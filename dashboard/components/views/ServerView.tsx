@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
+import { toast } from 'sonner';
 import {
   Box,
   Cpu,
@@ -22,6 +23,8 @@ import {
   Laptop,
   Radio,
   Flame,
+  Zap,
+  MinusCircle,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -33,9 +36,11 @@ import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { isWhisperModel } from '../../src/services/modelCapabilities';
+import { MODEL_REGISTRY } from '../../src/services/modelRegistry';
 import {
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   MAIN_MODEL_CUSTOM_OPTION,
+  MAIN_RECOMMENDED_MODEL,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   LIVE_MODEL_CUSTOM_OPTION,
   MODEL_DISABLED_OPTION,
@@ -49,7 +54,9 @@ import {
 } from '../../src/services/modelSelection';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 
-type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan';
+type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
+
+const MLX_DEFAULT_MODEL = 'mlx-community/parakeet-tdt-0.6b-v3';
 
 interface ServerViewProps {
   onStartServer: (
@@ -70,6 +77,7 @@ const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
 const FALLBACK_LIVE_WHISPER_MODEL = WHISPER_MEDIUM;
 
+// Static sets for validation — include all models regardless of runtime profile.
 const MAIN_MODEL_SELECTION_OPTIONS = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   ...MAIN_MODEL_PRESETS,
@@ -86,6 +94,11 @@ const DIARIZATION_MODEL_SELECTION_OPTIONS = new Set([
   DIARIZATION_DEFAULT_MODEL,
   DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
+
+// IDs of models that require the Metal/MLX runtime.
+const MLX_MODEL_IDS = new Set(
+  MODEL_REGISTRY.filter((m) => m.family === 'mlx').map((m) => m.id),
+);
 
 const UI_SENTINEL_VALUES = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
@@ -199,6 +212,41 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Runtime profile (persisted in electron-store)
   const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('gpu');
 
+  // Metal (Apple Silicon) detection – derived from server-side feature check
+  const mlxFeature = (adminStatus?.models as any)?.features?.mlx as { available: boolean; reason: string } | undefined;
+  const metalSupported = mlxFeature?.available ?? false;
+  const [isDarwin] = useState<boolean>(() => {
+    return (window as any).electronAPI?.app?.getPlatform?.() === 'darwin';
+  });
+  const [isAppleSilicon] = useState<boolean>(() => {
+    return (window as any).electronAPI?.app?.getArch?.() === 'arm64';
+  });
+
+  // Native storage paths for bare-metal mode (loaded once on mount)
+  const [nativeDataDir, setNativeDataDir] = useState<string | null>(null);
+  const [nativeModelsDir, setNativeModelsDir] = useState<string | null>(null);
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.app?.getConfigDir) return;
+    api.app.getConfigDir().then((dir: string) => {
+      setNativeDataDir(dir + '/data');
+      setNativeModelsDir(dir + '/models');
+    }).catch(() => {});
+  }, []);
+
+  // Derive model option lists filtered by the active runtime profile.
+  // MLX models are only shown when running under Metal; non-MLX models are
+  // always shown (they work with Docker GPU/CPU and bare-metal via ctranslate2).
+  const isMetal = runtimeProfile === 'metal';
+  const mainModelOptions = useMemo(() => {
+    const presets = MAIN_MODEL_PRESETS.filter((id) => isMetal || !MLX_MODEL_IDS.has(id));
+    return [...presets, MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
+  }, [isMetal]);
+  const liveModelOptions = useMemo(() => {
+    // Live mode only supports faster-whisper; no MLX live models exist yet.
+    return [LIVE_MODEL_SAME_AS_MAIN_OPTION, ...LIVE_MODEL_PRESETS, MODEL_DISABLED_OPTION, LIVE_MODEL_CUSTOM_OPTION];
+  }, []);
+
   // Auth token display in Instance Settings
   const [showAuthToken, setShowAuthToken] = useState(false);
   const [authTokenCopied, setAuthTokenCopied] = useState(false);
@@ -227,7 +275,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       api.config
         .get('server.runtimeProfile')
         .then((val: unknown) => {
-          if (val === 'gpu' || val === 'cpu' || val === 'vulkan') setRuntimeProfile(val);
+          if (val === 'gpu' || val === 'cpu' || val === 'vulkan' || val === 'metal') setRuntimeProfile(val);
         })
         .catch(() => {});
       api.config
@@ -382,19 +430,81 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     };
   }, []);
 
-  // Persist runtime profile changes
-  const handleRuntimeProfileChange = useCallback((profile: RuntimeProfile) => {
+  // Persist runtime profile changes and start/stop MLX server accordingly
+  const handleRuntimeProfileChange = useCallback(async (profile: RuntimeProfile) => {
     setRuntimeProfile(profile);
     const api = (window as any).electronAPI;
     if (api?.config) {
       api.config.set('server.runtimeProfile', profile);
     }
-  }, []);
+    // Leaving Metal: reset any MLX-only model selections back to non-MLX defaults.
+    if (profile !== 'metal') {
+      if (MLX_MODEL_IDS.has(mainModelSelection)) {
+        setMainModelSelection(MAIN_RECOMMENDED_MODEL);
+        api?.config?.set('server.mainModelSelection', MAIN_RECOMMENDED_MODEL);
+      }
+      if (MLX_MODEL_IDS.has(liveModelSelection)) {
+        setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
+        api?.config?.set('server.liveModelSelection', LIVE_MODEL_SAME_AS_MAIN_OPTION);
+      }
+    }
+    if (!api?.mlx) return;
+    if (profile !== 'metal') {
+      // Leaving Metal — stop the native server if it is running or errored.
+      const current = await api.mlx.getStatus().catch(() => 'stopped');
+      if (current === 'running' || current === 'starting' || current === 'error') {
+        await api.mlx.stop().catch(() => {});
+      }
+    } else {
+      // Entering Metal — start the native server if it is not already up.
+      const current = await api.mlx.getStatus().catch(() => 'stopped');
+      if (current === 'stopped' || current === 'error') {
+        try {
+          const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
+          const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
+          const storedModel = (await api.config?.get('server.mainModelSelection').catch(() => '')) ?? '';
+          const storedCustomModel = (await api.config?.get('server.mainCustomModel').catch(() => '')) ?? '';
+          const storedLiveModel = (await api.config?.get('server.liveModelSelection').catch(() => '')) ?? '';
+          const storedLiveCustom = (await api.config?.get('server.liveCustomModel').catch(() => '')) ?? '';
+          const storedDiarizationModel = (await api.config?.get('server.diarizationModelSelection').catch(() => '')) ?? '';
+          // Use the same resolution path as the component's render to avoid raw sentinel strings.
+          const resolvedMain = resolveMainModelSelectionValue(storedModel, storedCustomModel, '') || MLX_DEFAULT_MODEL;
+          const resolvedLive = resolveLiveModelSelectionValue(storedLiveModel, storedLiveCustom, resolvedMain, '');
+          const normalizedLive = normalizeLiveModelToWhisper(resolvedLive);
+          await api.mlx.start({
+            port: Number(port),
+            hfToken: hfToken || undefined,
+            mainTranscriberModel: sanitizeModelName(resolvedMain) || MLX_DEFAULT_MODEL,
+            liveTranscriberModel: sanitizeModelName(normalizedLive) || undefined,
+            diarizationModel: storedDiarizationModel || undefined,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          toast.error(`Failed to start Metal server: ${msg}`);
+        }
+      }
+    }
+  }, [mainModelSelection, liveModelSelection]);
 
   // Derive status from Docker hook
   const containerStatus = docker.container;
   const isRunning = containerStatus.running;
   const isRunningAndHealthy = isRunning && containerStatus.health === 'healthy';
+
+  // MLX (native process) server state
+  type MLXStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
+  const [mlxStatus, setMlxStatus] = useState<MLXStatus>('stopped');
+
+  // Sync mlxStatus from the main process on mount and subscribe to push updates.
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.mlx) return;
+    api.mlx.getStatus().then(setMlxStatus).catch(() => {});
+    const unsub = api.mlx.onStatusChanged((status: MLXStatus) => setMlxStatus(status));
+    return unsub;
+  }, []);
+
+
   const hasImages = docker.images.length > 0;
   const statusLabel = containerStatus.exists
     ? containerStatus.status.charAt(0).toUpperCase() + containerStatus.status.slice(1)
@@ -483,13 +593,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   useEffect(() => {
     if (!localSelectionsHydrated || modelsHydrated || !adminStatus) return;
 
-    const mappedMain = mapMainModelToSelection(configuredMainModel);
-    const mappedLive = mapLiveModelToSelection(configuredLiveModel, configuredMainModel);
+    // Only seed model selections from the running server when the user has no
+    // locally-persisted preference (still at the loading placeholder). If a real
+    // preference was restored from electron-store, keep it — otherwise, navigating
+    // away and returning would overwrite the user's selection with whatever model
+    // the server happens to be running (which may be an older choice).
+    if (mainModelSelection === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
+      const mappedMain = mapMainModelToSelection(configuredMainModel);
+      const mappedLive = mapLiveModelToSelection(configuredLiveModel, configuredMainModel);
 
-    setMainModelSelection(mappedMain.selection);
-    setMainCustomModel(mappedMain.custom);
-    setLiveModelSelection(mappedLive.selection);
-    setLiveCustomModel(mappedLive.custom);
+      setMainModelSelection(mappedMain.selection);
+      setMainCustomModel(mappedMain.custom);
+      setLiveModelSelection(mappedLive.selection);
+      setLiveCustomModel(mappedLive.custom);
+    }
 
     setModelsHydrated(true);
   }, [
@@ -497,6 +614,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     configuredMainModel,
     configuredLiveModel,
     localSelectionsHydrated,
+    mainModelSelection,
     modelsHydrated,
   ]);
 
@@ -531,6 +649,32 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION
       ? diarizationCustomModel.trim() || configuredDiarizationModel || DIARIZATION_DEFAULT_MODEL
       : DIARIZATION_DEFAULT_MODEL;
+
+  // MLX native-process start/stop handlers (depend on activeTranscriber declared above)
+  const handleMLXStart = useCallback(async () => {
+    const api = (window as any).electronAPI;
+    if (!api?.mlx) return;
+    try {
+      const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
+      const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
+      await api.mlx.start({
+        port: Number(port),
+        hfToken: hfToken || undefined,
+        mainTranscriberModel: sanitizeModelName(activeTranscriber) || MLX_DEFAULT_MODEL,
+        liveTranscriberModel: sanitizeModelName(normalizedLiveModel) || undefined,
+        diarizationModel: sanitizeModelName(activeDiarizationModel) || undefined,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to start Metal server: ${msg}`);
+    }
+  }, [activeTranscriber, normalizedLiveModel, activeDiarizationModel]);
+
+  const handleMLXStop = useCallback(async () => {
+    const api = (window as any).electronAPI;
+    if (!api?.mlx) return;
+    await api.mlx.stop();
+  }, []);
 
   // Hard-reset any non-whisper live model selection to the default whisper model.
   useEffect(() => {
@@ -672,14 +816,30 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         .then((info: { gpu: boolean; toolkit: boolean }) => {
           cachedGpuInfo = info;
           setGpuInfo(info);
-          // Auto-set runtime profile based on GPU detection (only if not already configured)
+          // Auto-set runtime profile based on hardware detection (only if not already configured).
+          // Priority: Metal (Apple Silicon) > NVIDIA GPU > CPU
           api.config
             ?.get('server.runtimeProfile')
             .then((val: unknown) => {
-              if (!val && info.gpu && info.toolkit) {
-                handleRuntimeProfileChange('gpu');
-              } else if (!val && !info.gpu) {
-                handleRuntimeProfileChange('cpu');
+              if (!val) {
+                if (metalSupported) {
+                  handleRuntimeProfileChange('metal');
+                  api.config
+                    ?.get('server.mainModelSelection')
+                    .then((modelVal: unknown) => {
+                      const cur = typeof modelVal === 'string' ? modelVal.trim() : '';
+                      if (!cur || cur === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
+                        setMainModelSelection(MLX_DEFAULT_MODEL);
+                        api.config?.set('server.mainModelSelection', MLX_DEFAULT_MODEL);
+                        api.config?.set('server.mainCustomModel', '');
+                      }
+                    })
+                    .catch(() => {});
+                } else if (info.gpu && info.toolkit) {
+                  handleRuntimeProfileChange('gpu');
+                } else {
+                  handleRuntimeProfileChange('cpu');
+                }
               }
             })
             .catch(() => {});
@@ -691,35 +851,65 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     }
   }, []);
 
-  // Setup checks
+  // Setup checks — gated by the currently selected runtime profile
   const rtName = docker.runtimeKind ?? 'Docker';
+  const gpuSatisfied = gpuInfo?.gpu ?? false;
+  // Hardware check (arm64 mac) passes immediately via Electron; server report only
+  // refines whether mlx_whisper is actually installed.
+  const metalSatisfied = isAppleSilicon && (mlxFeature === undefined || metalSupported);
+  const needsDocker = runtimeProfile !== 'metal';
+  const needsNvidia = runtimeProfile === 'gpu';
+  const needsMetal  = runtimeProfile === 'metal';
   const setupChecks = [
     {
       label: `${rtName} installed`,
       ok: docker.available,
-      hint: 'Install Docker Engine, Docker Desktop, or Podman',
+      na: !needsDocker,
+      hint: !needsDocker
+        ? 'Not needed for Metal runtime'
+        : 'Install Docker Engine, Docker Desktop, or Podman',
     },
     {
       label: `${rtName} image pulled`,
       ok: docker.images.length > 0,
-      hint: 'Pull an image below to get started',
+      na: !needsDocker,
+      hint: !needsDocker
+        ? 'Not needed for Metal runtime'
+        : 'Pull an image below to get started',
     },
-    ...(runtimeProfile === 'gpu'
-      ? [
-          {
-            label: 'NVIDIA GPU detected',
-            ok: gpuInfo?.gpu ?? false,
-            warn: gpuInfo !== null && !gpuInfo.gpu,
-            hint: gpuInfo?.gpu
-              ? gpuInfo.toolkit
-                ? 'nvidia-container-toolkit ready'
-                : 'Run: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml'
-              : 'CPU mode will be used (slower)',
-          },
-        ]
-      : []),
+    {
+      label: 'NVIDIA GPU detected',
+      ok: gpuSatisfied,
+      na: !needsNvidia,
+      warn: needsNvidia && gpuInfo !== null && !gpuSatisfied,
+      hint: !needsNvidia
+        ? 'Not needed for selected runtime'
+        : gpuSatisfied
+          ? gpuInfo?.toolkit
+            ? 'nvidia-container-toolkit ready'
+            : 'Run: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml'
+          : 'Install NVIDIA drivers and nvidia-container-toolkit',
+    },
+    {
+      label: 'Apple Silicon Metal',
+      ok: metalSatisfied,
+      na: !needsMetal,
+      warn: needsMetal && !metalSatisfied,
+      hint: !needsMetal
+        ? 'Not needed for selected runtime'
+        : metalSatisfied
+          ? mlxFeature === undefined ? 'Apple Silicon detected' : 'MLX acceleration available'
+          : mlxFeature?.reason === 'not_apple_silicon'
+            ? 'Intel Mac — not supported'
+            : mlxFeature?.reason === 'mlx_whisper_not_installed'
+              ? 'mlx-whisper not installed — run: uv sync --extra mlx'
+              : !isAppleSilicon
+                ? 'Apple Silicon (arm64) required'
+                : 'MLX unavailable',
+    },
   ];
-  const allPassed = setupChecks.every((c) => c.ok);
+  // allPassed: na items (not required for this runtime) count as passing
+  const allPassed = setupChecks.every((c) => c.ok || c.na);
   const showChecklist = !setupDismissed || !allPassed;
 
   const handleDismissSetup = useCallback(() => {
@@ -801,7 +991,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     {allPassed ? 'Setup Complete' : 'Setup Checklist'}
                   </span>
                   <span className="font-mono text-xs text-slate-500">
-                    {setupChecks.filter((c) => c.ok).length}/{setupChecks.length} checks passed
+                    {setupChecks.filter((c) => !c.na && c.ok).length}/{setupChecks.filter((c) => !c.na).length} checks passed
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -858,15 +1048,25 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <div key={i} className="flex items-center gap-3">
                       {check.ok ? (
                         <CheckCircle2 size={15} className="shrink-0 text-green-400" />
+                      ) : (check as any).na ? (
+                        <MinusCircle size={15} className="shrink-0 text-slate-600" />
                       ) : check.warn ? (
                         <AlertTriangle size={15} className="text-accent-orange shrink-0" />
                       ) : (
                         <XCircle size={15} className="shrink-0 text-red-400" />
                       )}
-                      <span className={`text-sm ${check.ok ? 'text-slate-300' : 'text-white'}`}>
+                      <span
+                        className={`text-sm ${
+                          check.ok
+                            ? 'text-slate-300'
+                            : (check as any).na
+                              ? 'text-slate-600'
+                              : 'text-white'
+                        }`}
+                      >
                         {check.label}
                       </span>
-                      <span className="ml-auto text-xs text-slate-500">{check.hint}</span>
+                      <span className={`ml-auto text-xs ${(check as any).na ? 'text-slate-700' : 'text-slate-500'}`}>{check.hint}</span>
                     </div>
                   ))}
                 </div>
@@ -874,113 +1074,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             </div>
           )}
 
-          {/* 1. Image Card */}
+          {/* 1. Instance Settings Card */}
           <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
             <div
-              className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${hasImages ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}
-            >
-              <Download size={14} />
-            </div>
-            <GlassCard
-              title="1. Docker Image"
-              className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
-            >
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-3">
-                    <StatusLight status={hasImages ? 'active' : 'inactive'} />
-                    <span
-                      className={`font-mono text-sm transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
-                    >
-                      {hasImages
-                        ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available`
-                        : 'No images'}
-                    </span>
-
-                    {hasImages && docker.images[0] && (
-                      <div className="flex gap-2 transition-opacity duration-300">
-                        <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
-                          {docker.images[0].created.split(' ')[0]}
-                        </span>
-                        <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
-                          {docker.images[0].size}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">
-                      Select Image Tag
-                    </label>
-                    <CustomSelect
-                      value={selectedImage}
-                      onChange={setSelectedImage}
-                      options={imageOptions}
-                      className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-col justify-end space-y-2">
-                  <Button
-                    variant="secondary"
-                    className="h-10 w-full"
-                    onClick={() => docker.refreshImages()}
-                    disabled={docker.operating}
-                  >
-                    <RefreshCw size={14} className="mr-2" />
-                    Scan Local Images
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    className="h-10 w-full"
-                    onClick={() => docker.pullImage(selectedTagForActions)}
-                    disabled={docker.operating}
-                  >
-                    {docker.pulling ? (
-                      <>
-                        <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
-                      </>
-                    ) : (
-                      'Fetch Fresh Image'
-                    )}
-                  </Button>
-                  {docker.pulling && (
-                    <Button
-                      variant="danger"
-                      className="h-10 w-full"
-                      onClick={() => docker.cancelPull()}
-                    >
-                      Cancel Pull
-                    </Button>
-                  )}
-                  <Button
-                    variant="danger"
-                    className="h-10 w-full"
-                    onClick={() => docker.removeImage(selectedTagForActions)}
-                    disabled={docker.operating || docker.images.length === 0}
-                  >
-                    Remove Image
-                  </Button>
-                </div>
-              </div>
-              {docker.operationError && (
-                <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                  {docker.operationError}
-                </div>
-              )}
-            </GlassCard>
-          </div>
-
-          {/* 2. Container Card (Config & Controls) */}
-          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-            <div
-              className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning ? `bg-accent-cyan text-slate-900 ${isRunningAndHealthy ? 'shadow-[0_0_15px_rgba(34,211,238,0.5)]' : ''}` : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+              className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning || mlxStatus === 'running' ? `bg-accent-cyan text-slate-900 ${isRunningAndHealthy || mlxStatus === 'running' ? 'shadow-[0_0_15px_rgba(34,211,238,0.5)]' : ''}` : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
             >
               <Box size={16} />
             </div>
             <GlassCard
-              title="2. Instance Settings"
-              className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+              title="1. Instance Settings"
+              className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy || mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
             >
               <div className="space-y-6">
                 {/* Runtime Profile Selector */}
@@ -1025,6 +1128,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       <Cpu size={14} />
                       CPU Only
                     </button>
+                    {isDarwin && (
+                      <button
+                        onClick={() => handleRuntimeProfileChange('metal')}
+                        disabled={isRunning}
+                        className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
+                          runtimeProfile === 'metal'
+                            ? 'bg-violet-500/15 border-violet-500/40 text-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.15)]'
+                            : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                        } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                      >
+                        <Zap size={14} />
+                        GPU (Metal)
+                      </button>
+                    )}
                   </div>
                   {runtimeProfile === 'vulkan' && !isRunning && (
                     <span className="text-xs text-slate-500 italic">
@@ -1036,103 +1153,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       Slower transcription, no NVIDIA GPU required
                     </span>
                   )}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-5">
-                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
-                    <StatusLight
-                      status={
-                        isRunningAndHealthy
-                          ? 'active'
-                          : containerStatus.exists
-                            ? 'warning'
-                            : 'inactive'
-                      }
-                      animate={isRunningAndHealthy}
-                    />
-                    <span
-                      className={`font-mono text-sm transition-colors ${
-                        isRunning
-                          ? 'text-slate-300'
-                          : containerStatus.exists
-                            ? 'text-accent-orange'
-                            : 'text-slate-500'
-                      }`}
-                    >
-                      {statusLabel}
-                    </span>
-                    {isRunning && serverMode && (
-                      <span
-                        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
-                      >
-                        {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
-                        {serverMode}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
-                    <div className="flex gap-2">
-                      <Button
-                        variant="secondary"
-                        className="h-9 px-4"
-                        onClick={() =>
-                          onStartServer('local', runtimeProfile, selectedTagForStart, {
-                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                            diarizationModel: sanitizeModelName(activeDiarizationModel),
-                          })
-                        }
-                        disabled={
-                          docker.operating ||
-                          isRunning ||
-                          startupFlowPending ||
-                          !liveModelWhisperOnlyCompatible
-                        }
-                      >
-                        {docker.operating || startupFlowPending ? (
-                          <Loader2 size={14} className="animate-spin" />
-                        ) : (
-                          'Start Local'
-                        )}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        className="h-9 px-4"
-                        onClick={() =>
-                          onStartServer('remote', runtimeProfile, selectedTagForStart, {
-                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                            diarizationModel: sanitizeModelName(activeDiarizationModel),
-                          })
-                        }
-                        disabled={
-                          docker.operating ||
-                          isRunning ||
-                          startupFlowPending ||
-                          !liveModelWhisperOnlyCompatible
-                        }
-                      >
-                        Start Remote
-                      </Button>
-                      <Button
-                        variant="danger"
-                        className="h-9 px-4"
-                        onClick={() => docker.stopContainer()}
-                        disabled={docker.operating || !isRunning}
-                      >
-                        Stop
-                      </Button>
-                    </div>
-                    <Button
-                      variant="danger"
-                      className="h-9 px-4"
-                      onClick={() => docker.removeContainer()}
-                      disabled={docker.operating || isRunning || !containerStatus.exists}
-                    >
-                      Remove Container
-                    </Button>
-                  </div>
                 </div>
 
                 {/* Auth Token (read-only) */}
@@ -1218,8 +1238,277 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   </div>
                 )}
 
+              </div>
+            </GlassCard>
+          </div>
+
+          {/* 2. Inference Server (metal) or Docker Image (docker/cpu/gpu) Card */}
+          {runtimeProfile === 'metal' ? (
+            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+              <div
+                className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${mlxStatus === 'running' ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : mlxStatus === 'starting' || mlxStatus === 'stopping' ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+              >
+                <Zap size={14} />
+              </div>
+              <GlassCard
+                title="2. Inference Server"
+                className={`transition-all duration-500 ease-in-out ${mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+              >
+                <div className="flex flex-wrap items-center gap-5">
+                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
+                    <StatusLight
+                      status={
+                        mlxStatus === 'running'
+                          ? 'active'
+                          : mlxStatus === 'starting' || mlxStatus === 'stopping'
+                            ? 'warning'
+                            : 'inactive'
+                      }
+                      animate={mlxStatus === 'running'}
+                    />
+                    <span
+                      className={`font-mono text-sm transition-colors ${
+                        mlxStatus === 'running'
+                          ? 'text-slate-300'
+                          : mlxStatus === 'starting' || mlxStatus === 'stopping'
+                            ? 'text-accent-orange'
+                            : 'text-slate-500'
+                      }`}
+                    >
+                      {mlxStatus === 'running'
+                        ? 'Running'
+                        : mlxStatus === 'starting'
+                          ? 'Starting…'
+                          : mlxStatus === 'stopping'
+                            ? 'Stopping…'
+                            : mlxStatus === 'error'
+                              ? 'Error'
+                              : 'Stopped'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Button
+                      variant="secondary"
+                      className="h-9 px-4"
+                      onClick={handleMLXStart}
+                      disabled={mlxStatus === 'running' || mlxStatus === 'starting' || mlxStatus === 'stopping'}
+                    >
+                      {mlxStatus === 'starting' ? (
+                        <><Loader2 size={14} className="animate-spin" /> Starting…</>
+                      ) : (
+                        <><Zap size={14} /> Start Metal Server</>
+                      )}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      className="h-9 px-4"
+                      onClick={handleMLXStop}
+                      disabled={mlxStatus !== 'running' && mlxStatus !== 'starting'}
+                    >
+                      {mlxStatus === 'stopping' ? (
+                        <><Loader2 size={14} className="animate-spin" /> Stopping…</>
+                      ) : (
+                        'Stop'
+                      )}
+                    </Button>
+                    {mlxStatus === 'error' && (
+                      <span className="text-xs text-red-400">Error — check logs</span>
+                    )}
+                  </div>
+                </div>
+              </GlassCard>
+            </div>
+          ) : (
+            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+              <div
+                className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${hasImages ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+              >
+                <Download size={14} />
+              </div>
+              <GlassCard
+                title="2. Docker Image"
+                className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+              >
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-3">
+                      <StatusLight status={hasImages ? 'active' : 'inactive'} />
+                      <span
+                        className={`font-mono text-sm transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
+                      >
+                        {hasImages
+                          ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available`
+                          : 'No images'}
+                      </span>
+
+                      {hasImages && docker.images[0] && (
+                        <div className="flex gap-2 transition-opacity duration-300">
+                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
+                            {docker.images[0].created.split(' ')[0]}
+                          </span>
+                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
+                            {docker.images[0].size}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-500">
+                        Select Image Tag
+                      </label>
+                      <CustomSelect
+                        value={selectedImage}
+                        onChange={setSelectedImage}
+                        options={imageOptions}
+                        className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col justify-end space-y-2">
+                    <Button
+                      variant="secondary"
+                      className="h-10 w-full"
+                      onClick={() => docker.refreshImages()}
+                      disabled={docker.operating}
+                    >
+                      <RefreshCw size={14} className="mr-2" />
+                      Scan Local Images
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-10 w-full"
+                      onClick={() => docker.pullImage(selectedTagForActions)}
+                      disabled={docker.operating}
+                    >
+                      {docker.pulling ? (
+                        <>
+                          <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
+                        </>
+                      ) : (
+                        'Fetch Fresh Image'
+                      )}
+                    </Button>
+                    {docker.pulling && (
+                      <Button
+                        variant="danger"
+                        className="h-10 w-full"
+                        onClick={() => docker.cancelPull()}
+                      >
+                        Cancel Pull
+                      </Button>
+                    )}
+                    <Button
+                      variant="danger"
+                      className="h-10 w-full"
+                      onClick={() => docker.removeImage(selectedTagForActions)}
+                      disabled={docker.operating || docker.images.length === 0}
+                    >
+                      Remove Image
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-white/5 pt-4">
+                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
+                    <StatusLight
+                      status={
+                        isRunningAndHealthy
+                          ? 'active'
+                          : containerStatus.exists
+                            ? 'warning'
+                            : 'inactive'
+                      }
+                      animate={isRunningAndHealthy}
+                    />
+                    <span
+                      className={`font-mono text-sm transition-colors ${
+                        isRunning
+                          ? 'text-slate-300'
+                          : containerStatus.exists
+                            ? 'text-accent-orange'
+                            : 'text-slate-500'
+                      }`}
+                    >
+                      {statusLabel}
+                    </span>
+                    {isRunning && serverMode && (
+                      <span
+                        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                      >
+                        {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
+                        {serverMode}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        className="h-9 px-4"
+                        onClick={() =>
+                          onStartServer('local', runtimeProfile, selectedTagForStart, {
+                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                            diarizationModel: sanitizeModelName(activeDiarizationModel),
+                          })
+                        }
+                        disabled={
+                          docker.operating ||
+                          isRunning ||
+                          startupFlowPending ||
+                          !liveModelWhisperOnlyCompatible
+                        }
+                      >
+                        {docker.operating || startupFlowPending ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          'Start Local'
+                        )}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-9 px-4"
+                        onClick={() =>
+                          onStartServer('remote', runtimeProfile, selectedTagForStart, {
+                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                            diarizationModel: sanitizeModelName(activeDiarizationModel),
+                          })
+                        }
+                        disabled={
+                          docker.operating ||
+                          isRunning ||
+                          startupFlowPending ||
+                          !liveModelWhisperOnlyCompatible
+                        }
+                      >
+                        Start Remote
+                      </Button>
+                      <Button
+                        variant="danger"
+                        className="h-9 px-4"
+                        onClick={() => docker.stopContainer()}
+                        disabled={docker.operating || !isRunning}
+                      >
+                        Stop
+                      </Button>
+                    </div>
+                    <Button
+                      variant="danger"
+                      className="h-9 px-4"
+                      onClick={() => docker.removeContainer()}
+                      disabled={docker.operating || isRunning || !containerStatus.exists}
+                    >
+                      Remove Container
+                    </Button>
+                  </div>
+                </div>
+                {docker.operationError && (
+                  <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                    {docker.operationError}
+                  </div>
+                )}
                 {containerStatus.startedAt && isRunning && (
-                  <div className="font-mono text-xs text-slate-500">
+                  <div className="mt-2 font-mono text-xs text-slate-500">
                     Started: {new Date(containerStatus.startedAt).toLocaleString()}
                     {containerStatus.health && (
                       <span className="ml-3">
@@ -1237,9 +1526,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     )}
                   </div>
                 )}
-              </div>
-            </GlassCard>
-          </div>
+              </GlassCard>
+            </div>
+          )}
 
           {/* 3. ASR Models Card */}
           <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
@@ -1273,15 +1562,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <CustomSelect
                       value={mainModelSelection}
                       onChange={setMainModelSelection}
-                      options={[
-                        ...MAIN_MODEL_PRESETS,
-                        MODEL_DISABLED_OPTION,
-                        MAIN_MODEL_CUSTOM_OPTION,
-                      ]}
+                      options={mainModelOptions}
                       accentColor="magenta"
                       className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                       disabled={isRunning}
                     />
+                    {MLX_MODEL_IDS.has(mainModelSelection) && (
+                      <p className="flex items-center gap-1 text-xs text-violet-400">
+                        <Zap size={10} />
+                        Metal / MLX accelerated
+                      </p>
+                    )}
                     {mainModelSelection === MAIN_MODEL_CUSTOM_OPTION && (
                       <input
                         type="text"
@@ -1323,12 +1614,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <CustomSelect
                       value={liveModelSelection}
                       onChange={setLiveModelSelection}
-                      options={[
-                        LIVE_MODEL_SAME_AS_MAIN_OPTION,
-                        ...LIVE_MODEL_PRESETS,
-                        MODEL_DISABLED_OPTION,
-                        LIVE_MODEL_CUSTOM_OPTION,
-                      ]}
+                      options={liveModelOptions}
                       className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                       disabled={isRunning}
                     />
@@ -1431,6 +1717,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             <GlassCard
               title="5. Persistent Volumes"
               action={
+                !isMetal ? (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1439,10 +1726,32 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 >
                   Refresh
                 </Button>
+                ) : undefined
               }
             >
               <div className="space-y-4">
-                {docker.volumes.length > 0 ? (
+                {isMetal ? (
+                  // Bare-metal mode: show native filesystem paths instead of Docker volumes
+                  <>
+                    {[
+                      { label: 'Data directory', path: nativeDataDir, color: 'bg-blue-500' },
+                      { label: 'Models cache (HF_HOME)', path: nativeModelsDir, color: 'bg-purple-500' },
+                    ].map(({ label, path: dir, color }) => (
+                      <div key={label} className="flex items-center justify-between py-1 text-sm">
+                        <div className="flex items-center gap-3">
+                          <div className={`h-2 w-2 rounded-full ${color}`} />
+                          <span className="text-slate-300">{label}</span>
+                        </div>
+                        <span className="max-w-[55%] truncate text-right font-mono text-xs text-slate-400" title={dir ?? ''}>
+                          {dir ?? '…'}
+                        </span>
+                      </div>
+                    ))}
+                    <p className="text-xs text-slate-500 italic">
+                      Managed by the native server process. Delete these directories to clear cached models or transcription data.
+                    </p>
+                  </>
+                ) : docker.volumes.length > 0 ? (
                   docker.volumes.map((vol) => {
                     const colorMap: Record<string, string> = {
                       'transcriptionsuite-data': 'bg-blue-500',
@@ -1477,7 +1786,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   </div>
                 )}
 
-                {docker.volumes.length > 0 && (
+                {!isMetal && docker.volumes.length > 0 && (
                   <div className="mt-4 flex gap-2 overflow-x-auto border-t border-white/5 pt-4 pb-2">
                     {docker.volumes.map((vol) => (
                       <Button

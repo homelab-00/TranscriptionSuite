@@ -99,8 +99,8 @@ function getComposeDir(): string {
   return composeDir;
 }
 
-/** Runtime profile: GPU (NVIDIA CUDA), Vulkan (AMD/Intel GPU), or CPU-only */
-export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan';
+/** Runtime profile: GPU (NVIDIA CUDA), Vulkan (AMD/Intel GPU), CPU-only, or Metal (Apple Silicon MLX) */
+export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 
 const VOLUME_NAMES = {

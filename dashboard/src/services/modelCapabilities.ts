@@ -7,6 +7,11 @@ const PARAKEET_PATTERN = /^nvidia\/(parakeet|nemotron-speech)/i;
 const CANARY_PATTERN = /^nvidia\/canary/i;
 const VIBEVOICE_ASR_PATTERN = /^[^/]+\/vibevoice-asr(?:-[^/]+)?$/i;
 const WHISPERCPP_PATTERN = /(?:(?:^|\/)ggml-.*\.bin$|\.gguf$)/i;
+// MLX Parakeet must be checked before the general mlx-community prefix.
+const MLX_PARAKEET_PATTERN = /^mlx-community\/parakeet/i;
+// Matches community Canary MLX ports: eelcor/canary-1b-v2-mlx, Mediform/canary-1b-v2-mlx-q8, qfuxa/canary-mlx, etc.
+const MLX_CANARY_PATTERN = /^[^/]+\/canary[^/]*-mlx/i;
+const MLX_PATTERN = /^mlx-community\//i;
 
 /**
  * The 25 European languages supported by NeMo ASR models
@@ -95,12 +100,42 @@ export function isNemoModel(modelName: string | null | undefined): boolean {
 }
 
 /**
+ * Returns true if the model runs on the MLX Whisper backend (Apple Silicon).
+ * Model IDs in the mlx-community namespace on HuggingFace.
+ */
+export function isMLXModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim();
+  return MLX_PATTERN.test(name) || MLX_CANARY_PATTERN.test(name);
+}
+
+/**
+ * Returns true if the model is an MLX-accelerated Parakeet-TDT model.
+ * English-only; no translation; no live mode.
+ */
+export function isMLXParakeetModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim();
+  return MLX_PARAKEET_PATTERN.test(name);
+}
+
+/**
+ * Returns true if the model is an MLX-accelerated Canary model (community port).
+ * 25 EU languages; native P&C; no translation; no live mode.
+ */
+export function isMLXCanaryModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim();
+  return MLX_CANARY_PATTERN.test(name);
+}
+
+/**
  * Returns true if the model should run on the faster-whisper/Whisper backend.
  * Unknown or empty values are treated as Whisper-compatible defaults.
  */
 export function isWhisperModel(modelName: string | null | undefined): boolean {
   return (
-    !isNemoModel(modelName) && !isVibeVoiceASRModel(modelName) && !isWhisperCppModel(modelName)
+    !isNemoModel(modelName) &&
+    !isVibeVoiceASRModel(modelName) &&
+    !isWhisperCppModel(modelName) &&
+    !isMLXModel(modelName)
   );
 }
 
@@ -152,6 +187,9 @@ export function filterLanguagesForModel(
   if (isVibeVoiceASRModel(modelName)) {
     return languages.filter((l) => l === 'Auto Detect');
   }
+  if (isMLXParakeetModel(modelName)) {
+    return languages.filter((l) => l === 'English');
+  }
   if (isEnglishOnlyWhisperModel(modelName)) {
     return languages.filter((l) => l === 'English');
   }
@@ -171,6 +209,8 @@ export function supportsTranslation(modelName: string | null | undefined): boole
 
   // Parakeet models are ASR-only (no translation)
   if (isParakeetModel(modelName)) return false;
+  // MLX Parakeet models are English-only (no translation)
+  if (isMLXParakeetModel(modelName)) return false;
   // Canary models support translation (X↔English)
   if (isCanaryModel(modelName)) return true;
   // VibeVoice-ASR (v1 integration) is ASR+diarization only.

@@ -29,7 +29,7 @@ export interface TrayMenuState {
   isStandby?: boolean;
 }
 
-export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan';
+export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 export type ClientLogType = 'info' | 'success' | 'error' | 'warning';
 
@@ -64,6 +64,7 @@ export interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>;
     getPlatform: () => string;
+    getArch: () => string;
     getSessionType: () => string;
     openExternal: (url: string) => Promise<void>;
     openPath: (filePath: string) => Promise<string>;
@@ -208,6 +209,16 @@ export interface ElectronAPI {
       }) => void,
     ) => () => void;
   };
+  mlx: {
+    start: (opts: { port: number; hfToken?: string; mainTranscriberModel?: string; liveTranscriberModel?: string; diarizationModel?: string }) => Promise<void>;
+    stop: () => Promise<void>;
+    getStatus: () => Promise<'stopped' | 'starting' | 'running' | 'stopping' | 'error'>;
+    getLogs: (tail?: number) => Promise<string[]>;
+    onStatusChanged: (
+      callback: (status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error') => void,
+    ) => () => void;
+    onLogLine: (callback: (line: string) => void) => () => void;
+  };
 }
 
 export interface ComponentUpdateStatus {
@@ -232,6 +243,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => process.platform,
+    getArch: () => process.arch,
     getSessionType: () =>
       process.env.XDG_SESSION_TYPE ?? (process.env.WAYLAND_DISPLAY ? 'wayland' : 'x11'),
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
@@ -412,6 +424,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ) => callback(payload);
       ipcRenderer.on('watcher:filesDetected', handler);
       return () => ipcRenderer.removeListener('watcher:filesDetected', handler);
+    },
+  },
+  mlx: {
+    start: (opts: { port: number; hfToken?: string; mainTranscriberModel?: string; liveTranscriberModel?: string; diarizationModel?: string }) =>
+      ipcRenderer.invoke('mlx:start', opts) as Promise<void>,
+    stop: () => ipcRenderer.invoke('mlx:stop') as Promise<void>,
+    getStatus: () =>
+      ipcRenderer.invoke('mlx:getStatus') as Promise<
+        'stopped' | 'starting' | 'running' | 'stopping' | 'error'
+      >,
+    getLogs: (tail?: number) => ipcRenderer.invoke('mlx:getLogs', tail) as Promise<string[]>,
+    onStatusChanged: (
+      callback: (status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error') => void,
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error',
+      ) => callback(status);
+      ipcRenderer.on('mlx:statusChanged', handler);
+      return () => ipcRenderer.removeListener('mlx:statusChanged', handler);
+    },
+    onLogLine: (callback: (line: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, line: string) => callback(line);
+      ipcRenderer.on('mlx:logLine', handler);
+      return () => ipcRenderer.removeListener('mlx:logLine', handler);
     },
   },
 } satisfies ElectronAPI);

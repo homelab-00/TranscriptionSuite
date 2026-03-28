@@ -11,9 +11,11 @@ import {
   isVibeVoiceASRModel,
   isCanaryModel,
   isParakeetModel,
+  isMLXModel,
+  isMLXParakeetModel,
 } from './modelCapabilities';
 
-export type ModelFamily = 'whisper' | 'nemo' | 'vibevoice' | 'diarization' | 'custom' | 'none';
+export type ModelFamily = 'whisper' | 'nemo' | 'vibevoice' | 'mlx' | 'diarization' | 'custom' | 'none';
 export type ModelRole = 'main' | 'live' | 'diarization';
 
 export interface ModelInfo {
@@ -150,6 +152,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
 
   // ── VibeVoice ────────────────────────────────────────────────────────────
+  // TODO: Add MLX-converted VibeVoice ASR models (e.g. mlx-community/VibeVoice-ASR-4bit) 
+  // when the underlying `mlx-audio` library becomes stable enough to process raw numpy audio 
+  // arrays without indexing errors. (As of v0.4.1, it crashes on inference in our backend).
   {
     id: 'microsoft/VibeVoice-ASR',
     displayName: 'VibeVoice ASR',
@@ -169,6 +174,94 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     parameterCount: '9B',
     huggingfaceUrl: 'https://huggingface.co/scerz/VibeVoice-ASR-4bit',
     capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
+    roles: ['main'],
+  },
+
+  // ── MLX Parakeet (Apple Silicon / Metal) ───────────────────────────────
+  // Note: mlx-community/parakeet-tdt-1.1b is intentionally omitted.
+  // The 1.1b TDT model was trained to output lowercase text only (no native
+  // punctuation or capitalisation) and there is no MLX PnC variant.  The
+  // 0.6b-v3 is NVIDIA's September 2025 SOTA model trained on 660K hours
+  // (10× more data), supports 25 languages with native P&C, and matches or
+  // beats the 1.1b on all English benchmarks.
+  {
+    id: 'mlx-community/parakeet-tdt-0.6b-v3',
+    displayName: 'MLX Parakeet TDT 0.6B v3',
+    family: 'mlx',
+    description:
+      'NVIDIA Parakeet-TDT 0.6B v3 on MLX. SOTA accuracy on Apple Silicon — 660K hours of training, native punctuation & capitalisation, 25 European languages.',
+    parameterCount: '600M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
+    roles: ['main'],
+  },
+
+  // ── MLX Canary (Apple Silicon / Metal) ─────────────────────────────────
+  // Community MLX ports of NVIDIA Canary 1B v2 using the canary-mlx package.
+  // No translation support in the MLX port (ASR only).
+  {
+    id: 'eelcor/canary-1b-v2-mlx',
+    displayName: 'MLX Canary 1B v2',
+    family: 'mlx',
+    description:
+      'NVIDIA Canary 1B v2 on MLX. ~8.5× real-time on Apple Silicon, native P&C, 25 European languages. Full precision (~3.7 GB).',
+    parameterCount: '1B',
+    huggingfaceUrl: 'https://huggingface.co/eelcor/canary-1b-v2-mlx',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
+    roles: ['main'],
+  },
+  {
+    id: 'Mediform/canary-1b-v2-mlx-q8',
+    displayName: 'MLX Canary 1B v2 (Q8)',
+    family: 'mlx',
+    description:
+      'NVIDIA Canary 1B v2 on MLX, Q8 quantised. Native P&C, 25 European languages. Smaller footprint (~1.1 GB).',
+    parameterCount: '1B',
+    huggingfaceUrl: 'https://huggingface.co/Mediform/canary-1b-v2-mlx-q8',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
+    roles: ['main'],
+  },
+
+  // ── MLX Whisper (Apple Silicon / Metal) ────────────────────────────────
+  {
+    id: 'mlx-community/whisper-large-v3-mlx',
+    displayName: 'MLX Whisper Large v3',
+    family: 'mlx',
+    description:
+      'Apple Silicon Metal-accelerated Whisper large-v3. Best accuracy on Mac bare-metal.',
+    parameterCount: '1.5B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-mlx',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-medium-mlx',
+    displayName: 'MLX Whisper Medium',
+    family: 'mlx',
+    description: 'Good accuracy/speed balance on Apple Silicon.',
+    parameterCount: '769M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-medium-mlx',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-small-mlx',
+    displayName: 'MLX Whisper Small',
+    family: 'mlx',
+    description: 'Lightweight Metal-accelerated model for fast Mac bare-metal transcription.',
+    parameterCount: '244M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-small-mlx',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-tiny-mlx',
+    displayName: 'MLX Whisper Tiny',
+    family: 'mlx',
+    description: 'Smallest Metal-accelerated model. Fastest but lowest accuracy.',
+    parameterCount: '39M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-tiny-mlx',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
     roles: ['main'],
   },
 
@@ -201,5 +294,6 @@ export function detectModelFamily(modelId: string): ModelFamily {
   if (isParakeetModel(modelId) || isCanaryModel(modelId)) return 'nemo';
   if (isNemoModel(modelId)) return 'nemo';
   if (isVibeVoiceASRModel(modelId)) return 'vibevoice';
+  if (isMLXParakeetModel(modelId) || isMLXModel(modelId)) return 'mlx';
   return 'whisper';
 }

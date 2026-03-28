@@ -32,6 +32,8 @@ interface SidebarProps {
   containerHealth?: string;
   clientRunning: boolean;
   gpuError?: string;
+  runtimeProfile?: 'gpu' | 'cpu' | 'vulkan' | 'metal';
+  serverReachable?: boolean;
 }
 
 const SIDEBAR_COLLAPSED_WIDTH_PX = 80;
@@ -54,7 +56,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   containerHealth,
   clientRunning,
   gpuError,
+  runtimeProfile,
+  serverReachable,
 }) => {
+  const isMetal = runtimeProfile === 'metal';
   const [collapsed, setCollapsed] = useState(false);
   const [expandedWidthPx, setExpandedWidthPx] = useState(SIDEBAR_EXPANDED_BASE_WIDTH_PX);
   const logoContentRef = useRef<HTMLDivElement | null>(null);
@@ -106,25 +111,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // Derive status for each sidebar item from Docker + client state
   // Issue 17 — Session: pulsing green when server AND client running AND healthy, orange when container exists, gray otherwise
+  // For bare-metal mode, use server reachability instead of Docker container state.
   const sessionStatus: 'active' | 'warning' | 'inactive' | 'error' = gpuError
     ? 'error'
     : useMockupStatusFallback
       ? 'active'
-      : containerRunning && clientRunning && containerHealth === 'healthy'
-        ? 'active'
-        : containerExists
-          ? 'warning'
-          : 'inactive';
+      : isMetal
+        ? serverReachable
+          ? 'active'
+          : 'inactive'
+        : containerRunning && clientRunning && containerHealth === 'healthy'
+          ? 'active'
+          : containerExists
+            ? 'warning'
+            : 'inactive';
   // Issue 18 — Server: pulsing green when server running AND healthy, orange when container exists, gray otherwise
   const serverSidebarStatus: 'active' | 'warning' | 'inactive' | 'error' = gpuError
     ? 'error'
     : useMockupStatusFallback
       ? 'active'
-      : containerRunning && containerHealth === 'healthy'
-        ? 'active'
-        : containerExists
-          ? 'warning'
-          : 'inactive';
+      : isMetal
+        ? serverReachable
+          ? 'active'
+          : 'inactive'
+        : containerRunning && containerHealth === 'healthy'
+          ? 'active'
+          : containerExists
+            ? 'warning'
+            : 'inactive';
 
   // Top navigation items that get the sliding animation
   const navItems = [

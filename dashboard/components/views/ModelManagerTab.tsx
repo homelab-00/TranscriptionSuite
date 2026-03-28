@@ -85,6 +85,13 @@ const FAMILY_SECTIONS: FamilySectionConfig[] = [
     headerTextClass: 'text-blue-400',
   },
   {
+    family: 'mlx',
+    label: 'MLX Whisper (Apple Silicon)',
+    borderClass: 'border-l-orange-400',
+    badgeClass: 'bg-orange-500/10 text-orange-400',
+    headerTextClass: 'text-orange-400',
+  },
+  {
     family: 'diarization',
     label: 'Diarization',
     borderClass: 'border-l-accent-magenta',

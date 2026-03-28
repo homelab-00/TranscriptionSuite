@@ -34,6 +34,7 @@ def get_user_config_dir() -> Path:
     Returns:
         Path to user config directory:
         - Linux: ~/.config/TranscriptionSuite/
+        - macOS: ~/Library/Application Support/TranscriptionSuite/
         - Windows: ~/Documents/TranscriptionSuite/
         - Docker: /user-config/ (if exists and is mounted)
     """
@@ -47,8 +48,11 @@ def get_user_config_dir() -> Path:
         # Windows: Documents/TranscriptionSuite/
         documents = Path.home() / "Documents"
         return documents / "TranscriptionSuite"
+    elif sys.platform == "darwin":
+        # macOS: ~/Library/Application Support/TranscriptionSuite/
+        return Path.home() / "Library" / "Application Support" / "TranscriptionSuite"
     else:
-        # Linux/macOS: ~/.config/TranscriptionSuite/
+        # Linux: ~/.config/TranscriptionSuite/
         xdg_config = os.environ.get("XDG_CONFIG_HOME")
         if xdg_config:
             return Path(xdg_config) / "TranscriptionSuite"
@@ -190,8 +194,15 @@ class ServerConfig:
         ("WHISPERCPP_SERVER_URL", ("whisper_cpp", "server_url")),
     )
 
+    _ENV_LOGGING_OVERRIDES = (
+        # LOG_LEVEL overrides logging.level (DEBUG, INFO, WARNING, ERROR)
+        ("LOG_LEVEL", ("logging", "level")),
+        # LOG_DIR overrides logging.directory (path to log file directory)
+        ("LOG_DIR", ("logging", "directory")),
+    )
+
     def _apply_env_overrides(self) -> None:
-        """Apply environment variable overrides for model selection.
+        """Apply environment variable overrides for model selection and logging.
 
         Environment variables (set by the dashboard via docker-compose) take
         precedence over config.yaml values.  Only non-empty values are applied.
@@ -201,6 +212,15 @@ class ServerConfig:
             if not value:
                 continue
             # Ensure the nested dict structure exists
+            section = self.config
+            for key in config_path[:-1]:
+                section = section.setdefault(key, {})
+            section[config_path[-1]] = value
+
+        for env_key, config_path in self._ENV_LOGGING_OVERRIDES:
+            value = os.environ.get(env_key, "").strip()
+            if not value:
+                continue
             section = self.config
             for key in config_path[:-1]:
                 section = section.setdefault(key, {})

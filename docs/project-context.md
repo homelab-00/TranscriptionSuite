@@ -27,6 +27,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
   - `nemo`: nemo_toolkit[asr] 2.7.0
   - `vibevoice_asr`: Microsoft VibeVoice (git pin)
   - `whispercpp`: whisper.cpp Vulkan sidecar (HTTP, AMD/Intel GPU support via docker-compose.vulkan.yml)
+  - `mlx`: mlx-whisper ≥0.4.1 + parakeet-mlx ≥0.2.0 + canary-mlx ≥0.1.0 (Apple Silicon only)
 - **VAD**: webrtcvad 2.0.10 + silero-vad 6.2.1
 - **Logging**: structlog 25.5.0
 - **Package manager**: uv (NEVER pip)
@@ -68,7 +69,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **All API routes are async**: Use `async def` for every FastAPI route handler
 - **Type hints required**: All function signatures must have return type annotations (e.g., `-> None`, `-> bool`, `-> str`)
 - **Lazy imports in hot paths**: Several core modules (e.g., `model_manager.py`, `audio_utils.py`) use lazy imports inside functions — when mocking, patch at the **call site module**, not the source module
-- **asyncio_mode = "auto"**: pytest-asyncio auto-detects async tests — no `@pytest.mark.asyncio` decorator needed
+- **asyncio_mode = "auto"**: pytest-asyncio (dev dependency) auto-detects async tests — no `@pytest.mark.asyncio` decorator needed
+- **Config isolation**: `conftest.py` has an autouse fixture that redirects `get_user_config_dir()` to a tmp dir, preventing developer's personal config from interfering with tests
 
 #### TypeScript (Frontend)
 - **Relative imports only**: Despite `@/` alias in tsconfig, the codebase uses relative paths (`../../src/hooks/useXxx`)
@@ -88,9 +90,18 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 #### STT Backend Architecture
 - **Factory pattern**: `create_backend(model_name)` in `factory.py` routes to correct backend class
-- **Detection**: GGML pattern (`ggml-*.bin`, `.gguf`) → WhisperCppBackend; `nvidia/parakeet*` or `nvidia/nemotron-speech*` → ParakeetBackend; `nvidia/canary*` → CanaryBackend; else → WhisperBackend
+- **Detection order** (first match wins):
+  - `nvidia/parakeet*` or `nvidia/nemotron-speech*` → ParakeetBackend (NeMo, Docker)
+  - `nvidia/canary*` → CanaryBackend (NeMo, Docker)
+  - `[user]/vibevoice-asr*` → VibeVoiceASRBackend
+  - `mlx-community/parakeet*` → MLXParakeetBackend (Apple Silicon)
+  - `[user]/canary*-mlx` → MLXCanaryBackend (Apple Silicon)
+  - `mlx-community/*` → MLXWhisperBackend (Apple Silicon)
+  - GGML pattern (`ggml-*.bin`, `.gguf`) → WhisperCppBackend
+  - else → WhisperBackend (faster-whisper, CPU/CUDA)
 - **Abstract base**: `base.py::STTBackend` — all backends implement `load()`, `unload()`, `transcribe()`
 - **NeMo backends require temp WAV files** — no direct array transcription in older NeMo versions
+- **MLX backends**: Apple Silicon only; all calls wrapped in `asyncio.to_thread()`; beam_size > 1 silently falls back to greedy
 
 #### WhisperCpp Sidecar Backend
 - **HTTP sidecar**: Multipart POST to whisper.cpp server — no in-process model loading
@@ -122,7 +133,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 ### Testing Rules
 
 #### Backend (pytest)
-- **35+ test files**, 285+ passing tests in `server/backend/tests/`
+- **40+ test files**, 650+ passing tests in `server/backend/tests/`
 - **conftest.py is critical**: Contains `_ensure_server_package_alias()` that MUST run at import time — enables `from server.xxx import ...` without pip-install
 - **Torch stub**: Session-scoped `torch_stub` fixture — lightweight stand-in for tests that import ML modules but never run GPU code
 - **Token store mock**: `_TestTokenStore` (in-memory, no file I/O); must be patched in 3 modules: `main`, `utils`, `auth`

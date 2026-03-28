@@ -22,6 +22,7 @@ import {
 const execFileAsync = promisify(execFile);
 import Store from 'electron-store';
 import { CONTAINER_NAME, dockerManager, type StartContainerOptions } from './dockerManager.js';
+import { MLXServerManager, type MLXStartOptions } from './mlxServerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
 import {
@@ -450,6 +451,8 @@ const trayManager = new TrayManager(isDev, () => mainWindow);
 // ─── Watcher Manager ─────────────────────────────────────────────────────────
 
 const watcherManager = new WatcherManager(() => mainWindow);
+
+const mlxServerManager = new MLXServerManager(() => mainWindow ?? null);
 
 // ─── Update Manager ─────────────────────────────────────────────────────────
 
@@ -1611,6 +1614,7 @@ function gracefulShutdown(): Promise<void> {
     unregisterShortcuts();
     trayManager.destroy();
     updateManager.destroy();
+    await mlxServerManager.destroy();
     await watcherManager.destroyAll();
     shutdownLog('[Shutdown] Cleanup complete.');
   })();
@@ -1682,6 +1686,48 @@ app.whenReady().then(() => {
   // Crash-resilient container cleanup: sentinel survives SIGBUS/SIGKILL
   spawnContainerSentinel();
 
+  // Auto-start the native MLX server if the Metal runtime profile is selected.
+  const runtimeProfile = store.get('server.runtimeProfile') as string;
+  if (runtimeProfile === 'metal') {
+    const port = (store.get('server.port') as number) ?? 9786;
+    const hfToken = (store.get('server.hfToken') as string) || undefined;
+    const mainTranscriberModel =
+      (store.get('server.mainModelSelection') as string) || 'mlx-community/whisper-small-mlx';
+
+    // Resolve live transcriber model from stored selection sentinels.
+    const LIVE_SAME_AS_MAIN = 'Same as Main Transcriber';
+    const LIVE_CUSTOM = 'Custom (HuggingFace repo)';
+    const liveModelSelection = (store.get('server.liveModelSelection') as string) || '';
+    const liveCustomModel = (store.get('server.liveCustomModel') as string) || '';
+    let resolvedLiveModel: string;
+    if (liveModelSelection === 'None (Disabled)' || liveModelSelection === '__none__') {
+      resolvedLiveModel = '';
+    } else if (!liveModelSelection || liveModelSelection === LIVE_SAME_AS_MAIN) {
+      resolvedLiveModel = mainTranscriberModel;
+    } else if (liveModelSelection === LIVE_CUSTOM) {
+      resolvedLiveModel = liveCustomModel || mainTranscriberModel;
+    } else {
+      resolvedLiveModel = liveModelSelection;
+    }
+    // Normalize: if resolved model is MLX, fall back to faster-whisper.
+    if (resolvedLiveModel && /mlx/i.test(resolvedLiveModel)) {
+      resolvedLiveModel = 'Systran/faster-whisper-medium';
+    }
+
+    const diarizationModel =
+      (store.get('server.diarizationModelSelection') as string) || undefined;
+
+    mlxServerManager
+      .start({
+        port,
+        hfToken,
+        mainTranscriberModel,
+        liveTranscriberModel: resolvedLiveModel || undefined,
+        diarizationModel: diarizationModel || undefined,
+      })
+      .catch((err: unknown) => console.warn('[MLX] Auto-start failed:', err));
+  }
+
   // Register global keyboard shortcuts (async — uses D-Bus portal on Wayland)
   registerShortcuts(store, () => mainWindow).catch((err) =>
     console.warn('[Shortcuts] Initial registration failed:', err),
@@ -1719,6 +1765,24 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+// ─── MLX Server IPC Handlers ────────────────────────────────────────────────
+
+ipcMain.handle('mlx:start', async (_event, opts: MLXStartOptions) => {
+  await mlxServerManager.start(opts);
+});
+
+ipcMain.handle('mlx:stop', async () => {
+  await mlxServerManager.stop();
+});
+
+ipcMain.handle('mlx:getStatus', () => {
+  return mlxServerManager.getStatus();
+});
+
+ipcMain.handle('mlx:getLogs', (_event, tail?: number) => {
+  return mlxServerManager.getLogs(tail);
 });
 
 // ─── Watcher IPC Handlers ────────────────────────────────────────────────────
