@@ -42,6 +42,7 @@ Notes
 from __future__ import annotations
 
 import argparse
+import csv
 import difflib
 import importlib
 import importlib.util
@@ -99,7 +100,7 @@ MODEL_GROUPS: dict[str, list[str]] = {
         "mlx-community/whisper-small-mlx",
         "mlx-community/whisper-medium-mlx",
         "mlx-community/whisper-large-v3-mlx",
-        "mlx-community/whisper-large-v3-turbo-mlx",
+        "mlx-community/whisper-large-v3-turbo",
     ],
     "mlx-asr": [
         "mlx-community/parakeet-tdt-0.6b-v3",
@@ -468,10 +469,12 @@ def _collect_models(args: argparse.Namespace) -> list[tuple[str, str]]:
         # 3. Always add PyTorch standard models on CPU to establish a baseline
         for m in MODEL_GROUPS["whisper"]:
             raw_models.append(f"{m}@cpu")
-            
-        # Optional: Add Nemo on CPU (can be extremely slow, so typically just test Whisper on CPU for baseline)
-        for m in MODEL_GROUPS["nemo"]:
-            raw_models.append(f"{m}@cpu")
+
+        # NeMo models (Parakeet/Canary) require the NeMo toolkit which is only
+        # available inside Docker with INSTALL_NEMO=true. Skip on bare-metal.
+        if has_cuda:
+            for m in MODEL_GROUPS["nemo"]:
+                raw_models.append(f"{m}@cpu")
         
     parsed = []
     for m in raw_models:
@@ -609,6 +612,18 @@ def main() -> None:
     payload = _build_json_output(all_results, args, models, audio_files)
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    # Write CSV
+    csv_path = output_dir / f"benchmark_{ts_tag}.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        headers = [
+            "model", "backend_type", "device", "audio_file", "audio_duration_s",
+            "setup_time_s", "transcribe_time_s", "rtf", "word_count", "error", "text"
+        ]
+        writer.writerow(headers)
+        for r in payload["results"]:
+            writer.writerow([r.get(h, "") for h in headers])
+
     # Final summary across all files
     if len(audio_files) > 1:
         print(f"\n{'='*70}")
@@ -616,7 +631,7 @@ def main() -> None:
         print(f"{'='*70}")
         print_table(all_results)
 
-    print(f"\nFull results written to: {json_path}\n")
+    print(f"\nFull results written to:\n  - {json_path}\n  - {csv_path}\n")
 
 
 if __name__ == "__main__":

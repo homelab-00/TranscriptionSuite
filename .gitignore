@@ -60,3 +60,4 @@ __pycache__/
 .directory
 codeql-agent-results/
 benchmark_*.json
+benchmark_*.csv
