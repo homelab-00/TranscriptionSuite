@@ -31,6 +31,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [5.5 macOS DMG + ZIP (Unsigned)](#55-macos-dmg--zip-unsigned)
   - [5.6 Build Assets](#56-build-assets)
   - [5.7 End-User Verification Docs](#57-end-user-verification-docs)
+  - [5.8 Automated Release (CI/CD)](#58-automated-release-cicd)
 - [6. Docker Reference](#6-docker-reference)
   - [6.1 Compose File Layering](#61-compose-file-layering)
   - [6.2 Local vs Remote Mode](#62-local-vs-remote-mode)
@@ -674,6 +675,75 @@ cd build && ./generate-ico.sh
 - User-facing verification steps are documented in `README.md` section `3.1 Verify Download (Kleopatra)`.
 - Keep this key path stable for docs and releases: `docs/assets/homelab-00_0xBFE4CC5D72020691_public.asc`.
 - Kleopatra reference page used in docs: https://apps.kde.org/kleopatra/
+
+### 5.8 Automated Release (CI/CD)
+
+The release workflow (`.github/workflows/release.yml`) automates cross-platform builds and GitHub Release creation. It is triggered by pushing a version tag.
+
+#### Trigger
+
+```bash
+git tag v1.2.1
+git push --tags
+```
+
+Any tag matching `v*` triggers the workflow.
+
+#### Pipeline Overview
+
+The workflow runs **three parallel build jobs** on GitHub-hosted runners, then a final job that assembles the release:
+
+```
+v* tag push
+    ├── build-linux   (ubuntu-latest)   → AppImage + .asc
+    ├── build-windows (windows-latest)  → NSIS .exe + .asc
+    ├── build-macos   (macos-14, arm64) → DMG + ZIP + .asc
+    └── create-release (after all three) → Draft GitHub Release
+```
+
+| Job | Runner | Build Command | Output |
+|-----|--------|---------------|--------|
+| `build-linux` | `ubuntu-latest` | `npm run package:linux` | `.AppImage` |
+| `build-windows` | `windows-latest` | `npm run package:windows` | `.exe` (NSIS) |
+| `build-macos` | `macos-14` | `bash build/build-electron-mac.sh` | `.dmg` + `.zip` (arm64) |
+
+The macOS job uses the full `build-electron-mac.sh` script (handles `dmgbuild` installation, `.icns` generation, etc.) rather than a bare `npm run package:mac`.
+
+The Windows job includes retry logic (3 attempts, 15s delay) to handle transient 502 errors when electron-builder downloads `winCodeSign` from GitHub Releases.
+
+#### GPG Signing
+
+Signing is **opt-in** via the repository variable `GPG_SIGNING_ENABLED`. When set to `true`, each build job imports the GPG key and runs `build/sign-electron-artifacts.sh` to produce `.asc` detached signatures.
+
+A **dedicated signing subkey** (separate from the master key) is used for CI. Only the subkey's private key and fingerprint are stored in GitHub Secrets — the master key never leaves the local machine. The subkey can be revoked independently if compromised. It expires **2027-03-28** and will need to be replaced before that date.
+
+Required repository configuration (Settings → Secrets and variables → Actions):
+
+| Type | Name | Description |
+|------|------|-------------|
+| Variable | `GPG_SIGNING_ENABLED` | Set to `true` to enable signing |
+| Secret | `GPG_PRIVATE_KEY` | Armored private key of the **signing subkey** (`gpg --armor --export-secret-keys KEY_ID`) |
+| Secret | `GPG_KEY_ID` | Fingerprint of the **signing subkey** |
+| Secret | `GPG_PASSPHRASE` | Subkey passphrase (omit if using a passphrase-less subkey) |
+
+> **Reminder:** The signing subkey expires **2027-03-28**. Before that date, generate a new subkey, upload its private key and fingerprint to GitHub Secrets, and update the public key in `docs/assets/`.
+
+#### Release Output
+
+The final `create-release` job downloads all artifacts and creates a **draft** GitHub Release with auto-generated release notes. Review and publish the draft manually.
+
+Typical release assets:
+
+```
+TranscriptionSuite-<version>-x86_64.AppImage
+TranscriptionSuite-<version>-x86_64.AppImage.asc
+TranscriptionSuite Setup <version>.exe
+TranscriptionSuite Setup <version>.exe.asc
+TranscriptionSuite-<version>-arm64-mac.dmg
+TranscriptionSuite-<version>-arm64-mac.dmg.asc
+TranscriptionSuite-<version>-arm64-mac.zip
+TranscriptionSuite-<version>-arm64-mac.zip.asc
+```
 
 ---
 

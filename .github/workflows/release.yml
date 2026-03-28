@@ -1,0 +1,178 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "25.7.0"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package AppImage
+        run: npm run package:linux
+
+      - name: Import GPG key
+        if: ${{ vars.GPG_SIGNING_ENABLED == 'true' }}
+        run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+        working-directory: .
+
+      - name: Sign artifacts
+        if: ${{ vars.GPG_SIGNING_ENABLED == 'true' }}
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: bash ../build/sign-electron-artifacts.sh release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: |
+            dashboard/release/*.AppImage
+            dashboard/release/*.asc
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "25.7.0"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package NSIS installer
+        shell: pwsh
+        run: |
+          $maxRetries = 3
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            Write-Host "Attempt $i of $maxRetries"
+            npm run package:windows
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($i -lt $maxRetries) {
+              Write-Host "Build failed, retrying in 15 seconds..."
+              Start-Sleep -Seconds 15
+            } else {
+              Write-Host "All $maxRetries attempts failed"
+              exit 1
+            }
+          }
+
+      - name: Import GPG key
+        if: ${{ vars.GPG_SIGNING_ENABLED == 'true' }}
+        shell: bash
+        run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Sign artifacts
+        if: ${{ vars.GPG_SIGNING_ENABLED == 'true' }}
+        shell: bash
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: bash ../build/sign-electron-artifacts.sh release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            dashboard/release/*.exe
+            dashboard/release/*.asc
+          if-no-files-found: error
+
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "25.7.0"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Setup Python (for dmgbuild)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build macOS DMG + ZIP
+        env:
+          GPG_KEY_ID: ""
+        run: bash build/build-electron-mac.sh
+
+      - name: Import GPG key
+        if: ${{ vars.GPG_SIGNING_ENABLED == 'true' }}
+        run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Sign artifacts
+        if: ${{ vars.GPG_SIGNING_ENABLED == 'true' }}
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: bash build/sign-electron-artifacts.sh dashboard/release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: |
+            dashboard/release/*.dmg
+            dashboard/release/*.zip
+            dashboard/release/*.asc
+          if-no-files-found: error
+
+  create-release:
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: List release files
+        run: ls -lh release-artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: true
+          files: release-artifacts/*
