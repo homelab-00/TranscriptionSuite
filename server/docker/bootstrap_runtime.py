@@ -125,6 +125,28 @@ def is_whisper_model_name(model_name: str | None) -> bool:
     return not is_nemo_model_name(name) and not is_vibevoice_asr_model_name(name)
 
 
+_NVIDIA_PROC_VERSION = Path("/proc/driver/nvidia/version")
+
+
+def detect_gpu_driver_version() -> str:
+    """Return the host NVIDIA driver version visible inside the container.
+
+    Reads ``/proc/driver/nvidia/version`` (exposed by the NVIDIA container
+    runtime).  Returns an empty string when no GPU driver is detected so that
+    CPU-only containers are unaffected.
+    """
+    try:
+        text = _NVIDIA_PROC_VERSION.read_text(encoding="utf-8", errors="replace")
+        # First line looks like:
+        #   NVRM version: NVIDIA UNIX x86_64 Kernel Module  595.58.03  ...
+        match = re.search(r"Kernel Module\s+([\d.]+)", text)
+        if match:
+            return match.group(1)
+    except OSError:
+        pass
+    return ""
+
+
 def python_abi_tag() -> str:
     soabi = sysconfig.get_config_var("SOABI")
     if soabi:
@@ -148,12 +170,14 @@ def compute_dependency_fingerprint(
     python_abi: str,
     arch: str,
     extras: tuple[str, ...] = (),
+    gpu_driver: str = "",
 ) -> str:
     hasher = hashlib.sha256()
     hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode())
     hasher.update(f"abi={python_abi}".encode())
     hasher.update(f"arch={arch}".encode())
     hasher.update(f"extras={','.join(sorted(extras))}".encode())
+    hasher.update(f"gpu_driver={gpu_driver}".encode())
 
     update_hash_with_file(hasher, "uv-lock", LOCK_FILE)
 
@@ -164,16 +188,20 @@ def compute_structural_fingerprint(
     python_abi: str,
     arch: str,
     extras: tuple[str, ...] = (),
+    gpu_driver: str = "",
 ) -> str:
-    """Hash of factors that determine venv shape (ABI, arch, extras).
+    """Hash of factors that determine venv shape (ABI, arch, extras, GPU driver).
 
     A change here means the venv cannot be incrementally updated.
+    The GPU driver version is structural because compiled CUDA extensions
+    (e.g. PyTorch) are linked against a specific driver ABI.
     """
     hasher = hashlib.sha256()
     hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode())
     hasher.update(f"abi={python_abi}".encode())
     hasher.update(f"arch={arch}".encode())
     hasher.update(f"extras={','.join(sorted(extras))}".encode())
+    hasher.update(f"gpu_driver={gpu_driver}".encode())
     return hasher.hexdigest()
 
 
@@ -348,15 +376,20 @@ def ensure_runtime_dependencies(
 
     python_abi = python_abi_tag()
     arch = platform.machine()
+    gpu_driver = detect_gpu_driver_version()
+    if gpu_driver:
+        log(f"Detected host GPU driver: {gpu_driver}")
     fingerprint = compute_dependency_fingerprint(
         python_abi=python_abi,
         arch=arch,
         extras=extras,
+        gpu_driver=gpu_driver,
     )
     structural_fp = compute_structural_fingerprint(
         python_abi=python_abi,
         arch=arch,
         extras=extras,
+        gpu_driver=gpu_driver,
     )
     lock_fp = compute_lock_fingerprint()
     force_rebuild = parse_bool_env("BOOTSTRAP_FORCE_REBUILD", False)
@@ -538,6 +571,7 @@ def ensure_runtime_dependencies(
                 "fingerprint": fingerprint,
                 "python_abi": python_abi,
                 "arch": arch,
+                "gpu_driver": gpu_driver,
                 "structural_fingerprint": structural_fp,
                 "lock_fingerprint": lock_fp,
                 "sync_mode": final_sync_mode,
