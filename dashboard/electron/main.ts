@@ -1119,14 +1119,17 @@ ipcMain.handle('clipboard:writeText', (_event, text: string) => {
   clipboard.writeText(text);
 });
 
-ipcMain.handle('clipboard:pasteAtCursor', async (_event, text: string) => {
-  try {
-    await pasteAtCursor(text);
-  } catch (err) {
-    // Non-fatal — text is already in the clipboard for manual paste
-    console.warn('[PasteAtCursor] Failed:', err);
-  }
-});
+ipcMain.handle(
+  'clipboard:pasteAtCursor',
+  async (_event, text: string, options?: { preserveClipboard?: boolean }) => {
+    try {
+      await pasteAtCursor(text, options);
+    } catch (err) {
+      // Non-fatal — text is already in the clipboard for manual paste
+      console.warn('[PasteAtCursor] Failed:', err);
+    }
+  },
+);
 
 // ─── Update Check IPC ───────────────────────────────────────────────────────
 

@@ -295,6 +295,16 @@ async function simulatePaste(): Promise<void> {
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
+export interface PasteOptions {
+  /**
+   * If true, save the clipboard before pasting and restore it afterward.
+   * If false, the pasted text remains in the clipboard (useful when the caller
+   * wants the text to stay in the clipboard, e.g. autoCopy + pasteAtCursor).
+   * @default true
+   */
+  preserveClipboard?: boolean;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -302,19 +312,22 @@ function sleep(ms: number): Promise<void> {
 /**
  * Paste text at the current cursor position in the focused application.
  *
- * 1. Save current clipboard
+ * 1. Optionally save current clipboard
  * 2. Write text to clipboard
  * 3. Simulate paste keystroke (platform-specific)
- * 4. Restore original clipboard
+ * 4. Optionally restore original clipboard
  */
-export async function pasteAtCursor(text: string): Promise<void> {
-  const originalClipboard = clipboard.readText();
+export async function pasteAtCursor(text: string, options?: PasteOptions): Promise<void> {
+  const preserve = options?.preserveClipboard ?? true;
+  const originalClipboard = preserve ? clipboard.readText() : null;
   clipboard.writeText(text);
   try {
     await sleep(50);
     await simulatePaste();
     await sleep(100);
   } finally {
-    clipboard.writeText(originalClipboard);
+    if (preserve && originalClipboard !== null) {
+      clipboard.writeText(originalClipboard);
+    }
   }
 }

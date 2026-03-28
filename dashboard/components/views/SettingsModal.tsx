@@ -400,7 +400,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         <AppleSwitch
           checked={appSettings.autoCopy}
           onChange={(v) => {
-            setAppSettings((prev) => ({ ...prev, autoCopy: v }));
+            setAppSettings((prev) => ({
+              ...prev,
+              autoCopy: v,
+              // Disabling autoCopy must also disable pasteAtCursor (paste needs clipboard)
+              pasteAtCursor: v ? prev.pasteAtCursor : false,
+            }));
             setIsDirty(true);
           }}
           label="Automatically copy transcription to clipboard"
@@ -410,7 +415,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         <AppleSwitch
           checked={appSettings.pasteAtCursor}
           onChange={(v) => {
-            setAppSettings((prev) => ({ ...prev, pasteAtCursor: v }));
+            setAppSettings((prev) => ({
+              ...prev,
+              pasteAtCursor: v,
+              // Enabling pasteAtCursor implies autoCopy (text must reach clipboard first)
+              autoCopy: v ? true : prev.autoCopy,
+            }));
             setIsDirty(true);
           }}
           label="Auto-paste transcription at cursor"

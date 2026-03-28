@@ -145,7 +145,7 @@ interface ElectronAPI {
   };
   clipboard: {
     writeText: (text: string) => Promise<void>;
-    pasteAtCursor: (text: string) => Promise<void>;
+    pasteAtCursor: (text: string, options?: { preserveClipboard?: boolean }) => Promise<void>;
   };
   shortcuts: {
     getPortalBindings: () => Promise<Array<{ id: string; trigger: string }> | null>;

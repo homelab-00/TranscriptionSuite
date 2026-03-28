@@ -153,7 +153,7 @@ export interface ElectronAPI {
   };
   clipboard: {
     writeText: (text: string) => Promise<void>;
-    pasteAtCursor: (text: string) => Promise<void>;
+    pasteAtCursor: (text: string, options?: { preserveClipboard?: boolean }) => Promise<void>;
   };
   shortcuts: {
     getPortalBindings: () => Promise<Array<{ id: string; trigger: string }> | null>;
@@ -335,7 +335,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   clipboard: {
     writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
-    pasteAtCursor: (text: string) => ipcRenderer.invoke('clipboard:pasteAtCursor', text),
+    pasteAtCursor: (text: string, options?: { preserveClipboard?: boolean }) =>
+      ipcRenderer.invoke('clipboard:pasteAtCursor', text, options),
   },
   shortcuts: {
     getPortalBindings: () => ipcRenderer.invoke('shortcuts:getPortalBindings'),

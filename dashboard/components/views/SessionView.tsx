@@ -825,24 +825,33 @@ export const SessionView: React.FC<SessionViewProps> = ({
     const wasProcessing = prevStatusRef.current === 'processing';
     prevStatusRef.current = transcription.status;
     if (wasProcessing && transcription.status === 'complete' && transcription.result?.text) {
-      // Auto-copy to clipboard
-      writeToClipboard(transcription.result.text).catch(() => {});
-      // Paste at cursor (if enabled)
-      if (window.electronAPI?.clipboard?.pasteAtCursor) {
-        getConfig<boolean>('app.pasteAtCursor').then((enabled) => {
-          if (enabled) {
-            window.electronAPI!.clipboard.pasteAtCursor(transcription.result!.text).catch((err) => {
+      const text = transcription.result.text;
+
+      // Single async chain: read both settings, then perform one clipboard operation.
+      // This eliminates the race between independent writeToClipboard and pasteAtCursor calls.
+      (async () => {
+        const pasteEnabled =
+          window.electronAPI?.clipboard?.pasteAtCursor &&
+          ((await getConfig<boolean>('app.pasteAtCursor')) ?? false);
+        const autoCopy = (await getConfig<boolean>('app.autoCopy')) ?? true;
+
+        if (pasteEnabled) {
+          // pasteAtCursor writes text to clipboard + simulates Ctrl+V.
+          // preserveClipboard: false keeps the text in clipboard (autoCopy is implicit).
+          await window
+            .electronAPI!.clipboard.pasteAtCursor(text, { preserveClipboard: false })
+            .catch((err) => {
               console.warn('Paste at cursor failed:', err);
             });
-          }
-        });
-      }
+        } else if (autoCopy) {
+          await writeToClipboard(text).catch(() => {});
+        }
+      })();
+
       // Desktop notification (if permission granted)
       if (Notification.permission === 'granted') {
         new Notification('Transcription Complete', {
-          body:
-            transcription.result.text.slice(0, 100) +
-            (transcription.result.text.length > 100 ? '...' : ''),
+          body: text.slice(0, 100) + (text.length > 100 ? '...' : ''),
           icon: '/logo.svg',
         });
       }
