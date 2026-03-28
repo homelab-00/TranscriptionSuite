@@ -16,7 +16,8 @@ LM Studio integration, and both longform
 and live transcription. Electron
 dashboard + Python backend with
 multi-backend STT (Whisper, NVIDIA NeMo,
-VibeVoice-ASR), NVIDIA GPU acceleration
+VibeVoice-ASR, whisper.cpp), NVIDIA GPU
+acceleration, AMD/Intel Vulkan support,
 or CPU mode. Dockerized for fast setup.
 </pre>
           </td>
@@ -31,6 +32,7 @@ or CPU mode. Dockerized for fast setup.
       <img src="https://img.shields.io/badge/macOS-000000.svg?style=for-the-badge&logo=apple&logoColor=white" alt="macOS"><br><br>
       <strong>Hardware Acceleration:</strong><br>
       <img src="https://img.shields.io/badge/NVIDIA-Recommended-%2376B900.svg?style=for-the-badge&logo=nvidia&logoColor=white" alt="NVIDIA Recommended"><br>
+      <img src="https://img.shields.io/badge/AMD%2FIntel-Vulkan-%23ED1C24.svg?style=for-the-badge" alt="AMD/Intel Vulkan"><br>
       <img src="https://img.shields.io/badge/CPU-Supported-%230EA5E9.svg?style=for-the-badge" alt="CPU Supported">
     </td>
   </tr>
@@ -58,6 +60,7 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
     - [2.2.1 Linux AppImage Prerequisites](#221-linux-appimage-prerequisites)
     - [2.2.2 Verify Download with Kleopatra (optional)](#222-verify-download-with-kleopatra-optional)
   - [2.3 Setting Up the Server](#23-setting-up-the-server)
+  - [2.4 AMD / Intel GPU Support (Vulkan)](#24-amd--intel-gpu-support-vulkan)
 - [3. Remote Connection](#3-remote-connection)
   - [3.1 Option A: Tailscale (recommended)](#31-option-a-tailscale-recommended)
     - [Server Machine Setup](#server-machine-setup)
@@ -78,18 +81,16 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 ### 1.1 Features
 
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup*
-- **Multiple Models available**: *WhisperX* (all three sizes of the [`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), and [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR) models are supported
-- **Speaker Diarization**: Speaker identification & diarization (subtitling) for all three model families; Whisper and Nemo use PyAnnote for diarization while VibeVoice does it by itself
+- **Multiple Models available**: *WhisperX* (all three sizes of the [`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU acceleration via Vulkan) are supported
+- **Speaker Diarization**: Speaker identification & diarization (subtitling) for Whisper, NeMo, and VibeVoice models; Whisper and NeMo use PyAnnote for diarization while VibeVoice does it by itself (not available for whisper.cpp models)
 - **Parallel Processing**: If your VRAM budget allows it, transcribe & diarize a recording at the same time - speeding up processing time significantly
 - **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [50 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds; either using your mic or the system audio
 - **Session File Import**: Import existing audio files from the Session tab; transcription results are saved directly as `.txt` or `.srt` to a folder of your choice — no Notebook entry created
-- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (Whisper-only currently)
+- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (Whisper-only; not yet available for whisper.cpp)
 - **Global Keyboard Shortcuts**: System-wide shortcuts & paste-at-cursor functionality
-- **Remote Access**: Securely access your desktop at home running the model from anywhere
-  (utilizing Tailscale) or share it on your local network via LAN
-- **Audio Notebook**: An Audio Notebook mode, with a calendar-based view,
-  full-text search, and LM Studio integration (chat with the AI about your notes)
+- **Remote Access**: Securely access your desktop at home running the model from anywhere (utilizing Tailscale) or share it on your local network via LAN
+- **Audio Notebook**: An Audio Notebook mode, with a calendar-based view, full-text search, and LM Studio integration (chat with the AI about your notes)
 
 
 📌*Half an hour of audio transcribed in under a minute with Whisper (RTX 3060)!*
@@ -224,6 +225,38 @@ Notes:
 *TranscriptionSuite supports both Docker and Podman. The dashboard and CLI scripts auto-detect which runtime is available. For GPU mode with Podman, ensure CDI is configured (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`).*
 *Podman 4.7+ is required for `podman compose` support.*
 
+### 2.4 AMD / Intel GPU Support (Vulkan)
+
+If you have an **AMD or Intel GPU** instead of NVIDIA, you can still get GPU-accelerated transcription using [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with Vulkan.
+
+This works by running a second helper container (called whisper-server) alongside the main TranscriptionSuite container. The helper container uses your AMD or Intel GPU for the actual transcription work, while the main container handles everything else (the dashboard, file management, etc.).
+
+**What you need:**
+
+- An AMD GPU with Vulkan support (RDNA1 or newer, e.g. RX 5500 XT, RX 6600, RX 7800 XT)
+- Or an Intel GPU with Vulkan support (Arc A-series or integrated Xe graphics)
+- Docker installed (Podman is not yet supported for Vulkan mode)
+- Linux is recommended; macOS and Windows should work but are untested
+
+**How to set it up:**
+
+1. In the dashboard, select **Vulkan** as the runtime profile (instead of GPU or CPU) when starting the server
+2. The dashboard will automatically start the whisper-server helper container alongside the main container
+3. Select a GGML model (e.g. `ggml-large-v3-turbo.bin`) as your transcription model — these are the model files that whisper.cpp uses
+
+**What works and what doesn't:**
+
+| Feature | Vulkan (AMD/Intel) | NVIDIA (CUDA) |
+|---------|-------------------|---------------|
+| Longform transcription | Yes | Yes |
+| Translation (to English) | Yes (except turbo models) | Yes |
+| Speaker diarization | No | Yes |
+| Live mode | Not yet | Yes |
+| Multiple concurrent jobs | One at a time | One at a time |
+
+**Choosing a different model:** By default, whisper.cpp uses `ggml-large-v3-turbo.bin`. To use a different GGML model, set the `WHISPERCPP_MODEL` environment variable in your `.env` file (found in the server's Docker compose directory). For example: `WHISPERCPP_MODEL=/models/ggml-medium.bin`.
+
+> **Note for older AMD GPUs (RDNA1):** If you experience Vulkan initialization errors with an RX 5500 XT or similar RDNA1 card, you may need to add `iommu=soft` to your kernel boot parameters.
 
 ---
 

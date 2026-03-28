@@ -40,6 +40,7 @@ Technical documentation for developing and building TranscriptionSuite.
   - [6.6 Docker Image Selection](#66-docker-image-selection)
   - [6.7 Server Update Lifecycle](#67-server-update-lifecycle)
   - [6.8 Differential Update Implementation](#68-differential-update-implementation)
+  - [6.9 Vulkan Sidecar (whisper.cpp)](#69-vulkan-sidecar-whispercpp)
 - [7. API Reference](#7-api-reference)
   - [7.1 API Endpoints — Quick Reference](#71-api-endpoints--quick-reference)
   - [7.2 Endpoint Details](#72-endpoint-details)
@@ -690,6 +691,7 @@ Docker Compose configuration is split into layered files for cross-platform and 
 | `docker-compose.gpu.yml` | NVIDIA GPU reservation (legacy `driver: nvidia` hook) |
 | `docker-compose.gpu-cdi.yml` | NVIDIA GPU reservation (modern CDI mode) |
 | `podman-compose.gpu.yml` | Podman GPU reservation (CDI, the only mode Podman supports) |
+| `docker-compose.vulkan.yml` | Vulkan sidecar: whisper.cpp whisper-server for AMD/Intel GPU transcription |
 
 **Usage examples:**
 
@@ -708,6 +710,9 @@ docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
 
 # Windows + GPU (Docker Desktop with NVIDIA WSL support)
 docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml -f docker-compose.gpu.yml up -d
+
+# Linux + Vulkan sidecar (AMD/Intel GPU via whisper.cpp)
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.vulkan.yml up -d
 ```
 
 The Electron dashboard selects the correct compose file stack automatically based on the detected platform, container runtime (Docker vs Podman), GPU toolkit mode (CDI vs legacy), and the user's runtime profile setting.
@@ -719,6 +724,7 @@ The Electron dashboard selects the correct compose file stack automatically base
 | Docker | CDI | `docker-compose.gpu-cdi.yml` |
 | Docker | Legacy | `docker-compose.gpu.yml` |
 | Podman | (always CDI) | `podman-compose.gpu.yml` |
+| Docker | Vulkan (AMD/Intel) | `docker-compose.vulkan.yml` |
 
 Detection order in `checkGpu()`: CDI is checked first (`nvidia-ctk cdi list`), then legacy (`docker info` for nvidia runtime). The result is stored in the module-level `detectedGpuMode` variable.
 
@@ -1082,6 +1088,153 @@ The server's `/api/status` endpoint reads this file to report backend capability
     - `docker-user-config/` (effective `/user-config` bind mount copy),
     - fallback managed `.env`,
     - fallback saved Docker auth token.
+
+### 6.9 Vulkan Sidecar (whisper.cpp)
+
+TranscriptionSuite supports AMD and Intel GPU acceleration via a **whisper.cpp sidecar container** that uses Vulkan for inference. This is an alternative to the default NVIDIA CUDA path and runs as a separate Docker service alongside the main container.
+
+#### Architecture
+
+```
+┌─────────────────────────┐     HTTP (multipart)     ┌──────────────────────────┐
+│  transcriptionsuite     │ ──────────────────────── │  whisper-server          │
+│  (FastAPI backend)      │    POST /inference        │  (whisper.cpp + Vulkan)  │
+│                         │ ◄──────────────────────── │                          │
+│  WhisperCppBackend      │    JSON response          │  ghcr.io/ggerganov/      │
+│  (httpx HTTP client)    │                           │  whisper.cpp:main-       │
+│                         │                           │  server-vulkan           │
+└─────────────────────────┘                           └──────────────────────────┘
+         │                                                      │
+         │ network_mode: host (Linux)                           │ /dev/dri passthrough
+         │ bridge networking (macOS/Windows)                    │ Vulkan via Mesa RADV
+         │                                                      │ or Intel ANV
+    ┌────┴─────────┐                                    ┌───────┴──────────┐
+    │ Port 9786    │                                    │ Port 8080        │
+    │ (main API)   │                                    │ (whisper-server) │
+    └──────────────┘                                    └──────────────────┘
+```
+
+The sidecar pattern keeps Vulkan dependencies isolated from the main CUDA container. The two containers communicate over HTTP — the main container's `WhisperCppBackend` sends WAV audio to whisper-server's `/inference` endpoint and receives timestamped transcription JSON.
+
+#### How It Works
+
+1. **Model routing**: When a user selects a GGML model (e.g. `ggml-large-v3-turbo.bin` or `large-v3.gguf`), the factory in `server/backend/core/stt/backends/factory.py` detects the GGML file pattern and instantiates `WhisperCppBackend` instead of the default Whisper backend.
+
+2. **Audio encoding**: `WhisperCppBackend.transcribe()` converts the float32 numpy audio array into a WAV byte buffer (mono 16-bit PCM) and sends it as a multipart POST to `{server_url}/inference`.
+
+3. **Response parsing**: The whisper-server returns verbose JSON with segments and token-level timestamps (`t0`/`t1` in centiseconds). The backend maps these to standard `BackendSegment` objects with word-level timing.
+
+4. **Model loading**: On `load()`, the backend sends `POST /load` to whisper-server. If the server pre-loads the model via the `WHISPER_MODEL` environment variable (the default), this call may fail gracefully — the backend continues regardless.
+
+#### GGML Model Detection
+
+The factory uses a regex pattern to distinguish GGML models from HuggingFace model names:
+
+```
+Pattern: ((?:^|/)ggml-.*\.bin$|\.gguf$)
+```
+
+| Input | Matches? | Backend |
+|-------|----------|---------|
+| `ggml-large-v3-turbo.bin` | Yes | whispercpp |
+| `/models/ggml-small.bin` | Yes | whispercpp |
+| `large-v3.gguf` | Yes | whispercpp |
+| `Systran/faster-whisper-large-v3` | No | whisper (default) |
+| `nvidia/parakeet-tdt-0.6b-v3` | No | parakeet |
+
+The same pattern is mirrored in `dashboard/src/services/modelCapabilities.ts` for frontend capability checks.
+
+#### Docker Compose Setup
+
+The Vulkan overlay (`docker-compose.vulkan.yml`) adds a `whisper-server` service:
+
+```yaml
+services:
+  whisper-server:
+    image: ghcr.io/ggerganov/whisper.cpp:main-server-vulkan
+    restart: unless-stopped
+    volumes:
+      - huggingface-models:/models:ro    # Shared model volume (read-only)
+    ports:
+      - "127.0.0.1:8080:8080"           # Localhost-only for Linux host networking
+    devices:
+      - /dev/dri:/dev/dri               # DRM render nodes for Vulkan
+    environment:
+      - WHISPER_MODEL=${WHISPERCPP_MODEL:-/models/ggml-large-v3-turbo.bin}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  transcriptionsuite:
+    depends_on:
+      whisper-server:
+        condition: service_healthy
+```
+
+Key design decisions:
+
+- **Port mapping `127.0.0.1:8080:8080`**: On Linux, the main container runs with `network_mode: host` (via `docker-compose.linux-host.yml`), which disables Docker DNS. The port mapping exposes whisper-server on `localhost:8080` so the host-networked main container can reach it. On macOS/Windows with bridge networking, Docker DNS resolves `whisper-server` directly and the port mapping is harmless.
+- **Read-only volume mount**: whisper-server only needs to read GGML model files from the shared HuggingFace models volume.
+- **Health check**: The main container waits for whisper-server to be healthy before starting (`depends_on` with `condition: service_healthy`).
+- **`/dev/dri` passthrough**: Provides access to GPU render nodes for Vulkan (Mesa RADV for AMD, Intel ANV for Intel).
+
+#### Networking by Platform
+
+| Platform | Main container networking | whisper-server networking | URL used |
+|----------|--------------------------|--------------------------|----------|
+| Linux | `network_mode: host` | Bridge + port mapping | `http://localhost:8080` |
+| macOS | Bridge (Docker Desktop) | Bridge (same network) | `http://whisper-server:8080` |
+| Windows | Bridge (Docker Desktop) | Bridge (same network) | `http://whisper-server:8080` |
+| WSL2 | `network_mode: host` | Bridge + port mapping | `http://localhost:8080` |
+
+The dashboard's `dockerManager.ts` automatically sets `WHISPERCPP_SERVER_URL` based on `process.platform` when the vulkan runtime profile is selected. The backend resolves the server URL with this priority:
+
+1. `WHISPERCPP_SERVER_URL` environment variable
+2. `whisper_cpp.server_url` in `config.yaml`
+3. Default: `http://whisper-server:8080`
+
+#### Configuration
+
+| Environment variable | Set by | Purpose |
+|---------------------|--------|---------|
+| `WHISPERCPP_SERVER_URL` | dockerManager (auto) | URL for backend → whisper-server communication |
+| `WHISPERCPP_MODEL` | User (optional) | GGML model path inside the container (default: `/models/ggml-large-v3-turbo.bin`) |
+
+To use a different GGML model, set `WHISPERCPP_MODEL` in your `.env` file or pass it via `StartContainerOptions.whispercppModel` from the dashboard.
+
+#### Capability Differences
+
+whisper.cpp models have different capabilities compared to the default faster-whisper backend:
+
+| Capability | whisper.cpp (GGML) | faster-whisper | NeMo |
+|------------|-------------------|----------------|------|
+| Translation (→ English) | Yes (except turbo) | Yes (except turbo/.en) | Canary only |
+| Speaker diarization | No (no pyannote) | Yes | Yes |
+| Word timestamps | Yes (token-level) | Yes | Yes |
+| Live mode | Not yet supported | Yes | Yes |
+
+#### Files
+
+| File | Role |
+|------|------|
+| `server/backend/core/stt/backends/whispercpp_backend.py` | HTTP client backend (STTBackend implementation) |
+| `server/backend/core/stt/backends/factory.py` | GGML pattern routing to WhisperCppBackend |
+| `server/backend/core/stt/capabilities.py` | Translation validation (GGML falls through to Whisper logic) |
+| `server/backend/config.py` | `whisper_cpp` config section + `WHISPERCPP_SERVER_URL` env override |
+| `server/backend/core/model_manager.py` | Feature status reporting (`get_whispercpp_feature_status()`) |
+| `server/docker/docker-compose.vulkan.yml` | Sidecar overlay (whisper-server image, healthcheck, volumes) |
+| `dashboard/src/services/modelCapabilities.ts` | Frontend GGML detection + capability flags |
+| `dashboard/electron/dockerManager.ts` | Vulkan runtime profile, platform-aware env injection |
+
+#### Limitations
+
+- **Single-worker**: whisper-server processes one request at a time. Concurrent transcription requests will queue.
+- **No diarization**: whisper.cpp has no pyannote integration. Speaker diarization is unavailable for GGML models.
+- **No live mode**: The sidecar architecture is not yet integrated with the live transcription engine.
+- **AMD GPU requirement**: Vulkan acceleration requires an AMD GPU with RADV support (RDNA1+) or an Intel GPU with ANV support. RDNA1 GPUs (e.g. RX 5500 XT) may need the `iommu=soft` kernel parameter.
 
 ---
 
@@ -1753,7 +1906,8 @@ server/backend/
 │           ├── whisperx_backend.py       # WhisperX (alignment + diarization, shared GPU cache cleanup)
 │           ├── parakeet_backend.py       # NVIDIA NeMo Parakeet ASR (local attention + configurable chunking + GPU cache cleanup)
 │           ├── canary_backend.py         # NVIDIA NeMo Canary (Canary warmup override, reuses Parakeet chunking)
-│           └── vibevoice_asr_backend.py  # VibeVoice-ASR (experimental, 1-min chunking + inference_mode + GPU cache cleanup)
+│           ├── vibevoice_asr_backend.py  # VibeVoice-ASR (experimental, 1-min chunking + inference_mode + GPU cache cleanup)
+│           └── whispercpp_backend.py     # whisper.cpp HTTP sidecar client (Vulkan GPU, WAV encoding, multipart POST)
 ├── database/
 │   └── database.py               # SQLite + FTS5 operations
 └── config.py                     # Configuration management
@@ -2005,7 +2159,7 @@ The dashboard now uses model-first startup and additive dependency installs:
 - If selected families are missing, one combined Install/Cancel dialog appears; install flags are only set to `true` for missing families (additive-only, no auto-remove)
 
 **Model Manager Tab (`ModelManagerTab.tsx`):**
-- Browse STT models grouped by family (Whisper, NeMo Parakeet, NeMo Canary, VibeVoice-ASR)
+- Browse STT models grouped by family (Whisper, NeMo Parakeet, NeMo Canary, VibeVoice-ASR, whisper.cpp/GGML)
 - View per-model capabilities: supported languages, translation support, live mode compatibility
 - Check HuggingFace cache status for each model (downloaded / not downloaded)
 - Download or delete models directly from the UI

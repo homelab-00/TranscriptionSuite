@@ -1,10 +1,10 @@
 ---
 project_name: 'TranscriptionSuite'
 user_name: 'Bill'
-date: '2026-03-21'
+date: '2026-03-28'
 sections_completed: ['technology_stack', 'language_rules', 'framework_rules', 'testing_rules', 'code_quality', 'workflow_rules', 'critical_rules']
 status: 'complete'
-rule_count: 67
+rule_count: 82
 optimized_for_llm: true
 ---
 
@@ -26,6 +26,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
   - `whisper`: faster-whisper 1.2.1 + ctranslate2 4.7.1 + WhisperX 3.8.1
   - `nemo`: nemo_toolkit[asr] 2.7.0
   - `vibevoice_asr`: Microsoft VibeVoice (git pin)
+  - `whispercpp`: whisper.cpp Vulkan sidecar (HTTP, AMD/Intel GPU support via docker-compose.vulkan.yml)
 - **VAD**: webrtcvad 2.0.10 + silero-vad 6.2.1
 - **Logging**: structlog 25.5.0
 - **Package manager**: uv (NEVER pip)
@@ -38,6 +39,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Vite 7.3.1** — dev server on port 3000, `base: './'` for Electron file:// protocol
 - **Tailwind CSS 4.2.1** — via @tailwindcss/vite plugin + custom oklab-strip PostCSS plugin
 - **@tanstack/react-query 5.90.21** — server state
+- **zustand 5.0.12** — client-only ephemeral state (import queue)
 - **@headlessui/react 2.2.9** — accessible UI primitives
 - **lucide-react 0.564.0** — icons
 - **Prettier 3.8.1** — singleQuote, semi, trailingComma: "all", printWidth: 100, prettier-plugin-tailwindcss
@@ -47,7 +49,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Frontend**: Vitest 4.0.18 + @testing-library/react 16.3.2 + jsdom 28.1.0
 
 ### Infrastructure
-- **Docker**: Ubuntu 24.04 base, 5 compose variants (base, linux-host, desktop-vm, gpu, gpu-cdi)
+- **Docker**: Ubuntu 24.04 base, 6 compose variants (base, linux-host, desktop-vm, gpu, gpu-cdi, vulkan)
 - **CI**: GitHub Actions — CodeQL analysis, dashboard-quality, scripts-lint
 - **Packaging**: electron-builder 26.8.1 (AppImage, NSIS, DMG)
 
@@ -86,17 +88,36 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 #### STT Backend Architecture
 - **Factory pattern**: `create_backend(model_name)` in `factory.py` routes to correct backend class
-- **Detection**: `nvidia/parakeet*` or `nvidia/nemotron-speech*` → ParakeetBackend; `nvidia/canary*` → CanaryBackend; else → WhisperBackend
+- **Detection**: GGML pattern (`ggml-*.bin`, `.gguf`) → WhisperCppBackend; `nvidia/parakeet*` or `nvidia/nemotron-speech*` → ParakeetBackend; `nvidia/canary*` → CanaryBackend; else → WhisperBackend
 - **Abstract base**: `base.py::STTBackend` — all backends implement `load()`, `unload()`, `transcribe()`
 - **NeMo backends require temp WAV files** — no direct array transcription in older NeMo versions
 
+#### WhisperCpp Sidecar Backend
+- **HTTP sidecar**: Multipart POST to whisper.cpp server — no in-process model loading
+- **Server URL precedence**: `WHISPERCPP_SERVER_URL` env → `whisper_cpp.server_url` config → `http://whisper-server:8080` (Docker DNS)
+- **Audio encoding**: WAV bytes in-memory (no temp files, no model downloads — sidecar manages its own model lifecycle)
+- **Model passthrough**: `POST /load {"model": model_name}` — `load()` tolerates HTTP failure (sidecar may pre-load)
+- **Diarization**: `transcribe_with_diarization()` returns `None` — falls back to legacy two-step pipeline
+- **Device parameter ignored**: Sidecar container manages Vulkan device via `/dev/dri`
+- **Timeouts**: Inference 300s, load 60s
+- **Warmup**: Sends 1s of silence (16kHz zeros) to prime Vulkan pipeline
+- **Docker**: `docker-compose.vulkan.yml` adds `whisper-server` sidecar with health check; main container depends on it
+
 #### React/Electron (Frontend)
-- **State management**: @tanstack/react-query for server state (`useQuery`, `useMutation`, `useQueryClient`)
-- **No global state library**: Local state via `useState`, derived via `useMemo`, no Redux/Zustand
+- **Server state**: @tanstack/react-query for server data (`useQuery`, `useMutation`, `useQueryClient`)
+- **Client state**: Zustand for ephemeral client-only state (import queue, folder watch, pause/resume)
 - **Custom hooks pattern**: Each feature has a dedicated hook (`useTranscription`, `useLiveMode`, `useDocker`, etc.)
 - **UI primitives**: @headlessui/react for accessible components, custom `ui/` directory for shared components (GlassCard, Button, AppleSwitch, StatusLight, CustomSelect)
 - **Tailwind CSS v4**: Utility-first styling, custom oklab-strip PostCSS plugin to force sRGB fallbacks
 - **Vite base `'./'`**: Required for Electron `file://` protocol — never change to `/`
+
+#### Zustand (Client State)
+- **Zustand for client-only state**: Import queue, pause/resume, folder watch — ephemeral, not persisted
+- **React Query for server state**: Models, recordings, admin status — cached with staleTime/refetch
+- **Selector pattern**: Always use `useImportQueueStore(selector)` — never subscribe to whole store
+- **useShallow for arrays**: `useShallow(selectSessionJobs)` prevents re-renders on array identity changes
+- **Module-level processing**: Async queue processing happens outside the store via `getState()` to avoid stale closures
+- **Stores directory**: `dashboard/src/stores/` — one store per feature domain
 
 ### Testing Rules
 
@@ -140,7 +161,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 #### File Organization
 - **Backend**: Feature modules in `server/backend/core/`, API routes in `server/backend/api/routes/`, WebSocket in `api/routes/live.py`
-- **Frontend**: Components in `dashboard/components/` (with `ui/` and `views/` subdirs), logic in `dashboard/src/` (`hooks/`, `services/`, `api/`, `utils/`, `types/`, `config/`)
+- **Frontend**: Components in `dashboard/components/` (with `ui/` and `views/` subdirs), logic in `dashboard/src/` (`hooks/`, `services/`, `stores/`, `api/`, `utils/`, `types/`, `config/`)
 - **Shared UI**: `dashboard/components/ui/` — 8 reusable primitives (GlassCard, Button, AppleSwitch, StatusLight, ErrorFallback, CustomSelect, ShortcutCapture, LogTerminal)
 
 ### Development Workflow Rules
@@ -185,6 +206,16 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **VibeVoice OOM**: `DEFAULT_MAX_CHUNK_DURATION_S = 60` (1 minute) — was 600s, caused CUDA OOM on 12GB GPU. Never increase without GPU memory testing
 - **NeMo requires `INSTALL_NEMO=true`** env var in Docker — not installed by default
 
+#### GPU Crash Resilience
+- **CUDA health probe**: `cuda_health_check()` in `audio_utils.py` runs at startup between prewarm and ModelManager init
+- **Error 999 = unrecoverable**: Sets `_cuda_probe_failed` module flag, skips model preload, server stays up (graceful degradation)
+- **Transient errors get one retry**: 500ms sleep, single retry of `torch.cuda.init()` — no retry on error 999
+- **`check_cuda_available()` respects probe flag**: All downstream consumers automatically short-circuit when `_cuda_probe_failed` is set
+- **GPU error surfacing**: `/api/status` includes `gpu_error` + `gpu_error_action` fields **only on failure** (no breaking change to clients)
+- **Frontend priority**: `deriveStatus()` in `useServerStatus.ts` checks GPU error **before** `ready` flag — GPU error overrides all other states
+- **Crash-safe sentinel** (Linux only): `setsid sh -c ...` polls Electron PID every 2s, stops Docker container on crash (survives SIGBUS/SIGKILL)
+- **Sentinel killed in graceful shutdown**: Prevents race between Electron and sentinel both stopping container
+
 #### Live Mode Lifecycle
 - **Model swap sequence**: Main model unloads → live engine loads live model → on stop: live engine unloads → main model reloads
 - **Live model config**: Comes from `live_transcriber.model` in server config, falls back to main model
@@ -194,7 +225,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 #### Docker / Deployment
 - **Bootstrap at first run**: Python deps installed at first container startup into `/runtime/.venv`, not baked into image
 - **Model storage**: `HF_HOME=/models`, `TORCH_HOME=/models/torch-cache` — mounted volumes, not in container
-- **5 compose variants**: Base, linux-host (host network), desktop-vm, gpu (runtime=nvidia), gpu-cdi (CDI device passthrough)
+- **6 compose variants**: Base, linux-host (host network), desktop-vm, gpu (runtime=nvidia), gpu-cdi (CDI device passthrough), vulkan (whisper.cpp sidecar with /dev/dri)
 
 #### Security
 - **Auth via first WS message**: WebSocket endpoints authenticate from the first JSON message, not headers
@@ -216,4 +247,4 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Review quarterly for outdated rules
 - Remove rules that become obvious over time
 
-Last Updated: 2026-03-21
+Last Updated: 2026-03-28
