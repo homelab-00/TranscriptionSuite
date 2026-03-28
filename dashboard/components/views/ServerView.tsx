@@ -625,6 +625,18 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       ? [MOST_RECENT, ...docker.images.map((i) => i.fullName)]
       : ['ghcr.io/homelab-00/transcriptionsuite-server:latest'];
   const [selectedImage, setSelectedImage] = useState(imageOptions[0]);
+
+  // When images load from empty (e.g. on first render), reset stale placeholder
+  // selection to MOST_RECENT so selectedTagForStart doesn't resolve to 'latest'.
+  const prevImagesLengthRef = useRef(docker.images.length);
+  useEffect(() => {
+    const prev = prevImagesLengthRef.current;
+    prevImagesLengthRef.current = docker.images.length;
+    if (prev === 0 && docker.images.length > 0) {
+      setSelectedImage(MOST_RECENT);
+    }
+  }, [docker.images.length]);
+
   const resolvedImage =
     selectedImage === MOST_RECENT && docker.images.length > 0
       ? docker.images[0].fullName
