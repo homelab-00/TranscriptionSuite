@@ -15,7 +15,7 @@ type TrayState =
   | 'error'
   | 'disconnected';
 
-type RuntimeProfile = 'gpu' | 'cpu';
+type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan';
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 type ClientLogType = 'info' | 'success' | 'error' | 'warning';
 

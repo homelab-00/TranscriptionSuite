@@ -57,7 +57,7 @@ interface SessionViewProps {
   setClientRunning: (running: boolean) => void;
   onStartServer: (
     mode: 'local' | 'remote',
-    runtimeProfile: 'gpu' | 'cpu',
+    runtimeProfile: 'gpu' | 'cpu' | 'vulkan',
     imageTag?: string,
     models?: {
       mainTranscriberModel?: string;
@@ -95,14 +95,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [monitorVolumePct, setMonitorVolumePct] = useState<number | null>(null);
 
   // Runtime profile (read from persisted config)
-  const [runtimeProfile, setRuntimeProfile] = useState<'gpu' | 'cpu'>('gpu');
+  const [runtimeProfile, setRuntimeProfile] = useState<'gpu' | 'cpu' | 'vulkan'>('gpu');
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (api?.config) {
       api.config
         .get('server.runtimeProfile')
         .then((val: unknown) => {
-          if (val === 'gpu' || val === 'cpu') setRuntimeProfile(val);
+          if (val === 'gpu' || val === 'cpu' || val === 'vulkan') setRuntimeProfile(val);
         })
         .catch(() => {});
     }

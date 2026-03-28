@@ -29,7 +29,7 @@ export interface TrayMenuState {
   isStandby?: boolean;
 }
 
-export type RuntimeProfile = 'gpu' | 'cpu';
+export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 export type ClientLogType = 'info' | 'success' | 'error' | 'warning';
 

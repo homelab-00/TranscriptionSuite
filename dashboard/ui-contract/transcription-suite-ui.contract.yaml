@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.14
+  spec_version: 1.0.15
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -38,7 +38,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-22T21:30:44.708Z
+    generated_at: 2026-03-28T13:10:40.842Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -61,6 +61,7 @@ foundation:
       cyan: "#22d3ee"
       magenta: "#d946ef"
       orange: "#fb923c"
+      rose: "#f43f5e"
     glass_scale: &a2
       "100": rgba(0, 0, 0, 0.3)
       "200": rgba(0, 0, 0, 0.5)
@@ -100,6 +101,7 @@ foundation:
         - "#e2e8f0"
         - "#ef4444"
         - "#f0abfc"
+        - "#f43f5e"
         - "#f87171"
         - "#f97316"
         - "#fb7185"
@@ -129,6 +131,7 @@ foundation:
         - rgba(239,22,238,0.5)
         - rgba(239,68,68,0.35)
         - rgba(239,68,68,0.6)
+        - rgba(244,63,94,0.15)
         - rgba(251, 146, 60, 0.3)
         - rgba(251,146,60,0.5)
         - rgba(255, 255, 255, 0.1)

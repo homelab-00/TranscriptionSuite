@@ -101,7 +101,7 @@ export interface UseDockerReturn {
   retryDetection: () => Promise<void>;
 }
 
-type RuntimeProfile = 'gpu' | 'cpu';
+type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan';
 
 const api = () => (window as any).electronAPI?.docker as ElectronAPI['docker'] | undefined;
 const appApi = () => (window as any).electronAPI?.app as ElectronAPI['app'] | undefined;

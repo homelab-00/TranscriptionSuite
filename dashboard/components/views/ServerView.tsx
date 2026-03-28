@@ -21,6 +21,7 @@ import {
   Users,
   Laptop,
   Radio,
+  Flame,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -48,7 +49,7 @@ import {
 } from '../../src/services/modelSelection';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 
-type RuntimeProfile = 'gpu' | 'cpu';
+type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan';
 
 interface ServerViewProps {
   onStartServer: (
@@ -226,7 +227,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       api.config
         .get('server.runtimeProfile')
         .then((val: unknown) => {
-          if (val === 'gpu' || val === 'cpu') setRuntimeProfile(val);
+          if (val === 'gpu' || val === 'cpu' || val === 'vulkan') setRuntimeProfile(val);
         })
         .catch(() => {});
       api.config
@@ -691,16 +692,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       ok: docker.images.length > 0,
       hint: 'Pull an image below to get started',
     },
-    {
-      label: 'NVIDIA GPU detected',
-      ok: gpuInfo?.gpu ?? false,
-      warn: gpuInfo !== null && !gpuInfo.gpu,
-      hint: gpuInfo?.gpu
-        ? gpuInfo.toolkit
-          ? 'nvidia-container-toolkit ready'
-          : 'Run: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml'
-        : 'CPU mode will be used (slower)',
-    },
+    ...(runtimeProfile === 'gpu'
+      ? [
+          {
+            label: 'NVIDIA GPU detected',
+            ok: gpuInfo?.gpu ?? false,
+            warn: gpuInfo !== null && !gpuInfo.gpu,
+            hint: gpuInfo?.gpu
+              ? gpuInfo.toolkit
+                ? 'nvidia-container-toolkit ready'
+                : 'Run: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml'
+              : 'CPU mode will be used (slower)',
+          },
+        ]
+      : []),
   ];
   const allPassed = setupChecks.every((c) => c.ok);
   const showChecklist = !setupDismissed || !allPassed;
@@ -985,6 +990,18 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       GPU (CUDA)
                     </button>
                     <button
+                      onClick={() => handleRuntimeProfileChange('vulkan')}
+                      disabled={isRunning}
+                      className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
+                        runtimeProfile === 'vulkan'
+                          ? 'bg-accent-rose/15 border-accent-rose/40 text-accent-rose shadow-[0_0_10px_rgba(244,63,94,0.15)]'
+                          : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                      } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                    >
+                      <Flame size={14} />
+                      Vulkan
+                    </button>
+                    <button
                       onClick={() => handleRuntimeProfileChange('cpu')}
                       disabled={isRunning}
                       className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
@@ -997,6 +1014,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       CPU Only
                     </button>
                   </div>
+                  {runtimeProfile === 'vulkan' && !isRunning && (
+                    <span className="text-xs text-slate-500 italic">
+                      AMD/Intel GPU via whisper.cpp — no diarization or live mode
+                    </span>
+                  )}
                   {runtimeProfile === 'cpu' && !isRunning && (
                     <span className="text-xs text-slate-500 italic">
                       Slower transcription, no NVIDIA GPU required
