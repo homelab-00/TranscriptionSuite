@@ -109,9 +109,14 @@ MODEL_GROUPS: dict[str, list[str]] = {
     "whisper": [
         "Systran/faster-whisper-tiny",
         "Systran/faster-whisper-small",
+        "Systran/faster-whisper-small.en",
+        "Systran/faster-distil-whisper-small.en",
         "Systran/faster-whisper-medium",
+        "Systran/faster-whisper-medium.en",
+        "Systran/faster-distil-whisper-medium.en",
         "Systran/faster-whisper-large-v3",
-        "Systran/faster-whisper-large-v3-turbo",
+        "Systran/faster-distil-whisper-large-v3",
+        "deepdml/faster-whisper-large-v3-turbo-ct2",
     ],
     "nemo": [
         "nvidia/parakeet-tdt-0.6b-v3",
@@ -364,24 +369,49 @@ def _word_diff(text_a: str, text_b: str, max_changes: int = 30) -> list[str]:
     return lines
 
 
+def _score_model_for_reference(model_name: str) -> int:
+    """Heuristic to pick the most accurate model for the diff."""
+    name = model_name.lower()
+    if "large-v3" in name:
+        return 100
+    if "large" in name:
+        return 90
+    if "canary" in name:
+        return 80
+    if "parakeet" in name:
+        return 70
+    if "medium" in name:
+        return 60
+    if "small" in name:
+        return 50
+    if "base" in name:
+        return 40
+    if "tiny" in name:
+        return 30
+    return 0
+
+
 def print_diff(results: list[ModelResult]) -> None:
-    """Print word-level diff comparing every successful model to the first."""
+    """Print word-level diff comparing every successful model to the highest-accuracy reference."""
     successful = [r for r in results if r.error is None and r.text]
     if len(successful) < 2:
         print("(Too few successful results for diff comparison)\n")
         return
 
     width = 110
+    best_ref = max(successful, key=lambda r: _score_model_for_reference(r.model))
+
     print("=" * width)
-    print("TRANSCRIPTION DIFF  (each model vs first model as reference)")
+    print(f"TRANSCRIPTION DIFF  (Reference: {best_ref.model} @ {best_ref.device})")
     print("=" * width)
-    ref = successful[0]
-    for r in successful[1:]:
-        sim = _similarity(ref.text, r.text)
-        print(f"\n  Reference : {ref.model} @ {ref.device}")
-        print(f"  Candidate : {r.model} @ {r.device}")
+    
+    for r in successful:
+        if r is best_ref:
+            continue
+        sim = _similarity(best_ref.text, r.text)
+        print(f"\n  Candidate : {r.model} @ {r.device}")
         print(f"  Similarity: {sim * 100:.1f}%")
-        changes = _word_diff(ref.text, r.text)
+        changes = _word_diff(best_ref.text, r.text)
         if not changes:
             print("  Changes   : (identical)")
         else:
@@ -415,7 +445,33 @@ def _collect_models(args: argparse.Namespace) -> list[tuple[str, str]]:
             sys.exit(1)
         raw_models = MODEL_GROUPS[g]
     else:
-        raw_models = MODEL_GROUPS["mlx"]
+        # Default behavior: test all registered models across available hardware
+        import platform
+        try:
+            import torch
+            has_cuda = torch.cuda.is_available()
+        except ImportError:
+            has_cuda = False
+        
+        is_apple_silicon = sys.platform == "darwin" and platform.machine() == "arm64"
+        
+        # 1. Add MLX models if running on Apple Silicon
+        if is_apple_silicon:
+            for m in MODEL_GROUPS["mlx-whisper"] + MODEL_GROUPS["mlx-asr"]:
+                raw_models.append(f"{m}@metal")
+
+        # 2. Add PyTorch standard models on CUDA if available
+        if has_cuda:
+            for m in MODEL_GROUPS["whisper"] + MODEL_GROUPS["nemo"]:
+                raw_models.append(f"{m}@cuda")
+
+        # 3. Always add PyTorch standard models on CPU to establish a baseline
+        for m in MODEL_GROUPS["whisper"]:
+            raw_models.append(f"{m}@cpu")
+            
+        # Optional: Add Nemo on CPU (can be extremely slow, so typically just test Whisper on CPU for baseline)
+        for m in MODEL_GROUPS["nemo"]:
+            raw_models.append(f"{m}@cpu")
         
     parsed = []
     for m in raw_models:

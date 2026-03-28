@@ -152,6 +152,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
 
   // ── VibeVoice ────────────────────────────────────────────────────────────
+  // TODO: Add MLX-converted VibeVoice ASR models (e.g. mlx-community/VibeVoice-ASR-4bit) 
+  // when the underlying `mlx-audio` library becomes stable enough to process raw numpy audio 
+  // arrays without indexing errors. (As of v0.4.1, it crashes on inference in our backend).
   {
     id: 'microsoft/VibeVoice-ASR',
     displayName: 'VibeVoice ASR',
