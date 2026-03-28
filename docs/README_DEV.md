@@ -90,6 +90,21 @@ Technical documentation for developing and building TranscriptionSuite.
 - [14. Dependencies](#14-dependencies)
   - [14.1 Server (Docker)](#141-server-docker)
   - [14.2 Dashboard](#142-dashboard)
+- [15. Apple Silicon (Metal/MLX) Development](#15-apple-silicon-metalmlx-development)
+  - [15.1 Prerequisites](#151-prerequisites)
+  - [15.2 Unit Tests (CI-safe, no GPU required)](#152-unit-tests-ci-safe-no-gpu-required)
+  - [15.3 Manual Server Test (Apple Silicon required)](#153-manual-server-test-apple-silicon-required)
+  - [15.4 Metal Runtime Profile — Dashboard](#154-metal-runtime-profile--dashboard)
+  - [15.5 MLX Backend Notes](#155-mlx-backend-notes)
+  - [15.6 Dashboard Integration Test](#156-dashboard-integration-test)
+  - [15.7 Tail the Structured Log](#157-tail-the-structured-log)
+  - [15.8 Confirming MLX is Active](#158-confirming-mlx-is-active)
+  - [15.9 Troubleshooting (MLX)](#159-troubleshooting-mlx)
+- [16. STT Benchmark Tool](#16-stt-benchmark-tool)
+  - [16.1 Overview](#161-overview)
+  - [16.2 Usage](#162-usage)
+  - [16.3 Model Groups](#163-model-groups)
+  - [16.4 Output Files](#164-output-files)
 
 ---
 
@@ -2603,25 +2618,61 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 
 ---
 
-## 15. Testing Bare-Metal MLX Functionality
+## 15. Apple Silicon (Metal/MLX) Development
 
-This section covers how to test the Apple Silicon / Metal (MLX) backend without
-Docker.  All steps assume an **Apple Silicon Mac** (M1 or later) with the Python
-virtual environment already created (`uv sync --extra mlx` inside `server/backend/`).
+The Metal/MLX backend provides hardware-accelerated transcription on Apple Silicon
+Macs using the `mlx-whisper`, `parakeet-mlx`, and `canary-mlx` packages. When the
+Metal runtime profile is selected, the dashboard manages a native uvicorn server
+process directly — no Docker required.
 
-See also: [docs/apple-silicon-metal.md](apple-silicon-metal.md) for the full setup guide.
+| Component | Details |
+|-----------|---------|
+| Acceleration | Apple Metal GPU via MLX framework |
+| Whisper models | `mlx-community/*` via `mlx-whisper` |
+| Parakeet (NeMo ASR) | `mlx-community/parakeet-*` via `parakeet-mlx` |
+| Canary (multitask) | `*/canary*-mlx` pattern via `canary-mlx` |
+| Diarization | PyAnnote on MPS (falls back to CPU) |
+| Server | Native uvicorn (no Docker) |
 
 ---
 
-### 15.1 Unit Tests (CI-safe, no GPU required)
+### 15.1 Prerequisites
+
+1. **Apple Silicon Mac** (M1 or later) running macOS 12+.
+2. Python backend dependencies installed with the `mlx` extra:
+
+   ```bash
+   cd server/backend
+   uv sync --extra mlx
+   ```
+
+3. A [Hugging Face](https://huggingface.co/) account with access to the PyAnnote
+   diarization models (required only for diarization):
+   - Accept [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
+   - Accept [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
+   - Generate an API token at <https://huggingface.co/settings/tokens>
+
+4. A symlink so the server package resolves correctly when running outside pytest:
+
+   ```bash
+   ln -sf . server/backend/server
+   ```
+
+   > `mlxServerManager.ts` (Electron) creates this automatically on first start.
+
+---
+
+### 15.2 Unit Tests (CI-safe, no GPU required)
 
 ```bash
 cd server/backend
-uv run pytest tests/test_mlx_whisper_backend.py -v
+uv run pytest tests/test_mlx_whisper_backend.py tests/test_mlx_parakeet_backend.py tests/test_mlx_canary_backend.py -v
 ```
 
-These tests run on any platform using stubs for `mlx_whisper` and `scipy`.
-16 tests cover:
+These tests run on any platform using stubs for `mlx_whisper`, `parakeet_mlx`,
+`canary_mlx`, and `scipy`.
+
+**MLX Whisper** (16 tests — `test_mlx_whisper_backend.py`):
 
 | Class | What is tested |
 |-------|---------------|
@@ -2631,19 +2682,17 @@ These tests run on any platform using stubs for `mlx_whisper` and `scipy`.
 | `TestMLXWhisperBeamSizeFallback` | `beam_size > 1` silently falls back to greedy (`None`); `None` passes through |
 | `TestMLXWhisperResampling` | 44100 Hz audio triggers `scipy.signal.resample`; 16000 Hz skips it |
 
+**MLX Parakeet** (33 tests — `test_mlx_parakeet_backend.py`):  
+Factory detection, lifecycle, transcribe, resampling, and error-path coverage for the `mlx-community/parakeet-*` variant.
+
+**MLX Canary** (33 tests — `test_mlx_canary_backend.py`):  
+Factory detection, lifecycle, transcribe, language/task config, and error-path coverage for the `*/canary*-mlx` variant.
+
 ---
 
-### 15.2 Manual Server Test (Apple Silicon required)
+### 15.3 Manual Server Test (Apple Silicon required)
 
 **Start the bare-metal server:**
-
-> **Prerequisite:** The hatch editable install requires a self-referential symlink
-> `server/backend/server → .` so Python can find the `server` package.  This is
-> gitignored and must exist before starting the server.  Create it once per clone:
-> ```bash
-> ln -sf . server/backend/server
-> ```
-> `mlxServerManager.ts` (Electron) creates this automatically on first start.
 
 ```bash
 cd /path/to/TranscriptionSuite
@@ -2662,6 +2711,10 @@ LOG_DIR="$DATA_DIR/logs" \
 server/backend/.venv/bin/uvicorn server.api.main:app \
   --host 0.0.0.0 --port 9786
 ```
+
+> **Tip:** All path arguments must be fully expanded — no `$HOME` inside quoted
+> env vars on macOS. Use the shell expansion above (outside the quotes) or substitute
+> the actual path.
 
 **Verify the server is ready:**
 
@@ -2687,6 +2740,38 @@ curl -s -X POST http://localhost:9786/api/transcribe/file \
   -w "\nHTTP_STATUS: %{http_code}\n" | python3 -m json.tool
 ```
 
+The response is a JSON object:
+
+```jsonc
+{
+  "text": "...",                  // full transcript
+  "language": "en",
+  "language_probability": 1.0,
+  "duration": 60.0,
+  "num_speakers": 2,              // present when diarization=true
+  "segments": [
+    {
+      "text": "Hello world.",
+      "start": 0.0,
+      "end": 2.5,
+      "speaker": "SPEAKER_00",   // present when diarization=true
+      "words": [...]              // per-word timestamps + speaker
+    }
+  ],
+  "words": [...]                  // flat word list with speaker labels
+}
+```
+
+Useful optional form fields:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `language` | auto-detect | BCP-47 code, e.g. `"en"` |
+| `diarization` | `false` | Enable speaker diarization |
+| `min_speakers` | auto | Hint minimum speaker count |
+| `max_speakers` | auto | Hint maximum speaker count |
+| `initial_prompt` | none | Context string to guide transcription |
+
 **Observed benchmarks on M-series (whisper-large-v3-mlx):**
 
 | File          | Duration | Wall time | RTF    | Speakers |
@@ -2711,7 +2796,47 @@ Alternatively, open **Activity Monitor → Window → GPU History**.
 
 ---
 
-### 15.3 Dashboard Integration Test
+### 15.4 Metal Runtime Profile — Dashboard
+
+The Metal profile can be selected from two places in the dashboard:
+
+**Settings → Server Profile**
+
+1. Open the dashboard (`npm run dev:electron` from `dashboard/`).
+2. Click the gear ⚙ icon → **Settings**.
+3. Under *Runtime Profile*, select **Metal (Apple Silicon)**.
+4. The model selector will show only `mlx-community/*` models.
+5. Click **Save**. The dashboard stores `runtimeProfile: "metal"` in its config.
+
+**Server View (quick toggle)**
+
+The Server panel also exposes the profile dropdown so you can switch without
+opening Settings.
+
+When `metal` is selected the dashboard bypasses Docker entirely. The Server view
+shows "Native Process Running" / "Server Offline" status and a ⚡ Metal badge.
+Start/stop the server from the **Server** view using the native process controls.
+
+---
+
+### 15.5 MLX Backend Notes
+
+- **Model selection**: The backend is auto-selected by the model name prefix:
+  - `mlx-community/parakeet-*` → MLXParakeetBackend
+  - `*/canary*-mlx` → MLXCanaryBackend
+  - `mlx-community/*` → MLXWhisperBackend
+- **Beam search**: MLX Whisper only supports greedy decoding. If `beam_size > 1`
+  is configured (default is 5), the backend silently falls back to greedy.
+  This has no user-visible impact.
+- **Diarization**: PyAnnote diarization works with all MLX backends — transcription
+  runs on Metal, diarization runs on MPS (or CPU if MPS is unavailable).
+- **Performance**: ~3 s per minute of audio on M-series with `whisper-large-v3-mlx`.
+- **Async safety**: All MLX transcription calls are wrapped in `asyncio.to_thread()`
+  to prevent blocking the FastAPI event loop.
+
+---
+
+### 15.6 Dashboard Integration Test
 
 1. Run `npm run dev:electron` from `dashboard/`.
 2. Open **Server** view → select **Metal (MLX)** runtime profile.
@@ -2723,7 +2848,7 @@ Alternatively, open **Activity Monitor → Window → GPU History**.
 
 ---
 
-### 15.4 Tail the Structured Log
+### 15.7 Tail the Structured Log
 
 ```bash
 tail -f "$HOME/Library/Application Support/TranscriptionSuite/data/logs/server.log" \
@@ -2735,7 +2860,7 @@ for transcription requests: `model`, `duration_s`, `backend`.
 
 ---
 
-### 15.5 Confirming MLX is Active
+### 15.8 Confirming MLX is Active
 
 The `/ready` endpoint reports whether MLX is available:
 
@@ -2756,3 +2881,107 @@ If `mlx.available` is `false`, check `mlx.reason`:
 | `not_apple_silicon` | Must run on Apple Silicon (arm64) |
 | `mlx_whisper_not_installed` | `cd server/backend && uv sync --extra mlx` |
 | `platform_not_darwin` | Only macOS is supported for Metal acceleration |
+
+---
+
+### 15.9 Troubleshooting (MLX)
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `mlx_whisper not found` | MLX extra not installed | `cd server/backend && uv sync --extra mlx` |
+| `features.mlx.available: false` | Not Apple Silicon or wrong Python | Check `uname -m` → must be `arm64` |
+| Diarization falls back to CPU | MPS memory pressure | Normal; use `device: cpu` in `config.yaml` to force |
+| `DATA_DIR` not found errors | Path not created | `mkdir -p "$DATA_DIR/logs" "$DATA_DIR/audio" "$DATA_DIR/tokens"` |
+| Server won't start on port 9786 | Port in use | `lsof -i :9786` then kill or change `--port` |
+
+---
+
+## 16. STT Benchmark Tool
+
+### 16.1 Overview
+
+`scripts/benchmark_stt.py` batch-tests multiple STT models against one or more
+audio files and produces a timing comparison table, word-level diff, and JSON/CSV
+results.
+
+**Metrics measured:**
+
+| Metric | Description |
+|--------|-------------|
+| `setup_time` | `backend.load()` + warmup pass (cold start including JIT compile) |
+| `transcribe_time` | `backend.transcribe()` wall time for the audio |
+| `RTF` | `transcribe_time / audio_duration` — lower is faster; 1.0x = real-time |
+| `word_count` | Words in the transcription output |
+
+**Outputs:**
+
+- Console: ASCII timing table + per-model text + word-level diff vs. reference model
+- `benchmark_<timestamp>.json` — full results including segments
+- `benchmark_<timestamp>.csv` — summary rows, easy to open in a spreadsheet
+
+> Model download time is **not** included in `setup_time` if the model is already
+> cached. First-run times are dominated by download; subsequent runs measure pure
+> inference.
+
+---
+
+### 16.2 Usage
+
+```bash
+# Activate the venv first
+source server/backend/.venv/bin/activate
+
+# Run from the project root so the server package resolves correctly
+
+# Default: all MLX models (on Apple Silicon) on a file
+python scripts/benchmark_stt.py --input samples/input/clip.m4a
+
+# All files in a directory, specific group
+python scripts/benchmark_stt.py --dir samples/input/ --group mlx-whisper
+
+# Explicit model list — append @<device> to override device per model
+python scripts/benchmark_stt.py \
+  --models "mlx-community/whisper-tiny-mlx" "Systran/faster-whisper-tiny@cpu" \
+  --input clip.m4a
+
+# List available model groups
+python scripts/benchmark_stt.py --list-groups
+
+# Skip warmup (first-inference JIT cost shows up in transcribe_time)
+python scripts/benchmark_stt.py --no-warmup --input clip.m4a
+
+# Save results to a specific directory
+python scripts/benchmark_stt.py --input clip.m4a --output-dir /tmp/results
+```
+
+---
+
+### 16.3 Model Groups
+
+| Group | Contents |
+|-------|----------|
+| `mlx` | Balanced set: whisper-tiny/small/medium/large-v3 + parakeet-tdt-0.6b-v3 + canary-1b-v2 (Apple Silicon default) |
+| `mlx-whisper` | All 6 MLX Whisper variants (tiny → large-v3-turbo) |
+| `mlx-asr` | MLX Parakeet + 2× MLX Canary variants |
+| `whisper` | 10 Systran faster-whisper variants (CPU/CUDA) |
+| `nemo` | NVIDIA Parakeet + Canary (requires Docker/CUDA, not for bare-metal macOS) |
+| `all` | Every model from all groups above |
+
+The default group is auto-selected based on platform:
+- **Apple Silicon** → `mlx` group
+- **CUDA** → all MLX models + `whisper` + `nemo` groups
+- **Other** → `whisper` group only
+
+---
+
+### 16.4 Output Files
+
+Results are saved as `benchmark_<timestamp>.json` and `benchmark_<timestamp>.csv`
+in the current directory (or `--output-dir`). Both are gitignored (`benchmark_*.json`,
+`benchmark_*.csv`).
+
+The JSON file contains full output including segments and word-level data.
+The CSV file contains one row per `(model, file)` pair with the core metrics
+for quick comparison in a spreadsheet.
+
+

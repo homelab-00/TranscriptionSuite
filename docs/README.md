@@ -161,8 +161,14 @@ After installation to make sure it's enabled, run `wsl --list --verbose` - if th
     * Not required if using CPU mode
 
 **macOS:**
-1. Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/) or [Podman Desktop](https://podman-desktop.io/)
-2. GPU mode is not available on macOS — the server runs in CPU mode automatically
+1. **Apple Silicon (M1+) — recommended:** Use the **Metal/MLX runtime** for native
+   hardware-accelerated transcription without Docker:
+   - Install Python deps: `cd server/backend && uv sync --extra mlx`
+   - Start the server bare-metal (see [README_DEV.md § 15](README_DEV.md#15-apple-silicon-metalmlx-development))
+   - In the dashboard **Settings → Runtime Profile**, select **Metal (Apple Silicon)**
+2. **Intel Mac / CPU-only:** Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
+   or [Podman Desktop](https://podman-desktop.io/) — GPU acceleration is not
+   available on Intel macOS; the server runs in CPU mode automatically.
 
 ### 2.2 Download the Dashboard app
 

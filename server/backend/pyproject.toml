@@ -81,6 +81,7 @@ allow-direct-references = true
 [dependency-groups]
 dev = [
     "pytest==9.0.2",
+    "pytest-asyncio==1.3.0",
     "pip-licenses==5.5.1",
 ]
 
