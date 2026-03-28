@@ -173,7 +173,7 @@ Before doing anything else, you need to download the Dashboard app for your plat
 This is just the frontend, no models or packages are downloaded yet.
 
 >* *Linux and Windows builds are x64; macOS is arm64*
->* *Each release artifact includes an gpg signature by my key (`.sig`)*
+>* *Each release artifact includes an gpg signature by my key (`.asc`)*
 
 ##### 2.2.1 Linux AppImage Prerequisites
 
@@ -195,7 +195,7 @@ AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default
 
 1. Download both files from the same release:
    - installer/app (`.AppImage`, `.exe` or `.dmg`)
-   - matching signature file (`.sig`)
+   - matching signature file (`.asc`)
 2. Install Kleopatra: https://apps.kde.org/kleopatra/
 3. Import the public key in Kleopatra from this repository:
    - [`docs/assets/homelab-00_0xBFE4CC5D72020691_public.asc`](assets/homelab-00_0xBFE4CC5D72020691_public.asc)
