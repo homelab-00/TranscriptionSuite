@@ -7,7 +7,7 @@ Provides CRUD operations for the transcription_jobs table.
 import logging
 from datetime import UTC, datetime
 
-from server.backend.database.database import get_connection
+from .database import get_connection
 
 # Adapted from Scriberr (https://github.com/rishikanthc/Scriberr) — job model structure:
 # id, status, audio_path, result, error_message, timestamps pattern.
@@ -66,7 +66,14 @@ def save_result(
                     completed_at = ?
                 WHERE id = ?
                 """,
-                (result_text, result_json, result_language, duration_seconds, completed_at, job_id),
+                (
+                    result_text,
+                    result_json,
+                    result_language,
+                    duration_seconds,
+                    completed_at,
+                    job_id,
+                ),
             )
             conn.commit()
     except Exception:

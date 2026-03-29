@@ -796,7 +796,7 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
     """
     import json as _json
 
-    from server.backend.database.job_repository import get_job, mark_delivered
+    from ...database.job_repository import get_job, mark_delivered
 
     job = get_job(job_id)
     if job is None:
