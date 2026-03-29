@@ -1348,7 +1348,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
                             onClick={handleStopRecording}
                             disabled={isProcessing}
                           >
-                            {isProcessing ? 'Processing...' : 'Stop Recording'}
+                            {isProcessing
+                              ? transcription.processingProgress?.total
+                                ? `Processing... ${transcription.processingProgress.current}/${transcription.processingProgress.total}`
+                                : 'Processing...'
+                              : 'Stop Recording'}
                           </Button>
                           {isProcessing && (
                             <Button

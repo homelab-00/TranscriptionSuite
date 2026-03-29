@@ -46,6 +46,8 @@ export interface TranscriptionState {
   reset: () => void;
   /** VAD state from the server */
   vadActive: boolean;
+  /** Segment progress while server is processing (current/total segments) */
+  processingProgress: { current: number; total: number } | null;
   /** Whether audio is muted (capture continues but chunks not sent) */
   muted: boolean;
   /** Toggle mute during recording */
@@ -61,6 +63,10 @@ export function useTranscription(): TranscriptionState {
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [vadActive, setVadActive] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
 
   const socketRef = useRef<TranscriptionSocket | null>(null);
   const captureRef = useRef<AudioCapture | null>(null);
@@ -138,6 +144,14 @@ export function useTranscription(): TranscriptionState {
 
       case 'session_stopped':
         setStatus('processing');
+        setProcessingProgress(null);
+        break;
+
+      case 'processing_progress':
+        setProcessingProgress({
+          current: (msg.data?.current as number) ?? 0,
+          total: (msg.data?.total as number) ?? 0,
+        });
         break;
 
       case 'final':
@@ -147,6 +161,7 @@ export function useTranscription(): TranscriptionState {
           language: msg.data?.language as string | undefined,
           duration: msg.data?.duration as number | undefined,
         });
+        setProcessingProgress(null);
         setStatus('complete');
         captureRef.current?.stop();
         setAnalyser(null);
@@ -227,6 +242,7 @@ export function useTranscription(): TranscriptionState {
     setAnalyser(null);
     setVadActive(false);
     setMuted(false);
+    setProcessingProgress(null);
   }, []);
 
   const toggleMute = useCallback(() => {
@@ -257,5 +273,6 @@ export function useTranscription(): TranscriptionState {
     muted,
     toggleMute,
     setGain,
+    processingProgress,
   };
 }

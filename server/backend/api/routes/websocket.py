@@ -80,6 +80,10 @@ class TranscriptionSession:
         # Job tracking for transcription
         self._current_job_id: str | None = None
 
+        # Set to True when the client disconnects mid-transcription so the
+        # worker thread can abort via cancellation_check.
+        self._client_disconnected = False
+
         # Get client capabilities
         self.capabilities = get_client_capabilities({"x-client-type": client_type.value}, {})
 
@@ -139,18 +143,55 @@ class TranscriptionSession:
             model_manager = get_model_manager()
             engine = model_manager.transcription_engine
 
-            # Transcribe
+            # Transcribe — run in a thread so the event loop stays responsive.
+            # Without this, the synchronous transcribe_file() blocks the entire
+            # asyncio event loop (and the server) for the duration of processing.
             task = "translate" if getattr(self, "translation_enabled", False) else "transcribe"
             translation_target = (
                 getattr(self, "translation_target_language", "en") if task == "translate" else None
             )
-            result = engine.transcribe_file(
-                file_path=str(self.temp_file),
-                language=self.language,
-                word_timestamps=True,
-                task=task,
-                translation_target_language=translation_target,
+
+            # Shared progress state written by the worker thread, read by the loop.
+            # Simple dict access is safe here — GIL guarantees atomic reads of ints.
+            _progress: dict[str, int] = {"current": 0, "total": 0}
+
+            def _on_progress(current: int, total: int) -> None:
+                _progress["current"] = current
+                _progress["total"] = total
+                model_manager.job_tracker.update_progress(current, total)
+
+            loop = asyncio.get_event_loop()
+            transcribe_future = loop.run_in_executor(
+                None,
+                lambda: engine.transcribe_file(
+                    file_path=str(self.temp_file),
+                    language=self.language,
+                    word_timestamps=True,
+                    task=task,
+                    translation_target_language=translation_target,
+                    progress_callback=_on_progress,
+                    cancellation_check=lambda: self._client_disconnected,
+                ),
             )
+
+            # While transcription runs, send progress keepalives every 5 seconds.
+            # This serves two purposes:
+            #   1. Keeps the WebSocket connection alive (prevents idle timeout).
+            #   2. Gives the client visible feedback so the user doesn't navigate away.
+            _KEEPALIVE_INTERVAL = 5.0
+            while True:
+                done, _ = await asyncio.wait({transcribe_future}, timeout=_KEEPALIVE_INTERVAL)
+                if done:
+                    break
+                await self.send_message(
+                    "processing_progress",
+                    {
+                        "current": _progress["current"],
+                        "total": _progress["total"],
+                    },
+                )
+
+            result = transcribe_future.result()
 
             # Send final result
             # result.words is already a flat list of word dicts
@@ -186,8 +227,15 @@ class TranscriptionSession:
                 logger.warning("Webhook dispatch failed after transcription: %s", wh_err)
 
         except Exception as e:
-            logger.error(f"Transcription error: {e}", exc_info=True)
-            await self.send_message("error", {"message": f"Transcription failed: {e}"})
+            # Import lazily to avoid circular imports at module load time.
+            from server.core.model_manager import TranscriptionCancelledError
+
+            if isinstance(e, TranscriptionCancelledError):
+                # Client disconnected during processing — this is expected, not an error.
+                logger.info(f"Transcription cancelled (client disconnected) for {self.client_name}")
+            else:
+                logger.error(f"Transcription error: {e}", exc_info=True)
+                await self.send_message("error", {"message": f"Transcription failed: {e}"})
 
         finally:
             # Cleanup
@@ -541,6 +589,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             # Check for disconnect message
             if message.get("type") == "websocket.disconnect":
                 logger.info("WebSocket disconnect message received")
+                if session:
+                    session._client_disconnected = True
                 break
 
             if "text" in message:
@@ -557,6 +607,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
+        if session:
+            session._client_disconnected = True
 
     except TimeoutError:
         logger.warning("WebSocket authentication timeout")
