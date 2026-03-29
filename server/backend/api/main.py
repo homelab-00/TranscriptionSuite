@@ -395,6 +395,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         _log_time("backup check scheduled (async)")
         logger.info(f"Backup check scheduled (max_age={max_age_hours}h, max_backups={max_backups})")
 
+    # Schedule audio cleanup in background (non-blocking, Wave 2)
+    durability_config = config.config.get("durability", {})
+    _recordings_dir = (
+        durability_config.get("recordings_dir", "/data/recordings") or "/data/recordings"
+    )
+    _max_age_days = durability_config.get("audio_retention_days", 7)
+
+    from server.database.audio_cleanup import cleanup_old_recordings
+
+    asyncio.create_task(cleanup_old_recordings(_recordings_dir, _max_age_days))
+    _log_time("audio cleanup scheduled (async)")
+    logger.info(
+        "Audio cleanup scheduled (recordings_dir=%s, retention=%d days)",
+        _recordings_dir,
+        _max_age_days,
+    )
+
     # Initialize token store (generates admin token on first run)
     _ts_mod.get_token_store()
     _log_time("token store initialized")

@@ -145,10 +145,60 @@ def get_recent_undelivered(client_name: str, limit: int = 5) -> list[dict]:
 
 
 def set_audio_path(job_id: str, audio_path: str) -> None:
-    """Set audio_path field. Stub for Wave 2 use."""
+    """Set audio_path field. Populated by Wave 2 before transcription starts."""
     with get_connection() as conn:
         conn.execute(
             "UPDATE transcription_jobs SET audio_path = ? WHERE id = ?",
             (audio_path, job_id),
         )
         conn.commit()
+
+
+def reset_for_retry(job_id: str) -> None:
+    """Reset a job to 'processing' state so it can be re-transcribed.
+
+    Clears result fields and error_message. The audio_path is preserved
+    so the retry can read the same file.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE transcription_jobs
+            SET status = 'processing',
+                error_message = NULL,
+                completed_at = NULL,
+                result_text = NULL,
+                result_json = NULL,
+                delivered = 0
+            WHERE id = ?
+            """,
+            (job_id,),
+        )
+        conn.commit()
+
+
+def get_jobs_for_cleanup(max_age_days: int, limit: int = 100) -> list[dict]:
+    """Return completed+delivered jobs with audio_path older than max_age_days.
+
+    Only returns rows where status='completed', delivered=1, audio_path is set,
+    and completed_at is older than the cutoff. Used by the cleanup task to find
+    audio files safe to delete.
+    """
+    from datetime import timedelta
+
+    cutoff = (datetime.now(UTC) - timedelta(days=max_age_days)).isoformat()
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            SELECT * FROM transcription_jobs
+            WHERE status = 'completed'
+              AND delivered = 1
+              AND audio_path IS NOT NULL
+              AND completed_at < ?
+            ORDER BY completed_at ASC
+            LIMIT ?
+            """,
+            (cutoff, limit),
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]

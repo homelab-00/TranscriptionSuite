@@ -569,3 +569,26 @@ stt:
     # Token -1 means no suppression. See Whisper tokenizer for token IDs.
     # Default: [-1]
     suppress_tokens: [-1]
+
+# ----------------------------------------------------------------------------
+# Transcription Durability
+# ----------------------------------------------------------------------------
+# Controls how raw audio and transcription jobs are persisted to disk.
+# Wave 2: raw audio preservation and retry support.
+# Wave 3: startup orphan recovery (uses orphan_job_timeout_minutes).
+durability:
+    # Directory where raw audio recordings are saved before transcription.
+    # Must be on a persistent volume (not /tmp). In Docker: /data/recordings.
+    # Set to an empty string "" to disable persistent audio saving (falls back to /tmp).
+    recordings_dir: "/data/recordings"
+
+    # How many days to keep raw audio files for completed+delivered jobs.
+    # Set to 0 to keep audio files forever (no automatic cleanup).
+    # Audio for failed or undelivered jobs is never automatically deleted.
+    # Default: 7
+    audio_retention_days: 7
+
+    # Jobs stuck in 'processing' longer than this are considered orphaned on startup.
+    # Used by Wave 3 startup recovery. Set in minutes.
+    # Default: 10
+    orphan_job_timeout_minutes: 10

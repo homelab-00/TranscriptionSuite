@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from server.api.routes.utils import get_client_name
@@ -827,6 +827,97 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
         status_code=200,
         content={"job_id": job_id, "status": "completed", "result": result_data},
     )
+
+
+@router.post("/retry/{job_id}", response_model=None)
+async def retry_transcription(
+    job_id: str, request: Request, background_tasks: BackgroundTasks
+) -> JSONResponse:
+    """Re-transcribe a job from its saved audio file.
+
+    Resets the job status to 'processing' and runs transcription in the
+    background. The client should poll GET /result/{job_id} for the result.
+
+    Returns:
+        202: Retry started. Poll /result/{job_id} for completion.
+        403: Job belongs to a different client.
+        404: Job not found.
+        409: Job is already processing.
+        410: Audio file not available (never saved or already deleted).
+    """
+    from ...database.job_repository import get_job, reset_for_retry
+
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    client_name = get_client_name(request)
+    if job.get("client_name") and job["client_name"] != client_name:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if job["status"] == "processing":
+        raise HTTPException(status_code=409, detail="Job is already processing")
+
+    if job["status"] != "failed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only failed jobs can be retried (current status: {job['status']})",
+        )
+
+    audio_path = job.get("audio_path")
+    if not audio_path or not Path(audio_path).exists():
+        raise HTTPException(status_code=410, detail="Audio file not available — cannot retry")
+
+    reset_for_retry(job_id)
+    background_tasks.add_task(_run_retry, job_id, audio_path, job, request.app.state)
+
+    return JSONResponse(status_code=202, content={"job_id": job_id, "status": "processing"})
+
+
+async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_state: Any) -> None:
+    """Background task: re-transcribe from saved audio and persist the result."""
+    import json as _json
+
+    from ...core.json_utils import sanitize_for_json
+    from ...database.job_repository import mark_failed, save_result
+
+    try:
+        model_manager = app_state.model_manager
+        engine = model_manager.transcription_engine
+
+        result = await asyncio.to_thread(
+            engine.transcribe_file,
+            audio_path,
+            language=job.get("language"),
+            task=job.get("task", "transcribe"),
+            translation_target_language=job.get("translation_target"),
+            word_timestamps=True,
+        )
+
+        result_payload = sanitize_for_json(
+            {
+                "text": result.text,
+                "words": result.words or [],
+                "language": result.language,
+                "duration": result.duration,
+            }
+        )
+
+        save_result(
+            job_id=job_id,
+            result_text=result.text or "",
+            result_json=_json.dumps(result_payload, ensure_ascii=False),
+            result_language=result.language,
+            duration_seconds=result.duration,
+        )
+        logger.info("Retry transcription complete for job %s", job_id)
+
+    except Exception as exc:
+        logger.error("Retry transcription failed for job %s: %s", job_id, exc, exc_info=True)
+        try:
+            mark_failed(job_id, str(exc))
+        except Exception as _mf_err:
+            logger.warning("Failed to mark retry job %s as failed: %s", job_id, _mf_err)
 
 
 def _sorted_languages(langs: dict[str, str]) -> dict[str, str]:

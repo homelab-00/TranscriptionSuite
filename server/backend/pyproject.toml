@@ -29,8 +29,8 @@ dependencies = [
     "websockets==16.0",
 
     # Core ML / Transcription
-    "torch==2.8.0",          # Required by PyAnnote 4.0.3
-    "torchaudio==2.8.0",     # Required by PyAnnote 4.0.3
+    "torch==2.8.0",          # Required by PyAnnote 4.0.4
+    "torchaudio==2.8.0",     # Required by PyAnnote 4.0.4
     "pyannote.audio==4.0.4", # Diarization (still needed for NeMo backends)
 
     # Audio Processing

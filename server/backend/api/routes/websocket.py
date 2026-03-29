@@ -12,6 +12,7 @@ Handles:
 
 import asyncio
 import json
+import shutil
 import struct
 import tempfile
 import uuid
@@ -43,6 +44,9 @@ from server.database.job_repository import (
 )
 from server.database.job_repository import (
     save_result as _save_result,
+)
+from server.database.job_repository import (
+    set_audio_path as _set_audio_path,
 )
 from server.logging import get_logger
 from starlette.websockets import WebSocketState
@@ -139,10 +143,55 @@ class TranscriptionSession:
             # Convert to float32 [-1.0, 1.0]
             audio_float = audio_array.astype(np.float32) / 32768.0
 
-            # Save to temporary WAV file
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                self.temp_file = Path(tmp.name)
-                sf.write(tmp.name, audio_float, self.sample_rate)
+            # Save audio to persistent storage before transcription starts.
+            # This ensures raw audio survives a server crash — job can be retried.
+            # Falls back to /tmp if persistent write fails so transcription still runs.
+            _audio_written_persistently = False
+            if self._current_job_id:
+                try:
+                    from server.config import get_config as _get_config
+
+                    _cfg = _get_config()
+                    _recordings_dir = Path(
+                        _cfg.get("durability", "recordings_dir", default="/data/recordings")
+                        or "/data/recordings"
+                    )
+                    _recordings_dir.mkdir(parents=True, exist_ok=True)
+                    _free_bytes = shutil.disk_usage(str(_recordings_dir)).free
+                    if _free_bytes < 500_000_000:
+                        logger.warning(
+                            "Low disk space: %.0f MB free in %s — audio may not survive a crash",
+                            _free_bytes / 1_000_000,
+                            _recordings_dir,
+                        )
+                    _audio_path = _recordings_dir / f"{self._current_job_id}.wav"
+                    sf.write(str(_audio_path), audio_float, self.sample_rate)
+                    self.temp_file = _audio_path
+                    _audio_written_persistently = True
+                    try:
+                        _set_audio_path(self._current_job_id, str(_audio_path))
+                    except Exception as _sap_err:
+                        logger.warning(
+                            "Failed to set audio_path in DB for job %s: %s",
+                            self._current_job_id,
+                            _sap_err,
+                        )
+                except Exception as _write_err:
+                    logger.error(
+                        "Failed to write audio to persistent storage: %s — falling back to /tmp",
+                        _write_err,
+                    )
+
+            if not _audio_written_persistently:
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                    self.temp_file = Path(tmp.name)
+                    sf.write(tmp.name, audio_float, self.sample_rate)
+                # Record /tmp path so retries know where to look (best-effort)
+                if self._current_job_id:
+                    try:
+                        _set_audio_path(self._current_job_id, str(self.temp_file))
+                    except Exception:
+                        pass
 
             logger.info(
                 f"Processing {len(audio_float) / self.sample_rate:.2f}s of audio "
@@ -294,8 +343,13 @@ class TranscriptionSession:
                 await self.send_message("error", {"message": f"Transcription failed: {e}"})
 
         finally:
-            # Cleanup
-            if self.temp_file and self.temp_file.exists():
+            # Only delete files in /tmp — persistent audio in recordings_dir must survive
+            # so failed jobs can be retried (Wave 2) and orphan recovery can find them (Wave 3).
+            if (
+                self.temp_file
+                and self.temp_file.exists()
+                and str(self.temp_file).startswith("/tmp")
+            ):
                 try:
                     self.temp_file.unlink()
                 except Exception as e:
