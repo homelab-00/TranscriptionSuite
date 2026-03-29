@@ -54,6 +54,8 @@ export interface TranscriptionState {
   toggleMute: () => void;
   /** Set capture gain (amplification). Values >1 boost quiet sources. */
   setGain: (value: number) => void;
+  /** Job ID assigned by the server for this transcription session */
+  jobId: string | null;
 }
 
 export function useTranscription(): TranscriptionState {
@@ -70,6 +72,16 @@ export function useTranscription(): TranscriptionState {
 
   const socketRef = useRef<TranscriptionSocket | null>(null);
   const captureRef = useRef<AudioCapture | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const jobIdRef = useRef<string | null>(null);
+  const statusRef = useRef<TranscriptionStatus>('idle');
+
+  // Keep statusRef in sync so onClose can read the latest status without stale closure
+  const setStatusTracked = useCallback((s: TranscriptionStatus) => {
+    statusRef.current = s;
+    setStatus(s);
+  }, []);
+
   const startOptsRef = useRef<{
     language?: string;
     deviceId?: string;
@@ -87,104 +99,112 @@ export function useTranscription(): TranscriptionState {
     };
   }, []);
 
-  const handleMessage = useCallback((msg: ServerMessage) => {
-    switch (msg.type) {
-      case 'auth_ok':
-        // Auth succeeded — now send start
-        socketRef.current?.sendJSON({
-          type: 'start',
-          data: {
-            language: startOptsRef.current.language,
-            translation_enabled: startOptsRef.current.translate ?? false,
-            translation_target_language: startOptsRef.current.translationTarget ?? 'en',
-          },
-        });
-        break;
-
-      case 'session_started':
-        setStatus('recording');
-        {
-          const rawCaptureRate = msg.data?.capture_sample_rate_hz;
-          const captureSampleRateHz =
-            typeof rawCaptureRate === 'number' &&
-            Number.isFinite(rawCaptureRate) &&
-            rawCaptureRate > 0
-              ? Math.round(rawCaptureRate)
-              : 16000;
-          socketRef.current?.setAudioSampleRate(captureSampleRateHz);
-          // Begin audio capture
-          captureRef.current = new AudioCapture((chunk) => {
-            socketRef.current?.sendAudio(chunk);
+  const handleMessage = useCallback(
+    (msg: ServerMessage) => {
+      switch (msg.type) {
+        case 'auth_ok':
+          // Auth succeeded — now send start
+          socketRef.current?.sendJSON({
+            type: 'start',
+            data: {
+              language: startOptsRef.current.language,
+              translation_enabled: startOptsRef.current.translate ?? false,
+              translation_target_language: startOptsRef.current.translationTarget ?? 'en',
+            },
           });
-          captureRef.current
-            .start({
-              deviceId: startOptsRef.current.deviceId,
-              systemAudio: startOptsRef.current.systemAudio,
-              monitorDeviceLabel: startOptsRef.current.monitorDeviceLabel,
-              targetSampleRateHz: captureSampleRateHz,
-            })
-            .then(() => {
-              setAnalyser(captureRef.current?.analyser ?? null);
-            })
-            .catch((err) => {
-              setError(err instanceof Error ? err.message : 'Failed to start audio capture');
-              setStatus('error');
-              socketRef.current?.disconnect();
+          break;
+
+        case 'session_started':
+          if (msg.data?.job_id) {
+            const id = msg.data.job_id as string;
+            jobIdRef.current = id;
+            setJobId(id);
+          }
+          setStatusTracked('recording');
+          {
+            const rawCaptureRate = msg.data?.capture_sample_rate_hz;
+            const captureSampleRateHz =
+              typeof rawCaptureRate === 'number' &&
+              Number.isFinite(rawCaptureRate) &&
+              rawCaptureRate > 0
+                ? Math.round(rawCaptureRate)
+                : 16000;
+            socketRef.current?.setAudioSampleRate(captureSampleRateHz);
+            // Begin audio capture
+            captureRef.current = new AudioCapture((chunk) => {
+              socketRef.current?.sendAudio(chunk);
             });
-        }
-        break;
+            captureRef.current
+              .start({
+                deviceId: startOptsRef.current.deviceId,
+                systemAudio: startOptsRef.current.systemAudio,
+                monitorDeviceLabel: startOptsRef.current.monitorDeviceLabel,
+                targetSampleRateHz: captureSampleRateHz,
+              })
+              .then(() => {
+                setAnalyser(captureRef.current?.analyser ?? null);
+              })
+              .catch((err) => {
+                setError(err instanceof Error ? err.message : 'Failed to start audio capture');
+                setStatus('error');
+                socketRef.current?.disconnect();
+              });
+          }
+          break;
 
-      case 'session_busy':
-        setError(
-          `Server busy — ${(msg.data?.active_user as string) ?? 'another session'} is active`,
-        );
-        setStatus('error');
-        socketRef.current?.disconnect();
-        break;
+        case 'session_busy':
+          setError(
+            `Server busy — ${(msg.data?.active_user as string) ?? 'another session'} is active`,
+          );
+          setStatusTracked('error');
+          socketRef.current?.disconnect();
+          break;
 
-      case 'session_stopped':
-        setStatus('processing');
-        setProcessingProgress(null);
-        break;
+        case 'session_stopped':
+          setStatusTracked('processing');
+          setProcessingProgress(null);
+          break;
 
-      case 'processing_progress':
-        setProcessingProgress({
-          current: (msg.data?.current as number) ?? 0,
-          total: (msg.data?.total as number) ?? 0,
-        });
-        break;
+        case 'processing_progress':
+          setProcessingProgress({
+            current: (msg.data?.current as number) ?? 0,
+            total: (msg.data?.total as number) ?? 0,
+          });
+          break;
 
-      case 'final':
-        setResult({
-          text: (msg.data?.text as string) ?? '',
-          words: (msg.data?.words as TranscriptionResult['words']) ?? [],
-          language: msg.data?.language as string | undefined,
-          duration: msg.data?.duration as number | undefined,
-        });
-        setProcessingProgress(null);
-        setStatus('complete');
-        captureRef.current?.stop();
-        setAnalyser(null);
-        socketRef.current?.disconnect();
-        break;
+        case 'final':
+          setResult({
+            text: (msg.data?.text as string) ?? '',
+            words: (msg.data?.words as TranscriptionResult['words']) ?? [],
+            language: msg.data?.language as string | undefined,
+            duration: msg.data?.duration as number | undefined,
+          });
+          setProcessingProgress(null);
+          setStatusTracked('complete');
+          captureRef.current?.stop();
+          setAnalyser(null);
+          socketRef.current?.disconnect();
+          break;
 
-      case 'vad_start':
-      case 'vad_recording_start':
-        setVadActive(true);
-        break;
-      case 'vad_stop':
-      case 'vad_recording_stop':
-        setVadActive(false);
-        break;
+        case 'vad_start':
+        case 'vad_recording_start':
+          setVadActive(true);
+          break;
+        case 'vad_stop':
+        case 'vad_recording_stop':
+          setVadActive(false);
+          break;
 
-      case 'error':
-        setError((msg.data?.message as string) ?? 'Transcription error');
-        setStatus('error');
-        captureRef.current?.stop();
-        setAnalyser(null);
-        break;
-    }
-  }, []);
+        case 'error':
+          setError((msg.data?.message as string) ?? 'Transcription error');
+          setStatusTracked('error');
+          captureRef.current?.stop();
+          setAnalyser(null);
+          break;
+      }
+    },
+    [setStatusTracked],
+  );
 
   const start = useCallback(
     (options?: {
@@ -199,27 +219,78 @@ export function useTranscription(): TranscriptionState {
       setError(null);
       setVadActive(false);
       setMuted(false);
+      jobIdRef.current = null;
+      setJobId(null);
       startOptsRef.current = options ?? {};
 
-      setStatus('connecting');
+      setStatusTracked('connecting');
 
       socketRef.current?.disconnect();
       socketRef.current = new TranscriptionSocket('/ws', {
         onMessage: handleMessage,
         onError: (err) => {
           setError(err);
-          setStatus('error');
+          setStatusTracked('error');
           captureRef.current?.stop();
           setAnalyser(null);
         },
         onClose: () => {
           captureRef.current?.stop();
           setAnalyser(null);
+
+          // If we were processing when the socket closed, poll for the result
+          const currentJobId = jobIdRef.current;
+          if (statusRef.current === 'processing' && currentJobId) {
+            let retries = 0;
+            const maxRetries = 10;
+            let cancelled = false;
+
+            // Cancel polling if the hook re-initialises a new session
+            // (jobIdRef will be cleared by start() before a new socket is created)
+            const poll = async () => {
+              if (cancelled || jobIdRef.current !== currentJobId) return;
+              try {
+                const resp = await fetch(`/api/transcribe/result/${currentJobId}`);
+                if (cancelled || jobIdRef.current !== currentJobId) return;
+                if (resp.status === 200) {
+                  const data = await resp.json();
+                  const r = data.result ?? {};
+                  setResult({
+                    text: r.text ?? '',
+                    words: r.words ?? [],
+                    language: r.language,
+                    duration: r.duration,
+                  });
+                  setStatusTracked('complete');
+                  return;
+                }
+                if (resp.status === 202 && retries < maxRetries) {
+                  retries++;
+                  setTimeout(poll, 3000);
+                  return;
+                }
+                // 410 = server says job failed
+                if (resp.status === 410) {
+                  setStatusTracked('error');
+                  setError('Transcription failed on server');
+                  return;
+                }
+                // 404 or unexpected — don't leave user stuck in processing
+                setStatusTracked('idle');
+              } catch {
+                if (!cancelled && retries < maxRetries) {
+                  retries++;
+                  setTimeout(poll, 3000);
+                }
+              }
+            };
+            poll();
+          }
         },
       });
       socketRef.current.connect();
     },
-    [handleMessage],
+    [handleMessage, setStatusTracked],
   );
 
   const stop = useCallback(() => {
@@ -229,21 +300,23 @@ export function useTranscription(): TranscriptionState {
       // Stop audio capture immediately
       captureRef.current?.stop();
       setAnalyser(null);
-      setStatus('processing');
+      setStatusTracked('processing');
     }
-  }, [status]);
+  }, [status, setStatusTracked]);
 
   const reset = useCallback(() => {
     captureRef.current?.stop();
     socketRef.current?.disconnect();
-    setStatus('idle');
+    setStatusTracked('idle');
     setResult(null);
     setError(null);
     setAnalyser(null);
     setVadActive(false);
     setMuted(false);
     setProcessingProgress(null);
-  }, []);
+    jobIdRef.current = null;
+    setJobId(null);
+  }, [setStatusTracked]);
 
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
@@ -274,5 +347,6 @@ export function useTranscription(): TranscriptionState {
     toggleMute,
     setGain,
     processingProgress,
+    jobId,
   };
 }

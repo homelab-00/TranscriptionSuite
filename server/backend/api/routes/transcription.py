@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from server.api.routes.utils import get_client_name
 from server.config import resolve_main_transcriber_model
@@ -781,6 +782,51 @@ async def import_and_transcribe(
 
     # Return immediately — client polls /api/admin/status for result
     return {"job_id": job_id[:8]}
+
+
+@router.get("/result/{job_id}", response_model=None)
+async def get_transcription_result(job_id: str, request: Request) -> JSONResponse:
+    """Retrieve a saved transcription result by job ID.
+
+    Returns:
+        200: Result JSON (completed job). Also marks job as delivered.
+        202: Job still processing — client should poll again.
+        404: Job not found.
+        410: Job failed (includes error_message).
+    """
+    import json as _json
+
+    from server.backend.database.job_repository import get_job, mark_delivered
+
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    client_name = get_client_name(request)
+    if job.get("client_name") and job["client_name"] != client_name:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if job["status"] == "processing":
+        return JSONResponse(status_code=202, content={"status": "processing", "job_id": job_id})
+    if job["status"] == "failed":
+        raise HTTPException(
+            status_code=410, detail=job.get("error_message") or "Transcription failed"
+        )
+    # completed
+    if job.get("result_json"):
+        try:
+            result_data = _json.loads(job["result_json"])
+        except _json.JSONDecodeError as _e:
+            logger.error("Malformed result_json for job %s: %s", job_id, _e)
+            raise HTTPException(status_code=500, detail="Result data is corrupted") from _e
+    else:
+        result_data = {}
+    try:
+        mark_delivered(job_id)
+    except Exception as e:
+        logger.warning("Failed to mark job %s as delivered: %s", job_id, e)
+    return JSONResponse(
+        status_code=200,
+        content={"job_id": job_id, "status": "completed", "result": result_data},
+    )
 
 
 def _sorted_languages(langs: dict[str, str]) -> dict[str, str]:

@@ -31,6 +31,19 @@ from server.core.client_detector import (
     ClientType,
     get_client_capabilities,
 )
+from server.core.json_utils import sanitize_for_json
+from server.database.job_repository import (
+    create_job as _create_job,
+)
+from server.database.job_repository import (
+    mark_delivered as _mark_delivered,
+)
+from server.database.job_repository import (
+    mark_failed as _mark_failed,
+)
+from server.database.job_repository import (
+    save_result as _save_result,
+)
 from server.logging import get_logger
 from starlette.websockets import WebSocketState
 
@@ -193,17 +206,47 @@ class TranscriptionSession:
 
             result = transcribe_future.result()
 
-            # Send final result
-            # result.words is already a flat list of word dicts
-            await self.send_message(
-                "final",
+            # Build and sanitize result payload
+            result_payload = sanitize_for_json(
                 {
                     "text": result.text,
-                    "words": result.words,
+                    "words": result.words or [],
                     "language": result.language,
                     "duration": result.duration,
-                },
+                }
             )
+
+            # PERSIST BEFORE DELIVER — result must survive even if delivery fails
+            if self._current_job_id:
+                try:
+                    _save_result(
+                        job_id=self._current_job_id,
+                        result_text=result.text or "",
+                        result_json=json.dumps(result_payload, ensure_ascii=False),
+                        result_language=result.language,
+                        duration_seconds=result.duration,
+                    )
+                except Exception as _e:
+                    # DB write failed — log CRITICAL but do NOT abort delivery.
+                    # The user's transcription must not be lost because of a DB error.
+                    logger.critical(
+                        "CRITICAL: Failed to persist transcription result for job %s — "
+                        "result will be delivered to client but is NOT in the database: %s",
+                        self._current_job_id,
+                        _e,
+                    )
+                    # Do NOT re-raise. Do NOT call mark_failed. Attempt delivery anyway.
+
+            # Send final result (best-effort — result is in DB regardless, or logged as lost above)
+            await self.send_message("final", result_payload)
+
+            if self._current_job_id:
+                try:
+                    _mark_delivered(self._current_job_id)
+                except Exception as _e:
+                    logger.warning(
+                        "Failed to mark job %s as delivered: %s", self._current_job_id, _e
+                    )
 
             logger.info(f"Transcription complete for {self.client_name}")
 
@@ -231,10 +274,23 @@ class TranscriptionSession:
             from server.core.model_manager import TranscriptionCancelledError
 
             if isinstance(e, TranscriptionCancelledError):
-                # Client disconnected during processing — this is expected, not an error.
                 logger.info(f"Transcription cancelled (client disconnected) for {self.client_name}")
+                if self._current_job_id:
+                    try:
+                        _mark_failed(self._current_job_id, "Cancelled: client disconnected")
+                    except Exception as _mf_err:
+                        logger.warning(
+                            "Failed to mark job %s as failed: %s", self._current_job_id, _mf_err
+                        )
             else:
                 logger.error(f"Transcription error: {e}", exc_info=True)
+                if self._current_job_id:
+                    try:
+                        _mark_failed(self._current_job_id, str(e))
+                    except Exception as _mf_err:
+                        logger.warning(
+                            "Failed to mark job %s as failed: %s", self._current_job_id, _mf_err
+                        )
                 await self.send_message("error", {"message": f"Transcription failed: {e}"})
 
         finally:
@@ -324,6 +380,7 @@ class TranscriptionSession:
                 "vad_enabled": self._use_realtime_engine,
                 "preview_enabled": False,
                 "capture_sample_rate_hz": self.sample_rate,
+                "job_id": self._current_job_id,
             },
         )
 
@@ -433,12 +490,28 @@ async def handle_client_message(session: TranscriptionSession, message: dict[str
         # Store job_id in session for cleanup
         session._current_job_id = job_id
 
-        language = message.get("data", {}).get("language")
-        use_vad = message.get("data", {}).get("use_vad", False)
-        translation_enabled = message.get("data", {}).get("translation_enabled", False)
-        translation_target_language = message.get("data", {}).get(
-            "translation_target_language", "en"
-        )
+        # Extract job metadata from message before attributes are set by start_recording()
+        _msg_data = message.get("data", {})
+        _language = _msg_data.get("language")
+        _translation_enabled = _msg_data.get("translation_enabled", False)
+        _translation_target = _msg_data.get("translation_target_language")
+        try:
+            _create_job(
+                job_id=session._current_job_id,
+                source="websocket",
+                client_name=session.client_name,
+                language=_language,
+                task="translate" if _translation_enabled else "transcribe",
+                translation_target=_translation_target,
+            )
+        except Exception as _e:
+            logger.warning("Failed to create job record for %s: %s", session._current_job_id, _e)
+            session._current_job_id = None  # Prevent downstream DB noise
+
+        language = _msg_data.get("language")
+        use_vad = _msg_data.get("use_vad", False)
+        translation_enabled = _msg_data.get("translation_enabled", False)
+        translation_target_language = _msg_data.get("translation_target_language", "en")
         await session.start_recording(
             language, use_vad, translation_enabled, translation_target_language
         )
