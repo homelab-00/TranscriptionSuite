@@ -133,8 +133,8 @@ def _compute_speech_chunks(
             model,
             sampling_rate=sample_rate,
             min_speech_duration_ms=250,
-            min_silence_duration_ms=300,
-            speech_pad_ms=60,
+            min_silence_duration_ms=700,
+            speech_pad_ms=100,
         )
     except Exception:
         logger.warning("Silero VAD failed, falling back to fixed 30s chunks")

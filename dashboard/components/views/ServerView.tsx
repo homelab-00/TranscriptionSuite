@@ -72,7 +72,7 @@ interface ServerViewProps {
   startupFlowPending: boolean;
 }
 
-const DIARIZATION_AUTO_OPTION = 'Auto (best available)';
+const DIARIZATION_SORTFORMER_OPTION = 'Sortformer (Metal; ≤ 4 speakers)';
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
@@ -92,7 +92,7 @@ const LIVE_MODEL_SELECTION_OPTIONS = new Set([
   LIVE_MODEL_CUSTOM_OPTION,
 ]);
 const DIARIZATION_MODEL_SELECTION_OPTIONS = new Set([
-  DIARIZATION_AUTO_OPTION,
+  DIARIZATION_SORTFORMER_OPTION,
   DIARIZATION_DEFAULT_MODEL,
   DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
@@ -107,7 +107,7 @@ const UI_SENTINEL_VALUES = new Set([
   MAIN_MODEL_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   LIVE_MODEL_CUSTOM_OPTION,
-  DIARIZATION_AUTO_OPTION,
+  DIARIZATION_SORTFORMER_OPTION,
   DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
 
@@ -184,7 +184,7 @@ function mapLiveModelToSelection(
 function mapDiarizationModelToSelection(modelName: string): { selection: string; custom: string } {
   const normalizedModel = normalizeModelName(modelName);
   if (!normalizedModel) {
-    return { selection: DIARIZATION_AUTO_OPTION, custom: '' };
+    return { selection: DIARIZATION_SORTFORMER_OPTION, custom: '' };
   }
   if (normalizedModel === normalizeModelName(DIARIZATION_DEFAULT_MODEL)) {
     return { selection: DIARIZATION_DEFAULT_MODEL, custom: '' };
@@ -204,7 +204,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [localSelectionsHydrated, setLocalSelectionsHydrated] = useState(false);
   const [modelsHydrated, setModelsHydrated] = useState(false);
   const [diarizationModelSelection, setDiarizationModelSelection] =
-    useState(DIARIZATION_DEFAULT_MODEL);
+    useState(DIARIZATION_SORTFORMER_OPTION);
   const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
   const [diarizationHydrated, setDiarizationHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -396,8 +396,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           }
 
           let nextDiarizationSelection =
-            getString(storedDiarizationSelection) ?? DIARIZATION_AUTO_OPTION;
+            getString(storedDiarizationSelection) ?? DIARIZATION_SORTFORMER_OPTION;
           let nextDiarizationCustom = getString(storedDiarizationCustom) ?? '';
+
+          // Migrate the old 'Auto (best available)' label to the new Sortformer option.
+          if (nextDiarizationSelection === 'Auto (best available)') {
+            nextDiarizationSelection = DIARIZATION_SORTFORMER_OPTION;
+          }
 
           if (!DIARIZATION_MODEL_SELECTION_OPTIONS.has(nextDiarizationSelection)) {
             if (
@@ -409,7 +414,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               nextDiarizationCustom = nextDiarizationSelection;
               nextDiarizationSelection = DIARIZATION_MODEL_CUSTOM_OPTION;
             } else {
-              nextDiarizationSelection = DIARIZATION_AUTO_OPTION;
+              nextDiarizationSelection = DIARIZATION_SORTFORMER_OPTION;
             }
           }
           if (nextDiarizationSelection !== DIARIZATION_MODEL_CUSTOM_OPTION) {
@@ -478,7 +483,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           const resolvedDiarization =
             storedDiarizationModel === DIARIZATION_MODEL_CUSTOM_OPTION
               ? storedDiarizationCustom_auto.trim()
-              : storedDiarizationModel === DIARIZATION_AUTO_OPTION || !storedDiarizationModel
+              : storedDiarizationModel === DIARIZATION_SORTFORMER_OPTION
+                  || storedDiarizationModel === 'Auto (best available)'
+                  || !storedDiarizationModel
                 ? ''
                 : storedDiarizationModel;
           // Use the same resolution path as the component's render to avoid raw sentinel strings.
@@ -635,12 +642,19 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   useEffect(() => {
     if (!localSelectionsHydrated || diarizationHydrated || !adminStatus) return;
 
-    const mappedDiarization = mapDiarizationModelToSelection(configuredDiarizationModel);
-    setDiarizationModelSelection(mappedDiarization.selection);
-    setDiarizationCustomModel(mappedDiarization.custom);
+    // Only seed diarization selection from the running server when no
+    // locally-persisted preference exists (still at initial default).
+    // If a real preference was restored from electron-store, keep it —
+    // otherwise navigating away and returning would overwrite the user's
+    // selection with whatever the server reports.
+    if (diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION) {
+      const mappedDiarization = mapDiarizationModelToSelection(configuredDiarizationModel);
+      setDiarizationModelSelection(mappedDiarization.selection);
+      setDiarizationCustomModel(mappedDiarization.custom);
+    }
 
     setDiarizationHydrated(true);
-  }, [adminStatus, configuredDiarizationModel, diarizationHydrated, localSelectionsHydrated]);
+  }, [adminStatus, configuredDiarizationModel, diarizationHydrated, diarizationModelSelection, localSelectionsHydrated]);
 
   const activeTranscriber = resolveMainModelSelectionValue(
     mainModelSelection,
@@ -658,11 +672,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     activeLiveModel === DISABLED_MODEL_SENTINEL || isWhisperModel(activeLiveModel);
   const liveModeModelConstraintMessage = 'Live Mode only supports faster-whisper models.';
 
-  // Active diarization model name — empty string = let server auto-select
+  // Active diarization model name — empty string = Sortformer (server auto-select)
   const activeDiarizationModel =
     diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION
       ? diarizationCustomModel.trim() || configuredDiarizationModel || DIARIZATION_DEFAULT_MODEL
-      : diarizationModelSelection === DIARIZATION_AUTO_OPTION
+      : diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION
         ? ''
         : DIARIZATION_DEFAULT_MODEL;
 
@@ -1707,7 +1721,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <CustomSelect
                   value={diarizationModelSelection}
                   onChange={setDiarizationModelSelection}
-                  options={[DIARIZATION_AUTO_OPTION, DIARIZATION_DEFAULT_MODEL, DIARIZATION_MODEL_CUSTOM_OPTION]}
+                  options={[DIARIZATION_SORTFORMER_OPTION, DIARIZATION_DEFAULT_MODEL, DIARIZATION_MODEL_CUSTOM_OPTION]}
                   className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                   disabled={isRunning}
                 />
