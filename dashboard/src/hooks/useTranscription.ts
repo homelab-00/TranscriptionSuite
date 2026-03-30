@@ -56,6 +56,8 @@ export interface TranscriptionState {
   setGain: (value: number) => void;
   /** Job ID assigned by the server for this transcription session */
   jobId: string | null;
+  /** Load an externally-fetched result into the hook (e.g. recovered from DB) */
+  loadResult: (result: TranscriptionResult) => void;
 }
 
 export function useTranscription(): TranscriptionState {
@@ -185,6 +187,40 @@ export function useTranscription(): TranscriptionState {
           setAnalyser(null);
           socketRef.current?.disconnect();
           break;
+
+        case 'result_ready': {
+          // Result was too large to stream over WebSocket — fetch it via HTTP
+          const job_id = msg.data?.job_id as string;
+          fetch(`/api/transcribe/result/${job_id}`)
+            .then(async (resp) => {
+              if (resp.status === 200) {
+                const data = await resp.json();
+                const r = data.result ?? {};
+                setResult({
+                  text: r.text ?? '',
+                  words: r.words ?? [],
+                  language: r.language,
+                  duration: r.duration,
+                });
+                setStatusTracked('complete');
+              } else {
+                setError('Result too large to stream — fetch failed');
+                setStatusTracked('error');
+              }
+            })
+            .catch(() => {
+              setError('Result too large to stream — fetch failed');
+              setStatusTracked('error');
+            });
+          captureRef.current?.stop();
+          setAnalyser(null);
+          // Clear jobIdRef before disconnect so onClose skips the poll loop
+          // (onClose captures jobIdRef.current as currentJobId — null means no poll starts)
+          jobIdRef.current = null;
+          setJobId(null);
+          socketRef.current?.disconnect();
+          break;
+        }
 
         case 'vad_start':
         case 'vad_recording_start':
@@ -334,6 +370,14 @@ export function useTranscription(): TranscriptionState {
     captureRef.current?.setGain(value);
   }, []);
 
+  const loadResult = useCallback(
+    (r: TranscriptionResult) => {
+      setResult(r);
+      setStatusTracked('complete');
+    },
+    [setStatusTracked],
+  );
+
   return {
     status,
     result,
@@ -348,5 +392,6 @@ export function useTranscription(): TranscriptionState {
     setGain,
     processingProgress,
     jobId,
+    loadResult,
   };
 }

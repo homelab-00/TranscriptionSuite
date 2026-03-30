@@ -177,6 +177,35 @@ def reset_for_retry(job_id: str) -> None:
         conn.commit()
 
 
+def get_orphaned_jobs(timeout_minutes: int) -> list[dict]:
+    """Return jobs stuck in 'processing' that were created before the timeout cutoff.
+
+    Orphaned jobs are those that started processing but never completed — typically
+    because the server crashed or was restarted mid-transcription.
+
+    Only returns jobs where created_at < (now - timeout_minutes) to avoid falsely
+    orphaning jobs that are legitimately in progress on a fresh boot.
+    """
+    from datetime import timedelta
+
+    # Use strftime to match SQLite's CURRENT_TIMESTAMP format ("YYYY-MM-DD HH:MM:SS").
+    # isoformat() produces "T" separator and "+00:00" suffix which sorts differently
+    # than the space-separated SQLite default, causing the query to match all rows.
+    cutoff = (datetime.now(UTC) - timedelta(minutes=timeout_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            SELECT * FROM transcription_jobs
+            WHERE status = 'processing'
+              AND created_at < ?
+            ORDER BY created_at ASC
+            """,
+            (cutoff,),
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
 def get_jobs_for_cleanup(max_age_days: int, limit: int = 100) -> list[dict]:
     """Return completed+delivered jobs with audio_path older than max_age_days.
 

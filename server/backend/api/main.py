@@ -78,6 +78,35 @@ from server import __version__  # noqa: E402
 
 logger = get_logger("api")
 
+
+# Adapted from Scriberr (https://github.com/rishikanthc/Scriberr) — startup recovery pattern
+async def recover_orphaned_jobs(timeout_minutes: int) -> None:
+    """Mark orphaned 'processing' jobs as failed on server startup.
+
+    Finds jobs that were still processing when the server last stopped (crash or
+    docker stop) and marks them failed with an actionable message. Logs each
+    recovery action. Wraps the entire body in try/except so startup always continues.
+    """
+    if timeout_minutes <= 0:
+        return
+    try:
+        from server.database.job_repository import get_orphaned_jobs
+        from server.database.job_repository import mark_failed as _mark_failed_repo
+
+        orphaned = get_orphaned_jobs(timeout_minutes)
+        for job in orphaned:
+            job_id = job.get("id", "")
+            audio_path = job.get("audio_path")
+            if audio_path and Path(audio_path).exists():
+                reason = "Server restarted — use retry to re-transcribe"
+            else:
+                reason = "Server restarted — audio not preserved"
+            _mark_failed_repo(job_id, reason)
+            logger.info("Recovered orphaned job %s (%s)", job_id, reason)
+    except Exception:
+        logger.error("Orphan job recovery failed — continuing startup", exc_info=True)
+
+
 # Check if TLS mode is enabled (requires authentication for all routes)
 TLS_MODE = os.environ.get("TLS_ENABLED", "false").lower() == "true"
 
@@ -371,6 +400,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     _log_time("database init_db() complete")
     logger.info("Database initialized")
 
+    # Read durability config early so orphan recovery can use it
+    _durability_config_early = config.config.get("durability", {})
+    _orphan_timeout = _durability_config_early.get("orphan_job_timeout_minutes", 10)
+
+    # Recover orphaned jobs from a previous crash/restart (Wave 3)
+    await recover_orphaned_jobs(_orphan_timeout)
+    _log_time("orphan job recovery complete")
+
     # Schedule backup check in background (non-blocking)
     backup_config = config.config.get("backup", {})
     backup_enabled = backup_config.get("enabled", True)
@@ -490,6 +527,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Shutdown
     logger.info("Server shutting down...")
+
+    # Graceful drain: stop any active recording sessions before killing the model.
+    # Wave 1 already persisted results to DB, so a timeout just means the result
+    # is in DB and can be fetched later — no data loss.
+    from server.api.routes.websocket import _connected_sessions
+
+    recording_sessions = [s for s in _connected_sessions.values() if s.is_recording]
+    if recording_sessions:
+        logger.info("Draining %d active recording session(s)...", len(recording_sessions))
+    for session in recording_sessions:
+        try:
+            await asyncio.wait_for(session.stop_recording(), timeout=120.0)
+            logger.info("Session %s drained successfully", session.session_id)
+        except TimeoutError:
+            logger.warning(
+                "Timed out waiting for session %s to stop recording (120s) — "
+                "result should be in DB if Wave 1 persisted it",
+                session.session_id,
+            )
+
     cleanup_models()
     logger.info("Shutdown complete")
 

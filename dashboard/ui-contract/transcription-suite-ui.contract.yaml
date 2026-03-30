@@ -38,7 +38,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-28T13:42:48.571Z
+    generated_at: 2026-03-30T05:28:15.928Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -585,6 +585,7 @@ utility_allowlist:
     - hover:bg-accent-cyan/30
     - hover:bg-accent-cyan/5
     - hover:bg-amber-400/30
+    - hover:bg-amber-500/20
     - hover:bg-black/40
     - hover:bg-cyan-300
     - hover:bg-glass-100
@@ -605,6 +606,7 @@ utility_allowlist:
     - hover:shadow-accent-cyan/40
     - hover:shadow-lg
     - hover:text-accent-cyan
+    - hover:text-amber-300
     - hover:text-black
     - hover:text-cyan-300
     - hover:text-green-300
@@ -841,7 +843,10 @@ utility_allowlist:
     - text-accent-cyan
     - text-accent-magenta
     - text-accent-orange
+    - text-amber-200
     - text-amber-300
+    - text-amber-300/60
+    - text-amber-300/70
     - text-amber-400
     - text-amber-400/60
     - text-base

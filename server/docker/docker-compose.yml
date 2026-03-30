@@ -113,7 +113,10 @@ services:
     
     # Disable automatic restart so failures surface immediately
     restart: "no"
-    
+
+    # Give Docker 130s before SIGKILL — matches the 120s graceful drain timeout in lifespan
+    stop_grace_period: 130s
+
     # Health check - works with both HTTP and HTTPS modes
     healthcheck:
       test: ["CMD", "sh", "-c", "if [ \"$${TLS_ENABLED:-false}\" = \"true\" ]; then curl -f -k https://localhost:$${SERVER_PORT:-9786}/health; else curl -f http://localhost:$${SERVER_PORT:-9786}/health; fi"]

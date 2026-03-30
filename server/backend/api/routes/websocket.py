@@ -286,8 +286,16 @@ class TranscriptionSession:
                     )
                     # Do NOT re-raise. Do NOT call mark_failed. Attempt delivery anyway.
 
-            # Send final result (best-effort — result is in DB regardless, or logged as lost above)
-            await self.send_message("final", result_payload)
+            # Size check: very large results (>1 MB) cannot safely be sent over a
+            # single WebSocket frame. Send a reference instead and let the client
+            # fetch the result via HTTP. Wave 1 already persisted it to DB.
+            _result_size = len(json.dumps(result_payload))
+            if _result_size > 1_000_000 and self._current_job_id:
+                # Send a lightweight reference so the client fetches via HTTP
+                await self.send_message("result_ready", {"job_id": self._current_job_id})
+            else:
+                # Send final result (best-effort — result is in DB regardless, or logged as lost above)
+                await self.send_message("final", result_payload)
 
             if self._current_job_id:
                 try:

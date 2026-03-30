@@ -873,6 +873,19 @@ export const SessionView: React.FC<SessionViewProps> = ({
     }
   }, []);
 
+  // Recovery notification — fetch undelivered results from a previous session
+  const [recoveryJobs, setRecoveryJobs] = useState<
+    Array<{ job_id: string; completed_at: string; text_preview: string }>
+  >([]);
+  useEffect(() => {
+    fetch('/api/transcribe/recent')
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) setRecoveryJobs(data);
+      })
+      .catch(() => {});
+  }, []);
+
   // Scroll State
   const leftScrollRef = useRef<HTMLDivElement>(null);
   const rightScrollRef = useRef<HTMLDivElement>(null);
@@ -1020,6 +1033,82 @@ export const SessionView: React.FC<SessionViewProps> = ({
       <div className="mb-6 flex flex-none flex-col space-y-2">
         <h1 className="text-3xl font-bold tracking-tight text-white">Session</h1>
       </div>
+
+      {/* Recovery Notifications */}
+      {recoveryJobs.length > 0 && (
+        <div className="mb-4 flex flex-none flex-col gap-2">
+          {recoveryJobs.map((job) => {
+            const relativeTime = (() => {
+              try {
+                const completed = new Date(job.completed_at);
+                const diffMs = Date.now() - completed.getTime();
+                const diffMins = Math.round(diffMs / 60000);
+                if (diffMins < 1) return 'just now';
+                if (diffMins < 60) return `${diffMins}m ago`;
+                const diffHrs = Math.round(diffMins / 60);
+                if (diffHrs < 24) return `${diffHrs}h ago`;
+                return `${Math.round(diffHrs / 24)}d ago`;
+              } catch {
+                return '';
+              }
+            })();
+            return (
+              <div
+                key={job.job_id}
+                className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+              >
+                <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-400" />
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium">
+                    Transcription from {relativeTime} is available.
+                  </span>
+                  {job.text_preview && (
+                    <span className="ml-1 text-amber-300/70">
+                      &ldquo;{job.text_preview}
+                      {job.text_preview.length >= 100 ? '\u2026' : ''}&rdquo;
+                    </span>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    className="rounded px-2 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
+                    onClick={() => {
+                      fetch(`/api/transcribe/result/${job.job_id}`)
+                        .then(async (resp) => {
+                          if (resp.status === 200) {
+                            const data = await resp.json();
+                            const r = data.result ?? {};
+                            transcription.loadResult({
+                              text: r.text ?? '',
+                              words: r.words ?? [],
+                              language: r.language,
+                              duration: r.duration,
+                            });
+                            setRecoveryJobs((prev) => prev.filter((j) => j.job_id !== job.job_id));
+                          }
+                        })
+                        .catch(() => {});
+                    }}
+                  >
+                    View
+                  </button>
+                  <button
+                    className="rounded px-2 py-1 text-xs font-semibold text-amber-300/60 hover:bg-amber-500/20 hover:text-amber-300"
+                    onClick={() => {
+                      fetch(`/api/transcribe/result/${job.job_id}/dismiss`, {
+                        method: 'POST',
+                      }).catch(() => {});
+                      setRecoveryJobs((prev) => prev.filter((j) => j.job_id !== job.job_id));
+                    }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* 2. Main Content Area */}
       <div className="grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 lg:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]">

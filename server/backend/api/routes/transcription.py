@@ -1065,6 +1065,61 @@ _WHISPER_LANGUAGES: dict[str, str] = _sorted_languages(
 _VIBEVOICE_ASR_LANGUAGES: dict[str, str] = {}
 
 
+@router.get("/recent")
+async def get_recent_undelivered_results(request: Request) -> JSONResponse:
+    """Return recently completed but undelivered transcription results for the caller.
+
+    Used by the dashboard to surface recovered results after a server restart.
+
+    Returns:
+        200: List of up to 5 undelivered completed jobs with a text preview.
+    """
+    import json as _json
+
+    from ...database.job_repository import get_recent_undelivered
+
+    client_name = get_client_name(request)
+    rows = get_recent_undelivered(client_name, limit=5)
+    result_list = []
+    for row in rows:
+        raw_json = row.get("result_json") or "{}"
+        try:
+            result_data = _json.loads(raw_json)
+        except _json.JSONDecodeError:
+            result_data = {}
+        result_list.append(
+            {
+                "job_id": row.get("id"),
+                "completed_at": row.get("completed_at"),
+                "text_preview": result_data.get("text", "")[:100],
+            }
+        )
+    return JSONResponse(status_code=200, content=result_list)
+
+
+@router.post("/result/{job_id}/dismiss")
+async def dismiss_transcription_result(job_id: str, request: Request) -> JSONResponse:
+    """Mark a completed transcription result as delivered (dismiss the notification).
+
+    Equivalent to delivery without transferring the full payload.
+
+    Returns:
+        200: Job marked as delivered.
+        403: Job belongs to a different client.
+        404: Job not found.
+    """
+    from ...database.job_repository import get_job, mark_delivered
+
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    client_name = get_client_name(request)
+    if job.get("client_name") and job["client_name"] != client_name:
+        raise HTTPException(status_code=403, detail="Access denied")
+    mark_delivered(job_id)
+    return JSONResponse(status_code=200, content={"job_id": job_id})
+
+
 @router.get("/languages")
 async def get_supported_languages(request: Request) -> dict[str, Any]:
     """Get list of supported languages for the active transcription model.
