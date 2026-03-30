@@ -12,8 +12,10 @@ Key characteristics:
 - 25 European languages with native punctuation and capitalisation
 - No translation task support (ASR only in the MLX port)
 - No sub-segment word timestamps (canary-mlx timestamps=True is broken for this model;
-  segments carry chunk-level start/end estimates at 30-second granularity)
-- Chunked processing: audio is split into 30-second windows internally
+  segments carry chunk-level start/end estimates)
+- VAD-based chunking: audio is split at speech/silence boundaries instead of
+  fixed 30-second windows, giving more natural segment boundaries.  Falls back
+  to fixed 30s windows when silero-vad/torch are unavailable.
 
 The model is downloaded and cached by ``canary-mlx`` on first load.
 """
@@ -37,6 +39,15 @@ from server.core.stt.backends.base import (
 SAMPLE_RATE = 16000
 
 logger = logging.getLogger(__name__)
+
+# Try to import silero-vad for speech-boundary chunking
+try:
+    import torch as _torch
+    from silero_vad import get_speech_timestamps, load_silero_vad
+
+    HAS_SILERO_VAD = True
+except Exception:  # ImportError or torch load failures
+    HAS_SILERO_VAD = False
 
 # Mapping from full language names (as stored in transcription config) to ISO 639-1 codes.
 # Canary 1B v2 supports these 25 EU languages.
@@ -81,6 +92,85 @@ def _resolve_language_code(language: str | None) -> str:
     if len(lang) == 2:
         return lang.lower()
     return _LANGUAGE_NAME_TO_CODE.get(lang.lower(), "en")
+
+
+# ── VAD-based audio chunking ─────────────────────────────────────────────
+
+# Maximum chunk duration (seconds) fed to the Canary model in one call.
+_MAX_CHUNK_S: float = 30.0
+# Minimum audio length (samples) for Metal STFT — smaller chunks crash.
+_MIN_SAMPLES: int = 400
+
+
+def _compute_speech_chunks(
+    audio: np.ndarray,
+    sample_rate: int = SAMPLE_RATE,
+    *,
+    max_chunk_s: float = _MAX_CHUNK_S,
+) -> list[tuple[int, int]]:
+    """Return merged speech regions as (start_sample, end_sample) pairs.
+
+    Uses Silero VAD to detect speech boundaries, then greedily merges adjacent
+    regions whose total duration stays under *max_chunk_s*.  Falls back to
+    fixed-size windows when silero-vad / torch are unavailable.
+    """
+    audio_len = len(audio)
+    chunk_size = int(max_chunk_s * sample_rate)
+
+    if not HAS_SILERO_VAD:
+        # Fixed-size fallback
+        return [
+            (s, min(s + chunk_size, audio_len))
+            for s in range(0, audio_len, chunk_size)
+            if min(s + chunk_size, audio_len) - s >= _MIN_SAMPLES
+        ]
+
+    try:
+        model = load_silero_vad(onnx=False)
+        tensor = _torch.from_numpy(audio)
+        regions = get_speech_timestamps(
+            tensor,
+            model,
+            sampling_rate=sample_rate,
+            min_speech_duration_ms=250,
+            min_silence_duration_ms=300,
+            speech_pad_ms=60,
+        )
+    except Exception:
+        logger.warning("Silero VAD failed, falling back to fixed 30s chunks")
+        return [
+            (s, min(s + chunk_size, audio_len))
+            for s in range(0, audio_len, chunk_size)
+            if min(s + chunk_size, audio_len) - s >= _MIN_SAMPLES
+        ]
+
+    if not regions:
+        # VAD found no speech — treat entire audio as one chunk
+        if audio_len >= _MIN_SAMPLES:
+            return [(0, audio_len)]
+        return []
+
+    # Greedily merge adjacent speech regions that fit within max_chunk_s
+    merged: list[tuple[int, int]] = []
+    group_start = int(regions[0]["start"])
+    group_end = int(regions[0]["end"])
+
+    for region in regions[1:]:
+        r_start = int(region["start"])
+        r_end = int(region["end"])
+        # Would adding this region exceed the chunk limit?
+        if (r_end - group_start) / sample_rate <= max_chunk_s:
+            group_end = r_end
+        else:
+            if group_end - group_start >= _MIN_SAMPLES:
+                merged.append((group_start, group_end))
+            group_start = r_start
+            group_end = r_end
+
+    if group_end - group_start >= _MIN_SAMPLES:
+        merged.append((group_start, group_end))
+
+    return merged
 
 
 def _load_canary_model(model_name: str) -> Any:
@@ -290,25 +380,17 @@ class MLXCanaryBackend(STTBackend):
         #      than time-based ones, so when chunk token-sets don't overlap,
         #      earlier-chunk content is progressively lost.
         #
-        # Workaround: manually split audio into fixed 30-second windows, call
-        # transcribe(timestamps=False) on each, and assign chunk-level timestamps.
-        # This loses sub-segment timing but produces correct transcription text.
-        CHUNK_S = 30.0
-        chunk_size = int(CHUNK_S * SAMPLE_RATE)
+        # Workaround: split audio at speech/silence boundaries via Silero VAD
+        # (merging adjacent speech into groups ≤30 s), call transcribe(timestamps=False)
+        # on each group, and assign chunk-level timestamps.  Falls back to fixed
+        # 30 s windows when Silero VAD / torch are unavailable.
+        chunks = _compute_speech_chunks(audio)
 
         segments: list[BackendSegment] = []
         audio_len = len(audio)
 
-        for start_sample in range(0, audio_len, chunk_size):
-            end_sample = min(start_sample + chunk_size, audio_len)
+        for start_sample, end_sample in chunks:
             chunk = audio[start_sample:end_sample]
-
-            # canary_mlx's STFT computes t = (n - win_length + hop_length) // hop_length.
-            # For n < win_length (400 samples = 25 ms), t is negative and the
-            # Metal allocator overflows when asked for a negative-sized buffer.
-            # Skip tiny residual chunks; their content is negligible.
-            if len(chunk) < 400:
-                break
 
             chunk_start_s = start_sample / SAMPLE_RATE
             chunk_end_s = end_sample / SAMPLE_RATE

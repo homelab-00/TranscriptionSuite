@@ -272,7 +272,13 @@ class ModelManager:
         if token:
             self._set_diarization_feature_status(True, "ready")
         else:
-            self._set_diarization_feature_status(False, "token_missing")
+            # Sortformer (mlx-audio) works without a token on Apple Silicon.
+            from server.core.sortformer_engine import sortformer_available
+
+            if sortformer_available():
+                self._set_diarization_feature_status(True, "ready")
+            else:
+                self._set_diarization_feature_status(False, "token_missing")
 
     def _initialize_nemo_feature_status(self) -> None:
         """Initialize NeMo feature availability from bootstrap state/env."""
@@ -642,8 +648,8 @@ class ModelManager:
             self._transcription_engine.unload_model()
 
     @property
-    def diarization_engine(self) -> "DiarizationEngine":
-        """Get or create the diarization engine."""
+    def diarization_engine(self) -> "DiarizationEngine | Any":
+        """Get or create the diarization engine (PyAnnote or Sortformer)."""
         from server.core.diarization_engine import create_diarization_engine
 
         if self._diarization_engine is None:

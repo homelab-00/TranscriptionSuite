@@ -72,6 +72,7 @@ interface ServerViewProps {
   startupFlowPending: boolean;
 }
 
+const DIARIZATION_AUTO_OPTION = 'Auto (best available)';
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
@@ -91,6 +92,7 @@ const LIVE_MODEL_SELECTION_OPTIONS = new Set([
   LIVE_MODEL_CUSTOM_OPTION,
 ]);
 const DIARIZATION_MODEL_SELECTION_OPTIONS = new Set([
+  DIARIZATION_AUTO_OPTION,
   DIARIZATION_DEFAULT_MODEL,
   DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
@@ -105,6 +107,7 @@ const UI_SENTINEL_VALUES = new Set([
   MAIN_MODEL_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   LIVE_MODEL_CUSTOM_OPTION,
+  DIARIZATION_AUTO_OPTION,
   DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
 
@@ -180,7 +183,10 @@ function mapLiveModelToSelection(
 
 function mapDiarizationModelToSelection(modelName: string): { selection: string; custom: string } {
   const normalizedModel = normalizeModelName(modelName);
-  if (!normalizedModel || normalizedModel === normalizeModelName(DIARIZATION_DEFAULT_MODEL)) {
+  if (!normalizedModel) {
+    return { selection: DIARIZATION_AUTO_OPTION, custom: '' };
+  }
+  if (normalizedModel === normalizeModelName(DIARIZATION_DEFAULT_MODEL)) {
     return { selection: DIARIZATION_DEFAULT_MODEL, custom: '' };
   }
   return { selection: DIARIZATION_MODEL_CUSTOM_OPTION, custom: modelName };
@@ -390,7 +396,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           }
 
           let nextDiarizationSelection =
-            getString(storedDiarizationSelection) ?? DIARIZATION_DEFAULT_MODEL;
+            getString(storedDiarizationSelection) ?? DIARIZATION_AUTO_OPTION;
           let nextDiarizationCustom = getString(storedDiarizationCustom) ?? '';
 
           if (!DIARIZATION_MODEL_SELECTION_OPTIONS.has(nextDiarizationSelection)) {
@@ -403,7 +409,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               nextDiarizationCustom = nextDiarizationSelection;
               nextDiarizationSelection = DIARIZATION_MODEL_CUSTOM_OPTION;
             } else {
-              nextDiarizationSelection = DIARIZATION_DEFAULT_MODEL;
+              nextDiarizationSelection = DIARIZATION_AUTO_OPTION;
             }
           }
           if (nextDiarizationSelection !== DIARIZATION_MODEL_CUSTOM_OPTION) {
@@ -467,6 +473,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           const storedLiveModel = (await api.config?.get('server.liveModelSelection').catch(() => '')) ?? '';
           const storedLiveCustom = (await api.config?.get('server.liveCustomModel').catch(() => '')) ?? '';
           const storedDiarizationModel = (await api.config?.get('server.diarizationModelSelection').catch(() => '')) ?? '';
+          // Resolve diarization selection to actual model name (empty = auto-select)
+          const storedDiarizationCustom_auto = (await api.config?.get('server.diarizationCustomModel').catch(() => '')) ?? '';
+          const resolvedDiarization =
+            storedDiarizationModel === DIARIZATION_MODEL_CUSTOM_OPTION
+              ? storedDiarizationCustom_auto.trim()
+              : storedDiarizationModel === DIARIZATION_AUTO_OPTION || !storedDiarizationModel
+                ? ''
+                : storedDiarizationModel;
           // Use the same resolution path as the component's render to avoid raw sentinel strings.
           const resolvedMain = resolveMainModelSelectionValue(storedModel, storedCustomModel, '') || MLX_DEFAULT_MODEL;
           const resolvedLive = resolveLiveModelSelectionValue(storedLiveModel, storedLiveCustom, resolvedMain, '');
@@ -476,7 +490,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             hfToken: hfToken || undefined,
             mainTranscriberModel: sanitizeModelName(resolvedMain) || MLX_DEFAULT_MODEL,
             liveTranscriberModel: sanitizeModelName(normalizedLive) || undefined,
-            diarizationModel: storedDiarizationModel || undefined,
+            diarizationModel: resolvedDiarization || undefined,
           });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -644,11 +658,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     activeLiveModel === DISABLED_MODEL_SENTINEL || isWhisperModel(activeLiveModel);
   const liveModeModelConstraintMessage = 'Live Mode only supports faster-whisper models.';
 
-  // Active diarization model name
+  // Active diarization model name — empty string = let server auto-select
   const activeDiarizationModel =
     diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION
       ? diarizationCustomModel.trim() || configuredDiarizationModel || DIARIZATION_DEFAULT_MODEL
-      : DIARIZATION_DEFAULT_MODEL;
+      : diarizationModelSelection === DIARIZATION_AUTO_OPTION
+        ? ''
+        : DIARIZATION_DEFAULT_MODEL;
 
   // MLX native-process start/stop handlers (depend on activeTranscriber declared above)
   const handleMLXStart = useCallback(async () => {
@@ -1691,7 +1707,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <CustomSelect
                   value={diarizationModelSelection}
                   onChange={setDiarizationModelSelection}
-                  options={[DIARIZATION_DEFAULT_MODEL, DIARIZATION_MODEL_CUSTOM_OPTION]}
+                  options={[DIARIZATION_AUTO_OPTION, DIARIZATION_DEFAULT_MODEL, DIARIZATION_MODEL_CUSTOM_OPTION]}
                   className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                   disabled={isRunning}
                 />

@@ -217,8 +217,24 @@ class TestMLXCanaryBackendLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# Transcribe — manual 30-second chunking behaviour
+# Transcribe — VAD-based chunking (falls back to fixed 30 s on silence)
 # ---------------------------------------------------------------------------
+
+
+def _fixed_chunks(audio: Any, sample_rate: int = 16000, *, max_chunk_s: float = 30.0) -> list:
+    """Simulate fixed 30 s chunking for tests that verify multi-chunk behaviour.
+
+    With all-zeros audio Silero VAD finds no speech and returns a single chunk.
+    This helper provides deterministic fixed-window chunking so tests  can verify
+    that multiple chunks are handled correctly.
+    """
+    chunk_size = int(max_chunk_s * sample_rate)
+    audio_len = len(audio)
+    return [
+        (s, min(s + chunk_size, audio_len))
+        for s in range(0, audio_len, chunk_size)
+        if min(s + chunk_size, audio_len) - s >= 400
+    ]
 
 
 class TestMLXCanaryBackendTranscribe:
@@ -243,10 +259,11 @@ class TestMLXCanaryBackendTranscribe:
 
     def test_transcribe_two_full_chunks(self) -> None:
         """60 s audio (exactly 2 chunks of 30 s) produces 2 segments."""
-        backend, _, mock_model = _loaded_backend("Some speech.")
+        backend, mod, mock_model = _loaded_backend("Some speech.")
         audio = np.zeros(60 * 16000, dtype=np.float32)
 
-        segments, info = backend.transcribe(audio)
+        with patch.object(mod, "_compute_speech_chunks", side_effect=_fixed_chunks):
+            segments, info = backend.transcribe(audio)
 
         assert len(segments) == 2
         assert segments[0].start == pytest.approx(0.0)
@@ -256,10 +273,11 @@ class TestMLXCanaryBackendTranscribe:
 
     def test_transcribe_partial_third_chunk(self) -> None:
         """65 s audio (2 full + 1 partial chunk) produces 3 segments."""
-        backend, _, mock_model = _loaded_backend("Speech.")
+        backend, mod, mock_model = _loaded_backend("Speech.")
         audio = np.zeros(65 * 16000, dtype=np.float32)
 
-        segments, _ = backend.transcribe(audio)
+        with patch.object(mod, "_compute_speech_chunks", side_effect=_fixed_chunks):
+            segments, _ = backend.transcribe(audio)
 
         assert len(segments) == 3
         assert segments[2].start == pytest.approx(60.0)
@@ -268,11 +286,12 @@ class TestMLXCanaryBackendTranscribe:
     def test_transcribe_skips_residual_chunk_under_400_samples(self) -> None:
         """A trailing residual of < 400 samples must not be sent to the model
         (it would cause a Metal integer-overflow / OOM crash)."""
-        backend, _, mock_model = _loaded_backend("Speech.")
+        backend, mod, mock_model = _loaded_backend("Speech.")
         # 30 s + 300 sample residual (< 400 guard threshold)
         audio = np.zeros(30 * 16000 + 300, dtype=np.float32)
 
-        segments, _ = backend.transcribe(audio)
+        with patch.object(mod, "_compute_speech_chunks", side_effect=_fixed_chunks):
+            segments, _ = backend.transcribe(audio)
 
         # Only the first 30 s chunk should produce a segment.
         assert len(segments) == 1
@@ -285,7 +304,8 @@ class TestMLXCanaryBackendTranscribe:
         mock_model.transcribe.side_effect = ["", "Chunk two.", ""]
         audio = np.zeros(90 * 16000, dtype=np.float32)  # 3 chunks
 
-        segments, _ = backend.transcribe(audio)
+        with patch.object(mod, "_compute_speech_chunks", side_effect=_fixed_chunks):
+            segments, _ = backend.transcribe(audio)
 
         # Only the non-empty chunk contributes a segment
         assert len(segments) == 1

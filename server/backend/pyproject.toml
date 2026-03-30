@@ -68,6 +68,7 @@ mlx = [
     "parakeet-mlx>=0.2.0",
     "canary-mlx>=0.1.0",
     "soundfile>=0.13.1",
+    "mlx-audio>=0.4.1",
 ]
 [project.scripts]
 transcription-server = "server.api.main:main"
@@ -99,3 +100,23 @@ explicit = true
 # Linux/Windows: use CUDA 12.9 build; macOS: fall back to PyPI CPU/MPS build
 torch = [{ index = "pytorch-cu129", marker = "sys_platform != 'darwin'" }]
 torchaudio = [{ index = "pytorch-cu129", marker = "sys_platform != 'darwin'" }]
+
+# mlx-audio (in the mlx extra) has dependency requirements that conflict with
+# the CUDA-oriented extras (whisper, nemo, vibevoice_asr).  The mlx extra is
+# macOS-only; the others target Linux/Windows CUDA.  They are never installed
+# in the same environment.
+[tool.uv]
+conflicts = [
+    [
+        { extra = "mlx" },
+        { extra = "nemo" },
+    ],
+    [
+        { extra = "mlx" },
+        { extra = "vibevoice_asr" },
+    ],
+    [
+        { extra = "mlx" },
+        { extra = "whisper" },
+    ],
+]

@@ -163,10 +163,14 @@ class TestFeatureStatusFallback:
     def test_diarization_fallback_token_missing(self, tmp_path: Path):
         mgr = _build_manager(tmp_path, env_overrides={"HF_TOKEN": ""})
 
-        assert mgr.get_diarization_feature_status() == {
-            "available": False,
-            "reason": "token_missing",
-        }
+        from server.core.sortformer_engine import sortformer_available
+
+        status = mgr.get_diarization_feature_status()
+        if sortformer_available():
+            # Sortformer (mlx-audio) works without a HuggingFace token.
+            assert status == {"available": True, "reason": "ready"}
+        else:
+            assert status == {"available": False, "reason": "token_missing"}
 
     def test_diarization_fallback_token_present_in_env(self, tmp_path: Path):
         mgr = _build_manager(tmp_path, env_overrides={"HF_TOKEN": "hf_abc123"})

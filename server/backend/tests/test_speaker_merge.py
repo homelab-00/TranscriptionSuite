@@ -14,6 +14,7 @@ from __future__ import annotations
 from server.core.speaker_merge import (
     assign_speakers_to_words,
     build_speaker_segments,
+    build_speaker_segments_nowords,
     merge_diarization_with_words,
     smooth_micro_turns,
 )
@@ -328,3 +329,133 @@ class TestBuildSpeakerSegments:
 
         assert segments[0]["start"] == 0.123
         assert segments[0]["end"] == 0.679
+
+
+# ── build_speaker_segments_nowords ────────────────────────────────────────
+
+
+def _stt_seg(text: str, start: float, end: float) -> dict:
+    return {"text": text, "start": start, "end": end}
+
+
+class TestBuildSpeakerSegmentsNowords:
+    def test_empty_stt_returns_empty(self):
+        result = build_speaker_segments_nowords([], [_seg("A", 0, 5)])
+
+        assert result == []
+
+    def test_empty_diar_returns_empty(self):
+        result = build_speaker_segments_nowords([_stt_seg("hello", 0, 5)], [])
+
+        assert result == []
+
+    def test_single_speaker_full_overlap(self):
+        stt = [_stt_seg("hello world", 0.0, 5.0)]
+        diar = [_seg("A", 0.0, 5.0)]
+
+        result = build_speaker_segments_nowords(stt, diar)
+
+        assert len(result) == 1
+        assert result[0]["text"] == "hello world"
+        assert result[0]["speaker"] == "A"
+        assert result[0]["start"] == 0.0
+        assert result[0]["end"] == 5.0
+
+    def test_no_diar_overlap_gives_unknown(self):
+        stt = [_stt_seg("hello", 10.0, 15.0)]
+        diar = [_seg("A", 0.0, 5.0)]
+
+        result = build_speaker_segments_nowords(stt, diar)
+
+        assert len(result) == 1
+        assert result[0]["speaker"] == "UNKNOWN"
+        assert result[0]["text"] == "hello"
+
+    def test_two_speakers_text_distributed(self):
+        """Two diarization turns split a 30s STT segment."""
+        stt = [_stt_seg("one two three four five six", 0.0, 30.0)]
+        # Speaker A: 0-10 (10s), Speaker B: 10-30 (20s)
+        diar = [_seg("A", 0.0, 10.0), _seg("B", 10.0, 30.0)]
+
+        result = build_speaker_segments_nowords(stt, diar)
+
+        assert len(result) == 2
+        assert result[0]["speaker"] == "A"
+        assert result[1]["speaker"] == "B"
+        # 6 words total, A has 10/30 ≈ 33% → 2 words, B gets rest (4 words)
+        assert result[0]["text"] == "one two"
+        assert result[1]["text"] == "three four five six"
+
+    def test_three_speakers_proportional(self):
+        stt = [_stt_seg("a b c d e f g h i j", 0.0, 10.0)]
+        # Equal thirds: 3.33s each
+        diar = [
+            _seg("A", 0.0, 3.33),
+            _seg("B", 3.33, 6.67),
+            _seg("C", 6.67, 10.0),
+        ]
+
+        result = build_speaker_segments_nowords(stt, diar)
+
+        assert len(result) == 3
+        assert result[0]["speaker"] == "A"
+        assert result[1]["speaker"] == "B"
+        assert result[2]["speaker"] == "C"
+        # All words accounted for
+        all_words = " ".join(s["text"] for s in result).split()
+        assert all_words == ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]
+
+    def test_partial_diar_overlap(self):
+        """Diarization only covers part of the STT segment."""
+        stt = [_stt_seg("hello world", 0.0, 10.0)]
+        diar = [_seg("A", 2.0, 8.0)]
+
+        result = build_speaker_segments_nowords(stt, diar)
+
+        assert len(result) == 1
+        assert result[0]["speaker"] == "A"
+        assert result[0]["start"] == 2.0
+        assert result[0]["end"] == 8.0
+
+    def test_multiple_stt_segments(self):
+        stt = [
+            _stt_seg("first chunk", 0.0, 5.0),
+            _stt_seg("second chunk", 5.0, 10.0),
+        ]
+        diar = [_seg("A", 0.0, 5.0), _seg("B", 5.0, 10.0)]
+
+        result = build_speaker_segments_nowords(stt, diar)
+
+        assert len(result) == 2
+        assert result[0]["speaker"] == "A"
+        assert result[0]["text"] == "first chunk"
+        assert result[1]["speaker"] == "B"
+        assert result[1]["text"] == "second chunk"
+
+    def test_empty_text_segment_skipped(self):
+        stt = [_stt_seg("", 0.0, 5.0), _stt_seg("hello", 5.0, 10.0)]
+        diar = [_seg("A", 0.0, 10.0)]
+
+        result = build_speaker_segments_nowords(stt, diar)
+
+        assert len(result) == 1
+        assert result[0]["text"] == "hello"
+
+    def test_timestamps_clamped_to_overlap(self):
+        """Output timestamps are the intersection of STT and diar boundaries."""
+        stt = [_stt_seg("hello", 0.0, 30.0)]
+        diar = [_seg("A", 5.0, 25.0)]
+
+        result = build_speaker_segments_nowords(stt, diar)
+
+        assert result[0]["start"] == 5.0
+        assert result[0]["end"] == 25.0
+
+    def test_timestamps_rounded(self):
+        stt = [_stt_seg("hi", 0.12345, 0.67891)]
+        diar = [_seg("A", 0.0, 1.0)]
+
+        result = build_speaker_segments_nowords(stt, diar)
+
+        assert result[0]["start"] == 0.123
+        assert result[0]["end"] == 0.679

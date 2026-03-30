@@ -261,6 +261,23 @@ async def transcribe_audio(
                             num_speakers,
                             len(merged_segments),
                         )
+                    elif not result.words and result.segments:
+                        # No word timestamps (e.g. MLX Canary) — fall back
+                        # to segment-level speaker attribution.
+                        from server.core.speaker_merge import build_speaker_segments_nowords
+
+                        fallback = build_speaker_segments_nowords(
+                            result.segments, diar_dicts
+                        )
+                        if fallback:
+                            speakers = {s["speaker"] for s in fallback} - {"UNKNOWN"}
+                            result.segments = fallback
+                            result.num_speakers = len(speakers)
+                            logger.info(
+                                "Segment-level speaker merge: %s speakers, %s segments",
+                                len(speakers),
+                                len(fallback),
+                            )
                 except Exception:
                     logger.warning(
                         "Speaker merge failed (returning transcript without speakers)",
@@ -622,6 +639,20 @@ def _run_file_import(
                             result.segments = merged_segments
                             result.words = merged_words
                             result.num_speakers = num_speakers
+                        elif not result.words and result.segments:
+                            # No word timestamps (e.g. MLX Canary) — fall back
+                            # to segment-level speaker attribution.
+                            from server.core.speaker_merge import (
+                                build_speaker_segments_nowords,
+                            )
+
+                            fallback = build_speaker_segments_nowords(
+                                result.segments, diar_dicts
+                            )
+                            if fallback:
+                                speakers = {s["speaker"] for s in fallback} - {"UNKNOWN"}
+                                result.segments = fallback
+                                result.num_speakers = len(speakers)
                     except Exception:
                         logger.warning(
                             "File import: speaker merge failed (returning without speakers)",

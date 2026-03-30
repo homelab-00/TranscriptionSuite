@@ -357,24 +357,55 @@ class DiarizationEngine:
         return self.diarize_audio(audio_data, sample_rate, num_speakers)
 
 
-def create_diarization_engine(config: dict[str, Any]) -> DiarizationEngine:
+def create_diarization_engine(config: dict[str, Any]) -> DiarizationEngine | Any:
     """
-    Create a DiarizationEngine from configuration.
+    Create a diarization engine from configuration.
+
+    On Apple Silicon, when ``mlx-audio`` is installed and the user has **not**
+    explicitly set a PyAnnote model, this returns a
+    :class:`~server.core.sortformer_engine.SortformerEngine` (Metal-native,
+    no HuggingFace token required, up to 4 speakers).  Otherwise falls back
+    to the PyAnnote-based :class:`DiarizationEngine`.
 
     Args:
         config: Configuration with diarization settings.
                 Expects 'diarization' key at top level of config dict.
 
     Returns:
-        Configured DiarizationEngine instance
+        Configured diarization engine instance (SortformerEngine or DiarizationEngine).
     """
-    # Read from top-level 'diarization' section (matches config.yaml structure)
     diar_config = config.get("diarization", {})
+
+    # Check if Sortformer is viable: Apple Silicon + mlx-audio installed.
+    # Skip Sortformer when the user explicitly configured a pyannote model
+    # or requests more than 4 speakers (Sortformer's limit).
+    from server.core.sortformer_engine import sortformer_available
+
+    explicit_model = diar_config.get("model")
+    max_speakers = diar_config.get("max_speakers")
+    resolved_device = _resolve_device(diar_config.get("device", "cuda"))
+
+    use_sortformer = (
+        sortformer_available()
+        and resolved_device in ("mps", "cpu")  # Apple Silicon path
+        and not (explicit_model and "pyannote" in explicit_model)
+        and (max_speakers is None or max_speakers <= 4)
+    )
+
+    if use_sortformer:
+        from server.core.sortformer_engine import SortformerEngine
+
+        logger.info("Using Sortformer (Metal-native) diarization engine")
+        return SortformerEngine(
+            num_speakers=diar_config.get("num_speakers"),
+            min_speakers=diar_config.get("min_speakers"),
+            max_speakers=max_speakers,
+        )
 
     return DiarizationEngine(
         model=diar_config.get("model", "pyannote/speaker-diarization-community-1"),
         hf_token=diar_config.get("hf_token") or os.environ.get("HF_TOKEN"),
-        device=_resolve_device(diar_config.get("device", "cuda")),
+        device=resolved_device,
         num_speakers=diar_config.get("num_speakers"),
         min_speakers=diar_config.get("min_speakers"),
         max_speakers=diar_config.get("max_speakers"),
