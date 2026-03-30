@@ -125,6 +125,10 @@
         "to": "docker/podman-compose.gpu.yml"
       },
       {
+        "from": "../server/docker/docker-compose.vulkan.yml",
+        "to": "docker/docker-compose.vulkan.yml"
+      },
+      {
         "from": "../server/config.yaml",
         "to": "config.yaml"
       }
