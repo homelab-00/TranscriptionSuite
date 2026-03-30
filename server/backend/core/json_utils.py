@@ -33,7 +33,7 @@ def sanitize_for_json(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {sanitize_for_json(k): sanitize_for_json(v) for k, v in obj.items()}
 
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple)):
         return [sanitize_for_json(item) for item in obj]
 
     if isinstance(obj, float):

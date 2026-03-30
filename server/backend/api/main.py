@@ -531,9 +531,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Graceful drain: stop any active recording sessions before killing the model.
     # Wave 1 already persisted results to DB, so a timeout just means the result
     # is in DB and can be fetched later — no data loss.
-    from server.api.routes.websocket import _connected_sessions
+    from server.api.routes.websocket import _connected_sessions, _sessions_lock
 
-    recording_sessions = [s for s in _connected_sessions.values() if s.is_recording]
+    async with _sessions_lock:
+        recording_sessions = [s for s in _connected_sessions.values() if s.is_recording]
     if recording_sessions:
         logger.info("Draining %d active recording session(s)...", len(recording_sessions))
     for session in recording_sessions:

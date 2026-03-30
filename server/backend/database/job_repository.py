@@ -136,7 +136,13 @@ def get_job(job_id: str) -> dict | None:
 
 
 def get_recent_undelivered(client_name: str, limit: int = 5) -> list[dict]:
-    """Return completed jobs where delivered=0 for this client, newest first."""
+    """Return completed jobs where delivered=0 for this client, newest first.
+
+    Ordered by completed_at (when the result was ready), not created_at (when
+    the job started). This correctly surfaces retried jobs that completed recently
+    even if their original creation time was long ago.
+    completed_at uses isoformat() format — see save_result() for details.
+    """
     with get_connection() as conn:
         cursor = conn.execute(
             """
@@ -144,7 +150,7 @@ def get_recent_undelivered(client_name: str, limit: int = 5) -> list[dict]:
             WHERE client_name = ?
               AND status = 'completed'
               AND delivered = 0
-            ORDER BY created_at DESC
+            ORDER BY completed_at DESC
             LIMIT ?
             """,
             (client_name, limit),
@@ -221,6 +227,11 @@ def get_jobs_for_cleanup(max_age_days: int, limit: int = 100) -> list[dict]:
     Only returns rows where status='completed', delivered=1, audio_path is set,
     and completed_at is older than the cutoff. Used by the cleanup task to find
     audio files safe to delete.
+
+    Note: completed_at is written by save_result() using isoformat() (T-separator,
+    UTC offset), so the cutoff must also use isoformat() for correct lexicographic
+    comparison. This differs from created_at (set by SQLite CURRENT_TIMESTAMP,
+    space-separator) — do not use strftime() for this query.
     """
     from datetime import timedelta
 

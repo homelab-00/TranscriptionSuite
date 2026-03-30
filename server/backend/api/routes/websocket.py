@@ -270,6 +270,7 @@ class TranscriptionSession:
             )
 
             # PERSIST BEFORE DELIVER — result must survive even if delivery fails
+            _result_persisted = False
             if self._current_job_id:
                 try:
                     _save_result(
@@ -279,6 +280,7 @@ class TranscriptionSession:
                         result_language=result.language,
                         duration_seconds=result.duration,
                     )
+                    _result_persisted = True
                 except Exception as _e:
                     # DB write failed — log CRITICAL but do NOT abort delivery.
                     # The user's transcription must not be lost because of a DB error.
@@ -294,14 +296,22 @@ class TranscriptionSession:
             # single WebSocket frame. Send a reference instead and let the client
             # fetch the result via HTTP. Wave 1 already persisted it to DB.
             _result_size = len(json.dumps(result_payload))
+            _sent_as_reference = False
             if _result_size > 1_000_000 and self._current_job_id:
-                # Send a lightweight reference so the client fetches via HTTP
+                # Send a lightweight reference so the client fetches via HTTP.
+                # Do NOT call mark_delivered here — the client hasn't fetched yet.
+                # mark_delivered is called by GET /result/{job_id} on actual fetch.
                 await self.send_message("result_ready", {"job_id": self._current_job_id})
+                _sent_as_reference = True
             else:
                 # Send final result (best-effort — result is in DB regardless, or logged as lost above)
                 await self.send_message("final", result_payload)
 
-            if self._current_job_id:
+            # Only mark delivered when result was actually sent inline (not as reference).
+            # For result_ready, the GET /result/{job_id} endpoint marks delivered on fetch.
+            # Skip mark_delivered entirely if save_result failed — the row is stuck in
+            # 'processing' state and will be cleaned up by orphan recovery on restart.
+            if self._current_job_id and _result_persisted and not _sent_as_reference:
                 try:
                     _mark_delivered(self._current_job_id)
                 except Exception as _e:

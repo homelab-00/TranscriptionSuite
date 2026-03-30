@@ -803,7 +803,7 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     client_name = get_client_name(request)
-    if job.get("client_name") and job["client_name"] != client_name:
+    if job.get("client_name") is not None and job["client_name"] != client_name:
         raise HTTPException(status_code=403, detail="Access denied")
     if job["status"] == "processing":
         return JSONResponse(status_code=202, content={"status": "processing", "job_id": job_id})
@@ -853,7 +853,7 @@ async def retry_transcription(
         raise HTTPException(status_code=404, detail="Job not found")
 
     client_name = get_client_name(request)
-    if job.get("client_name") and job["client_name"] != client_name:
+    if job.get("client_name") is not None and job["client_name"] != client_name:
         raise HTTPException(status_code=403, detail="Access denied")
 
     if job["status"] == "processing":
@@ -882,8 +882,32 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
     from ...core.json_utils import sanitize_for_json
     from ...database.job_repository import mark_failed, save_result
 
+    model_manager = app_state.model_manager
+
+    # Acquire the job tracker slot so the retry cannot run concurrently with
+    # an active WebSocket session. If the model is busy, mark the retry failed
+    # so the job stays in 'failed' state and can be retried again later.
+    client_name = job.get("client_name") or "retry"
+    success, tracker_job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
+    if not success:
+        logger.warning(
+            "Retry for job %s deferred — model busy (active user: %s). "
+            "Job remains failed; retry again when the session ends.",
+            sanitize_log_value(job_id),
+            sanitize_log_value(active_user or "unknown"),
+        )
+        try:
+            mark_failed(
+                job_id,
+                f"Retry deferred — model was busy (active user: {active_user}). Try again.",
+            )
+        except Exception as _mf_err:
+            logger.warning(
+                "Failed to mark retry job %s as failed: %s", sanitize_log_value(job_id), _mf_err
+            )
+        return
+
     try:
-        model_manager = app_state.model_manager
         engine = model_manager.transcription_engine
 
         result = await asyncio.to_thread(
@@ -911,6 +935,8 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
             result_language=result.language,
             duration_seconds=result.duration,
         )
+        # Leave delivered=0 so the result surfaces in the recovery banner.
+        # The client calls GET /result/{job_id} to retrieve it, which marks delivered.
         logger.info("Retry transcription complete for job %s", sanitize_log_value(job_id))
 
     except Exception as exc:
@@ -926,6 +952,9 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
             logger.warning(
                 "Failed to mark retry job %s as failed: %s", sanitize_log_value(job_id), _mf_err
             )
+    finally:
+        if tracker_job_id:
+            model_manager.job_tracker.end_job(tracker_job_id)
 
 
 def _sorted_languages(langs: dict[str, str]) -> dict[str, str]:
@@ -1122,7 +1151,7 @@ async def dismiss_transcription_result(job_id: str, request: Request) -> JSONRes
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     client_name = get_client_name(request)
-    if job.get("client_name") and job["client_name"] != client_name:
+    if job.get("client_name") is not None and job["client_name"] != client_name:
         raise HTTPException(status_code=403, detail="Access denied")
     mark_delivered(job_id)
     return JSONResponse(status_code=200, content={"job_id": job_id})

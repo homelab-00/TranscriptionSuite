@@ -9,6 +9,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { TranscriptionSocket, ServerMessage } from '../services/websocket';
 import { AudioCapture } from '../services/audioCapture';
+import { apiClient } from '../api/client';
 
 export type TranscriptionStatus =
   | 'idle'
@@ -77,6 +78,10 @@ export function useTranscription(): TranscriptionState {
   const [jobId, setJobId] = useState<string | null>(null);
   const jobIdRef = useRef<string | null>(null);
   const statusRef = useRef<TranscriptionStatus>('idle');
+  // Ref-based cancel flag for the disconnect poll loop — accessible from the
+  // useEffect cleanup on unmount (a plain `let cancelled` in the onClose closure
+  // cannot be reached from the cleanup function).
+  const pollCancelledRef = useRef(false);
 
   // Keep statusRef in sync so onClose can read the latest status without stale closure
   const setStatusTracked = useCallback((s: TranscriptionStatus) => {
@@ -96,6 +101,7 @@ export function useTranscription(): TranscriptionState {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      pollCancelledRef.current = true;
       captureRef.current?.stop();
       socketRef.current?.disconnect();
     };
@@ -191,7 +197,9 @@ export function useTranscription(): TranscriptionState {
         case 'result_ready': {
           // Result was too large to stream over WebSocket — fetch it via HTTP
           const job_id = msg.data?.job_id as string;
-          fetch(`/api/transcribe/result/${job_id}`)
+          const token = apiClient.getAuthToken();
+          const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+          fetch(`/api/transcribe/result/${job_id}`, { headers: authHeader })
             .then(async (resp) => {
               if (resp.status === 200) {
                 const data = await resp.json();
@@ -202,6 +210,7 @@ export function useTranscription(): TranscriptionState {
                   language: r.language,
                   duration: r.duration,
                 });
+                setProcessingProgress(null);
                 setStatusTracked('complete');
               } else {
                 setError('Result too large to stream — fetch failed');
@@ -279,15 +288,19 @@ export function useTranscription(): TranscriptionState {
           if (statusRef.current === 'processing' && currentJobId) {
             let retries = 0;
             const maxRetries = 10;
-            let cancelled = false;
+            pollCancelledRef.current = false;
 
             // Cancel polling if the hook re-initialises a new session
             // (jobIdRef will be cleared by start() before a new socket is created)
             const poll = async () => {
-              if (cancelled || jobIdRef.current !== currentJobId) return;
+              if (pollCancelledRef.current || jobIdRef.current !== currentJobId) return;
               try {
-                const resp = await fetch(`/api/transcribe/result/${currentJobId}`);
-                if (cancelled || jobIdRef.current !== currentJobId) return;
+                const pollToken = apiClient.getAuthToken();
+                const pollAuthHeader = pollToken ? { Authorization: `Bearer ${pollToken}` } : {};
+                const resp = await fetch(`/api/transcribe/result/${currentJobId}`, {
+                  headers: pollAuthHeader,
+                });
+                if (pollCancelledRef.current || jobIdRef.current !== currentJobId) return;
                 if (resp.status === 200) {
                   const data = await resp.json();
                   const r = data.result ?? {};
@@ -311,10 +324,11 @@ export function useTranscription(): TranscriptionState {
                   setError('Transcription failed on server');
                   return;
                 }
-                // 404 or unexpected — don't leave user stuck in processing
-                setStatusTracked('idle');
+                // 404 or unexpected — surface as error rather than silently idling
+                setStatusTracked('error');
+                setError('Transcription result unavailable');
               } catch {
-                if (!cancelled && retries < maxRetries) {
+                if (!pollCancelledRef.current && retries < maxRetries) {
                   retries++;
                   setTimeout(poll, 3000);
                 }
