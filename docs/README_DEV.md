@@ -1365,6 +1365,10 @@ whisper.cpp models have different capabilities compared to the default faster-wh
 | `/api/admin/models/unload` | POST | Admin | Unload models to free GPU memory |
 | `/api/admin/webhook/test` | POST | Admin | Send a test webhook to verify the configured URL |
 | `/api/admin/logs` | GET | Admin | Tail server log |
+| `/api/transcribe/result/{job_id}` | GET | User | Retrieve transcription result by job ID (200=ready, 202=processing, 410=failed) |
+| `/api/transcribe/retry/{job_id}` | POST | User | Re-run transcription for a failed job using saved audio (202 Accepted) |
+| `/api/transcribe/recent` | GET | User | List undelivered completed transcriptions for recovery UI |
+| `/api/transcribe/result/{job_id}/dismiss` | POST | User | Mark an undelivered result as delivered (dismiss recovery notification) |
 | `/ws` | WebSocket | User | Real-time audio streaming |
 | `/ws/live` | WebSocket | User | Live Mode continuous transcription |
 | `/v1/audio/transcriptions` | POST | User | **OpenAI-compatible** transcription |
@@ -1725,9 +1729,13 @@ Tail recent server log entries. Query params: `service` (filter), `level` (filte
 2. Send auth: `{"type": "auth", "data": {"token": "<token>"}}`
 3. Receive: `{"type": "auth_ok", "data": {...}}`
 4. Send start: `{"type": "start", "data": {"language": "en"}}`
-5. Stream binary audio (16kHz PCM Int16)
-6. Send stop: `{"type": "stop"}`
-7. Receive final: `{"type": "final", "data": {"text": "...", "words": [...]}}`
+5. Receive: `{"type": "session_started", "data": {"job_id": "<uuid>", "capture_sample_rate_hz": 16000}}`
+6. Stream binary audio (16kHz PCM Int16)
+7. Send stop: `{"type": "stop"}`
+8. Receive progress: `{"type": "processing_progress", "data": {"current": 45, "total": 189}}` (periodic keepalives)
+9. Receive final: `{"type": "final", "data": {"text": "...", "words": [...]}}` — or `{"type": "result_ready", "data": {"job_id": "..."}}` for results >1MB (client fetches via HTTP)
+
+**Durability:** Results are persisted to the `transcription_jobs` table BEFORE delivery via WebSocket. If the WebSocket disconnects during processing, the client polls `GET /api/transcribe/result/{job_id}` to recover. On reconnect, `GET /api/transcribe/recent` shows undelivered results.
 
 **Audio format:**
 - Binary messages: `[4 bytes metadata length][metadata JSON][PCM Int16 data]`
@@ -1957,6 +1965,7 @@ server/backend/
 │   ├── client_detector.py        # Client/host detection utilities
 │   ├── diarization_engine.py     # PyAnnote wrapper
 │   ├── ffmpeg_utils.py           # FFmpeg-based audio loading and resampling (soxr / swr_linear)
+│   ├── json_utils.py             # JSON sanitization (NaN/Inf/numpy handling for safe serialization)
 │   ├── model_manager.py          # Model lifecycle, job tracking, feature availability + disabled-slot state
 │   ├── parallel_diarize.py       # Parallel transcription + diarisation orchestration
 │   ├── realtime_engine.py        # Async wrapper for real-time STT
@@ -1979,7 +1988,9 @@ server/backend/
 │           ├── vibevoice_asr_backend.py  # VibeVoice-ASR (experimental, 1-min chunking + inference_mode + GPU cache cleanup)
 │           └── whispercpp_backend.py     # whisper.cpp HTTP sidecar client (Vulkan GPU, WAV encoding, multipart POST)
 ├── database/
-│   └── database.py               # SQLite + FTS5 operations
+│   ├── database.py               # SQLite + FTS5 operations
+│   ├── job_repository.py         # Transcription job CRUD (persist-before-deliver, retry, recovery)
+│   └── audio_cleanup.py          # Scheduled cleanup of old audio recordings
 └── config.py                     # Configuration management
 ```
 
@@ -2070,7 +2081,7 @@ npm run dev:electron
 |------|---------|
 | `useServerStatus.ts` | Poll server health/status and expose status-light-safe `ServerHealthState` values |
 | `useDocker.ts` | Docker container control via IPC (start/stop/status) with onboarding install flags (`installWhisper`, `installNemo`, `installVibeVoiceAsr`); polling suppressed when Docker daemon is unavailable (client-only machines) |
-| `useTranscription.ts` | Real-time WebSocket transcription session |
+| `useTranscription.ts` | Real-time WebSocket transcription session with durability recovery (job ID tracking, HTTP fallback polling on disconnect, large result fetch, recovery notification) |
 | `useLiveMode.ts` | Live Mode continuous transcription |
 | `useRecording.ts` | Fetch/manage individual recordings |
 | `useCalendar.ts` | Calendar view data fetching |
@@ -2417,6 +2428,7 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 - `local_llm` - LM Studio integration (supports v1 REST API for LM Studio 0.4.0+)
 - `webhook` - Outgoing webhook (enable/disable, target URL, optional Bearer secret)
 - `backup` - Automatic database backup settings
+- `durability` - Transcription data durability settings (recordings_dir, audio_retention_days, orphan_job_timeout_minutes)
 
 **Live Mode Configuration:**
 - `live_transcriber.enabled` - Enable/disable Live Mode feature
@@ -2499,6 +2511,7 @@ on Linux). Settings are managed through the **Settings** modal in the UI.
 | `conversations` | LLM chat conversations |
 | `messages` | Individual chat messages |
 | `words_fts` | FTS5 virtual table for full-text search |
+| `transcription_jobs` | Durability layer — tracks transcription lifecycle (processing/completed/failed), stores results and audio paths for recovery |
 
 ### 11.2 Database Migrations
 

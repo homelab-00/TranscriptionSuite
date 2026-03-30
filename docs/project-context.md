@@ -1,7 +1,7 @@
 ---
 project_name: 'TranscriptionSuite'
 user_name: 'Bill'
-date: '2026-03-28'
+date: '2026-03-30'
 sections_completed: ['technology_stack', 'language_rules', 'framework_rules', 'testing_rules', 'code_quality', 'workflow_rules', 'critical_rules']
 status: 'complete'
 rule_count: 82
@@ -59,6 +59,30 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Python strictly 3.13.x — NeMo + lhotse compatibility
 
 ## Critical Implementation Rules
+
+### Transcription Durability (Persist-Before-Deliver)
+
+All transcription code paths MUST persist results to the `transcription_jobs` SQLite table BEFORE attempting WebSocket/HTTP delivery. This is the project's most critical invariant.
+
+**Architecture:**
+- **Job lifecycle**: `create_job()` at recording start → `save_result()` after engine completes → `send_message()` to client → `mark_delivered()` on success
+- **Repository**: `server/backend/database/job_repository.py` — all job CRUD, parameterized SQL, no ORM
+- **Audio preservation**: Raw audio saved to `/data/recordings/{job_id}.wav` before transcription starts — survives server crashes for retry
+- **Recovery**: On startup, `recover_orphaned_jobs()` in `main.py` marks stale `processing` jobs as `failed` with actionable messages
+- **Client recovery**: `useTranscription.ts` polls `GET /api/transcribe/result/{job_id}` on disconnect; `SessionView.tsx` shows recovery banner for undelivered results on mount
+- **Large results**: Payloads >1MB sent as `result_ready` reference — client fetches via HTTP instead of WebSocket
+- **Graceful shutdown**: Lifespan drain gives active sessions 120s to complete; Docker `stop_grace_period: 130s`
+- **Audio cleanup**: `audio_cleanup.py` runs at startup, deletes completed+delivered recordings older than `durability.audio_retention_days`
+
+**Config** (`config.yaml`):
+```yaml
+durability:
+    recordings_dir: "/data/recordings"
+    audio_retention_days: 7
+    orphan_job_timeout_minutes: 10
+```
+
+**Key rule**: If you add a new transcription code path, it MUST call `create_job()` → `save_result()` → deliver → `mark_delivered()`. Never send results without persisting first.
 
 ### Language-Specific Rules
 
@@ -160,7 +184,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Node.js CI version**: 25.7.0
 
 #### File Organization
-- **Backend**: Feature modules in `server/backend/core/`, API routes in `server/backend/api/routes/`, WebSocket in `api/routes/live.py`
+- **Backend**: Feature modules in `server/backend/core/`, API routes in `server/backend/api/routes/`, WebSocket in `api/routes/live.py`, durability layer in `server/backend/database/job_repository.py` + `audio_cleanup.py`
 - **Frontend**: Components in `dashboard/components/` (with `ui/` and `views/` subdirs), logic in `dashboard/src/` (`hooks/`, `services/`, `stores/`, `api/`, `utils/`, `types/`, `config/`)
 - **Shared UI**: `dashboard/components/ui/` — 8 reusable primitives (GlassCard, Button, AppleSwitch, StatusLight, ErrorFallback, CustomSelect, ShortcutCapture, LogTerminal)
 
@@ -247,4 +271,4 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Review quarterly for outdated rules
 - Remove rules that become obvious over time
 
-Last Updated: 2026-03-28
+Last Updated: 2026-03-30
