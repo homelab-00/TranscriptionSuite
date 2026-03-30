@@ -1,4 +1,4 @@
-import { isNemoModel, isVibeVoiceASRModel } from './modelCapabilities';
+import { isNemoModel, isVibeVoiceASRModel, isWhisperCppModel } from './modelCapabilities';
 import { MODEL_REGISTRY } from './modelRegistry';
 import type { ModelFamily, ModelRole } from './modelRegistry';
 
@@ -6,6 +6,7 @@ export type { ModelFamily, ModelRole };
 
 export const MAIN_RECOMMENDED_MODEL = 'nvidia/parakeet-tdt-0.6b-v3';
 export const LIVE_RECOMMENDED_MODEL = 'Systran/faster-whisper-medium';
+export const VULKAN_RECOMMENDED_MODEL = 'ggml-large-v3-turbo-q8_0.bin';
 export const DISABLED_MODEL_SENTINEL = '__none__';
 
 export const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
@@ -27,6 +28,18 @@ export const WHISPER_DISTIL_SMALL_EN = 'Systran/faster-distil-whisper-small.en';
 export const CANARY_1B_V2 = 'nvidia/canary-1b-v2';
 export const VIBEVOICE_ASR = 'microsoft/VibeVoice-ASR';
 export const VIBEVOICE_ASR_4BIT = 'scerz/VibeVoice-ASR-4bit';
+
+export const GGML_LARGE_V3 = 'ggml-large-v3.bin';
+export const GGML_LARGE_V3_Q5_0 = 'ggml-large-v3-q5_0.bin';
+export const GGML_LARGE_V3_TURBO = 'ggml-large-v3-turbo.bin';
+export const GGML_LARGE_V3_TURBO_Q5_0 = 'ggml-large-v3-turbo-q5_0.bin';
+export const GGML_LARGE_V3_TURBO_Q8_0 = 'ggml-large-v3-turbo-q8_0.bin';
+export const GGML_MEDIUM = 'ggml-medium.bin';
+export const GGML_MEDIUM_Q5_0 = 'ggml-medium-q5_0.bin';
+export const GGML_MEDIUM_EN = 'ggml-medium.en.bin';
+export const GGML_SMALL = 'ggml-small.bin';
+export const GGML_SMALL_Q5_1 = 'ggml-small-q5_1.bin';
+export const GGML_SMALL_EN = 'ggml-small.en.bin';
 
 export const MAIN_MODEL_PRESETS: string[] = MODEL_REGISTRY.filter((m) =>
   m.roles.includes('main'),
@@ -89,12 +102,14 @@ export function modelFamilyFromName(value: string | null | undefined): ModelFami
   if (!modelName) return 'none';
   if (isNemoModel(modelName)) return 'nemo';
   if (isVibeVoiceASRModel(modelName)) return 'vibevoice';
+  if (isWhisperCppModel(modelName)) return 'whispercpp';
   return 'whisper';
 }
 
 export function familyDisplayName(family: Exclude<ModelFamily, 'none'>): string {
   if (family === 'whisper') return 'faster-whisper';
   if (family === 'nemo') return 'NeMo';
+  if (family === 'whispercpp') return 'whisper.cpp';
   return 'VibeVoice-ASR';
 }
 
@@ -176,6 +191,9 @@ export function computeMissingModelFamilies(options: {
 
   const installedFamilies = new Set<Exclude<ModelFamily, 'none'>>();
 
+  // whisper.cpp (GGML) is self-contained via the sidecar container — no Python install flag needed.
+  installedFamilies.add('whispercpp');
+
   if (
     options.composeInstallWhisperEnabled ||
     options.bootstrapStatus?.whisper?.available === true
@@ -210,7 +228,9 @@ export function toInstallFlagPatch(
     }
     if (family === 'vibevoice') {
       nextFlags.installVibeVoiceAsr = true;
+      continue;
     }
+    // 'whispercpp' — sidecar is self-contained, no install flag needed.
   }
   return nextFlags;
 }

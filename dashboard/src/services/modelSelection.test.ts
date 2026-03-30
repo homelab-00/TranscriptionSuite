@@ -19,6 +19,18 @@ import {
   LIVE_MODEL_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   MAIN_RECOMMENDED_MODEL,
+  VULKAN_RECOMMENDED_MODEL,
+  GGML_LARGE_V3,
+  GGML_LARGE_V3_Q5_0,
+  GGML_LARGE_V3_TURBO,
+  GGML_LARGE_V3_TURBO_Q5_0,
+  GGML_LARGE_V3_TURBO_Q8_0,
+  GGML_MEDIUM,
+  GGML_MEDIUM_Q5_0,
+  GGML_MEDIUM_EN,
+  GGML_SMALL,
+  GGML_SMALL_Q5_1,
+  GGML_SMALL_EN,
 } from './modelSelection';
 
 // ---------------------------------------------------------------------------
@@ -358,5 +370,131 @@ describe('mapBackendModelToUiSelection', () => {
 
   it('returns the model name for real models', () => {
     expect(mapBackendModelToUiSelection('nvidia/canary-1b-v2')).toBe('nvidia/canary-1b-v2');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GGML constants
+// ---------------------------------------------------------------------------
+describe('GGML constants', () => {
+  it('GGML_LARGE_V3 is defined', () => {
+    expect(GGML_LARGE_V3).toBe('ggml-large-v3.bin');
+  });
+
+  it('GGML_LARGE_V3_Q5_0 is defined', () => {
+    expect(GGML_LARGE_V3_Q5_0).toBe('ggml-large-v3-q5_0.bin');
+  });
+
+  it('GGML_LARGE_V3_TURBO is defined', () => {
+    expect(GGML_LARGE_V3_TURBO).toBe('ggml-large-v3-turbo.bin');
+  });
+
+  it('GGML_LARGE_V3_TURBO_Q5_0 is defined', () => {
+    expect(GGML_LARGE_V3_TURBO_Q5_0).toBe('ggml-large-v3-turbo-q5_0.bin');
+  });
+
+  it('GGML_LARGE_V3_TURBO_Q8_0 is defined', () => {
+    expect(GGML_LARGE_V3_TURBO_Q8_0).toBe('ggml-large-v3-turbo-q8_0.bin');
+  });
+
+  it('GGML_MEDIUM is defined', () => {
+    expect(GGML_MEDIUM).toBe('ggml-medium.bin');
+  });
+
+  it('GGML_MEDIUM_Q5_0 is defined', () => {
+    expect(GGML_MEDIUM_Q5_0).toBe('ggml-medium-q5_0.bin');
+  });
+
+  it('GGML_MEDIUM_EN is defined', () => {
+    expect(GGML_MEDIUM_EN).toBe('ggml-medium.en.bin');
+  });
+
+  it('GGML_SMALL is defined', () => {
+    expect(GGML_SMALL).toBe('ggml-small.bin');
+  });
+
+  it('GGML_SMALL_Q5_1 is defined', () => {
+    expect(GGML_SMALL_Q5_1).toBe('ggml-small-q5_1.bin');
+  });
+
+  it('GGML_SMALL_EN is defined', () => {
+    expect(GGML_SMALL_EN).toBe('ggml-small.en.bin');
+  });
+
+  it('VULKAN_RECOMMENDED_MODEL points to turbo q8_0', () => {
+    expect(VULKAN_RECOMMENDED_MODEL).toBe('ggml-large-v3-turbo-q8_0.bin');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// modelFamilyFromName — whispercpp
+// ---------------------------------------------------------------------------
+describe('modelFamilyFromName — whispercpp', () => {
+  it('returns whispercpp for ggml-large-v3-turbo-q8_0.bin', () => {
+    expect(modelFamilyFromName('ggml-large-v3-turbo-q8_0.bin')).toBe('whispercpp');
+  });
+
+  it('returns whispercpp for any ggml-*.bin pattern', () => {
+    expect(modelFamilyFromName('ggml-small.en.bin')).toBe('whispercpp');
+  });
+
+  it('returns whispercpp for *.gguf files', () => {
+    expect(modelFamilyFromName('model.gguf')).toBe('whispercpp');
+  });
+
+  it('still returns whisper for faster-whisper models (no regression)', () => {
+    expect(modelFamilyFromName('Systran/faster-whisper-large-v3')).toBe('whisper');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// familyDisplayName — whispercpp
+// ---------------------------------------------------------------------------
+describe('familyDisplayName — whispercpp', () => {
+  it('returns whisper.cpp for whispercpp family', () => {
+    expect(familyDisplayName('whispercpp')).toBe('whisper.cpp');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeMissingModelFamilies — whispercpp never missing
+// ---------------------------------------------------------------------------
+describe('computeMissingModelFamilies — whispercpp never missing', () => {
+  it('does not report whispercpp as missing when no compose flags set', () => {
+    const result = computeMissingModelFamilies({
+      mainModel: 'ggml-large-v3-turbo-q8_0.bin',
+      composeInstallWhisperEnabled: false,
+      composeInstallNemoEnabled: false,
+      composeInstallVibeVoiceAsrEnabled: false,
+      bootstrapStatus: null,
+    });
+    expect(result).not.toContain('whispercpp');
+    expect(result).toEqual([]);
+  });
+
+  it('does not report whispercpp when used as live model', () => {
+    const result = computeMissingModelFamilies({
+      liveModel: 'ggml-small.bin',
+      composeInstallWhisperEnabled: false,
+      composeInstallNemoEnabled: false,
+      composeInstallVibeVoiceAsrEnabled: false,
+      bootstrapStatus: null,
+    });
+    expect(result).not.toContain('whispercpp');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toInstallFlagPatch — whispercpp is no-op
+// ---------------------------------------------------------------------------
+describe('toInstallFlagPatch — whispercpp no-op', () => {
+  it('returns empty object for whispercpp family', () => {
+    expect(toInstallFlagPatch(['whispercpp'])).toEqual({});
+  });
+
+  it('whispercpp alongside other families does not add an extra flag', () => {
+    const result = toInstallFlagPatch(['whispercpp', 'whisper']);
+    expect(result).toEqual({ installWhisper: true });
+    expect(Object.keys(result)).not.toContain('installWhisperCpp');
   });
 });

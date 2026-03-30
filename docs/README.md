@@ -241,9 +241,31 @@ This works by running a second helper container (called whisper-server) alongsid
 
 **How to set it up:**
 
-1. In the dashboard, select **Vulkan** as the runtime profile (instead of GPU or CPU) when starting the server
-2. The dashboard will automatically start the whisper-server helper container alongside the main container
-3. Select a GGML model (e.g. `ggml-large-v3-turbo.bin`) as your transcription model — these are the model files that whisper.cpp uses
+1. In the dashboard, select **Vulkan** as the runtime profile (instead of GPU or CPU) when starting the server.
+2. The dashboard will automatically start the whisper-server helper container alongside the main container.
+3. Select a GGML model as your transcription model — the dashboard will suggest **`ggml-large-v3-turbo-q8_0.bin`** as a starting point.
+4. Download the model using the **Model Manager** tab (the download button streams the file directly from HuggingFace into the models volume — no Python or CLI tools needed).
+5. Click **Start Server** — the whisper-server sidecar will load the model and the main container will route requests to it.
+
+> **Model switching:** The whisper.cpp sidecar loads its model once at startup. To switch models, stop the server, select the new model, then start again.
+
+**Recommended model:** `ggml-large-v3-turbo-q8_0.bin` (~1.4 GB) — best balance of speed, quality, and VRAM usage for most AMD/Intel GPUs.
+
+**Available GGML models:**
+
+| Model | Size | Languages | Translation | Notes |
+|-------|------|-----------|-------------|-------|
+| `ggml-large-v3.bin` | ~3.1 GB | 99 | Yes | Highest accuracy |
+| `ggml-large-v3-q5_0.bin` | ~2.1 GB | 99 | Yes | Good accuracy, lower VRAM |
+| `ggml-large-v3-turbo.bin` | ~1.6 GB | 99 | No | Fast, no translation |
+| `ggml-large-v3-turbo-q5_0.bin` | ~1.1 GB | 99 | No | Compact, fast |
+| **`ggml-large-v3-turbo-q8_0.bin`** | **~1.4 GB** | **99** | **No** | **Recommended** |
+| `ggml-medium.bin` | ~1.5 GB | 99 | Yes | Good multilingual option |
+| `ggml-medium-q5_0.bin` | ~1.0 GB | 99 | Yes | Compact multilingual |
+| `ggml-medium.en.bin` | ~1.5 GB | English | No | English-only |
+| `ggml-small.bin` | ~465 MB | 99 | Yes | Lightweight |
+| `ggml-small-q5_1.bin` | ~370 MB | 99 | Yes | Smallest multilingual |
+| `ggml-small.en.bin` | ~465 MB | English | No | Smallest English-only |
 
 **What works and what doesn't:**
 
@@ -252,10 +274,14 @@ This works by running a second helper container (called whisper-server) alongsid
 | Longform transcription | Yes | Yes |
 | Translation (to English) | Yes (except turbo models) | Yes |
 | Speaker diarization | No | Yes |
-| Live mode | Not yet | Yes |
+| Live mode | No | Yes |
 | Multiple concurrent jobs | One at a time | One at a time |
 
-**Choosing a different model:** By default, whisper.cpp uses `ggml-large-v3-turbo.bin`. To use a different GGML model, set the `WHISPERCPP_MODEL` environment variable in your `.env` file (found in the server's Docker compose directory). For example: `WHISPERCPP_MODEL=/models/ggml-medium.bin`.
+**Troubleshooting:**
+
+- _"Requires CUDA" badge on model_ — You are in Vulkan mode. Use a GGML model instead (the CUDA models won't work with the Vulkan sidecar).
+- _Download fails_ — Make sure the server container is running before downloading models. The download runs inside the container.
+- _Sidecar health check timeout_ — The model is still loading. Large GGML files can take 30–60 seconds to initialize on first start.
 
 > **Note for older AMD GPUs (RDNA1):** If you experience Vulkan initialization errors with an RX 5500 XT or similar RDNA1 card, you may need to add `iommu=soft` to your kernel boot parameters.
 

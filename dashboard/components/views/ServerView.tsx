@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import {
   Box,
@@ -43,10 +43,13 @@ import {
   WHISPER_MEDIUM,
   MAIN_MODEL_PRESETS,
   LIVE_MODEL_PRESETS,
+  VULKAN_RECOMMENDED_MODEL,
   resolveMainModelSelectionValue,
   resolveLiveModelSelectionValue,
   toBackendModelEnvValue,
 } from '../../src/services/modelSelection';
+import { getModelById } from '../../src/services/modelRegistry';
+import type { OptionMeta } from '../ui/CustomSelect';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 
 type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan';
@@ -617,6 +620,34 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
     };
   }, [activeTranscriber, normalizedLiveModel, activeDiarizationModel, isRunning]);
+
+  // Compute per-option metadata for the Main Transcriber dropdown.
+  // Models requiring a different runtime are dimmed with a badge.
+  const mainModelOptionMeta = useMemo<Record<string, OptionMeta>>(() => {
+    const meta: Record<string, OptionMeta> = {};
+    for (const option of MAIN_MODEL_PRESETS) {
+      const info = getModelById(option);
+      if (!info?.requiresRuntime) continue;
+      if (runtimeProfile === 'vulkan' && info.requiresRuntime === 'cuda') {
+        meta[option] = { dim: true, badge: 'Requires CUDA' };
+      } else if (
+        (runtimeProfile === 'gpu' || runtimeProfile === 'cpu') &&
+        info.requiresRuntime === 'vulkan'
+      ) {
+        meta[option] = { dim: true, badge: 'Requires Vulkan' };
+      }
+    }
+    return meta;
+  }, [runtimeProfile]);
+
+  // Show a suggestion to use the recommended GGML model when the user switches to Vulkan
+  // mode and their current main model selection requires CUDA (not usable in Vulkan mode).
+  // Skips sentinels, custom options, and models that are already Vulkan-compatible.
+  const showVulkanModelSuggestion =
+    runtimeProfile === 'vulkan' &&
+    !isRunning &&
+    mainModelSelection !== VULKAN_RECOMMENDED_MODEL &&
+    mainModelOptionMeta[mainModelSelection]?.badge === 'Requires CUDA';
 
   // Image selection state — "Most Recent (auto)" always picks the newest available tag
   const MOST_RECENT = 'Most Recent (auto)';
@@ -1278,10 +1309,27 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         MODEL_DISABLED_OPTION,
                         MAIN_MODEL_CUSTOM_OPTION,
                       ]}
+                      optionMeta={mainModelOptionMeta}
                       accentColor="magenta"
                       className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                       disabled={isRunning}
                     />
+                    {showVulkanModelSuggestion && (
+                      <p className="text-xs text-amber-400">
+                        Vulkan mode works best with GGML models.{' '}
+                        <button
+                          className="underline hover:text-amber-300"
+                          onClick={() => setMainModelSelection(VULKAN_RECOMMENDED_MODEL)}
+                        >
+                          Use {VULKAN_RECOMMENDED_MODEL}
+                        </button>
+                      </p>
+                    )}
+                    {runtimeProfile === 'vulkan' && !isRunning && (
+                      <p className="text-xs text-slate-500 italic">
+                        Switching models requires a server restart.
+                      </p>
+                    )}
                     {mainModelSelection === MAIN_MODEL_CUSTOM_OPTION && (
                       <input
                         type="text"

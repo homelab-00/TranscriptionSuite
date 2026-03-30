@@ -11,13 +11,21 @@ import {
   isVibeVoiceASRModel,
   isCanaryModel,
   isParakeetModel,
+  isWhisperCppModel,
 } from './modelCapabilities';
 
-export type ModelFamily = 'whisper' | 'nemo' | 'vibevoice' | 'diarization' | 'custom' | 'none';
+export type ModelFamily =
+  | 'whisper'
+  | 'nemo'
+  | 'vibevoice'
+  | 'whispercpp'
+  | 'diarization'
+  | 'custom'
+  | 'none';
 export type ModelRole = 'main' | 'live' | 'diarization';
 
 export interface ModelInfo {
-  /** HuggingFace repo ID (e.g. "Systran/faster-whisper-large-v3") */
+  /** HuggingFace repo ID (e.g. "Systran/faster-whisper-large-v3") or GGML filename (e.g. "ggml-large-v3-turbo-q8_0.bin") */
   id: string;
   displayName: string;
   family: ModelFamily;
@@ -32,6 +40,8 @@ export interface ModelInfo {
   };
   /** Config slots this model can fill */
   roles: ModelRole[];
+  /** Runtime required to use this model. Used to dim incompatible models in the UI. */
+  requiresRuntime?: 'cuda' | 'vulkan';
 }
 
 export const MODEL_REGISTRY: ModelInfo[] = [
@@ -45,6 +55,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3',
     capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 25 },
     roles: ['main'],
+    requiresRuntime: 'cuda',
   },
   {
     id: 'nvidia/canary-1b-v2',
@@ -55,6 +66,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/nvidia/canary-1b-v2',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 25 },
     roles: ['main'],
+    requiresRuntime: 'cuda',
   },
 
   // ── Faster Whisper ──────────────────────────────────────────────────────────────
@@ -67,6 +79,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-large-v3',
     capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
     roles: ['main', 'live'],
+    requiresRuntime: 'cuda',
   },
   {
     id: 'Systran/faster-distil-whisper-large-v3',
@@ -77,6 +90,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/Systran/faster-distil-whisper-large-v3',
     capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
     roles: ['main', 'live'],
+    requiresRuntime: 'cuda',
   },
   {
     id: 'deepdml/faster-whisper-large-v3-turbo-ct2',
@@ -87,6 +101,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/deepdml/faster-whisper-large-v3-turbo-ct2',
     capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 99 },
     roles: ['main', 'live'],
+    requiresRuntime: 'cuda',
   },
   {
     id: 'Systran/faster-whisper-medium',
@@ -97,6 +112,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-medium',
     capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
     roles: ['main', 'live'],
+    requiresRuntime: 'cuda',
   },
   {
     id: 'Systran/faster-whisper-medium.en',
@@ -107,6 +123,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-medium.en',
     capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 1 },
     roles: ['main', 'live'],
+    requiresRuntime: 'cuda',
   },
   {
     id: 'Systran/faster-distil-whisper-medium.en',
@@ -117,6 +134,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/Systran/faster-distil-whisper-medium.en',
     capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 1 },
     roles: ['main', 'live'],
+    requiresRuntime: 'cuda',
   },
   {
     id: 'Systran/faster-whisper-small',
@@ -127,6 +145,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-small',
     capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
     roles: ['main', 'live'],
+    requiresRuntime: 'cuda',
   },
   {
     id: 'Systran/faster-whisper-small.en',
@@ -137,6 +156,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/Systran/faster-whisper-small.en',
     capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 1 },
     roles: ['main', 'live'],
+    requiresRuntime: 'cuda',
   },
   {
     id: 'Systran/faster-distil-whisper-small.en',
@@ -147,6 +167,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/Systran/faster-distil-whisper-small.en',
     capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 1 },
     roles: ['main', 'live'],
+    requiresRuntime: 'cuda',
   },
 
   // ── VibeVoice ────────────────────────────────────────────────────────────
@@ -160,6 +181,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/microsoft/VibeVoice-ASR',
     capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
     roles: ['main'],
+    requiresRuntime: 'cuda',
   },
   {
     id: 'scerz/VibeVoice-ASR-4bit',
@@ -170,6 +192,123 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/scerz/VibeVoice-ASR-4bit',
     capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
     roles: ['main'],
+    requiresRuntime: 'cuda',
+  },
+
+  // ── whisper.cpp (GGML / Vulkan) ──────────────────────────────────────────
+  // Flat .bin files served by the whisper.cpp sidecar container.
+  // Downloaded via direct HTTP from huggingface.co/ggerganov/whisper.cpp.
+  // No live mode, no diarization, no translation for turbo variants.
+  {
+    id: 'ggml-large-v3.bin',
+    displayName: 'GGML Large v3',
+    family: 'whispercpp',
+    description: 'Full-precision large-v3 GGML model. Best accuracy (~3.1 GB).',
+    huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+    requiresRuntime: 'vulkan',
+  },
+  {
+    id: 'ggml-large-v3-q5_0.bin',
+    displayName: 'GGML Large v3 (Q5)',
+    family: 'whispercpp',
+    description: 'Q5_0 quantized large-v3. Good accuracy, lower VRAM (~2.1 GB).',
+    huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+    requiresRuntime: 'vulkan',
+  },
+  {
+    id: 'ggml-large-v3-turbo.bin',
+    displayName: 'GGML Large v3 Turbo',
+    family: 'whispercpp',
+    description: 'Full-precision turbo variant. Fast inference, no translation (~1.6 GB).',
+    huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+    requiresRuntime: 'vulkan',
+  },
+  {
+    id: 'ggml-large-v3-turbo-q5_0.bin',
+    displayName: 'GGML Large v3 Turbo (Q5)',
+    family: 'whispercpp',
+    description: 'Q5_0 quantized turbo. Very fast, no translation (~1.1 GB).',
+    huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+    requiresRuntime: 'vulkan',
+  },
+  {
+    id: 'ggml-large-v3-turbo-q8_0.bin',
+    displayName: 'GGML Large v3 Turbo (Q8)',
+    family: 'whispercpp',
+    description:
+      'Q8_0 quantized turbo. Recommended for Vulkan — best speed/quality balance (~1.4 GB).',
+    huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+    requiresRuntime: 'vulkan',
+  },
+  {
+    id: 'ggml-medium.bin',
+    displayName: 'GGML Medium',
+    family: 'whispercpp',
+    description: 'Full-precision medium GGML model. Good balance of accuracy and speed (~1.5 GB).',
+    huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+    requiresRuntime: 'vulkan',
+  },
+  {
+    id: 'ggml-medium-q5_0.bin',
+    displayName: 'GGML Medium (Q5)',
+    family: 'whispercpp',
+    description: 'Q5_0 quantized medium. Lightweight multilingual option (~1.0 GB).',
+    huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+    requiresRuntime: 'vulkan',
+  },
+  {
+    id: 'ggml-medium.en.bin',
+    displayName: 'GGML Medium (English)',
+    family: 'whispercpp',
+    description: 'English-only medium GGML model (~1.5 GB).',
+    huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 1 },
+    roles: ['main'],
+    requiresRuntime: 'vulkan',
+  },
+  {
+    id: 'ggml-small.bin',
+    displayName: 'GGML Small',
+    family: 'whispercpp',
+    description: 'Full-precision small GGML model. Fast and lightweight (~465 MB).',
+    huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+    requiresRuntime: 'vulkan',
+  },
+  {
+    id: 'ggml-small-q5_1.bin',
+    displayName: 'GGML Small (Q5)',
+    family: 'whispercpp',
+    description: 'Q5_1 quantized small. Smallest multilingual option (~370 MB).',
+    huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+    requiresRuntime: 'vulkan',
+  },
+  {
+    id: 'ggml-small.en.bin',
+    displayName: 'GGML Small (English)',
+    family: 'whispercpp',
+    description: 'English-only small GGML model. Smallest English option (~465 MB).',
+    huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
+    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 1 },
+    roles: ['main'],
+    requiresRuntime: 'vulkan',
   },
 
   // ── Diarization ──────────────────────────────────────────────────────────
@@ -182,6 +321,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     huggingfaceUrl: 'https://huggingface.co/pyannote/speaker-diarization-community-1',
     capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 0 },
     roles: ['diarization'],
+    requiresRuntime: 'cuda',
   },
 ];
 
@@ -201,5 +341,6 @@ export function detectModelFamily(modelId: string): ModelFamily {
   if (isParakeetModel(modelId) || isCanaryModel(modelId)) return 'nemo';
   if (isNemoModel(modelId)) return 'nemo';
   if (isVibeVoiceASRModel(modelId)) return 'vibevoice';
+  if (isWhisperCppModel(modelId)) return 'whispercpp';
   return 'whisper';
 }

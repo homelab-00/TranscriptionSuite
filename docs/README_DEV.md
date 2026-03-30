@@ -2022,6 +2022,74 @@ See [`docs/testing/TESTING.md`](testing/TESTING.md) for the full developer guide
 ./build/.venv/bin/pytest server/backend/tests
 ```
 
+### 8.5 whisper.cpp / Vulkan Backend
+
+#### Architecture
+
+The whisper.cpp Vulkan backend runs as a **sidecar container** (`whisper-server`) alongside the main Python server. The main server routes transcription requests to the sidecar via HTTP — it never touches the model file directly.
+
+```
+Dashboard → Main Python Server (port 9786)
+                    ↓ HTTP POST /inference
+           whisper-server sidecar (port 8080)
+                    ↓
+           /models/ggml-*.bin  (models volume, read-only)
+```
+
+The sidecar is enabled by adding `docker-compose.vulkan.yml` to the compose stack:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.vulkan.yml up -d
+```
+
+#### Model Format
+
+GGML models are flat `.bin` files (or `.gguf` files), **not** HuggingFace repo directories. All available models live in a single HuggingFace repo: [`ggerganov/whisper.cpp`](https://huggingface.co/ggerganov/whisper.cpp).
+
+- Models are stored at the **root** of the models volume (`/models/ggml-*.bin`), not under `/models/hub/`.
+- The sidecar loads **one model at startup** via the `WHISPER_MODEL` env var. Switching models requires a container restart.
+- The Python server never loads the GGML file — it only calls the sidecar's HTTP endpoint.
+
+#### Factory Routing
+
+`factory.py` routes to `WhisperCppBackend` when the model name matches `isWhisperCppModel()` (pattern: `ggml-*.bin` or `*.gguf`). The detection runs before the faster-whisper fallback:
+
+```python
+# factory.py (simplified)
+if is_whispercpp_model(model_name):
+    return WhisperCppBackend(model_name)
+```
+
+On the TypeScript side, `detectModelFamily()` in `modelRegistry.ts` mirrors this:
+
+```typescript
+if (isWhisperCppModel(modelId)) return 'whispercpp';  // before 'whisper' fallback
+```
+
+#### Dependency Logic
+
+`computeMissingModelFamilies()` in `modelSelection.ts` always treats `'whispercpp'` as installed — the sidecar is self-contained and requires no Python `INSTALL_WHISPER` flag. Adding `'whispercpp'` to `installedFamilies` unconditionally prevents false "missing dependency" warnings for Vulkan users.
+
+#### Download Flow
+
+GGML models are downloaded via a direct HTTP GET from the HuggingFace raw file URL:
+
+```
+https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{fileName}
+```
+
+`downloadGgmlModel()` in `dockerManager.ts` runs `wget` inside the running container and saves the file to `/models/{fileName}`. On failure, the partial `.tmp` file is deleted before re-throwing (no resume in v1).
+
+The existing `downloadModelToCache()` entry point detects GGML files via `isGgmlFileName()` and routes to `downloadGgmlModel()` automatically — no UI changes needed.
+
+#### Limitations
+
+- **No live mode** — the sidecar processes complete audio files; real-time streaming is not supported.
+- **No speaker diarization** — `supportsDiarization()` returns `false` for GGML models; pyannote integration is unavailable.
+- **No translation** for turbo variants — large-v3 and medium GGML models support translation; turbo variants do not.
+- **One model at a time** — model switching requires a server restart (sidecar loads model at startup).
+- **AMD/Intel only** — CUDA users should prefer faster-whisper models for better performance and feature coverage.
+
 ---
 
 ## 9. Dashboard Development

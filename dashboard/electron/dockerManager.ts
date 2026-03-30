@@ -1851,43 +1851,77 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, Mod
     result[id] = { exists: false };
   }
 
-  try {
-    const output = await exec(await runtimeBin(), ['exec', CONTAINER_NAME, 'ls', '/models/hub/']);
+  const bin = await runtimeBin();
 
-    const entries = new Set(
-      output
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter(Boolean),
-    );
+  // Split into GGML flat-file models and HuggingFace hub models
+  const ggmlIds = modelIds.filter((id) => isGgmlFileName(id));
+  const hubIds = modelIds.filter((id) => !isGgmlFileName(id));
 
-    for (const id of modelIds) {
-      // HuggingFace convention: "Systran/faster-whisper-large-v3" → "models--Systran--faster-whisper-large-v3"
-      const cacheName = `models--${id.trim().replace(/\//g, '--')}`;
-      const exists = entries.has(cacheName);
-      if (!exists) {
-        result[id] = { exists: false };
-        continue;
-      }
-
+  // Check GGML models: flat files at /models/{fileName}
+  for (const id of ggmlIds) {
+    try {
+      const sanitized = path.basename(id.trim());
+      await exec(bin, ['exec', CONTAINER_NAME, 'test', '-f', `/models/${sanitized}`]);
       let size: string | undefined;
       try {
-        const duOutput = await exec(await runtimeBin(), [
+        const duOutput = await exec(bin, [
           'exec',
           CONTAINER_NAME,
           'du',
           '-sh',
-          `/models/hub/${cacheName}`,
+          `/models/${sanitized}`,
         ]);
         const parsedSize = duOutput.split(/\s+/)[0]?.trim();
         if (parsedSize) size = parsedSize;
       } catch {
-        // Keep exists=true even when size lookup fails.
+        /* Keep exists=true even when size lookup fails. */
       }
       result[id] = size ? { exists: true, size } : { exists: true };
+    } catch {
+      result[id] = { exists: false };
     }
-  } catch {
-    // Container not running or volume empty — all remain { exists: false }
+  }
+
+  // Check HuggingFace hub models: directories at /models/hub/models--{org}--{name}
+  if (hubIds.length > 0) {
+    try {
+      const output = await exec(bin, ['exec', CONTAINER_NAME, 'ls', '/models/hub/']);
+
+      const entries = new Set(
+        output
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean),
+      );
+
+      for (const id of hubIds) {
+        // HuggingFace convention: "Systran/faster-whisper-large-v3" → "models--Systran--faster-whisper-large-v3"
+        const cacheName = `models--${id.trim().replace(/\//g, '--')}`;
+        const exists = entries.has(cacheName);
+        if (!exists) {
+          result[id] = { exists: false };
+          continue;
+        }
+
+        let size: string | undefined;
+        try {
+          const duOutput = await exec(bin, [
+            'exec',
+            CONTAINER_NAME,
+            'du',
+            '-sh',
+            `/models/hub/${cacheName}`,
+          ]);
+          const parsedSize = duOutput.split(/\s+/)[0]?.trim();
+          if (parsedSize) size = parsedSize;
+        } catch {
+          // Keep exists=true even when size lookup fails.
+        }
+        result[id] = size ? { exists: true, size } : { exists: true };
+      }
+    } catch {
+      // Container not running or volume empty — hub models remain { exists: false }
+    }
   }
 
   return result;
@@ -1896,27 +1930,104 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, Mod
 // ─── Model Cache Operations ─────────────────────────────────────────────────
 
 /**
- * Remove a model's cache directory from the Docker volume.
+ * Remove a model's cache from the Docker volume.
  *
- * Deletes the HuggingFace hub directory `models--{org}--{name}` inside
- * the running container at `/models/hub/`.
+ * GGML flat-file models: deletes `/models/{fileName}`.
+ * HuggingFace hub models: deletes the `models--{org}--{name}` directory at `/models/hub/`.
  */
 async function removeModelCache(modelId: string): Promise<void> {
-  const cacheName = `models--${modelId.trim().replace(/\//g, '--')}`;
-  await exec(await runtimeBin(), ['exec', CONTAINER_NAME, 'rm', '-rf', `/models/hub/${cacheName}`]);
+  const trimmed = modelId.trim();
+  if (isGgmlFileName(trimmed)) {
+    const sanitized = path.basename(trimmed);
+    await exec(await runtimeBin(), ['exec', CONTAINER_NAME, 'rm', '-f', `/models/${sanitized}`]);
+  } else {
+    const cacheName = `models--${trimmed.replace(/\//g, '--')}`;
+    await exec(await runtimeBin(), [
+      'exec',
+      CONTAINER_NAME,
+      'rm',
+      '-rf',
+      `/models/hub/${cacheName}`,
+    ]);
+  }
+}
+
+/** Returns true if the given name looks like a GGML flat-file model (ggml-*.bin or *.gguf). */
+function isGgmlFileName(name: string): boolean {
+  return /(?:(?:^|\/)ggml-.*\.bin$|\.gguf$)/i.test(name.trim());
 }
 
 /**
- * Download a model's weights to the HuggingFace cache inside the container
+ * Download a GGML flat-file model from the ggerganov/whisper.cpp HuggingFace repo
+ * directly into `/models/` on the models volume inside the running container.
+ *
+ * Uses `wget` inside the container so no Python huggingface_hub dependency is needed.
+ * Downloads to a `.tmp` suffix first; renames to the final name on success.
+ * On failure, the partial `.tmp` file is deleted before re-throwing.
+ */
+async function downloadGgmlModel(fileName: string): Promise<void> {
+  // Sanitize: accept only the basename to prevent path traversal
+  const sanitized = path.basename(fileName.trim());
+  if (!isGgmlFileName(sanitized)) {
+    throw new Error(`Invalid GGML file name: ${fileName}`);
+  }
+
+  const url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${sanitized}`;
+  const dest = `/models/${sanitized}`;
+  const tmp = `${dest}.tmp`;
+  const bin = await runtimeBin();
+
+  try {
+    await execFileAsync(bin, ['exec', CONTAINER_NAME, 'wget', '-q', '-O', tmp, url], {
+      maxBuffer: 1 * 1024 * 1024,
+      timeout: 1_800_000, // 30 minutes for large models
+    });
+    // Atomically rename temp file to final destination
+    await exec(bin, ['exec', CONTAINER_NAME, 'mv', tmp, dest]);
+  } catch (err) {
+    // Best-effort cleanup of partial download — ignore cleanup errors
+    try {
+      await exec(bin, ['exec', CONTAINER_NAME, 'rm', '-f', tmp]);
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+}
+
+/**
+ * Check whether a GGML flat-file model exists in `/models/` on the models volume.
+ */
+async function isGgmlModelDownloaded(fileName: string): Promise<boolean> {
+  const sanitized = path.basename(fileName.trim());
+  if (!isGgmlFileName(sanitized)) return false;
+  try {
+    await exec(await runtimeBin(), ['exec', CONTAINER_NAME, 'test', '-f', `/models/${sanitized}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Download a model's weights to the models volume inside the container
  * (without GPU-loading it).
  *
- * Uses `huggingface_hub.snapshot_download` which is available in the
- * server container image.  The download timeout is extended to 10 minutes.
+ * GGML flat-file models (ggml-*.bin / *.gguf) are downloaded via direct HTTP
+ * from huggingface.co/ggerganov/whisper.cpp into `/models/`.
+ *
+ * All other models use `huggingface_hub.snapshot_download` into `/models/hub/`.
+ * The download timeout is extended to 10 minutes for HuggingFace hub models.
  */
 async function downloadModelToCache(modelId: string): Promise<void> {
   const trimmedModelId = modelId.trim();
   if (!trimmedModelId) {
     throw new Error('Model ID is required');
+  }
+
+  // Route GGML flat-file models to the dedicated download path
+  if (isGgmlFileName(trimmedModelId)) {
+    return downloadGgmlModel(trimmedModelId);
   }
 
   // Pass the model ID as an argv value instead of interpolating it into code.
@@ -1988,6 +2099,7 @@ export const dockerManager = {
   checkModelsCached,
   removeModelCache,
   downloadModelToCache,
+  isGgmlModelDownloaded,
   checkTailscaleCertsExist,
   VOLUME_NAMES,
   CONTAINER_NAME,
