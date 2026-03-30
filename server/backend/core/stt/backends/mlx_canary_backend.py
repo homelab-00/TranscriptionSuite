@@ -133,7 +133,7 @@ def _compute_speech_chunks(
             model,
             sampling_rate=sample_rate,
             min_speech_duration_ms=250,
-            min_silence_duration_ms=700,
+            min_silence_duration_ms=1200,
             speech_pad_ms=100,
         )
     except Exception:
