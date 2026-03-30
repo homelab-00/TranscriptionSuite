@@ -5,6 +5,6 @@ Provides structured JSON logging with service tagging,
 log rotation, and queryable log storage.
 """
 
-from server.logging.setup import get_logger, setup_logging
+from server.logging.setup import get_logger, sanitize_log_value, setup_logging
 
-__all__ = ["setup_logging", "get_logger"]
+__all__ = ["setup_logging", "get_logger", "sanitize_log_value"]

@@ -48,7 +48,7 @@ from server.database.job_repository import (
 from server.database.job_repository import (
     set_audio_path as _set_audio_path,
 )
-from server.logging import get_logger
+from server.logging import get_logger, sanitize_log_value
 from starlette.websockets import WebSocketState
 
 logger = get_logger(__name__)
@@ -190,8 +190,12 @@ class TranscriptionSession:
                 if self._current_job_id:
                     try:
                         _set_audio_path(self._current_job_id, str(self.temp_file))
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug(
+                            "Failed to record audio path for job %s: %s",
+                            sanitize_log_value(self._current_job_id),
+                            repr(_exc),
+                        )
 
             logger.info(
                 f"Processing {len(audio_float) / self.sample_rate:.2f}s of audio "
@@ -567,7 +571,11 @@ async def handle_client_message(session: TranscriptionSession, message: dict[str
                 translation_target=_translation_target,
             )
         except Exception as _e:
-            logger.warning("Failed to create job record for %s: %s", session._current_job_id, _e)
+            logger.warning(
+                "Failed to create job record for %s: %s",
+                sanitize_log_value(session._current_job_id),
+                repr(_e),
+            )
             session._current_job_id = None  # Prevent downstream DB noise
 
         language = _msg_data.get("language")

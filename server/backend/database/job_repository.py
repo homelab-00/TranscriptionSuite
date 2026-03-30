@@ -7,6 +7,8 @@ Provides CRUD operations for the transcription_jobs table.
 import logging
 from datetime import UTC, datetime
 
+from server.logging import sanitize_log_value
+
 from .database import get_connection
 
 # Adapted from Scriberr (https://github.com/rishikanthc/Scriberr) — job model structure:
@@ -77,7 +79,7 @@ def save_result(
             )
             conn.commit()
     except Exception:
-        logger.error("Failed to save result for job %s", job_id, exc_info=True)
+        logger.error("Failed to save result for job %s", sanitize_log_value(job_id), exc_info=True)
         raise
 
 
@@ -91,7 +93,9 @@ def mark_delivered(job_id: str) -> None:
             )
             conn.commit()
     except Exception:
-        logger.warning("Failed to mark job %s as delivered", job_id, exc_info=True)
+        logger.warning(
+            "Failed to mark job %s as delivered", sanitize_log_value(job_id), exc_info=True
+        )
 
 
 def mark_failed(job_id: str, error_message: str) -> None:
@@ -109,7 +113,12 @@ def mark_failed(job_id: str, error_message: str) -> None:
             )
             conn.commit()
     except Exception:
-        logger.warning("Failed to mark job %s as failed: %s", job_id, error_message, exc_info=True)
+        logger.warning(
+            "Failed to mark job %s as failed: %s",
+            sanitize_log_value(job_id),
+            sanitize_log_value(error_message),
+            exc_info=True,
+        )
 
 
 def get_job(job_id: str) -> dict | None:

@@ -2,6 +2,7 @@
 JSON serialization utilities for TranscriptionSuite.
 """
 
+import contextlib
 import math
 from typing import Any
 
@@ -16,7 +17,7 @@ def sanitize_for_json(obj: Any) -> Any:
     No attribution needed — original implementation.
     """
     # Try numpy conversion first (before type checks that may not cover np types)
-    try:
+    with contextlib.suppress(ImportError):
         import numpy as np  # type: ignore[import]
 
         if isinstance(obj, np.integer):
@@ -28,8 +29,6 @@ def sanitize_for_json(obj: Any) -> Any:
             return val
         if isinstance(obj, np.ndarray):
             return [sanitize_for_json(item) for item in obj.tolist()]
-    except ImportError:
-        pass
 
     if isinstance(obj, dict):
         return {sanitize_for_json(k): sanitize_for_json(v) for k, v in obj.items()}

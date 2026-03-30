@@ -21,6 +21,7 @@ from server.api.routes.utils import get_client_name
 from server.config import resolve_main_transcriber_model
 from server.core.model_manager import TranscriptionCancelledError
 from server.core.stt.backends.base import STTBackend
+from server.logging import sanitize_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -815,14 +816,14 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
         try:
             result_data = _json.loads(job["result_json"])
         except _json.JSONDecodeError as _e:
-            logger.error("Malformed result_json for job %s: %s", job_id, _e)
+            logger.error("Malformed result_json for job %s: %s", sanitize_log_value(job_id), _e)
             raise HTTPException(status_code=500, detail="Result data is corrupted") from _e
     else:
         result_data = {}
     try:
         mark_delivered(job_id)
     except Exception as e:
-        logger.warning("Failed to mark job %s as delivered: %s", job_id, e)
+        logger.warning("Failed to mark job %s as delivered: %s", sanitize_log_value(job_id), e)
     return JSONResponse(
         status_code=200,
         content={"job_id": job_id, "status": "completed", "result": result_data},
@@ -910,14 +911,21 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
             result_language=result.language,
             duration_seconds=result.duration,
         )
-        logger.info("Retry transcription complete for job %s", job_id)
+        logger.info("Retry transcription complete for job %s", sanitize_log_value(job_id))
 
     except Exception as exc:
-        logger.error("Retry transcription failed for job %s: %s", job_id, exc, exc_info=True)
+        logger.error(
+            "Retry transcription failed for job %s: %s",
+            sanitize_log_value(job_id),
+            exc,
+            exc_info=True,
+        )
         try:
             mark_failed(job_id, str(exc))
         except Exception as _mf_err:
-            logger.warning("Failed to mark retry job %s as failed: %s", job_id, _mf_err)
+            logger.warning(
+                "Failed to mark retry job %s as failed: %s", sanitize_log_value(job_id), _mf_err
+            )
 
 
 def _sorted_languages(langs: dict[str, str]) -> dict[str, str]:

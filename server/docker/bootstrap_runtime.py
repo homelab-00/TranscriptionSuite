@@ -7,6 +7,7 @@ dependencies are installed in the runtime virtual environment.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -135,15 +136,16 @@ def detect_gpu_driver_version() -> str:
     runtime).  Returns an empty string when no GPU driver is detected so that
     CPU-only containers are unaffected.
     """
-    try:
+    # contextlib.suppress only intercepts exceptions — return inside the block
+    # exits the function normally, so the fallback return "" is only reached
+    # on OSError (file not present on non-NVIDIA systems) or no regex match.
+    with contextlib.suppress(OSError):
         text = _NVIDIA_PROC_VERSION.read_text(encoding="utf-8", errors="replace")
         # First line looks like:
         #   NVRM version: NVIDIA UNIX x86_64 Kernel Module  595.58.03  ...
         match = re.search(r"Kernel Module\s+([\d.]+)", text)
         if match:
             return match.group(1)
-    except OSError:
-        pass
     return ""
 
 

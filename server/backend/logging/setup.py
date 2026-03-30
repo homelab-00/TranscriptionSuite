@@ -10,6 +10,7 @@ Provides:
 
 import logging
 import logging.handlers
+import re
 from pathlib import Path
 from typing import Any
 
@@ -134,6 +135,23 @@ def setup_logging(
     )
 
     return root_logger
+
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def sanitize_log_value(value: object) -> str:
+    """Sanitize a value before passing it to a log call.
+
+    Replaces ASCII control characters (including newlines and carriage
+    returns) with '?' so that user-controlled strings cannot inject
+    fake log entries into plain-text (console) log output.
+
+    Use this for any field that originates from user input — e.g. job IDs
+    received as URL path parameters, filenames, or exception messages that
+    may echo back user-supplied data.
+    """
+    return _CONTROL_CHARS_RE.sub("?", str(value))
 
 
 def get_logger(service_name: str) -> structlog.stdlib.BoundLogger:

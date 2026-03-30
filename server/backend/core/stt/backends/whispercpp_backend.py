@@ -37,8 +37,8 @@ def _resolve_server_url() -> str:
         url = (cfg.get("whisper_cpp", "server_url") or "").strip()
         if url:
             return url.rstrip("/")
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("Could not read whisper_cpp server_url from config: %s", repr(_exc))
 
     return _DEFAULT_SERVER_URL
 
@@ -119,8 +119,8 @@ class WhisperCppBackend(STTBackend):
         if self._client is not None:
             try:
                 self._client.close()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("Failed to close HTTP client cleanly: %s", repr(_exc))
             self._client = None
 
     def is_loaded(self) -> bool:
