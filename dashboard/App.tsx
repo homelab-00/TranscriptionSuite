@@ -577,24 +577,8 @@ const AppInner: React.FC = () => {
     ],
   );
 
-  const renderView = () => {
+  const renderOtherView = () => {
     switch (currentView) {
-      case View.SESSION:
-        return (
-          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
-            <SessionView
-              serverConnection={serverConnection}
-              clientRunning={clientRunning}
-              setClientRunning={setClientRunning}
-              onStartServer={startServerWithOnboarding}
-              startupFlowPending={startupFlowPending}
-              isUploading={isUploading}
-              live={live}
-              sessionTab={sessionTab}
-              onChangeSessionTab={setSessionTab}
-            />
-          </ErrorBoundary>
-        );
       case View.NOTEBOOK:
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
@@ -629,21 +613,7 @@ const AppInner: React.FC = () => {
           </ErrorBoundary>
         );
       default:
-        return (
-          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
-            <SessionView
-              serverConnection={serverConnection}
-              clientRunning={clientRunning}
-              setClientRunning={setClientRunning}
-              onStartServer={startServerWithOnboarding}
-              startupFlowPending={startupFlowPending}
-              isUploading={isUploading}
-              live={live}
-              sessionTab={sessionTab}
-              onChangeSessionTab={setSessionTab}
-            />
-          </ErrorBoundary>
-        );
+        return null;
     }
   };
 
@@ -677,9 +647,30 @@ const AppInner: React.FC = () => {
 
         {/* Scrollable View Content - Removed p-6 to allow full-width scrolling in Server View */}
         <div className="relative h-full flex-1 overflow-hidden">
-          <div className="animate-in fade-in slide-in-from-bottom-4 h-full w-full duration-500 ease-out">
-            {renderView()}
+          {/* SessionView stays mounted to preserve WebSocket/audio state across tab switches */}
+          <div
+            className="h-full w-full"
+            style={{ display: currentView === View.SESSION ? undefined : 'none' }}
+          >
+            <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
+              <SessionView
+                serverConnection={serverConnection}
+                clientRunning={clientRunning}
+                setClientRunning={setClientRunning}
+                onStartServer={startServerWithOnboarding}
+                startupFlowPending={startupFlowPending}
+                isUploading={isUploading}
+                live={live}
+                sessionTab={sessionTab}
+                onChangeSessionTab={setSessionTab}
+              />
+            </ErrorBoundary>
           </div>
+          {currentView !== View.SESSION && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 h-full w-full duration-500 ease-out">
+              {renderOtherView()}
+            </div>
+          )}
         </div>
       </main>
 

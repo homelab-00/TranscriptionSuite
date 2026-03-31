@@ -98,12 +98,16 @@ export function useTranscription(): TranscriptionState {
     monitorDeviceLabel?: string;
   }>({});
 
-  // Cleanup on unmount
+  // Cleanup on unmount — skip disconnect if actively recording/processing
+  // so the server can finish and the poll-for-result fallback can recover
   useEffect(() => {
     return () => {
-      pollCancelledRef.current = true;
-      captureRef.current?.stop();
-      socketRef.current?.disconnect();
+      const active = statusRef.current === 'recording' || statusRef.current === 'processing';
+      if (!active) {
+        pollCancelledRef.current = true;
+        captureRef.current?.stop();
+        socketRef.current?.disconnect();
+      }
     };
   }, []);
 
