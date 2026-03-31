@@ -1,12 +1,15 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { ModelManagerTab } from './ModelManagerTab';
 import { useDockerContext } from '../../src/hooks/DockerContext';
+import { isMLXModel } from '../../src/services/modelCapabilities';
 import {
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
+  resolveMainModelSelectionValue,
 } from '../../src/services/modelSelection';
 
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
+const MLX_DEFAULT_MODEL = 'mlx-community/parakeet-tdt-0.6b-v3';
 
 export const ModelManagerView: React.FC = () => {
   const docker = useDockerContext();
@@ -20,6 +23,7 @@ export const ModelManagerView: React.FC = () => {
   const [diarizationModelSelection, setDiarizationModelSelection] =
     useState(DIARIZATION_DEFAULT_MODEL);
   const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
+  const [runtimeProfile, setRuntimeProfile] = useState<string>('docker');
   const [hydrated, setHydrated] = useState(false);
 
   const [modelCacheStatus, setModelCacheStatus] = useState<
@@ -42,8 +46,10 @@ export const ModelManagerView: React.FC = () => {
       api.config.get('server.liveCustomModel'),
       api.config.get('server.diarizationModelSelection'),
       api.config.get('server.diarizationCustomModel'),
+      api.config.get('server.runtimeProfile'),
     ])
-      .then(([main, mainCustom, live, liveCustom, diarization, diarizationCustom]: unknown[]) => {
+      .then(
+        ([main, mainCustom, live, liveCustom, diarization, diarizationCustom, rt]: unknown[]) => {
         if (!active) return;
         if (typeof main === 'string' && main.trim()) setMainModelSelection(main.trim());
         if (typeof mainCustom === 'string') setMainCustomModel(mainCustom.trim());
@@ -53,7 +59,9 @@ export const ModelManagerView: React.FC = () => {
           setDiarizationModelSelection(diarization.trim());
         if (typeof diarizationCustom === 'string')
           setDiarizationCustomModel(diarizationCustom.trim());
-      })
+        if (typeof rt === 'string' && rt.trim()) setRuntimeProfile(rt.trim());
+      },
+    )
       .catch(() => {})
       .finally(() => {
         if (active) setHydrated(true);
@@ -63,6 +71,16 @@ export const ModelManagerView: React.FC = () => {
       active = false;
     };
   }, []);
+
+  // Metal mode: auto-switch a non-MLX main model to the MLX default.
+  useEffect(() => {
+    if (!hydrated || runtimeProfile !== 'metal') return;
+    const resolved = resolveMainModelSelectionValue(mainModelSelection, mainCustomModel, '');
+    if (resolved && !isMLXModel(resolved) && resolved !== MODEL_DEFAULT_LOADING_PLACEHOLDER) {
+      setMainModelSelection(MLX_DEFAULT_MODEL);
+      setMainCustomModel('');
+    }
+  }, [runtimeProfile, hydrated, mainModelSelection, mainCustomModel]);
 
   // Persist changes back to the shared electron-store keys
   useEffect(() => {
@@ -147,6 +165,7 @@ export const ModelManagerView: React.FC = () => {
           modelCacheStatus={modelCacheStatus}
           isRunning={isRunning}
           refreshCacheStatus={refreshCacheStatus}
+          isMetal={runtimeProfile === 'metal'}
         />
       </div>
     </div>

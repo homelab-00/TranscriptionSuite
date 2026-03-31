@@ -35,7 +35,7 @@ import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
-import { isWhisperModel } from '../../src/services/modelCapabilities';
+import { isWhisperModel, isMLXModel } from '../../src/services/modelCapabilities';
 import { MODEL_REGISTRY } from '../../src/services/modelRegistry';
 import {
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
@@ -241,15 +241,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   }, []);
 
   // Derive model option lists filtered by the active runtime profile.
-  // MLX models are only shown when running under Metal; non-MLX models are
-  // always shown (they work with Docker GPU/CPU and bare-metal via ctranslate2).
+  // Metal mode:     only MLX models (non-MLX need Docker/ctranslate2).
+  // Non-Metal mode: only non-MLX models (MLX needs Apple Silicon Metal).
   const isMetal = runtimeProfile === 'metal';
   const mainModelOptions = useMemo(() => {
-    const presets = MAIN_MODEL_PRESETS.filter((id) => isMetal || !MLX_MODEL_IDS.has(id));
+    const presets = MAIN_MODEL_PRESETS.filter((id) =>
+      isMetal ? MLX_MODEL_IDS.has(id) : !MLX_MODEL_IDS.has(id),
+    );
     return [...presets, MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
   }, [isMetal]);
   const liveModelOptions = useMemo(() => {
-    // Live mode only supports faster-whisper; no MLX live models exist yet.
     return [LIVE_MODEL_SAME_AS_MAIN_OPTION, ...LIVE_MODEL_PRESETS, MODEL_DISABLED_OPTION, LIVE_MODEL_CUSTOM_OPTION];
   }, []);
 
@@ -717,6 +718,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     setLiveModelSelection(FALLBACK_LIVE_WHISPER_MODEL);
     setLiveCustomModel('');
   }, [activeLiveModel, localSelectionsHydrated]);
+
+  // Metal mode: auto-switch a non-MLX main model to the MLX default.
+  useEffect(() => {
+    if (!localSelectionsHydrated || runtimeProfile !== 'metal') return;
+    const resolved = resolveMainModelSelectionValue(mainModelSelection, mainCustomModel, '');
+    if (resolved && !isMLXModel(resolved) && resolved !== MODEL_DEFAULT_LOADING_PLACEHOLDER) {
+      setMainModelSelection(MLX_DEFAULT_MODEL);
+      setMainCustomModel('');
+    }
+  }, [runtimeProfile, localSelectionsHydrated, mainModelSelection, mainCustomModel]);
 
   // Persist model selection UI state.
   useEffect(() => {
