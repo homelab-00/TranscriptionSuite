@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
-import { View, NotebookTab, SessionTab } from './types';
+import { View, NotebookTab, SessionTab, LogsTab } from './types';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/views/SessionView';
 import { NotebookView } from './components/views/NotebookView';
@@ -26,6 +26,7 @@ import { getConfig, setConfig } from './src/config/store';
 import { useLiveMode } from './src/hooks/useLiveMode';
 import { useImportQueueStore, selectIsUploading } from './src/stores/importQueueStore';
 import { QueuePausedBanner } from './components/ui/QueuePausedBanner';
+import { DownloadNotifications } from './components/ui/DownloadNotifications';
 import { useStarPopup } from './src/hooks/useStarPopup';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
 import { useAuthTokenSync } from './src/hooks/useAuthTokenSync';
@@ -66,6 +67,7 @@ const AppInner: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.SESSION);
   const [notebookTab, setNotebookTab] = useState<NotebookTab>(NotebookTab.CALENDAR);
   const [sessionTab, setSessionTab] = useState<SessionTab>(SessionTab.MAIN);
+  const [logsTab, setLogsTab] = useState<LogsTab>(LogsTab.MAIN);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
@@ -614,7 +616,7 @@ const AppInner: React.FC = () => {
       case View.LOGS:
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
-            <LogsView />
+            <LogsView logsTab={logsTab} />
           </ErrorBoundary>
         );
       default:
@@ -646,6 +648,8 @@ const AppInner: React.FC = () => {
         onChangeNotebookTab={setNotebookTab}
         sessionTab={sessionTab}
         onChangeSessionTab={setSessionTab}
+        logsTab={logsTab}
+        onChangeLogsTab={setLogsTab}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenAbout={() => setIsAboutOpen(true)}
         onOpenBugReport={() => setIsBugReportOpen(true)}
@@ -940,6 +944,7 @@ const App: React.FC = () => (
     <DockerProvider>
       <AppInner />
     </DockerProvider>
+    <DownloadNotifications />
     <Toaster position="bottom-right" theme="dark" richColors />
     <ReactQueryDevtools initialIsOpen={false} />
   </QueryClientProvider>

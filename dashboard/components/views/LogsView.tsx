@@ -5,8 +5,14 @@ import { Button } from '../ui/Button';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { useClientDebugLogs } from '../../src/hooks/useClientDebugLogs';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
+import { LogsTab } from '../../types';
+import { DownloadsPanel } from './DownloadsPanel';
 
-export const LogsView: React.FC = () => {
+interface LogsViewProps {
+  logsTab: LogsTab;
+}
+
+export const LogsView: React.FC<LogsViewProps> = ({ logsTab }) => {
   const docker = useDockerContext();
   const { logs: clientLogs } = useClientDebugLogs();
 
@@ -78,8 +84,9 @@ export const LogsView: React.FC = () => {
   }, [docker.logLines, docker.container.running, docker.operationError]);
 
   // Keep Docker logs streaming so the terminal updates in real time.
+  // Only stream when showing the main logs tab, not the Downloads sub-tab.
   useEffect(() => {
-    if (!docker.container.exists) {
+    if (!docker.container.exists || logsTab !== LogsTab.MAIN) {
       docker.stopLogStream();
       return;
     }
@@ -92,6 +99,7 @@ export const LogsView: React.FC = () => {
     docker.container.running,
     docker.startLogStream,
     docker.stopLogStream,
+    logsTab,
   ]);
 
   const handleCopyLogs = useCallback(() => {
@@ -99,6 +107,10 @@ export const LogsView: React.FC = () => {
     const logText = allLogs.map((l) => `[${l.timestamp}] [${l.source}] ${l.message}`).join('\n');
     writeToClipboard(logText).catch(() => {});
   }, [serverLogs, clientLogs]);
+
+  if (logsTab === LogsTab.DOWNLOADS) {
+    return <DownloadsPanel />;
+  }
 
   return (
     <div className="mx-auto flex h-full w-full max-w-7xl flex-col p-6">

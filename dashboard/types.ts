@@ -17,6 +17,11 @@ export enum SessionTab {
   IMPORT = 'IMPORT',
 }
 
+export enum LogsTab {
+  MAIN = 'MAIN',
+  DOWNLOADS = 'DOWNLOADS',
+}
+
 export interface StatusIndicatorProps {
   status: 'active' | 'inactive' | 'warning' | 'error' | 'loading';
   label?: string;

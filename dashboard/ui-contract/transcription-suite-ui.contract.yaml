@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.15
+  spec_version: 1.0.16
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -13,6 +13,7 @@ meta:
       - components/ui/AppleSwitch.tsx
       - components/ui/Button.tsx
       - components/ui/CustomSelect.tsx
+      - components/ui/DownloadNotifications.tsx
       - components/ui/ErrorFallback.tsx
       - components/ui/GlassCard.tsx
       - components/ui/LogTerminal.tsx
@@ -23,6 +24,7 @@ meta:
       - components/views/AddNoteModal.tsx
       - components/views/AudioNoteModal.tsx
       - components/views/BugReportModal.tsx
+      - components/views/DownloadsPanel.tsx
       - components/views/FullscreenVisualizer.tsx
       - components/views/LogsView.tsx
       - components/views/ModelManagerTab.tsx
@@ -38,7 +40,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-03-31T15:17:21.594Z
+    generated_at: 2026-03-31T16:16:57.647Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -253,6 +255,7 @@ foundation:
         - rounded-br-full
         - rounded-full
         - rounded-lg
+        - rounded-md
         - rounded-r-full
         - rounded-t-2xl
         - rounded-tl-none
@@ -416,6 +419,7 @@ utility_allowlist:
     - bg-black/75
     - bg-blue-400
     - bg-blue-500/10
+    - bg-emerald-900/40
     - bg-glass-100
     - bg-glass-100/30
     - bg-glass-100/50
@@ -433,6 +437,7 @@ utility_allowlist:
     - bg-red-500/10
     - bg-red-500/25
     - bg-red-500/5
+    - bg-red-900/40
     - bg-slate-500
     - bg-slate-500/10
     - bg-slate-700
@@ -495,6 +500,7 @@ utility_allowlist:
     - border-yellow-400/30
     - bottom-0
     - bottom-1
+    - bottom-4
     - bottom-6
     - bottom-right
     - cursor-pointer
@@ -551,7 +557,6 @@ utility_allowlist:
     - grid-cols-2
     - grid-cols-3
     - grid-cols-7
-    - grid-template-rows
     - group
     - h-1
     - h-1.5
@@ -685,6 +690,7 @@ utility_allowlist:
     - ml-1
     - ml-2
     - ml-auto
+    - ml-model
     - mr-1
     - mr-1.5
     - mr-2
@@ -775,6 +781,7 @@ utility_allowlist:
     - py-12
     - py-2
     - py-2.5
+    - py-20
     - py-3
     - py-3.5
     - py-4
@@ -799,6 +806,7 @@ utility_allowlist:
     - rounded-br-full
     - rounded-full
     - rounded-lg
+    - rounded-md
     - rounded-r-full
     - rounded-t-2xl
     - rounded-tl-none
@@ -821,6 +829,7 @@ utility_allowlist:
     - shrink-0
     - slide-in-from-bottom-2
     - slide-in-from-bottom-4
+    - slide-in-from-right-4
     - slide-in-from-right-8
     - slide-in-from-top-2
     - slide-in-from-top-4
@@ -855,6 +864,7 @@ utility_allowlist:
     - text-black
     - text-blue-400
     - text-center
+    - text-emerald-400
     - text-green-400
     - text-indigo-400
     - text-left
@@ -915,6 +925,7 @@ utility_allowlist:
     - via-transparent
     - w-1
     - w-1.5
+    - w-1/3
     - w-10
     - w-11
     - w-12
@@ -933,6 +944,7 @@ utility_allowlist:
     - w-48
     - w-6
     - w-7
+    - w-72
     - w-8
     - w-80
     - w-9
@@ -993,40 +1005,31 @@ inline_style_allowlist:
     - gridTemplateRows
     - height
     - left
-    - marginTop
     - maskImage
     - opacity
     - top
     - transform
-    - transition
     - WebkitMaskImage
     - width
   allowed_literals:
-    - -0.5rem
     - "#0f172a"
     - ${100 / visibleSlots}%
+    - ${item.progress}%
     - "0"
-    - "0.1"
     - "0.16"
-    - "0.25"
     - "0.3"
     - 0.4s
     - 0%
-    - 0fr
     - "1"
-    - 1.5rem
     - "100"
     - 100%
     - 16%
-    - 1fr
     - 1px
     - 1rem
-    - 200ms
     - 20px
     - 20px 20px
     - "225"
     - "253"
-    - 3.5rem
     - 30%
     - "339"
     - 39%
@@ -1036,7 +1039,6 @@ inline_style_allowlist:
     - "90"
     - auto repeat(${gridRows}, 1fr)
     - fixed
-    - grid-template-rows 200ms cubic-bezier(0.25,0.1,0.25,1), margin-top 200ms cubic-bezier(0.25,0.1,0.25,1), opacity 200ms cubic-bezier(0.25,0.1,0.25,1)
     - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
     - linear-gradient(to bottom, black 50%, transparent 100%)
     - linear-gradient(to top, black 50%, transparent 100%)
@@ -1045,7 +1047,7 @@ inline_style_allowlist:
     - radial-gradient(circle at bottom left, transparent 1rem, black 1rem)
     - radial-gradient(circle at top left, transparent 1rem, black 1rem)
     - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
-    - translateY(calc(1.5rem + ${activeIndex} * 3.5rem))
+    - translateY(${pillTop}px)
   keyframes:
     - dropdown-appear
     - slideInLeft
@@ -1384,6 +1386,91 @@ component_contracts:
     state_rules:
       - id: active-option-dot
         rule: Selected option indicator dot color/shadow must follow accentColor variant mapping.
+  DownloadCard:
+    file: components/ui/DownloadNotifications.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  DownloadNotifications:
+    file: components/ui/DownloadNotifications.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  DownloadRow:
+    file: components/views/DownloadsPanel.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  DownloadsPanel:
+    file: components/views/DownloadsPanel.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  EmptyState:
+    file: components/views/DownloadsPanel.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   ErrorFallback:
     file: components/ui/ErrorFallback.tsx
     required_tokens:
@@ -1932,6 +2019,23 @@ component_contracts:
         rule: Session, notebook, and server nav items retain StatusLight indicators, with notebook status sharing the server status source.
   StarPopupModal:
     file: components/views/StarPopupModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  StatusIcon:
+    file: components/ui/DownloadNotifications.tsx
     required_tokens:
       - colors
       - motion

@@ -28,6 +28,7 @@ import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { CustomSelect } from '../ui/CustomSelect';
 
+import { useDownloadStore } from '../../src/stores/downloadStore';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
@@ -412,6 +413,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       } else {
         setSidecarNeeded(null);
         docker.cancelSidecarPull();
+        useDownloadStore.getState().cancelDownload('sidecar-vulkan');
       }
     },
     [docker.hasSidecarImage, docker.cancelSidecarPull],
@@ -987,7 +989,22 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   <Button
                     variant="secondary"
                     className="h-10 w-full"
-                    onClick={() => docker.pullImage(selectedTagForActions)}
+                    onClick={async () => {
+                      const dlId = `docker-image-${selectedTagForActions}`;
+                      const store = useDownloadStore.getState();
+                      store.addDownload(
+                        dlId,
+                        'docker-image',
+                        `Server Image (${selectedTagForActions})`,
+                      );
+                      try {
+                        await docker.pullImage(selectedTagForActions);
+                        useDownloadStore.getState().completeDownload(dlId);
+                      } catch (err: unknown) {
+                        const msg = err instanceof Error ? err.message : 'Pull failed';
+                        useDownloadStore.getState().failDownload(dlId, msg);
+                      }
+                    }}
                     disabled={docker.operating}
                   >
                     {docker.pulling ? (
@@ -1002,7 +1019,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <Button
                       variant="danger"
                       className="h-10 w-full"
-                      onClick={() => docker.cancelPull()}
+                      onClick={() => {
+                        docker.cancelPull();
+                        const dlId = `docker-image-${selectedTagForActions}`;
+                        useDownloadStore.getState().cancelDownload(dlId);
+                      }}
                     >
                       Cancel Pull
                     </Button>
@@ -1100,7 +1121,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           Downloading Vulkan sidecar image...
                         </span>
                         <button
-                          onClick={() => docker.cancelSidecarPull()}
+                          onClick={() => {
+                            docker.cancelSidecarPull();
+                            useDownloadStore.getState().cancelDownload('sidecar-vulkan');
+                          }}
                           className="ml-auto text-xs text-slate-400 underline hover:text-slate-200"
                         >
                           Cancel
@@ -1119,7 +1143,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           className="ml-auto h-8 px-3 text-xs"
                           disabled={docker.operating}
                           onClick={async () => {
-                            await docker.pullSidecarImage();
+                            const dlId = 'sidecar-vulkan';
+                            useDownloadStore
+                              .getState()
+                              .addDownload(dlId, 'sidecar-image', 'Vulkan Sidecar (whisper.cpp)');
+                            try {
+                              await docker.pullSidecarImage();
+                              useDownloadStore.getState().completeDownload(dlId);
+                            } catch (err: unknown) {
+                              const msg = err instanceof Error ? err.message : 'Pull failed';
+                              useDownloadStore.getState().failDownload(dlId, msg);
+                            }
                             const hasIt = await docker.hasSidecarImage();
                             if (hasIt) setSidecarNeeded(false);
                           }}
