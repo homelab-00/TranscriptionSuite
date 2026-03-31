@@ -52,9 +52,12 @@ interface TrayMenuState {
   isStandby?: boolean;
 }
 
+type DownloadEventType = 'runtime-dep' | 'ml-model';
+
 interface BootstrapDownloadEvent {
   action: 'start' | 'complete' | 'fail';
   id: string;
+  type: DownloadEventType;
   label: string;
   error?: string;
 }

@@ -19,7 +19,7 @@ export function useBootstrapDownloads(): void {
 
       switch (event.action) {
         case 'start':
-          store.addDownload(event.id, 'runtime-dep', event.label);
+          store.addDownload(event.id, event.type, event.label);
           break;
         case 'complete':
           store.completeDownload(event.id);

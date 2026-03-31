@@ -135,6 +135,7 @@ export interface ElectronAPI {
       callback: (event: {
         action: 'start' | 'complete' | 'fail';
         id: string;
+        type: string;
         label: string;
         error?: string;
       }) => void,
@@ -326,13 +327,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
       callback: (event: {
         action: 'start' | 'complete' | 'fail';
         id: string;
+        type: string;
         label: string;
         error?: string;
       }) => void,
     ) => {
       const handler = (
         _event: Electron.IpcRendererEvent,
-        evt: { action: 'start' | 'complete' | 'fail'; id: string; label: string; error?: string },
+        evt: {
+          action: 'start' | 'complete' | 'fail';
+          id: string;
+          type: string;
+          label: string;
+          error?: string;
+        },
       ) => callback(evt);
       ipcRenderer.on('docker:downloadEvent', handler);
       return () => ipcRenderer.removeListener('docker:downloadEvent', handler);

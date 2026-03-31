@@ -1853,13 +1853,17 @@ async function getLogs(tail?: number): Promise<string[]> {
 
 // ─── Bootstrap Download Event Parser ────────────────────────────────────────
 //
-// Parses [bootstrap] log lines for install start/complete/fail patterns and
-// emits structured download events.  Subscribers register via
+// Parses container log lines for install start/complete/fail patterns and
+// emits structured download events.  Covers both [bootstrap] dependency
+// installs and server-side model preloading.  Subscribers register via
 // subscribeToDownloadEvents() — typically the IPC bridge in main.ts.
+
+export type DownloadEventType = 'runtime-dep' | 'ml-model';
 
 export interface BootstrapDownloadEvent {
   action: 'start' | 'complete' | 'fail';
   id: string;
+  type: DownloadEventType;
   label: string;
   error?: string;
 }
@@ -1869,6 +1873,7 @@ interface BootstrapPattern {
   match: string;
   action: BootstrapDownloadEvent['action'];
   id: string;
+  type: DownloadEventType;
   label: string;
   /** When true, extract text after the match string as the error message. */
   extractError?: boolean;
@@ -1880,12 +1885,14 @@ const BOOTSTRAP_PATTERNS: BootstrapPattern[] = [
     match: '[bootstrap] Installing Python runtime dependencies',
     action: 'start',
     id: 'bootstrap-runtime-deps',
+    type: 'runtime-dep',
     label: 'Runtime Dependencies',
   },
   {
     match: '[bootstrap] Runtime dependencies installed',
     action: 'complete',
     id: 'bootstrap-runtime-deps',
+    type: 'runtime-dep',
     label: 'Runtime Dependencies',
   },
   // ── faster-whisper ────────────────────────────────────────────────────────
@@ -1893,18 +1900,21 @@ const BOOTSTRAP_PATTERNS: BootstrapPattern[] = [
     match: '[bootstrap] Installing faster-whisper family dependencies',
     action: 'start',
     id: 'bootstrap-faster-whisper',
+    type: 'runtime-dep',
     label: 'faster-whisper',
   },
   {
     match: '[bootstrap] faster-whisper family dependencies installed',
     action: 'complete',
     id: 'bootstrap-faster-whisper',
+    type: 'runtime-dep',
     label: 'faster-whisper',
   },
   {
     match: '[bootstrap] faster-whisper dependency installation failed:',
     action: 'fail',
     id: 'bootstrap-faster-whisper',
+    type: 'runtime-dep',
     label: 'faster-whisper',
     extractError: true,
   },
@@ -1913,18 +1923,21 @@ const BOOTSTRAP_PATTERNS: BootstrapPattern[] = [
     match: '[bootstrap] Installing NeMo toolkit',
     action: 'start',
     id: 'bootstrap-nemo',
+    type: 'runtime-dep',
     label: 'NeMo Toolkit',
   },
   {
     match: '[bootstrap] NeMo toolkit installed',
     action: 'complete',
     id: 'bootstrap-nemo',
+    type: 'runtime-dep',
     label: 'NeMo Toolkit',
   },
   {
     match: '[bootstrap] NeMo toolkit installation failed:',
     action: 'fail',
     id: 'bootstrap-nemo',
+    type: 'runtime-dep',
     label: 'NeMo Toolkit',
     extractError: true,
   },
@@ -1933,20 +1946,38 @@ const BOOTSTRAP_PATTERNS: BootstrapPattern[] = [
     match: '[bootstrap] Installing VibeVoice-ASR',
     action: 'start',
     id: 'bootstrap-vibevoice',
+    type: 'runtime-dep',
     label: 'VibeVoice-ASR',
   },
   {
     match: '[bootstrap] VibeVoice-ASR support installed',
     action: 'complete',
     id: 'bootstrap-vibevoice',
+    type: 'runtime-dep',
     label: 'VibeVoice-ASR',
   },
   {
     match: '[bootstrap] VibeVoice-ASR installation failed:',
     action: 'fail',
     id: 'bootstrap-vibevoice',
+    type: 'runtime-dep',
     label: 'VibeVoice-ASR',
     extractError: true,
+  },
+  // ── Model preload (server runtime, post-bootstrap) ────────────────────────
+  {
+    match: 'Preloading transcription model',
+    action: 'start',
+    id: 'model-preload',
+    type: 'ml-model',
+    label: 'Transcription Model',
+  },
+  {
+    match: 'STT model loaded and ready',
+    action: 'complete',
+    id: 'model-preload',
+    type: 'ml-model',
+    label: 'Transcription Model',
   },
 ];
 
@@ -1963,6 +1994,7 @@ function bootstrapLogParser(line: string): void {
     const event: BootstrapDownloadEvent = {
       action: pattern.action,
       id: pattern.id,
+      type: pattern.type,
       label: pattern.label,
     };
 
