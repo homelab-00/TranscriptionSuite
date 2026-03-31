@@ -67,6 +67,12 @@ export interface UseDockerReturn {
   pulling: boolean;
   removeImage: (tag: string) => Promise<void>;
 
+  // Sidecar image state
+  hasSidecarImage: () => Promise<boolean>;
+  pullSidecarImage: () => Promise<void>;
+  cancelSidecarPull: () => Promise<void>;
+  sidecarPulling: boolean;
+
   // Container state
   container: ContainerStatus;
   startContainer: (
@@ -118,6 +124,7 @@ export function useDocker(): UseDockerReturn {
   const [operating, setOperating] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [pulling, setPulling] = useState(false);
+  const [sidecarPulling, setSidecarPulling] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const volumeRefreshedOnHealthyRef = useRef(false);
@@ -268,6 +275,34 @@ export function useDocker(): UseDockerReturn {
     await docker.cancelPull();
     setPulling(false);
     setOperating(false);
+  }, []);
+
+  const hasSidecarImage = useCallback(async (): Promise<boolean> => {
+    const docker = api();
+    if (!docker) return false;
+    return docker.hasSidecarImage();
+  }, []);
+
+  const pullSidecarImage = useCallback(async () => {
+    const docker = api();
+    if (!docker) return;
+    setSidecarPulling(true);
+    await withOperation(async () => {
+      try {
+        await docker.pullSidecarImage();
+      } finally {
+        setSidecarPulling(false);
+      }
+    });
+  }, [withOperation]);
+
+  const cancelSidecarPull = useCallback(async () => {
+    const docker = api();
+    if (!docker) return;
+    await docker.cancelSidecarPull();
+    setSidecarPulling(false);
+    setOperating(false);
+    setOperationError(null);
   }, []);
 
   const removeImage = useCallback(
@@ -445,6 +480,10 @@ export function useDocker(): UseDockerReturn {
     pullImage,
     cancelPull,
     pulling,
+    hasSidecarImage,
+    pullSidecarImage,
+    cancelSidecarPull,
+    sidecarPulling,
     removeImage,
     container,
     startContainer,

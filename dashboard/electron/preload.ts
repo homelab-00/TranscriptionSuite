@@ -94,6 +94,10 @@ export interface ElectronAPI {
     pullImage: (tag: string) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;
+    hasSidecarImage: () => Promise<boolean>;
+    pullSidecarImage: () => Promise<string>;
+    cancelSidecarPull: () => Promise<boolean>;
+    isSidecarPulling: () => Promise<boolean>;
     removeImage: (tag: string) => Promise<string>;
     getContainerStatus: () => Promise<{
       exists: boolean;
@@ -269,6 +273,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     pullImage: (tag: string) => ipcRenderer.invoke('docker:pullImage', tag),
     cancelPull: () => ipcRenderer.invoke('docker:cancelPull'),
     isPulling: () => ipcRenderer.invoke('docker:isPulling'),
+    hasSidecarImage: () => ipcRenderer.invoke('docker:hasSidecarImage'),
+    pullSidecarImage: () => ipcRenderer.invoke('docker:pullSidecarImage'),
+    cancelSidecarPull: () => ipcRenderer.invoke('docker:cancelSidecarPull'),
+    isSidecarPulling: () => ipcRenderer.invoke('docker:isSidecarPulling'),
     removeImage: (tag: string) => ipcRenderer.invoke('docker:removeImage', tag),
     getContainerStatus: () => ipcRenderer.invoke('docker:getContainerStatus'),
     startContainer: (options: StartContainerOptions) =>

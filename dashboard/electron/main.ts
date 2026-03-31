@@ -906,6 +906,22 @@ ipcMain.handle('docker:isPulling', () => {
   return dockerManager.isPulling();
 });
 
+ipcMain.handle('docker:hasSidecarImage', async () => {
+  return dockerManager.hasSidecarImage();
+});
+
+ipcMain.handle('docker:pullSidecarImage', async () => {
+  return dockerManager.pullSidecarImage();
+});
+
+ipcMain.handle('docker:cancelSidecarPull', () => {
+  return dockerManager.cancelSidecarPull();
+});
+
+ipcMain.handle('docker:isSidecarPulling', () => {
+  return dockerManager.isSidecarPulling();
+});
+
 ipcMain.handle('docker:removeImage', async (_event, tag: string) => {
   return dockerManager.removeImage(tag);
 });

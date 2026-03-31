@@ -217,6 +217,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [keepModelsVolume, setKeepModelsVolume] = useState(false);
   const [keepConfigDirectory, setKeepConfigDirectory] = useState(false);
 
+  // Vulkan sidecar image prompt state
+  const [sidecarNeeded, setSidecarNeeded] = useState<boolean | null>(null); // null = not checked
+
   // Firewall warning state (remote mode)
   const [firewallWarning, setFirewallWarning] = useState<string | null>(null);
 
@@ -230,7 +233,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       api.config
         .get('server.runtimeProfile')
         .then((val: unknown) => {
-          if (val === 'gpu' || val === 'cpu' || val === 'vulkan') setRuntimeProfile(val);
+          if (val === 'gpu' || val === 'cpu' || val === 'vulkan') {
+            setRuntimeProfile(val);
+            if (val === 'vulkan') {
+              docker
+                .hasSidecarImage()
+                .then((exists) => setSidecarNeeded(!exists))
+                .catch(() => {});
+            }
+          }
         })
         .catch(() => {});
       api.config
@@ -385,14 +396,26 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     };
   }, []);
 
-  // Persist runtime profile changes
-  const handleRuntimeProfileChange = useCallback((profile: RuntimeProfile) => {
-    setRuntimeProfile(profile);
-    const api = (window as any).electronAPI;
-    if (api?.config) {
-      api.config.set('server.runtimeProfile', profile);
-    }
-  }, []);
+  // Persist runtime profile changes and check sidecar availability for Vulkan
+  const handleRuntimeProfileChange = useCallback(
+    (profile: RuntimeProfile) => {
+      setRuntimeProfile(profile);
+      const api = (window as any).electronAPI;
+      if (api?.config) {
+        api.config.set('server.runtimeProfile', profile);
+      }
+      if (profile === 'vulkan') {
+        docker
+          .hasSidecarImage()
+          .then((exists) => setSidecarNeeded(!exists))
+          .catch(() => {});
+      } else {
+        setSidecarNeeded(null);
+        docker.cancelSidecarPull();
+      }
+    },
+    [docker.hasSidecarImage, docker.cancelSidecarPull],
+  );
 
   // Derive status from Docker hook
   const containerStatus = docker.container;
@@ -1068,6 +1091,51 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     </span>
                   )}
                 </div>
+                {runtimeProfile === 'vulkan' && !isRunning && sidecarNeeded && (
+                  <div className="border-accent-rose/20 bg-accent-rose/5 flex items-center gap-3 rounded-lg border px-4 py-3">
+                    {docker.sidecarPulling ? (
+                      <>
+                        <Loader2 size={14} className="text-accent-rose animate-spin" />
+                        <span className="text-sm text-slate-300">
+                          Downloading Vulkan sidecar image...
+                        </span>
+                        <button
+                          onClick={() => docker.cancelSidecarPull()}
+                          className="ml-auto text-xs text-slate-400 underline hover:text-slate-200"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <Download size={14} className="text-accent-rose" />
+                        <span className="text-sm text-slate-300">
+                          {docker.operationError
+                            ? `Download failed: ${docker.operationError}`
+                            : 'Vulkan mode requires the whisper.cpp sidecar image.'}
+                        </span>
+                        <Button
+                          variant="secondary"
+                          className="ml-auto h-8 px-3 text-xs"
+                          disabled={docker.operating}
+                          onClick={async () => {
+                            await docker.pullSidecarImage();
+                            const hasIt = await docker.hasSidecarImage();
+                            if (hasIt) setSidecarNeeded(false);
+                          }}
+                        >
+                          Download
+                        </Button>
+                        <button
+                          onClick={() => setSidecarNeeded(false)}
+                          className="text-xs text-slate-500 hover:text-slate-300"
+                        >
+                          Skip
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex flex-wrap items-center gap-5">
                   <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">

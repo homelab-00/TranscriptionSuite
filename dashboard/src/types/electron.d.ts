@@ -90,6 +90,10 @@ interface ElectronAPI {
     pullImage: (tag: string) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;
+    hasSidecarImage: () => Promise<boolean>;
+    pullSidecarImage: () => Promise<string>;
+    cancelSidecarPull: () => Promise<boolean>;
+    isSidecarPulling: () => Promise<boolean>;
     removeImage: (tag: string) => Promise<string>;
     getContainerStatus: () => Promise<{
       exists: boolean;

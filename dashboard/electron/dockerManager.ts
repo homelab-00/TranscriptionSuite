@@ -43,6 +43,9 @@ const __dirname = path.dirname(__filename);
 const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
 export const CONTAINER_NAME = 'transcriptionsuite-container';
 
+/** Vulkan sidecar image — upstream whisper.cpp with Vulkan GPU acceleration. */
+const VULKAN_SIDECAR_IMAGE = 'ghcr.io/ggml-org/whisper.cpp:main-vulkan';
+
 /**
  * Resolve compose directory.
  *
@@ -816,6 +819,9 @@ function retryDetection(): void {
 /** Active pull process — tracked so it can be cancelled */
 let pullProcess: ChildProcess | null = null;
 
+/** Active sidecar pull process — independent from main image pull */
+let sidecarPullProcess: ChildProcess | null = null;
+
 /**
  * List local Docker images matching our repo.
  */
@@ -1048,6 +1054,81 @@ function cancelPull(): boolean {
  */
 function isPulling(): boolean {
   return pullProcess !== null;
+}
+
+// ─── Sidecar Image Operations ─────────────────────────────────────────────
+
+/**
+ * Check whether the Vulkan sidecar image exists locally.
+ */
+async function hasSidecarImage(): Promise<boolean> {
+  try {
+    await exec(await runtimeBin(), ['image', 'inspect', VULKAN_SIDECAR_IMAGE]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pull the Vulkan sidecar image from the registry.
+ * Uses spawn so the process can be cancelled independently of the main pull.
+ */
+async function pullSidecarImage(): Promise<string> {
+  const bin = await runtimeBin();
+  return new Promise((resolve, reject) => {
+    cancelSidecarPull(); // kill any existing sidecar pull first
+
+    const proc = spawn(bin, ['pull', VULKAN_SIDECAR_IMAGE], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
+    });
+    sidecarPullProcess = proc;
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout?.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+    proc.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (sidecarPullProcess === proc) sidecarPullProcess = null;
+      if (code === 0) {
+        resolve(stdout.trim());
+      } else {
+        reject(new Error(stderr.trim() || `Sidecar pull exited with code ${code}`));
+      }
+    });
+
+    proc.on('error', (err) => {
+      if (sidecarPullProcess === proc) sidecarPullProcess = null;
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Cancel an in-progress sidecar image pull.
+ * Returns true if a pull was actually cancelled.
+ */
+function cancelSidecarPull(): boolean {
+  if (sidecarPullProcess) {
+    sidecarPullProcess.kill('SIGTERM');
+    sidecarPullProcess = null;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Check if a sidecar pull is currently in progress.
+ */
+function isSidecarPulling(): boolean {
+  return sidecarPullProcess !== null;
 }
 
 /**
@@ -2080,6 +2161,10 @@ export const dockerManager = {
   pullImage,
   cancelPull,
   isPulling,
+  hasSidecarImage,
+  pullSidecarImage,
+  cancelSidecarPull,
+  isSidecarPulling,
   removeImage,
   getContainerStatus,
   startContainer,
