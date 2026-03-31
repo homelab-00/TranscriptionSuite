@@ -34,6 +34,7 @@ interface SidebarProps {
   gpuError?: string;
   runtimeProfile?: 'gpu' | 'cpu' | 'vulkan' | 'metal';
   serverReachable?: boolean;
+  mlxProcessAlive?: boolean;
 }
 
 const SIDEBAR_COLLAPSED_WIDTH_PX = 80;
@@ -58,6 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   gpuError,
   runtimeProfile,
   serverReachable,
+  mlxProcessAlive,
 }) => {
   const isMetal = runtimeProfile === 'metal';
   const [collapsed, setCollapsed] = useState(false);
@@ -112,6 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Derive status for each sidebar item from Docker + client state
   // Issue 17 — Session: pulsing green when server AND client running AND healthy, orange when container exists, gray otherwise
   // For bare-metal mode, use server reachability instead of Docker container state.
+  // mlxProcessAlive shows orange (warning) when the server process is alive but not yet accepting connections.
   const sessionStatus: 'active' | 'warning' | 'inactive' | 'error' = gpuError
     ? 'error'
     : useMockupStatusFallback
@@ -119,7 +122,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       : isMetal
         ? serverReachable
           ? 'active'
-          : 'inactive'
+          : mlxProcessAlive
+            ? 'warning'
+            : 'inactive'
         : containerRunning && clientRunning && containerHealth === 'healthy'
           ? 'active'
           : containerExists
@@ -133,7 +138,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       : isMetal
         ? serverReachable
           ? 'active'
-          : 'inactive'
+          : mlxProcessAlive
+            ? 'warning'
+            : 'inactive'
         : containerRunning && containerHealth === 'healthy'
           ? 'active'
           : containerExists

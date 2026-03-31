@@ -1,4 +1,4 @@
-import { isNemoModel, isVibeVoiceASRModel } from './modelCapabilities';
+import { isMLXModel, isNemoModel, isVibeVoiceASRModel } from './modelCapabilities';
 import { MODEL_REGISTRY } from './modelRegistry';
 import type { ModelFamily, ModelRole } from './modelRegistry';
 
@@ -88,6 +88,9 @@ export function modelFamilyFromName(value: string | null | undefined): ModelFami
   const modelName = normalizeForModelFamily(value);
   if (!modelName) return 'none';
   if (isNemoModel(modelName)) return 'nemo';
+  // MLX check must come before VibeVoice — mlx-community/VibeVoice-ASR-bf16
+  // matches both isMLXModel and isVibeVoiceASRModel.
+  if (isMLXModel(modelName)) return 'mlx';
   if (isVibeVoiceASRModel(modelName)) return 'vibevoice';
   return 'whisper';
 }

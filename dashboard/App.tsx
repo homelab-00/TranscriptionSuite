@@ -106,6 +106,17 @@ const AppInner: React.FC = () => {
     }
   }, []);
 
+  // Track whether the MLX native server process is alive (starting or running)
+  // so the Sidebar can show an intermediate "starting" state.
+  const [mlxProcessAlive, setMlxProcessAlive] = useState(false);
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.mlx) return;
+    api.mlx.getStatus().then((s: string) => setMlxProcessAlive(s === 'starting' || s === 'running')).catch(() => {});
+    const unsub = api.mlx.onStatusChanged((s: string) => setMlxProcessAlive(s === 'starting' || s === 'running'));
+    return unsub;
+  }, []);
+
   const [startupFlowPending, setStartupFlowPending] = useState(false);
   const startupFlowPendingRef = useRef(false);
 
@@ -670,6 +681,7 @@ const AppInner: React.FC = () => {
         gpuError={serverConnection.details?.gpu_error}
         runtimeProfile={runtimeProfile}
         serverReachable={serverConnection.reachable}
+        mlxProcessAlive={mlxProcessAlive}
       />
 
       {/* Main Content Area */}

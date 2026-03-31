@@ -152,9 +152,6 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
 
   // ── VibeVoice ────────────────────────────────────────────────────────────
-  // TODO: Add MLX-converted VibeVoice ASR models (e.g. mlx-community/VibeVoice-ASR-4bit) 
-  // when the underlying `mlx-audio` library becomes stable enough to process raw numpy audio 
-  // arrays without indexing errors. (As of v0.4.1, it crashes on inference in our backend).
   {
     id: 'microsoft/VibeVoice-ASR',
     displayName: 'VibeVoice ASR',
@@ -173,6 +170,19 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     description: 'Quantized VibeVoice variant. Lower VRAM requirement (~7 GB).',
     parameterCount: '9B',
     huggingfaceUrl: 'https://huggingface.co/scerz/VibeVoice-ASR-4bit',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
+    roles: ['main'],
+  },
+
+  // ── MLX VibeVoice (Apple Silicon / Metal) ────────────────────────────────
+  {
+    id: 'mlx-community/VibeVoice-ASR-bf16',
+    displayName: 'MLX VibeVoice ASR (bf16)',
+    family: 'mlx',
+    description:
+      'Microsoft VibeVoice-ASR on MLX. Native diarization + timestamps on Apple Silicon. Very large (~18 GB).',
+    parameterCount: '9B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/VibeVoice-ASR-bf16',
     capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
     roles: ['main'],
   },
@@ -293,7 +303,9 @@ export function getModelById(id: string): ModelInfo | undefined {
 export function detectModelFamily(modelId: string): ModelFamily {
   if (isParakeetModel(modelId) || isCanaryModel(modelId)) return 'nemo';
   if (isNemoModel(modelId)) return 'nemo';
-  if (isVibeVoiceASRModel(modelId)) return 'vibevoice';
+  // MLX check must come before VibeVoice — mlx-community/VibeVoice-ASR-bf16
+  // matches both isMLXModel and isVibeVoiceASRModel.
   if (isMLXParakeetModel(modelId) || isMLXModel(modelId)) return 'mlx';
+  if (isVibeVoiceASRModel(modelId)) return 'vibevoice';
   return 'whisper';
 }

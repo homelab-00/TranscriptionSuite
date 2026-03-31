@@ -75,6 +75,9 @@ export class MLXServerManager {
       HF_HOME: hfHome,
       LOG_DIR: path.join(dataDir, 'logs'),
       LOG_LEVEL: 'INFO',
+      // Force line-buffered stdout so the Electron parent sees output
+      // immediately instead of waiting for the 8KB pipe buffer to fill.
+      PYTHONUNBUFFERED: '1',
     };
     if (opts.hfToken) env.HF_TOKEN = opts.hfToken;
     if (opts.mainTranscriberModel) env.MAIN_TRANSCRIBER_MODEL = opts.mainTranscriberModel;
@@ -130,11 +133,12 @@ export class MLXServerManager {
       for (const line of lines) {
         this._appendLog(line);
         this._emit('mlx:logLine', line);
-      }
-      // Transition to running once first output arrives (uvicorn prints startup info).
-      if (this._status === 'starting') {
-        this._setStatus('running');
-        this._emit('mlx:statusChanged', 'running');
+        // Transition to running only when the server reports it is ready
+        // to accept connections (lifespan complete, model loaded).
+        if (this._status === 'starting' && line.includes('startup complete')) {
+          this._setStatus('running');
+          this._emit('mlx:statusChanged', 'running');
+        }
       }
     });
 
@@ -143,6 +147,11 @@ export class MLXServerManager {
       for (const line of lines) {
         this._appendLog(`[stderr] ${line}`);
         this._emit('mlx:logLine', `[stderr] ${line}`);
+        // uvicorn also signals readiness on stderr.
+        if (this._status === 'starting' && line.includes('Application startup complete')) {
+          this._setStatus('running');
+          this._emit('mlx:statusChanged', 'running');
+        }
       }
     });
 

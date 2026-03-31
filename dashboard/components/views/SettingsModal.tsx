@@ -33,7 +33,7 @@ import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
-import { isVibeVoiceASRModel } from '../../src/services/modelCapabilities';
+import { isMLXModel, isVibeVoiceASRModel } from '../../src/services/modelCapabilities';
 import { buildSparseYaml } from '../../src/utils/configTree';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 import type { AuthToken } from '../../src/api/types';
@@ -394,8 +394,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   if (!isRendered) return null;
 
-  const sampleRateHz = isVibeVoiceASRModel(configuredMainModel) ? 24000 : 16000;
-  const sampleRateHint = isVibeVoiceASRModel(configuredMainModel)
+  const sampleRateHz = isVibeVoiceASRModel(configuredMainModel) && !isMLXModel(configuredMainModel) ? 24000 : 16000;
+  const sampleRateHint = isVibeVoiceASRModel(configuredMainModel) && !isMLXModel(configuredMainModel)
     ? 'Fixed for VibeVoice models'
     : 'Fixed for Faster Whisper and NeMo models';
 
