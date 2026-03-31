@@ -1221,7 +1221,7 @@ The Vulkan overlay (`docker-compose.vulkan.yml`) adds a `whisper-server` service
 ```yaml
 services:
   whisper-server:
-    image: ghcr.io/ggerganov/whisper.cpp:main-server-vulkan
+    image: ghcr.io/ggml-org/whisper.cpp:main-vulkan
     restart: unless-stopped
     volumes:
       - huggingface-models:/models:ro    # Shared model volume (read-only)
