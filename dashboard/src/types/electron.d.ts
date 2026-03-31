@@ -52,6 +52,13 @@ interface TrayMenuState {
   isStandby?: boolean;
 }
 
+interface BootstrapDownloadEvent {
+  action: 'start' | 'complete' | 'fail';
+  id: string;
+  label: string;
+  error?: string;
+}
+
 interface ElectronAPI {
   config: {
     get: (key: string) => Promise<unknown>;
@@ -126,6 +133,7 @@ interface ElectronAPI {
     startLogStream: (tail?: number) => Promise<void>;
     stopLogStream: () => Promise<void>;
     onLogLine: (callback: (line: string) => void) => () => void;
+    onDownloadEvent: (callback: (event: BootstrapDownloadEvent) => void) => () => void;
   };
   tray: {
     setTooltip: (tooltip: string) => Promise<void>;

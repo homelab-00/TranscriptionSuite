@@ -1830,6 +1830,7 @@ function stopBackgroundLogStream(): void {
   }
   logSubscribers.clear();
   logLineBuffer.length = 0;
+  bootstrapParserAttached = false;
 }
 
 /**
@@ -1847,6 +1848,157 @@ async function getLogs(tail?: number): Promise<string[]> {
     return output.split(/\r?\n/).filter(Boolean);
   } catch {
     return [];
+  }
+}
+
+// ─── Bootstrap Download Event Parser ────────────────────────────────────────
+//
+// Parses [bootstrap] log lines for install start/complete/fail patterns and
+// emits structured download events.  Subscribers register via
+// subscribeToDownloadEvents() — typically the IPC bridge in main.ts.
+
+export interface BootstrapDownloadEvent {
+  action: 'start' | 'complete' | 'fail';
+  id: string;
+  label: string;
+  error?: string;
+}
+
+interface BootstrapPattern {
+  /** Substring to match inside the log line. */
+  match: string;
+  action: BootstrapDownloadEvent['action'];
+  id: string;
+  label: string;
+  /** When true, extract text after the match string as the error message. */
+  extractError?: boolean;
+}
+
+const BOOTSTRAP_PATTERNS: BootstrapPattern[] = [
+  // ── Runtime dependencies ──────────────────────────────────────────────────
+  {
+    match: '[bootstrap] Installing Python runtime dependencies',
+    action: 'start',
+    id: 'bootstrap-runtime-deps',
+    label: 'Runtime Dependencies',
+  },
+  {
+    match: '[bootstrap] Runtime dependencies installed',
+    action: 'complete',
+    id: 'bootstrap-runtime-deps',
+    label: 'Runtime Dependencies',
+  },
+  // ── faster-whisper ────────────────────────────────────────────────────────
+  {
+    match: '[bootstrap] Installing faster-whisper family dependencies',
+    action: 'start',
+    id: 'bootstrap-faster-whisper',
+    label: 'faster-whisper',
+  },
+  {
+    match: '[bootstrap] faster-whisper family dependencies installed',
+    action: 'complete',
+    id: 'bootstrap-faster-whisper',
+    label: 'faster-whisper',
+  },
+  {
+    match: '[bootstrap] faster-whisper dependency installation failed:',
+    action: 'fail',
+    id: 'bootstrap-faster-whisper',
+    label: 'faster-whisper',
+    extractError: true,
+  },
+  // ── NeMo toolkit ──────────────────────────────────────────────────────────
+  {
+    match: '[bootstrap] Installing NeMo toolkit',
+    action: 'start',
+    id: 'bootstrap-nemo',
+    label: 'NeMo Toolkit',
+  },
+  {
+    match: '[bootstrap] NeMo toolkit installed',
+    action: 'complete',
+    id: 'bootstrap-nemo',
+    label: 'NeMo Toolkit',
+  },
+  {
+    match: '[bootstrap] NeMo toolkit installation failed:',
+    action: 'fail',
+    id: 'bootstrap-nemo',
+    label: 'NeMo Toolkit',
+    extractError: true,
+  },
+  // ── VibeVoice-ASR ─────────────────────────────────────────────────────────
+  {
+    match: '[bootstrap] Installing VibeVoice-ASR',
+    action: 'start',
+    id: 'bootstrap-vibevoice',
+    label: 'VibeVoice-ASR',
+  },
+  {
+    match: '[bootstrap] VibeVoice-ASR support installed',
+    action: 'complete',
+    id: 'bootstrap-vibevoice',
+    label: 'VibeVoice-ASR',
+  },
+  {
+    match: '[bootstrap] VibeVoice-ASR installation failed:',
+    action: 'fail',
+    id: 'bootstrap-vibevoice',
+    label: 'VibeVoice-ASR',
+    extractError: true,
+  },
+];
+
+const downloadEventSubscribers = new Set<(event: BootstrapDownloadEvent) => void>();
+
+/**
+ * Log subscriber that scans each line for bootstrap install patterns.
+ * Attached automatically when any download-event subscriber is registered.
+ */
+function bootstrapLogParser(line: string): void {
+  for (const pattern of BOOTSTRAP_PATTERNS) {
+    if (!line.includes(pattern.match)) continue;
+
+    const event: BootstrapDownloadEvent = {
+      action: pattern.action,
+      id: pattern.id,
+      label: pattern.label,
+    };
+
+    if (pattern.extractError) {
+      const idx = line.indexOf(pattern.match) + pattern.match.length;
+      event.error = line.slice(idx).trim() || 'Unknown error';
+    }
+
+    for (const cb of downloadEventSubscribers) {
+      cb(event);
+    }
+    return; // First match wins per line
+  }
+}
+
+/** Whether the parser is currently registered as a log subscriber. */
+let bootstrapParserAttached = false;
+
+function subscribeToDownloadEvents(callback: (event: BootstrapDownloadEvent) => void): void {
+  downloadEventSubscribers.add(callback);
+  if (!bootstrapParserAttached) {
+    // Replay the ring buffer so bootstrap events that arrived before this
+    // subscriber registered are not silently lost.
+    for (const line of logLineBuffer) {
+      bootstrapLogParser(line);
+    }
+    logSubscribers.add(bootstrapLogParser);
+    bootstrapParserAttached = true;
+  }
+}
+
+function unsubscribeFromDownloadEvents(callback: (event: BootstrapDownloadEvent) => void): void {
+  downloadEventSubscribers.delete(callback);
+  if (downloadEventSubscribers.size === 0 && bootstrapParserAttached) {
+    logSubscribers.delete(bootstrapLogParser);
+    bootstrapParserAttached = false;
   }
 }
 
@@ -2186,6 +2338,8 @@ export const dockerManager = {
   downloadModelToCache,
   isGgmlModelDownloaded,
   checkTailscaleCertsExist,
+  subscribeToDownloadEvents,
+  unsubscribeFromDownloadEvents,
   VOLUME_NAMES,
   CONTAINER_NAME,
   IMAGE_REPO,

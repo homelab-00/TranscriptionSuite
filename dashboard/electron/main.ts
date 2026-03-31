@@ -1004,6 +1004,15 @@ ipcMain.handle('docker:stopLogStream', async () => {
   }
 });
 
+// ─── Bootstrap Download Event Bridge ──────────────────────────────────────
+// Permanent subscriber — forwards structured download events from the
+// bootstrap log parser to the renderer so the download store can track
+// in-container installs regardless of which UI tab is active.
+
+dockerManager.subscribeToDownloadEvents((event) => {
+  mainWindow?.webContents.send('docker:downloadEvent', event);
+});
+
 // ─── Audio IPC ──────────────────────────────────────────────────────────────
 
 // Legacy stub — kept so older renderer builds don't crash on missing handler.

@@ -29,6 +29,7 @@ import { useImportQueueStore, selectIsUploading } from './src/stores/importQueue
 import { QueuePausedBanner } from './components/ui/QueuePausedBanner';
 import { DownloadNotifications } from './components/ui/DownloadNotifications';
 import { useStarPopup } from './src/hooks/useStarPopup';
+import { useBootstrapDownloads } from './src/hooks/useBootstrapDownloads';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
 import { useAuthTokenSync } from './src/hooks/useAuthTokenSync';
 import {
@@ -78,6 +79,8 @@ const AppInner: React.FC = () => {
   useServerEventReactor(serverConnection);
   // Always-on Docker log token scanner
   useAuthTokenSync(serverConnection.reachable);
+  // Bridge bootstrap log events → download store (runs regardless of active tab)
+  useBootstrapDownloads();
 
   // Track clientRunning at app level so Sidebar can derive Session status
   const [clientRunning, setClientRunning] = useState(false);
