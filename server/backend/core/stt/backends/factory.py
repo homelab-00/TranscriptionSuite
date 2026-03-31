@@ -112,6 +112,19 @@ def create_backend(model_name: str) -> STTBackend:
 
         return MLXWhisperBackend()
 
+    # Default: faster-whisper / WhisperX backend.
+    # Prefer WhisperX (alignment + diarization support) when available;
+    # fall back to lightweight FasterWhisperBackend when it isn't (e.g. MLX
+    # bare-metal environments where the whisper extra is not installed).
+    try:
+        import importlib
+
+        importlib.import_module("whisperx")
+    except ImportError:
+        from server.core.stt.backends.faster_whisper_backend import FasterWhisperBackend
+
+        return FasterWhisperBackend()
+
     from server.core.stt.backends.whisperx_backend import WhisperXBackend
 
     return WhisperXBackend()

@@ -34,8 +34,8 @@ const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-/** Families that require Docker/ctranslate2 and do not work in Metal mode. */
-const DOCKER_ONLY_FAMILIES: Set<ModelFamily> = new Set(['nemo', 'whisper', 'vibevoice']);
+/** Families that require Docker and do not work in Metal mode. */
+const DOCKER_ONLY_FAMILIES: Set<ModelFamily> = new Set(['nemo', 'vibevoice']);
 
 export interface ModelManagerTabProps {
   mainModelSelection: string;

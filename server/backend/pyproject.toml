@@ -69,6 +69,9 @@ mlx = [
     "canary-mlx>=0.1.0",
     "soundfile>=0.13.1",
     "mlx-audio>=0.4.1",
+    # Live Mode uses faster-whisper even on Metal.
+    "faster-whisper==1.2.1",
+    "ctranslate2==4.7.1",
 ]
 [project.scripts]
 transcription-server = "server.api.main:main"
