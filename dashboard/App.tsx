@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
-import { View, NotebookTab, SessionTab, LogsTab } from './types';
+import { View, NotebookTab, SessionTab } from './types';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/views/SessionView';
 import { NotebookView } from './components/views/NotebookView';
 import { ServerView } from './components/views/ServerView';
 import { LogsView } from './components/views/LogsView';
+import { DownloadsPanel } from './components/views/DownloadsPanel';
 import { ModelManagerView } from './components/views/ModelManagerView';
 import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
@@ -67,7 +68,6 @@ const AppInner: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.SESSION);
   const [notebookTab, setNotebookTab] = useState<NotebookTab>(NotebookTab.CALENDAR);
   const [sessionTab, setSessionTab] = useState<SessionTab>(SessionTab.MAIN);
-  const [logsTab, setLogsTab] = useState<LogsTab>(LogsTab.MAIN);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
@@ -613,10 +613,16 @@ const AppInner: React.FC = () => {
             <ModelManagerView />
           </ErrorBoundary>
         );
+      case View.DOWNLOADS:
+        return (
+          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
+            <DownloadsPanel />
+          </ErrorBoundary>
+        );
       case View.LOGS:
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
-            <LogsView logsTab={logsTab} />
+            <LogsView />
           </ErrorBoundary>
         );
       default:
@@ -648,8 +654,6 @@ const AppInner: React.FC = () => {
         onChangeNotebookTab={setNotebookTab}
         sessionTab={sessionTab}
         onChangeSessionTab={setSessionTab}
-        logsTab={logsTab}
-        onChangeLogsTab={setLogsTab}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenAbout={() => setIsAboutOpen(true)}
         onOpenBugReport={() => setIsBugReportOpen(true)}

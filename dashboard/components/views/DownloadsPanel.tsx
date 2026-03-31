@@ -2,7 +2,7 @@
  * Downloads panel — Steam-style detailed download manager.
  *
  * Shows full download history with progress bars, controls, speed,
- * size, and timestamps. Displayed as a sub-tab of the Logs view.
+ * size, and timestamps. Displayed as a top-level sidebar view.
  */
 
 import React, { useCallback } from 'react';

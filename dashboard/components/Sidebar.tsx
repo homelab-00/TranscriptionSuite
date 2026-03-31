@@ -1,5 +1,5 @@
 import React, { useCallback, useLayoutEffect, useRef, useState, useEffect } from 'react';
-import { View, NotebookTab, SessionTab, LogsTab } from '../types';
+import { View, NotebookTab, SessionTab } from '../types';
 import {
   Mic2,
   Book,
@@ -25,8 +25,6 @@ interface SidebarProps {
   onChangeNotebookTab: (tab: NotebookTab) => void;
   sessionTab: SessionTab;
   onChangeSessionTab: (tab: SessionTab) => void;
-  logsTab: LogsTab;
-  onChangeLogsTab: (tab: LogsTab) => void;
   onOpenSettings: () => void;
   onOpenAbout: () => void;
   onOpenBugReport: () => void;
@@ -49,8 +47,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onChangeNotebookTab,
   sessionTab,
   onChangeSessionTab,
-  logsTab,
-  onChangeLogsTab,
   onOpenSettings,
   onOpenAbout,
   onOpenBugReport,
@@ -157,6 +153,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: <Library size={20} />,
     },
     {
+      id: View.DOWNLOADS,
+      label: 'Downloads',
+      icon: <Download size={20} />,
+    },
+    {
       id: View.LOGS,
       label: 'Logs',
       icon: <Terminal size={20} />,
@@ -171,11 +172,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // Sub-items shown indented below the Session nav item
   const sessionSubItems = [{ id: SessionTab.IMPORT, icon: <Upload size={14} />, label: 'Import' }];
-
-  // Sub-items shown indented below the Logs nav item
-  const logsSubItems = [
-    { id: LogsTab.DOWNLOADS, icon: <Download size={14} />, label: 'Downloads' },
-  ];
 
   const activeIndex = navItems.findIndex((item) => item.id === currentView);
 
@@ -270,7 +266,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onChangeView(item.id);
                   if (item.id === View.NOTEBOOK) onChangeNotebookTab(NotebookTab.CALENDAR);
                   if (item.id === View.SESSION) onChangeSessionTab(SessionTab.MAIN);
-                  if (item.id === View.LOGS) onChangeLogsTab(LogsTab.MAIN);
                 }}
                 className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'px-4'} h-12 rounded-xl transition-colors duration-200 ${
                   isActive ? 'text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
@@ -314,42 +309,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         onClick={() => {
                           onChangeView(View.SESSION);
                           onChangeSessionTab(subItem.id);
-                        }}
-                        className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'pr-4 pl-9'} h-9 rounded-xl transition-colors duration-200 ${
-                          isSubActive
-                            ? 'bg-white/6 text-slate-200'
-                            : 'text-slate-500 hover:bg-white/5 hover:text-slate-400'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <span
-                            className={`transition-colors duration-200 ${isSubActive ? 'text-accent-cyan/70' : ''}`}
-                          >
-                            {subItem.icon}
-                          </span>
-                          <span
-                            className={`text-xs font-medium whitespace-nowrap transition-all duration-200 ${collapsed ? 'hidden w-0 opacity-0' : 'opacity-100'}`}
-                          >
-                            {subItem.label}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Logs sub-tabs: always visible */}
-              {item.id === View.LOGS && (
-                <div className="flex flex-col gap-2">
-                  {logsSubItems.map((subItem) => {
-                    const isSubActive = currentView === View.LOGS && logsTab === subItem.id;
-                    return (
-                      <button
-                        key={subItem.id}
-                        onClick={() => {
-                          onChangeView(View.LOGS);
-                          onChangeLogsTab(subItem.id);
                         }}
                         className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'pr-4 pl-9'} h-9 rounded-xl transition-colors duration-200 ${
                           isSubActive

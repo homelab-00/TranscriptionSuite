@@ -3,6 +3,7 @@ export enum View {
   NOTEBOOK = 'NOTEBOOK',
   SERVER = 'SERVER',
   MODEL_MANAGER = 'MODEL_MANAGER',
+  DOWNLOADS = 'DOWNLOADS',
   LOGS = 'LOGS',
 }
 
@@ -15,11 +16,6 @@ export enum NotebookTab {
 export enum SessionTab {
   MAIN = 'MAIN',
   IMPORT = 'IMPORT',
-}
-
-export enum LogsTab {
-  MAIN = 'MAIN',
-  DOWNLOADS = 'DOWNLOADS',
 }
 
 export interface StatusIndicatorProps {
