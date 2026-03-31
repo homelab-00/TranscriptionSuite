@@ -944,7 +944,9 @@ const App: React.FC = () => (
     <DockerProvider>
       <AppInner />
     </DockerProvider>
-    <DownloadNotifications />
+    <ErrorBoundary FallbackComponent={ErrorFallback}>
+      <DownloadNotifications />
+    </ErrorBoundary>
     <Toaster position="bottom-right" theme="dark" richColors />
     <ReactQueryDevtools initialIsOpen={false} />
   </QueryClientProvider>

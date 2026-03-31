@@ -6,7 +6,7 @@
  * to differentiate download categories.
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   X,
   Container,
@@ -20,7 +20,6 @@ import {
 } from 'lucide-react';
 import {
   useDownloadStore,
-  selectVisibleNotifications,
   type DownloadItem,
   type DownloadType,
 } from '../../src/stores/downloadStore';
@@ -120,7 +119,12 @@ function DownloadCard({ item }: { item: DownloadItem }) {
 // ─── Main widget ─────────────────────────────────────────────────────────────
 
 export const DownloadNotifications: React.FC = () => {
-  const items = useDownloadStore(selectVisibleNotifications);
+  // Subscribe to the raw items array (stable reference) and derive
+  // the filtered list via useMemo. Using a .filter() selector directly
+  // causes an infinite loop because it returns a new array reference
+  // every call, which React 18's useSyncExternalStore treats as changed state.
+  const allItems = useDownloadStore((s) => s.items);
+  const items = useMemo(() => allItems.filter((item) => !item.dismissed), [allItems]);
 
   if (items.length === 0) return null;
 
