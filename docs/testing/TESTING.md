@@ -10,29 +10,29 @@ for writing new tests, and future upgrade recommendations.
 
 ### Backend (pytest)
 
-All backend tests are run from the **`build/.venv`** virtual environment. This is
-deliberate — `build/.venv` does **not** have real `torch`/CUDA packages installed,
-which avoids module collisions that cause collection errors in `server/backend/.venv`.
-The `build/pyproject.toml` declares all required test dependencies in the `backend-test`
-dependency group.
+Backend tests run from `server/backend/` using the server's own `uv`-managed venv:
 
 ```bash
 cd server/backend
-../../build/.venv/bin/pytest tests/ -v --tb=short
+uv run pytest tests/ -v --tb=short
 ```
 
-Coverage report (requires `pytest-cov`, already in `build/pyproject.toml`):
+Quick summary (no traceback, just pass/fail counts):
 
 ```bash
-../../build/.venv/bin/pytest tests/ --cov=. --cov-report=term-missing
+uv run pytest tests/ -q --tb=no
 ```
 
-> **Why not `server/backend/.venv`?**
-> The server venv has real ML dependencies (`torch`, `faster-whisper`, etc.) which
-> pull in CUDA libraries. Some test modules stub these at import time, and having
-> the real modules already loaded causes `sys.modules` conflicts. The `build/.venv`
-> has none of these — it only has the lightweight dependencies needed to run tests
-> (`pytest`, `httpx`, `numpy`, `fastapi`, `pydantic`, `scipy`, etc.).
+Coverage report:
+
+```bash
+uv run pytest tests/ --cov=. --cov-report=term-missing
+```
+
+> **Note on `build/.venv`:** Earlier documentation referenced a separate `build/.venv`
+> for running tests. That approach is no longer needed — the backend venv now stubs
+> heavy ML dependencies at import time within each test file, so collection is clean
+> in `server/backend/.venv`.
 
 ### Frontend (Vitest)
 
@@ -47,52 +47,98 @@ Vitest runs in parallel by default. Configuration lives in `dashboard/vitest.con
 
 ## Current Coverage
 
-### Backend — 33 test files, ~502 tests
+### Backend — 45 test files, 804 tests
+
+#### Core STT backends
 
 | Test File | Tests | Module Under Test |
 |-----------|------:|-------------------|
-| `test_bootstrap_runtime.py` | 18 | Server startup, dependency bootstrap |
-| `test_vibevoice_asr_backend.py` | 16 | VibeVoice import/load compatibility |
-| `test_ffmpeg_utils.py` | 20 | Audio processing (resample, normalise) |
-| `test_parallel_diarize.py` | 12 | Parallel transcription + diarisation |
-| `test_subtitle_export.py` | 9 | SRT/ASS subtitle rendering |
-| `test_admin_auth.py` | 8 | Admin endpoint authorisation |
-| `test_config.py` | 12 | `ServerConfig` class |
-| `test_whisperx_backend.py` | 7 | WhisperX API signature compat |
-| `test_notebook_export_route.py` | 5 | Notebook export endpoints |
-| `test_cors.py` | 5 | CORS origin validation |
-| `test_translation_capabilities.py` | 5 | Translation model detection |
-| `test_auth_query_token_middleware.py` | 4 | Query token middleware |
-| `test_route_utils_local_auth_bypass.py` | 4 | Local auth bypass |
-| `test_disabled_model_slot_behavior.py` | 3 | Disabled model handling |
-| `test_stt_backend_factory.py` | 2 | Factory detection |
+| `test_mlx_whisper_backend.py` | 17 | `MLXWhisperBackend` (mlx-audio): load/unload, word-timestamp alignment-heads patch, transcribe, warmup |
+| `test_mlx_parakeet_backend.py` | 28 | `MLXParakeetBackend`: load/unload, transcribe with word timestamps, multi-segment, warmup, factory detection |
+| `test_mlx_canary_backend.py` | 38 | `MLXCanaryBackend`: VAD chunking, multi-chunk merge, silence tuning, factory detection |
+| `test_mlx_vibevoice_backend.py` | 15 | `MLXVibeVoiceBackend`: load/unload, diarized segment parsing, speaker labels, warmup, factory detection |
+| `test_faster_whisper_backend.py` | 18 | `FasterWhisperBackend`: word timestamps, multi-segment, warmup, `supports_translation()`, factory whisperx→faster_whisper fallback |
+| `test_vibevoice_asr_backend.py` | 16 | Docker `VibeVoiceASRBackend`: import/load compatibility |
+| `test_whisperx_backend.py` | 7 | `WhisperXBackend`: API signature compat |
+| `test_whispercpp_backend.py` | 18 | `WhisperCppBackend`: HTTP client to whisper-server sidecar |
+| `test_stt_backend_factory.py` | 9 | `detect_backend_type` routing for all model IDs; `is_mlx_model()` for new asr-fp16 and VibeVoice IDs |
+| `test_factory_whispercpp.py` | 17 | GGML model-name routing to `WhisperCppBackend` |
 | `test_stt_import_behavior.py` | 2 | Lazy STT imports |
-| `test_live_mode_model_constraints.py` | 2 | Live model validation |
-| `test_database_migration_versioning.py` | 1 | DB migration stamps |
-| `test_transcription_languages_route.py` | 1 | Languages endpoint |
-| `test_token_store.py` | 30 | Token hashing, create/validate/revoke, expiry, persistence, v1→v2 migration |
-| `test_speaker_merge.py` | 28 | Speaker assignment via overlap, fallback chain, micro-turn smoothing, segment builder |
-| `test_config_tree.py` | 33 | Type detection, key humanisation, comment extraction, parse/edit round-trip |
-| `test_route_utils_pure.py` | 22 | `is_localhost`, `extract_bearer_token`, `sanitize_for_log`, Docker gateway detection |
-| `test_transcription_job_tracker.py` | 27 | Job mutual exclusion, cancellation, progress, status dict, thread safety |
-| `test_model_manager_init.py` | 27 | Feature flag init from bootstrap/env, error classification, model normalisation |
+
+#### Diarization & speaker merging
+
+| Test File | Tests | Module Under Test |
+|-----------|------:|-------------------|
+| `test_sortformer_engine.py` | 20 | `SortformerEngine` (Metal-native diarization via mlx-audio): availability check, load/unload lifecycle, `diarize_audio()` result structure, speaker labels, auto-load |
+| `test_parallel_diarize.py` | 12 | Parallel transcription + diarisation orchestration |
+| `test_speaker_merge.py` | 37 | Speaker assignment via overlap, fallback chain, micro-turn smoothing, segment builder, no-words fallback path |
 | `test_diarization_data.py` | 19 | `DiarizationSegment` duration/to_dict, `DiarizationResult` speaker lookups |
-| `test_live_engine_config.py` | 34 | `LiveModeState` enum, `LiveModeConfig` defaults, engine init/history/callbacks |
-| `test_audio_utils.py` | 40 | GPU cache, CUDA check, convert WAV/MP3, legacy normalise, format timestamp, duration, WebRTC/Silero VAD |
+
+#### STT engine & model management
+
+| Test File | Tests | Module Under Test |
+|-----------|------:|-------------------|
 | `test_stt_engine_helpers.py` | 28 | `TranscriptionResult.to_dict()`, `_preprocess_output()` text processing, `get_status()`, constants |
-| `test_database.py` | 56 | Recording/segment/word CRUD, FTS search, conversation/message CRUD, cascading deletes, Unicode, `Recording` model |
-| `test_health_routes.py` | 9 | `/health`, `/ready`, `/api/status` endpoints, TLS public-route access |
+| `test_model_manager_init.py` | 27 | Feature flag init from bootstrap/env, error classification, model normalisation |
+| `test_capabilities_whispercpp.py` | 12 | GGML model capabilities — translation support validation |
+| `test_translation_capabilities.py` | 9 | Translation model detection across all families |
+
+#### Live Mode & transcription jobs
+
+| Test File | Tests | Module Under Test |
+|-----------|------:|-------------------|
+| `test_live_engine_config.py` | 33 | `LiveModeState` enum, `LiveModeConfig` defaults, engine init/history/callbacks |
+| `test_live_mode_model_constraints.py` | 2 | Live model validation — whisper/MLX accepted; NeMo/VibeVoice rejected |
+| `test_transcription_job_tracker.py` | 28 | Job mutual exclusion, cancellation, progress, status dict, thread safety |
+
+#### API routes
+
+| Test File | Tests | Module Under Test |
+|-----------|------:|-------------------|
+| `test_health_routes.py` | 11 | `/health`, `/ready`, `/api/status` endpoints, TLS public-route access |
 | `test_auth_routes.py` | 12 | `/api/auth/login`, token CRUD, admin-only gating, TLS auth enforcement |
 | `test_search_routes.py` | 9 | `/api/search/words`, `/api/search/recordings`, unified search, date-range filtering |
+| `test_notebook_export_route.py` | 7 | Notebook export endpoints |
+| `test_openai_audio_routes.py` | 16 | OpenAI-compatible `/v1/audio/` endpoints |
+| `test_admin_auth.py` | 8 | Admin endpoint authorisation |
+| `test_cors.py` | 5 | CORS origin validation |
+| `test_transcription_languages_route.py` | 2 | Languages endpoint |
+| `test_disabled_model_slot_behavior.py` | 3 | Disabled model handling |
+| `test_auth_query_token_middleware.py` | 4 | Query token middleware |
+| `test_route_utils_local_auth_bypass.py` | 4 | Local auth bypass |
+| `test_route_utils_pure.py` | 31 | `is_localhost`, `extract_bearer_token`, `sanitize_for_log`, Docker gateway detection |
 
-### Frontend — 4 test files, 123 tests
+#### Audio, config & infrastructure
 
 | Test File | Tests | Module Under Test |
 |-----------|------:|-------------------|
-| `modelCapabilities.test.ts` | 41 | Model family detection, NeMo languages, translation support, language filtering |
-| `modelSelection.test.ts` | 48 | Model normalisation, family resolution, install flag computation, UI ↔ backend mapping |
+| `test_audio_utils.py` | 53 | GPU cache, CUDA check, convert WAV/MP3, legacy normalise, format timestamp, duration, WebRTC/Silero VAD |
+| `test_ffmpeg_utils.py` | 20 | Audio processing (resample, normalise) |
+| `test_config.py` | 12 | `ServerConfig` class |
+| `test_config_tree.py` | 44 | Type detection, key humanisation, comment extraction, parse/edit round-trip |
+| `test_subtitle_export.py` | 9 | SRT/ASS subtitle rendering |
+| `test_formatters.py` | 15 | OpenAI-compatible response formatters |
+| `test_webhook.py` | 17 | Outgoing webhook dispatcher |
+| `test_bootstrap_runtime.py` | 23 | Server startup, dependency bootstrap |
+
+#### Persistence
+
+| Test File | Tests | Module Under Test |
+|-----------|------:|-------------------|
+| `test_database.py` | 56 | Recording/segment/word CRUD, FTS search, conversation/message CRUD, cascading deletes, Unicode, `Recording` model |
+| `test_token_store.py` | 30 | Token hashing, create/validate/revoke, expiry, persistence, v1→v2 migration |
+| `test_database_migration_versioning.py` | 1 | DB migration stamps |
+
+### Frontend — 6 test files, 188 tests
+
+| Test File | Tests | Module Under Test |
+|-----------|------:|-------------------|
+| `modelCapabilities.test.ts` | 64 | Model family detection, NeMo languages, translation/diarization support, MLX VibeVoice, new asr-fp16 Whisper IDs, language filtering |
+| `modelSelection.test.ts` | 50 | Model normalisation, family resolution, install flag computation, UI ↔ backend mapping, MLX VibeVoice family |
 | `transcriptionBackend.test.ts` | 11 | Backend type detection, word-timestamp toggle support |
 | `configTree.test.ts` | 23 | YAML parse/edit round-trip, type detection, comment extraction, flatten/sparse helpers |
+| `useServerStatus.test.ts` | 7 | Server status polling hook, connection state transitions |
+| `importQueueStore.test.ts` | 33 | Import queue state management, job lifecycle, selectors |
 
 ---
 
@@ -103,19 +149,25 @@ Vitest runs in parallel by default. Configuration lives in `dashboard/vitest.con
 ```
 server/backend/
 ├── tests/
-│   ├── conftest.py              # Shared fixtures (torch_stub, test clients, tokens)
-│   ├── test_admin_auth.py       # One file per module under test
+│   ├── conftest.py                       # Shared fixtures (torch_stub, test clients, tokens)
+│   ├── test_mlx_whisper_backend.py       # One file per module under test
+│   ├── test_mlx_parakeet_backend.py
+│   ├── test_mlx_canary_backend.py
+│   ├── test_mlx_vibevoice_backend.py
+│   ├── test_faster_whisper_backend.py
+│   ├── test_sortformer_engine.py
+│   ├── test_stt_backend_factory.py
+│   ├── test_parallel_diarize.py
+│   ├── test_speaker_merge.py
 │   ├── test_audio_utils.py
 │   ├── ...
 │   └── test_search_routes.py
 ├── api/                         # Production code: routes, middleware
 ├── core/                        # Production code: STT engines, model manager, etc.
+│   ├── stt/backends/            # Backend implementations (whisper, mlx_*, faster_whisper, etc.)
+│   └── sortformer_engine.py     # Metal-native diarization
 ├── database/                    # Production code: SQLite, migrations
 └── pyproject.toml               # Server dependency declarations
-
-build/
-├── pyproject.toml               # Build/test env — declares pytest + test deps
-└── .venv/                       # The venv used to run backend tests
 
 dashboard/
 ├── vitest.config.ts             # Vitest configuration
@@ -124,12 +176,19 @@ dashboard/
 │   │   ├── modelCapabilities.ts
 │   │   ├── modelCapabilities.test.ts   # Frontend tests live next to source
 │   │   ├── modelSelection.ts
-│   │   └── modelSelection.test.ts
-│   └── utils/
-│       ├── transcriptionBackend.ts
-│       ├── transcriptionBackend.test.ts
-│       ├── configTree.ts
-│       └── configTree.test.ts
+│   │   ├── modelSelection.test.ts
+│   │   └── modelRegistry.ts            # Static model metadata (no separate test file)
+│   ├── utils/
+│   │   ├── transcriptionBackend.ts
+│   │   ├── transcriptionBackend.test.ts
+│   │   ├── configTree.ts
+│   │   └── configTree.test.ts
+│   ├── hooks/
+│   │   ├── useServerStatus.ts
+│   │   └── useServerStatus.test.ts
+│   └── stores/
+│       ├── importQueueStore.ts
+│       └── importQueueStore.test.ts
 ```
 
 ### Writing a New Backend Test
@@ -340,7 +399,7 @@ impact and feasibility.
 ### 1. CI Integration
 
 Add a `backend-tests.yml` GitHub Actions workflow triggered on `server/**`
-changes. Run `build/.venv/bin/pytest server/backend/tests/ -v --tb=short` in CI.
+changes. Run `cd server/backend && uv run pytest tests/ -v --tb=short` in CI.
 Add an `npm test` step to the existing `dashboard-quality.yml` workflow for
 frontend tests.
 
@@ -414,5 +473,5 @@ with similar testing characteristics.
 | **2** | State machines (done) | 107 | `TranscriptionJobTracker`, model manager init, diarisation data, live engine config |
 | **3** | Audio / engine (done) | 68 | `audio_utils`, STT engine helpers |
 | **4** | Database (done) | 56 | `database.py` CRUD, FTS, cascading deletes |
-| **5** | Frontend logic (done) | 123 | `modelCapabilities`, `modelSelection`, `transcriptionBackend`, `configTree` |
+| **5** | Frontend logic (done) | 188 | `modelCapabilities`, `modelSelection`, `transcriptionBackend`, `configTree`, `useServerStatus`, `importQueueStore` |
 | **6** | Route handlers (done) | 30 + 13 recovered | health, auth, search routes; `test_client_tls`/`test_client_local` fixtures unblock `test_admin_auth`, `test_cors` |
