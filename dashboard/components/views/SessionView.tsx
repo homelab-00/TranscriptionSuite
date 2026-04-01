@@ -129,9 +129,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Admin status (needed early for model-aware language list)
   const admin = useAdminStatus();
+  // Prefer admin status (auth-gated) for model name; fall back to the
+  // unauthenticated /api/status payload so remote clients without an
+  // auth token can still derive the active model.
   const activeModel =
     admin.status?.config?.main_transcriber?.model ??
     admin.status?.config?.transcription?.model ??
+    serverConnection.details?.models?.transcription?.selected_model ??
     null;
   const activeLiveModel =
     admin.status?.config?.live_transcriber?.model ??
@@ -1179,13 +1183,19 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       </div>
                       <div className="flex items-center gap-2.5">
                         <span className="text-xs font-medium text-slate-400">
-                          {serverRunning && docker.container.health === 'healthy'
-                            ? 'Docker Container Running'
-                            : serverRunning
-                              ? 'Container Starting\u2026'
-                              : docker.container.exists
-                                ? 'Container Stopped'
-                                : 'Container Missing'}
+                          {isRemoteMode
+                            ? serverConnection.reachable
+                              ? serverConnection.ready
+                                ? 'Remote Server Ready'
+                                : 'Remote Server Loading\u2026'
+                              : 'Remote Server Offline'
+                            : serverRunning && docker.container.health === 'healthy'
+                              ? 'Docker Container Running'
+                              : serverRunning
+                                ? 'Container Starting\u2026'
+                                : docker.container.exists
+                                  ? 'Container Stopped'
+                                  : 'Container Missing'}
                         </span>
                         {serverRunning && serverMode && (
                           <span
@@ -1197,11 +1207,17 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         )}
                         <StatusLight
                           status={
-                            serverRunning && docker.container.health === 'healthy'
-                              ? 'active'
-                              : docker.container.exists
-                                ? 'warning'
+                            isRemoteMode
+                              ? serverConnection.reachable
+                                ? serverConnection.ready
+                                  ? 'active'
+                                  : 'warning'
                                 : 'inactive'
+                              : serverRunning && docker.container.health === 'healthy'
+                                ? 'active'
+                                : docker.container.exists
+                                  ? 'warning'
+                                  : 'inactive'
                           }
                           className="h-2 w-2"
                         />
@@ -1398,7 +1414,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
                   {/* Record / Stop Button */}
                   <div className="flex flex-col gap-2">
-                    {serverRunning && serverConnection.details?.gpu_error && (
+                    {(serverRunning || isRemoteMode) && serverConnection.details?.gpu_error && (
                       <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
                         <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                         <span>
@@ -1407,9 +1423,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         </span>
                       </div>
                     )}
-                    {serverRunning && serverConnection.ready && mainModelDisabled && (
-                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                        Main model not selected.
+                    {(serverRunning || isRemoteMode) &&
+                      serverConnection.ready &&
+                      mainModelDisabled && (
+                        <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                          Main model not selected.
+                        </div>
+                      )}
+                    {isRemoteMode && serverConnection.ready && !admin.status && !admin.loading && (
+                      <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                        <span>
+                          Auth token not configured — enter the server token in Settings to enable
+                          recording.
+                        </span>
                       </div>
                     )}
                     <div className="flex items-center gap-2">
@@ -1939,11 +1966,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         ref={liveTranscriptRef}
                         className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner"
                       >
-                        {serverRunning && serverConnection.ready && liveModelDisabled && (
-                          <div className="mb-3 text-xs text-amber-300">
-                            Live model not selected.
-                          </div>
-                        )}
+                        {(serverRunning || isRemoteMode) &&
+                          serverConnection.ready &&
+                          liveModelDisabled && (
+                            <div className="mb-3 text-xs text-amber-300">
+                              Live model not selected.
+                            </div>
+                          )}
                         {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
                           <div className="mb-3 text-xs text-red-400">
                             {liveModeUnsupportedMessage}
@@ -2110,9 +2139,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
                     ref={liveTranscriptRef}
                     className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner"
                   >
-                    {serverRunning && serverConnection.ready && liveModelDisabled && (
-                      <div className="mb-3 text-xs text-amber-300">Live model not selected.</div>
-                    )}
+                    {(serverRunning || isRemoteMode) &&
+                      serverConnection.ready &&
+                      liveModelDisabled && (
+                        <div className="mb-3 text-xs text-amber-300">Live model not selected.</div>
+                      )}
                     {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
                       <div className="mb-3 text-xs text-red-400">{liveModeUnsupportedMessage}</div>
                     )}

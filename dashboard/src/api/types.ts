@@ -18,7 +18,9 @@ export interface ReadyResponse {
 export interface ServerStatus {
   status: string;
   version?: string;
-  models?: Record<string, unknown>;
+  models?: Record<string, unknown> & {
+    transcription?: { selected_model?: string; loaded?: boolean; disabled?: boolean };
+  };
   features?: Record<string, unknown>;
   ready?: boolean;
   uptime?: number;
