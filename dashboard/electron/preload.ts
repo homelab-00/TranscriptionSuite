@@ -140,6 +140,25 @@ export interface ElectronAPI {
         error?: string;
       }) => void,
     ) => () => void;
+    onActivityEvent: (
+      callback: (event: {
+        id: string;
+        category: string;
+        label: string;
+        status?: string;
+        progress?: number;
+        totalSize?: string;
+        downloadedSize?: string;
+        detail?: string;
+        severity?: string;
+        persistent?: boolean;
+        phase?: string;
+        syncMode?: string;
+        expandableDetail?: string;
+        durationMs?: number;
+        ts?: number;
+      }) => void,
+    ) => () => void;
   };
   tray: {
     setTooltip: (tooltip: string) => Promise<void>;
@@ -352,6 +371,38 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ) => callback(evt);
       ipcRenderer.on('docker:downloadEvent', handler);
       return () => ipcRenderer.removeListener('docker:downloadEvent', handler);
+    },
+    onActivityEvent: (
+      callback: (event: {
+        id: string;
+        category: string;
+        label: string;
+        status?: string;
+        progress?: number;
+        totalSize?: string;
+        downloadedSize?: string;
+        detail?: string;
+        severity?: string;
+        persistent?: boolean;
+        phase?: string;
+        syncMode?: string;
+        expandableDetail?: string;
+        durationMs?: number;
+        ts?: number;
+      }) => void,
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        evt: {
+          id: string;
+          category: string;
+          label: string;
+          status?: string;
+          [key: string]: unknown;
+        },
+      ) => callback(evt as Parameters<typeof callback>[0]);
+      ipcRenderer.on('activity:event', handler);
+      return () => ipcRenderer.removeListener('activity:event', handler);
     },
   },
   tray: {

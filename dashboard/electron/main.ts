@@ -23,6 +23,7 @@ import {
 const execFileAsync = promisify(execFile);
 import Store from 'electron-store';
 import { CONTAINER_NAME, dockerManager, type StartContainerOptions } from './dockerManager.js';
+import { StartupEventWatcher } from './startupEventWatcher.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
 import {
@@ -931,14 +932,30 @@ ipcMain.handle('docker:getContainerStatus', async () => {
   return dockerManager.getContainerStatus();
 });
 
+// ─── Startup Event Watcher ────────────────────────────────────────────────
+// Watches the bind-mounted startup-events.jsonl file and forwards parsed
+// events to the renderer via IPC for the activityStore.
+
+const startupEventWatcher = new StartupEventWatcher();
+
 ipcMain.handle('docker:startContainer', async (_event, options: StartContainerOptions) => {
   const result = await dockerManager.startContainer(options);
   // Begin writing to server.log as soon as the container is running.
   dockerManager.startBackgroundLogStream();
+
+  // Start watching startup events file (set during startContainer)
+  const eventsFile = dockerManager.getStartupEventsFilePath();
+  if (eventsFile) {
+    startupEventWatcher.start(eventsFile, (event) => {
+      mainWindow?.webContents.send('activity:event', event);
+    });
+  }
+
   return result;
 });
 
 ipcMain.handle('docker:stopContainer', async () => {
+  startupEventWatcher.stop();
   return dockerManager.stopContainer();
 });
 

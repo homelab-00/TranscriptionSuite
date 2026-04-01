@@ -6,7 +6,7 @@ import { SessionView } from './components/views/SessionView';
 import { NotebookView } from './components/views/NotebookView';
 import { ServerView } from './components/views/ServerView';
 import { LogsView } from './components/views/LogsView';
-import { DownloadsPanel } from './components/views/DownloadsPanel';
+import { ActivityPanel } from './components/views/ActivityPanel';
 import { ModelManagerView } from './components/views/ModelManagerView';
 import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
@@ -27,7 +27,7 @@ import { getConfig, setConfig } from './src/config/store';
 import { useLiveMode } from './src/hooks/useLiveMode';
 import { useImportQueueStore, selectIsUploading } from './src/stores/importQueueStore';
 import { QueuePausedBanner } from './components/ui/QueuePausedBanner';
-import { DownloadNotifications } from './components/ui/DownloadNotifications';
+import { ActivityNotifications } from './components/ui/ActivityNotifications';
 import { useStarPopup } from './src/hooks/useStarPopup';
 import { useBootstrapDownloads } from './src/hooks/useBootstrapDownloads';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
@@ -600,10 +600,10 @@ const AppInner: React.FC = () => {
             <ModelManagerView />
           </ErrorBoundary>
         );
-      case View.DOWNLOADS:
+      case View.ACTIVITY:
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
-            <DownloadsPanel />
+            <ActivityPanel />
           </ErrorBoundary>
         );
       case View.LOGS:
@@ -943,7 +943,7 @@ const App: React.FC = () => (
       <AppInner />
     </DockerProvider>
     <ErrorBoundary FallbackComponent={ErrorFallback}>
-      <DownloadNotifications />
+      <ActivityNotifications />
     </ErrorBoundary>
     <Toaster position="bottom-right" theme="dark" richColors />
     <ReactQueryDevtools initialIsOpen={false} />

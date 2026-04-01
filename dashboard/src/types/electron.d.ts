@@ -62,6 +62,24 @@ interface BootstrapDownloadEvent {
   error?: string;
 }
 
+interface StartupActivityEvent {
+  id: string;
+  category: string;
+  label: string;
+  status?: string;
+  progress?: number;
+  totalSize?: string;
+  downloadedSize?: string;
+  detail?: string;
+  severity?: string;
+  persistent?: boolean;
+  phase?: string;
+  syncMode?: string;
+  expandableDetail?: string;
+  durationMs?: number;
+  ts?: number;
+}
+
 interface ElectronAPI {
   config: {
     get: (key: string) => Promise<unknown>;
@@ -137,6 +155,7 @@ interface ElectronAPI {
     stopLogStream: () => Promise<void>;
     onLogLine: (callback: (line: string) => void) => () => void;
     onDownloadEvent: (callback: (event: BootstrapDownloadEvent) => void) => () => void;
+    onActivityEvent: (callback: (event: StartupActivityEvent) => void) => () => void;
   };
   tray: {
     setTooltip: (tooltip: string) => Promise<void>;

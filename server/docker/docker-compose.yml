@@ -95,6 +95,8 @@ services:
       - TLS_ENABLED=${TLS_ENABLED:-false}
       - TLS_CERT_FILE=/certs/cert.crt
       - TLS_KEY_FILE=/certs/cert.key
+      # Startup events file path (bind-mounted for Electron fs.watch access)
+      - STARTUP_EVENTS_FILE=/startup-events/startup-events.jsonl
     
     # Volume mounts for persistent data
     volumes:
@@ -110,6 +112,8 @@ services:
       # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
       - ${TLS_CERT_PATH:-./.empty}:/certs/cert.crt:ro
       - ${TLS_KEY_PATH:-./.empty}:/certs/cert.key:ro
+      # Startup events file (bind-mounted for Electron fs.watch access)
+      - ${STARTUP_EVENTS_DIR:-./.empty}:/startup-events
     
     # Disable automatic restart so failures surface immediately
     restart: "no"

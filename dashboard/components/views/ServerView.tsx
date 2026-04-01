@@ -28,7 +28,7 @@ import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { CustomSelect } from '../ui/CustomSelect';
 
-import { useDownloadStore } from '../../src/stores/downloadStore';
+import { useActivityStore } from '../../src/stores/activityStore';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
@@ -413,7 +413,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       } else {
         setSidecarNeeded(null);
         docker.cancelSidecarPull();
-        useDownloadStore.getState().cancelDownload('sidecar-vulkan');
+        useActivityStore.getState().updateActivity('sidecar-vulkan', { status: 'dismissed' });
       }
     },
     [docker.hasSidecarImage, docker.cancelSidecarPull],
@@ -991,18 +991,25 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     className="h-10 w-full"
                     onClick={async () => {
                       const dlId = `docker-image-${selectedTagForActions}`;
-                      const store = useDownloadStore.getState();
-                      store.addDownload(
-                        dlId,
-                        'docker-image',
-                        `Server Image (${selectedTagForActions})`,
-                      );
+                      const store = useActivityStore.getState();
+                      store.addActivity({
+                        id: dlId,
+                        category: 'download',
+                        label: `Server Image (${selectedTagForActions})`,
+                        legacyType: 'docker-image',
+                      });
                       try {
                         await docker.pullImage(selectedTagForActions);
-                        useDownloadStore.getState().completeDownload(dlId);
+                        useActivityStore
+                          .getState()
+                          .updateActivity(dlId, { status: 'complete', completedAt: Date.now() });
                       } catch (err: unknown) {
                         const msg = err instanceof Error ? err.message : 'Pull failed';
-                        useDownloadStore.getState().failDownload(dlId, msg);
+                        useActivityStore.getState().updateActivity(dlId, {
+                          status: 'error',
+                          error: msg,
+                          completedAt: Date.now(),
+                        });
                       }
                     }}
                     disabled={docker.operating}
@@ -1022,7 +1029,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       onClick={() => {
                         docker.cancelPull();
                         const dlId = `docker-image-${selectedTagForActions}`;
-                        useDownloadStore.getState().cancelDownload(dlId);
+                        useActivityStore.getState().updateActivity(dlId, { status: 'dismissed' });
                       }}
                     >
                       Cancel Pull
@@ -1123,7 +1130,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         <button
                           onClick={() => {
                             docker.cancelSidecarPull();
-                            useDownloadStore.getState().cancelDownload('sidecar-vulkan');
+                            useActivityStore
+                              .getState()
+                              .updateActivity('sidecar-vulkan', { status: 'dismissed' });
                           }}
                           className="ml-auto text-xs text-slate-400 underline hover:text-slate-200"
                         >
@@ -1144,15 +1153,25 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           disabled={docker.operating}
                           onClick={async () => {
                             const dlId = 'sidecar-vulkan';
-                            useDownloadStore
-                              .getState()
-                              .addDownload(dlId, 'sidecar-image', 'Vulkan Sidecar (whisper.cpp)');
+                            useActivityStore.getState().addActivity({
+                              id: dlId,
+                              category: 'download',
+                              label: 'Vulkan Sidecar (whisper.cpp)',
+                              legacyType: 'sidecar-image',
+                            });
                             try {
                               await docker.pullSidecarImage();
-                              useDownloadStore.getState().completeDownload(dlId);
+                              useActivityStore.getState().updateActivity(dlId, {
+                                status: 'complete',
+                                completedAt: Date.now(),
+                              });
                             } catch (err: unknown) {
                               const msg = err instanceof Error ? err.message : 'Pull failed';
-                              useDownloadStore.getState().failDownload(dlId, msg);
+                              useActivityStore.getState().updateActivity(dlId, {
+                                status: 'error',
+                                error: msg,
+                                completedAt: Date.now(),
+                              });
                             }
                             const hasIt = await docker.hasSidecarImage();
                             if (hasIt) setSidecarNeeded(false);

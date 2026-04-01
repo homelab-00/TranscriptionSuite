@@ -43,6 +43,14 @@ const __dirname = path.dirname(__filename);
 const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
 export const CONTAINER_NAME = 'transcriptionsuite-container';
 
+/** Host-side path to the startup events file (set during startContainer). */
+let _startupEventsFilePath: string | null = null;
+
+/** Get the current startup events file path (null if container not started). */
+function getStartupEventsFilePath(): string | null {
+  return _startupEventsFilePath;
+}
+
 /** Vulkan sidecar image — upstream whisper.cpp with Vulkan GPU acceleration. */
 const VULKAN_SIDECAR_IMAGE = 'ghcr.io/ggml-org/whisper.cpp:main-vulkan';
 
@@ -1297,6 +1305,16 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
 
   upsertComposeEnvValues(envUpdates);
 
+  // Create host directory for startup events file (bind-mounted into container).
+  // The server writes JSON Lines here; Electron watches with fs.watch().
+  const eventsDir = path.join(os.tmpdir(), 'transcription-suite-events');
+  fs.mkdirSync(eventsDir, { recursive: true });
+  // Truncate any stale events file from a previous session
+  const eventsFile = path.join(eventsDir, 'startup-events.jsonl');
+  fs.writeFileSync(eventsFile, '', 'utf-8');
+  composeEnv['STARTUP_EVENTS_DIR'] = eventsDir;
+  _startupEventsFilePath = eventsFile;
+
   // Rotate the persistent server log — adds a session marker and trims old sessions.
   rotateServerLog();
 
@@ -2379,6 +2397,7 @@ export const dockerManager = {
   checkTailscaleCertsExist,
   subscribeToDownloadEvents,
   unsubscribeFromDownloadEvents,
+  getStartupEventsFilePath,
   VOLUME_NAMES,
   CONTAINER_NAME,
   IMAGE_REPO,

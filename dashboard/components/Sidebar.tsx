@@ -153,8 +153,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: <Library size={20} />,
     },
     {
-      id: View.DOWNLOADS,
-      label: 'Downloads',
+      id: View.ACTIVITY,
+      label: 'Activity',
       icon: <Download size={20} />,
     },
     {
