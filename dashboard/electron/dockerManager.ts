@@ -1858,7 +1858,7 @@ async function getLogs(tail?: number): Promise<string[]> {
 // installs and server-side model preloading.  Subscribers register via
 // subscribeToDownloadEvents() — typically the IPC bridge in main.ts.
 
-export type DownloadEventType = 'runtime-dep' | 'ml-model';
+export type DownloadEventType = 'runtime-dep' | 'ml-model' | 'model-preload';
 
 export interface BootstrapDownloadEvent {
   action: 'start' | 'complete' | 'fail';
@@ -1966,18 +1966,25 @@ const BOOTSTRAP_PATTERNS: BootstrapPattern[] = [
   },
   // ── Model preload (server runtime, post-bootstrap) ────────────────────────
   {
-    match: 'Preloading transcription model',
+    match: 'Loading transcription model from cache',
     action: 'start',
     id: 'model-preload',
-    type: 'ml-model',
-    label: 'Transcription Model',
+    type: 'model-preload',
+    label: 'Loading Model',
   },
   {
     match: 'STT model loaded and ready',
     action: 'complete',
     id: 'model-preload',
-    type: 'ml-model',
-    label: 'Transcription Model',
+    type: 'model-preload',
+    label: 'Loading Model',
+  },
+  {
+    match: 'Model preload failed',
+    action: 'fail',
+    id: 'model-preload',
+    type: 'model-preload',
+    label: 'Loading Model',
   },
 ];
 

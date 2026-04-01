@@ -31,6 +31,7 @@ const TYPE_ICON: Record<DownloadType, React.ReactNode> = {
   'sidecar-image': <Cpu size={16} />,
   'ml-model': <BrainCircuit size={16} />,
   'runtime-dep': <Cog size={16} />,
+  'model-preload': <BrainCircuit size={16} />,
 };
 
 const TYPE_COLOR: Record<DownloadType, string> = {
@@ -38,6 +39,7 @@ const TYPE_COLOR: Record<DownloadType, string> = {
   'sidecar-image': 'text-accent-magenta',
   'ml-model': 'text-accent-orange',
   'runtime-dep': 'text-slate-400',
+  'model-preload': 'text-slate-400',
 };
 
 // ─── Single notification card ────────────────────────────────────────────────
@@ -61,6 +63,7 @@ const AUTO_DISMISS_MS = 5_000;
 function DownloadCard({ item }: { item: DownloadItem }) {
   const dismiss = useDownloadStore((s) => s.dismissDownload);
   const isActive = item.status === 'queued' || item.status === 'downloading';
+  const showProgress = isActive && item.type !== 'model-preload';
 
   // Auto-dismiss completed/cancelled notifications after 5 seconds
   useEffect(() => {
@@ -82,7 +85,7 @@ function DownloadCard({ item }: { item: DownloadItem }) {
         </div>
 
         {/* Progress bar */}
-        {isActive && (
+        {showProgress && (
           <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/10">
             {item.progress !== undefined ? (
               <div
@@ -101,7 +104,9 @@ function DownloadCard({ item }: { item: DownloadItem }) {
         )}
 
         {/* Size info */}
-        {item.size && isActive && <p className="mt-0.5 text-[10px] text-slate-500">{item.size}</p>}
+        {item.size && showProgress && (
+          <p className="mt-0.5 text-[10px] text-slate-500">{item.size}</p>
+        )}
       </div>
 
       {/* Dismiss button */}

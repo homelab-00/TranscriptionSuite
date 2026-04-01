@@ -32,6 +32,7 @@ const TYPE_ICON: Record<DownloadType, React.ReactNode> = {
   'sidecar-image': <Cpu size={18} />,
   'ml-model': <BrainCircuit size={18} />,
   'runtime-dep': <Cog size={18} />,
+  'model-preload': <BrainCircuit size={18} />,
 };
 
 const TYPE_COLOR: Record<DownloadType, string> = {
@@ -39,6 +40,7 @@ const TYPE_COLOR: Record<DownloadType, string> = {
   'sidecar-image': 'text-accent-magenta',
   'ml-model': 'text-accent-orange',
   'runtime-dep': 'text-slate-400',
+  'model-preload': 'text-slate-400',
 };
 
 const TYPE_LABEL: Record<DownloadType, string> = {
@@ -46,6 +48,7 @@ const TYPE_LABEL: Record<DownloadType, string> = {
   'sidecar-image': 'Sidecar Image',
   'ml-model': 'ML Model',
   'runtime-dep': 'Runtime',
+  'model-preload': 'Model Load',
 };
 
 const STATUS_BADGE: Record<DownloadItem['status'], { label: string; className: string }> = {
@@ -74,6 +77,7 @@ function formatDuration(startMs: number, endMs?: number): string {
 
 function DownloadRow({ item }: { item: DownloadItem }) {
   const isActive = item.status === 'queued' || item.status === 'downloading';
+  const showProgress = isActive && item.type !== 'model-preload';
   const badge = STATUS_BADGE[item.status];
 
   return (
@@ -103,7 +107,7 @@ function DownloadRow({ item }: { item: DownloadItem }) {
         </div>
 
         {/* Progress bar for active items */}
-        {isActive && (
+        {showProgress && (
           <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
             {item.progress !== undefined ? (
               <div

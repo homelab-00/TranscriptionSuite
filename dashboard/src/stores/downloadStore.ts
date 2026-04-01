@@ -15,7 +15,12 @@ import { create } from 'zustand';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type DownloadType = 'docker-image' | 'sidecar-image' | 'ml-model' | 'runtime-dep';
+export type DownloadType =
+  | 'docker-image'
+  | 'sidecar-image'
+  | 'ml-model'
+  | 'runtime-dep'
+  | 'model-preload';
 
 export type DownloadStatus = 'queued' | 'downloading' | 'complete' | 'error' | 'cancelled';
 

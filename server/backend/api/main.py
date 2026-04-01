@@ -490,7 +490,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.info("No main model selected; preload skipped (intentional disabled slot mode)")
         _log_time("model preload skipped (main model disabled)")
     else:
-        logger.info("Preloading transcription model...")
+        logger.info("Loading transcription model from cache...")
         _log_time("starting model preload (GPU VRAM should spike now)...")
         try:
             manager.load_transcription_model()
@@ -512,6 +512,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 )
                 _log_time(timing_label)
             else:
+                logger.error("Model preload failed")
                 raise
         else:
             _log_time("model preload complete")
