@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -59,6 +60,26 @@ _VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS: tuple[str, ...] = (
     "accelerate>=0.26.0",
     "bitsandbytes>=0.43.1",
 )
+
+# Load startup event writer (stdlib-only module, safe to import before deps).
+# Falls back to no-ops when running outside the container (e.g. tests).
+try:
+    _se_path = APP_ROOT / "server" / "backend" / "core" / "startup_events.py"
+    _se_spec = importlib.util.spec_from_file_location("startup_events", _se_path)
+    if _se_spec and _se_spec.loader:
+        _se_mod = importlib.util.module_from_spec(_se_spec)
+        _se_spec.loader.exec_module(_se_mod)
+        emit_event = _se_mod.emit_event
+        truncate_events_file = _se_mod.truncate_events_file
+    else:
+        raise ImportError("spec_from_file_location returned None")
+except (FileNotFoundError, ImportError):
+
+    def emit_event(*_args: object, **_kwargs: object) -> None:  # type: ignore[misc]
+        pass
+
+    def truncate_events_file() -> None:
+        pass
 
 
 def log(message: str) -> None:
@@ -1170,6 +1191,9 @@ print(json.dumps(payload))
 
 def main() -> int:
     log_timing("bootstrap main() started")
+    bootstrap_start = time.perf_counter()
+    truncate_events_file()
+    emit_event("bootstrap-env", "server", "Preparing server environment...", phase="bootstrap")
     runtime_dir = Path(os.environ.get("BOOTSTRAP_RUNTIME_DIR", "/runtime"))
     cache_dir = Path(os.environ.get("BOOTSTRAP_CACHE_DIR", "/runtime/cache"))
     status_file = Path(
@@ -1210,6 +1234,42 @@ def main() -> int:
     )
     log_timing("runtime dependency bootstrap phase complete", deps_start)
     log(f"Dependency update path: {sync_mode}")
+
+    deps_elapsed_ms = round((time.perf_counter() - deps_start) * 1000)
+    if sync_mode == "skip":
+        emit_event(
+            "bootstrap-deps",
+            "download",
+            "Dependencies up to date",
+            status="complete",
+            syncMode="cache-hit",
+            durationMs=deps_elapsed_ms,
+            phase="bootstrap",
+        )
+    else:
+        sync_mode_label = "delta" if "delta" in sync_mode else "rebuild"
+        added = package_delta.get("added", 0)
+        updated = package_delta.get("updated", 0)
+        removed = package_delta.get("removed", 0)
+        total_after = package_delta.get("after_count", 0)
+        detail_parts: list[str] = []
+        if added:
+            detail_parts.append(f"{added} added")
+        if updated:
+            detail_parts.append(f"{updated} updated")
+        if removed:
+            detail_parts.append(f"{removed} removed")
+        detail = ", ".join(detail_parts) if detail_parts else f"{total_after} packages"
+        emit_event(
+            "bootstrap-deps",
+            "download",
+            "Dependencies installed",
+            status="complete",
+            syncMode=sync_mode_label,
+            detail=detail,
+            durationMs=deps_elapsed_ms,
+            phase="bootstrap",
+        )
 
     venv_python = venv_dir / "bin/python"
     if not venv_python.exists():
@@ -1264,6 +1324,14 @@ def main() -> int:
             "Diarization capability check: unavailable "
             f"({diarization_status.get('reason', 'unavailable')})"
         )
+        if diarization_model != DISABLED_MODEL_SENTINEL:
+            reason = diarization_status.get("reason", "unavailable")
+            emit_event(
+                "warn-diarization",
+                "warning",
+                f"Diarization unavailable \u2014 {reason}",
+                persistent=True,
+            )
 
     whisper_selected = is_whisper_model_name(main_model) or is_whisper_model_name(live_model)
     nemo_selected = is_nemo_model_name(main_model) or is_nemo_model_name(live_model)
@@ -1357,6 +1425,14 @@ def main() -> int:
                 "skipping optional install"
             )
     log_timing("faster-whisper feature check complete", whisper_start)
+    if whisper_selected and not whisper_status.get("available"):
+        reason = whisper_status.get("reason", "unavailable")
+        emit_event(
+            "warn-whisper",
+            "warning",
+            f"faster-whisper unavailable \u2014 {reason}",
+            persistent=True,
+        )
 
     # ── NeMo toolkit (optional, for NVIDIA Parakeet ASR models) ──────────
     nemo_start = time.perf_counter()
@@ -1425,6 +1501,14 @@ def main() -> int:
             nemo_status = {"available": False, "reason": "selected_but_not_requested"}
             log("NeMo model selected but INSTALL_NEMO is not enabled, skipping optional install")
     log_timing("NeMo feature check complete", nemo_start)
+    if nemo_selected and not nemo_status.get("available"):
+        reason = nemo_status.get("reason", "unavailable")
+        emit_event(
+            "warn-nemo",
+            "warning",
+            f"NeMo unavailable \u2014 {reason}",
+            persistent=True,
+        )
 
     # ── VibeVoice-ASR (optional, experimental in-process backend) ───────────
     vibevoice_start = time.perf_counter()
@@ -1612,6 +1696,14 @@ def main() -> int:
                 "skipping optional install"
             )
     log_timing("VibeVoice-ASR feature check complete", vibevoice_start)
+    if vibevoice_selected and not vibevoice_asr_status.get("available"):
+        reason = vibevoice_asr_status.get("reason", "unavailable")
+        emit_event(
+            "warn-vibevoice",
+            "warning",
+            f"VibeVoice-ASR unavailable \u2014 {reason}",
+            persistent=True,
+        )
 
     status_write_start = time.perf_counter()
     write_status_file(
@@ -1636,6 +1728,14 @@ def main() -> int:
     )
     log_timing("bootstrap status file write complete", status_write_start)
     log_timing("bootstrap main() complete")
+    emit_event(
+        "bootstrap-env",
+        "server",
+        "Server environment ready",
+        status="complete",
+        durationMs=round((time.perf_counter() - bootstrap_start) * 1000),
+        phase="bootstrap",
+    )
     return 0
 
 

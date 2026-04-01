@@ -74,6 +74,10 @@ from server.logging import get_logger, setup_logging  # noqa: E402
 
 _log_time("logging imported")
 
+from server.core.startup_events import emit_event  # noqa: E402
+
+_log_time("startup_events imported")
+
 from server import __version__  # noqa: E402
 
 logger = get_logger("api")
@@ -385,8 +389,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     prewarm_thread = _start_import_prewarming()
 
     # Startup
+    lifespan_start = _time.perf_counter()
     _log_time("lifespan() started")
     logger.info("TranscriptionSuite server starting...")
+    emit_event("lifespan-start", "server", "Starting server...", phase="lifespan")
 
     config = get_config()
     _log_time("config loaded")
@@ -456,17 +462,64 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Wait for ML package pre-warming before touching CUDA
     # (concurrent CUDA init from prewarm thread + ModelManager is not thread-safe)
+    imports_start = _time.perf_counter()
+    emit_event("lifespan-imports", "server", "Loading ML libraries...", phase="lifespan")
     if prewarm_thread is not None and prewarm_thread.is_alive():
         _log_time("waiting for import pre-warming to finish...")
         prewarm_thread.join(timeout=60)
     _log_time("import pre-warming complete")
+    emit_event(
+        "lifespan-imports",
+        "server",
+        "ML libraries loaded",
+        status="complete",
+        durationMs=round((_time.perf_counter() - imports_start) * 1000),
+        phase="lifespan",
+    )
 
     # CUDA health probe — detect unrecoverable GPU state before ModelManager
     from server.core.audio_utils import cuda_health_check
 
+    gpu_start = _time.perf_counter()
+    emit_event("lifespan-gpu", "server", "Checking GPU...", phase="lifespan")
     gpu_health = cuda_health_check()
+    gpu_elapsed_ms = round((_time.perf_counter() - gpu_start) * 1000)
     _log_time(f"CUDA health check: {gpu_health['status']}")
     gpu_unrecoverable = gpu_health["status"] == "unrecoverable"
+    emit_event(
+        "lifespan-gpu",
+        "server",
+        "GPU check complete",
+        status="error" if gpu_unrecoverable else "complete",
+        durationMs=gpu_elapsed_ms,
+        phase="lifespan",
+    )
+    if gpu_health["status"] == "healthy":
+        device_name = gpu_health.get("device_name", "Unknown")
+        vram_gb = gpu_health.get("total_memory_gb", "?")
+        emit_event(
+            "info-gpu",
+            "info",
+            f"GPU: {device_name} ({vram_gb}GB)",
+            status="complete",
+            durationMs=gpu_elapsed_ms,
+        )
+    elif gpu_unrecoverable:
+        emit_event(
+            "warn-gpu-fatal",
+            "warning",
+            "GPU in unrecoverable state \u2014 restart container",
+            persistent=True,
+            severity="error",
+        )
+    elif gpu_health["status"] in ("no_cuda", "no_torch"):
+        emit_event(
+            "warn-gpu",
+            "warning",
+            "No GPU detected \u2014 CPU mode",
+            persistent=True,
+        )
+
     if gpu_unrecoverable:
         logger.error(
             "CUDA health check failed — GPU transcription disabled for this session",
@@ -523,6 +576,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     logger.info("Server startup complete")
     _log_time("lifespan startup complete")
+    emit_event(
+        "server-ready",
+        "server",
+        "Server ready",
+        status="complete",
+        phase="ready",
+        durationMs=round((_time.perf_counter() - lifespan_start) * 1000),
+    )
 
     yield
 
