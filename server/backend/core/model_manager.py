@@ -469,7 +469,7 @@ class ModelManager:
         return status
 
     def _get_mlx_feature_status(self) -> dict[str, Any]:
-        """Check if MLX Whisper (Apple Silicon Metal) is available."""
+        """Check if MLX (Apple Silicon Metal) STT is available via mlx-audio."""
         import platform as _platform
         import sys
 
@@ -478,11 +478,11 @@ class ModelManager:
         if _platform.machine() != "arm64":
             return {"available": False, "reason": "not_apple_silicon"}
         try:
-            import mlx_whisper  # noqa: F401
+            from mlx_audio.stt import load as _load  # noqa: F401
 
-            return {"available": True, "reason": "mlx_whisper_installed"}
+            return {"available": True, "reason": "mlx_audio_installed"}
         except ImportError:
-            return {"available": False, "reason": "mlx_whisper_not_installed"}
+            return {"available": False, "reason": "mlx_audio_not_installed"}
 
     def get_whisper_feature_status(self) -> dict[str, Any]:
         """Return faster-whisper capability metadata for API clients."""

@@ -176,6 +176,28 @@ export const MODEL_REGISTRY: ModelInfo[] = [
 
   // ── MLX VibeVoice (Apple Silicon / Metal) ────────────────────────────────
   {
+    id: 'mlx-community/VibeVoice-ASR-4bit',
+    displayName: 'MLX VibeVoice ASR (4-bit)',
+    family: 'mlx',
+    description:
+      'Microsoft VibeVoice-ASR on MLX, 4-bit quantised. Native diarization + timestamps on Apple Silicon. Smallest VibeVoice variant (~5.7 GB).',
+    parameterCount: '9B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/VibeVoice-ASR-4bit',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/VibeVoice-ASR-8bit',
+    displayName: 'MLX VibeVoice ASR (8-bit)',
+    family: 'mlx',
+    description:
+      'Microsoft VibeVoice-ASR on MLX, 8-bit quantised. Native diarization + timestamps on Apple Silicon (~9.5 GB).',
+    parameterCount: '9B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/VibeVoice-ASR-8bit',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
+    roles: ['main'],
+  },
+  {
     id: 'mlx-community/VibeVoice-ASR-bf16',
     displayName: 'MLX VibeVoice ASR (bf16)',
     family: 'mlx',
@@ -232,45 +254,46 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     roles: ['main'],
   },
 
-  // ── MLX Whisper (Apple Silicon / Metal) ────────────────────────────────
+  // ── MLX Whisper (Apple Silicon / Metal via mlx-audio) ───────────────────
   {
-    id: 'mlx-community/whisper-large-v3-mlx',
+    id: 'mlx-community/whisper-large-v3-turbo-asr-fp16',
+    displayName: 'MLX Whisper Large v3 Turbo',
+    family: 'mlx',
+    description:
+      'Fast turbo variant of Whisper large-v3 on Apple Silicon. Best speed/accuracy tradeoff.',
+    parameterCount: '809M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-large-v3-asr-fp16',
     displayName: 'MLX Whisper Large v3',
     family: 'mlx',
     description:
       'Apple Silicon Metal-accelerated Whisper large-v3. Best accuracy on Mac bare-metal.',
     parameterCount: '1.5B',
-    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-mlx',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-asr-fp16',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
     roles: ['main'],
   },
   {
-    id: 'mlx-community/whisper-medium-mlx',
-    displayName: 'MLX Whisper Medium',
-    family: 'mlx',
-    description: 'Good accuracy/speed balance on Apple Silicon.',
-    parameterCount: '769M',
-    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-medium-mlx',
-    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
-    roles: ['main'],
-  },
-  {
-    id: 'mlx-community/whisper-small-mlx',
+    id: 'mlx-community/whisper-small-asr-fp16',
     displayName: 'MLX Whisper Small',
     family: 'mlx',
     description: 'Lightweight Metal-accelerated model for fast Mac bare-metal transcription.',
     parameterCount: '244M',
-    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-small-mlx',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-small-asr-fp16',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
     roles: ['main'],
   },
   {
-    id: 'mlx-community/whisper-tiny-mlx',
+    id: 'mlx-community/whisper-tiny-asr-fp16',
     displayName: 'MLX Whisper Tiny',
     family: 'mlx',
     description: 'Smallest Metal-accelerated model. Fastest but lowest accuracy.',
     parameterCount: '39M',
-    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-tiny-mlx',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-tiny-asr-fp16',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
     roles: ['main'],
   },

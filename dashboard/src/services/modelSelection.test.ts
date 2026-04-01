@@ -93,6 +93,7 @@ describe('modelFamilyFromName', () => {
 
   it('returns mlx for MLX whisper models', () => {
     expect(modelFamilyFromName('mlx-community/whisper-large-v3-mlx')).toBe('mlx');
+    expect(modelFamilyFromName('mlx-community/whisper-large-v3-turbo-asr-fp16')).toBe('mlx');
   });
 
   it('returns none for disabled/empty', () => {

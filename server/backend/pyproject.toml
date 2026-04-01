@@ -64,7 +64,6 @@ vibevoice_asr = [
     "vibevoice @ git+https://github.com/microsoft/VibeVoice.git@1807b858d4f7dffdd286249a01616c243e488c9e",
 ]
 mlx = [
-    "mlx-whisper>=0.4.1",
     "parakeet-mlx>=0.2.0",
     "canary-mlx>=0.1.0",
     "soundfile>=0.13.1",

@@ -1692,7 +1692,7 @@ app.whenReady().then(() => {
     const port = (store.get('server.port') as number) ?? 9786;
     const hfToken = (store.get('server.hfToken') as string) || undefined;
     const mainTranscriberModel =
-      (store.get('server.mainModelSelection') as string) || 'mlx-community/whisper-small-mlx';
+      (store.get('server.mainModelSelection') as string) || 'mlx-community/whisper-small-asr-fp16';
 
     // Resolve live transcriber model from stored selection sentinels.
     const LIVE_SAME_AS_MAIN = 'Same as Main Transcriber';

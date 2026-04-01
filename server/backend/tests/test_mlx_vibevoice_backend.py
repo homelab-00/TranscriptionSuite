@@ -64,6 +64,16 @@ class TestFactoryDetection:
 
         assert detect_backend_type("mlx-community/VibeVoice-ASR-bf16") == "mlx_vibevoice"
 
+    def test_detect_mlx_vibevoice_4bit(self) -> None:
+        from server.core.stt.backends.factory import detect_backend_type
+
+        assert detect_backend_type("mlx-community/VibeVoice-ASR-4bit") == "mlx_vibevoice"
+
+    def test_detect_mlx_vibevoice_8bit(self) -> None:
+        from server.core.stt.backends.factory import detect_backend_type
+
+        assert detect_backend_type("mlx-community/VibeVoice-ASR-8bit") == "mlx_vibevoice"
+
     def test_case_insensitive(self) -> None:
         from server.core.stt.backends.factory import detect_backend_type
 
