@@ -1307,11 +1307,20 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
 
   // Create host directory for startup events file (bind-mounted into container).
   // The server writes JSON Lines here; Electron watches with fs.watch().
-  const eventsDir = path.join(os.tmpdir(), 'transcription-suite-events');
-  fs.mkdirSync(eventsDir, { recursive: true });
+  // Use mkdtempSync to avoid predictable temp paths (CWE-377 symlink race).
+  // Clean up previous session's events directory if it exists.
+  if (_startupEventsFilePath) {
+    const prevDir = path.dirname(_startupEventsFilePath);
+    try {
+      fs.rmSync(prevDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
+  const eventsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'transcription-suite-events-'));
   // Truncate any stale events file from a previous session
   const eventsFile = path.join(eventsDir, 'startup-events.jsonl');
-  fs.writeFileSync(eventsFile, '', 'utf-8');
+  fs.writeFileSync(eventsFile, '', { encoding: 'utf-8', mode: 0o600 });
   composeEnv['STARTUP_EVENTS_DIR'] = eventsDir;
   _startupEventsFilePath = eventsFile;
 

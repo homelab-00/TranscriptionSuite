@@ -12,6 +12,17 @@ import pytest
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
+def _enter_ctx_and_raise(ctx, error):
+    """Enter *ctx* and raise *error* inside it.
+
+    Factored out so that CodeQL's intraprocedural analysis does not mark
+    post-``pytest.raises`` assertions as unreachable (it cannot trace through
+    the call boundary to see that the raise always fires).
+    """
+    with ctx:
+        raise error
+
+
 @pytest.fixture(autouse=True)
 def _reset_tracker():
     """Ensure thread-local tracker is None before and after each test."""
@@ -291,8 +302,10 @@ class TestTrackModelDownload:
         from server.core.download_progress import track_model_download
 
         with pytest.raises(RuntimeError, match="download failed"):
-            with track_model_download("nvidia/test-model"):
-                raise RuntimeError("download failed")
+            _enter_ctx_and_raise(
+                track_model_download("nvidia/test-model"),
+                RuntimeError("download failed"),
+            )
 
         error_event = mock_emit[-1]
         assert error_event["status"] == "error"
@@ -337,8 +350,7 @@ class TestTrackModelDownload:
 
         dp._set_tracker(None)
         with pytest.raises(RuntimeError):
-            with dp.track_model_download("test"):
-                raise RuntimeError("boom")
+            _enter_ctx_and_raise(dp.track_model_download("test"), RuntimeError("boom"))
         assert dp._get_tracker() is None
 
 
@@ -464,9 +476,15 @@ class TestMonkeyPatching:
         ):
             from server.core.download_progress import track_model_download
 
+            # Verify tqdm is patched while the context is active
+            with track_model_download("test-model"):
+                assert mod.tqdm != "original_tqdm"
+
+            # Now verify restoration after the error path
             with pytest.raises(RuntimeError):
-                with track_model_download("test-model"):
-                    assert mod.tqdm != "original_tqdm"
-                    raise RuntimeError("boom")
+                _enter_ctx_and_raise(
+                    track_model_download("test-model"),
+                    RuntimeError("boom"),
+                )
 
             assert mod.tqdm == "original_tqdm"
