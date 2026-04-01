@@ -397,10 +397,16 @@ TranscriptionSuite/
 │   │   │   │       ├── factory.py       # Backend detection + instantiation
 │   │   │   │       ├── whisper_backend.py       # Faster-whisper backend (shared GPU cache cleanup on unload)
 │   │   │   │       ├── whisperx_backend.py      # WhisperX (alignment + diarization, shared GPU cache cleanup)
+│   │   │   │       ├── faster_whisper_backend.py # Lightweight faster-whisper fallback (Metal / no-whisperx)
 │   │   │   │       ├── parakeet_backend.py      # NVIDIA NeMo Parakeet ASR (base warmup + reusable long-audio chunking)
 │   │   │   │       ├── canary_backend.py        # NVIDIA NeMo Canary (Canary warmup override, reuses Parakeet chunking)
-│   │   │   │       └── vibevoice_asr_backend.py # VibeVoice-ASR (experimental, shared GPU cache cleanup on unload)
+│   │   │   │       ├── vibevoice_asr_backend.py # VibeVoice-ASR (experimental, shared GPU cache cleanup on unload)
+│   │   │   │       ├── mlx_whisper_backend.py   # MLX Whisper via mlx-audio (word timestamps, alignment_heads patch)
+│   │   │   │       ├── mlx_parakeet_backend.py  # MLX Parakeet via parakeet-mlx
+│   │   │   │       ├── mlx_canary_backend.py    # MLX Canary via canary-mlx
+│   │   │   │       └── mlx_vibevoice_backend.py # MLX VibeVoice-ASR via mlx-audio (native diarization)
 │   │   │   ├── diarization_engine.py    # PyAnnote wrapper
+│   │   │   ├── sortformer_engine.py     # Metal-native Sortformer diarization via mlx-audio (no HF token)
 │   │   │   ├── model_manager.py         # Model lifecycle, job tracking
 │   │   │   ├── realtime_engine.py       # Async wrapper for real-time STT
 │   │   │   └── live_engine.py           # Live Mode engine (Whisper-only in v1)
@@ -1993,10 +1999,15 @@ server/backend/
 │           ├── factory.py        # Backend detection + instantiation
 │           ├── whisper_backend.py        # Faster-whisper backend (shared GPU cache cleanup on unload)
 │           ├── whisperx_backend.py       # WhisperX (alignment + diarization, shared GPU cache cleanup)
+│           ├── faster_whisper_backend.py # Lightweight faster-whisper (no WhisperX); Live Mode on Metal
 │           ├── parakeet_backend.py       # NVIDIA NeMo Parakeet ASR (local attention + configurable chunking + GPU cache cleanup)
 │           ├── canary_backend.py         # NVIDIA NeMo Canary (Canary warmup override, reuses Parakeet chunking)
 │           ├── vibevoice_asr_backend.py  # VibeVoice-ASR (experimental, 1-min chunking + inference_mode + GPU cache cleanup)
-│           └── whispercpp_backend.py     # whisper.cpp HTTP sidecar client (Vulkan GPU, WAV encoding, multipart POST)
+│           ├── whispercpp_backend.py     # whisper.cpp HTTP sidecar client (Vulkan GPU, WAV encoding, multipart POST)
+│           ├── mlx_whisper_backend.py    # MLX Whisper via mlx-audio (word timestamps, alignment_heads monkey-patch)
+│           ├── mlx_parakeet_backend.py   # MLX Parakeet via parakeet-mlx (long-audio chunking)
+│           ├── mlx_canary_backend.py     # MLX Canary via canary-mlx (multitask, reuses Parakeet chunking)
+│           └── mlx_vibevoice_backend.py  # MLX VibeVoice-ASR via mlx-audio (native diarization, JSON segment parse)
 ├── database/
 │   └── database.py               # SQLite + FTS5 operations
 └── config.py                     # Configuration management
@@ -3006,17 +3017,19 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 ## 15. Apple Silicon (Metal/MLX) Development
 
 The Metal/MLX backend provides hardware-accelerated transcription on Apple Silicon
-Macs using the `mlx-whisper`, `parakeet-mlx`, and `canary-mlx` packages. When the
+Macs using the `mlx-audio`, `parakeet-mlx`, and `canary-mlx` packages. When the
 Metal runtime profile is selected, the dashboard manages a native uvicorn server
 process directly — no Docker required.
 
 | Component | Details |
 |-----------|---------|
 | Acceleration | Apple Metal GPU via MLX framework |
-| Whisper models | `mlx-community/*` via `mlx-whisper` |
+| Whisper models | `mlx-community/whisper-*-asr-fp16` (and quantized variants) via `mlx-audio` |
 | Parakeet (NeMo ASR) | `mlx-community/parakeet-*` via `parakeet-mlx` |
 | Canary (multitask) | `*/canary*-mlx` pattern via `canary-mlx` |
-| Diarization | PyAnnote on MPS (falls back to CPU) |
+| VibeVoice-ASR | `mlx-community/VibeVoice-ASR-*` via `mlx-audio` (native diarization) |
+| Diarization | Sortformer via `mlx-audio` (Metal-native, no HF token); PyAnnote on MPS as fallback |
+| Live Mode | faster-whisper via `mlx-audio`-compatible venv (no WhisperX conflict) |
 | Server | Native uvicorn (no Docker) |
 
 ---
@@ -3051,27 +3064,55 @@ process directly — no Docker required.
 
 ```bash
 cd server/backend
-uv run pytest tests/test_mlx_whisper_backend.py tests/test_mlx_parakeet_backend.py tests/test_mlx_canary_backend.py -v
+uv run pytest tests/test_mlx_whisper_backend.py tests/test_mlx_parakeet_backend.py tests/test_mlx_canary_backend.py tests/test_mlx_vibevoice_backend.py tests/test_faster_whisper_backend.py tests/test_sortformer_engine.py -v
 ```
 
-These tests run on any platform using stubs for `mlx_whisper`, `parakeet_mlx`,
-`canary_mlx`, and `scipy`.
+All platform-independent tests use `patch.object` / `sys.modules` stubs and run
+on any platform without Apple Silicon.
 
-**MLX Whisper** (16 tests — `test_mlx_whisper_backend.py`):
+**MLX Whisper** (17 tests — `test_mlx_whisper_backend.py`):
 
 | Class | What is tested |
 |-------|---------------|
 | `TestFactoryDetection` | `detect_backend_type` returns `mlx_whisper` for `mlx-community/` prefix; `is_mlx_model()` helper |
-| `TestMLXWhisperBackendLifecycle` | `load()`, `unload()`, `is_loaded()`; `RuntimeError` when mlx_whisper absent |
-| `TestMLXWhisperBackendTranscribe` | Output structure (segments, words, info); empty segments; not-loaded guard |
+| `TestMLXWhisperBackendLifecycle` | `load()`, `unload()`, `is_loaded()`; `RuntimeError` when mlx-audio absent; `alignment_heads` monkey-patch |
+| `TestMLXWhisperBackendTranscribe` | Output structure (segments, words, info); empty segments; not-loaded guard; empty text filter |
 | `TestMLXWhisperBeamSizeFallback` | `beam_size > 1` silently falls back to greedy (`None`); `None` passes through |
 | `TestMLXWhisperResampling` | 44100 Hz audio triggers `scipy.signal.resample`; 16000 Hz skips it |
+
+**MLX VibeVoice** (15 tests — `test_mlx_vibevoice_backend.py`):  
+Factory detection for `mlx-community/VibeVoice-ASR-*` variants, lifecycle, native diarization segment parse, and `is_mlx_model()` inclusion.
 
 **MLX Parakeet** (33 tests — `test_mlx_parakeet_backend.py`):  
 Factory detection, lifecycle, transcribe, resampling, and error-path coverage for the `mlx-community/parakeet-*` variant.
 
 **MLX Canary** (33 tests — `test_mlx_canary_backend.py`):  
 Factory detection, lifecycle, transcribe, language/task config, and error-path coverage for the `*/canary*-mlx` variant.
+
+**FasterWhisperBackend** (16 tests — `test_faster_whisper_backend.py`):
+
+| Class | What is tested |
+|-------|---------------|
+| `TestFactoryFallback` | `detect_backend_type` for Systran/* models; `create_backend()` falls back to `FasterWhisperBackend` when `whisperx` absent |
+| `TestFasterWhisperBackendLifecycle` | `load()`, `unload()`, `is_loaded()`; `compute_type`/`download_root` kwargs forwarded |
+| `TestFasterWhisperBackendTranscribe` | Segments, word timestamps, empty output, multi-segment, `RuntimeError` when not loaded |
+| `TestFasterWhisperBackendWarmup` | No-op when not loaded; calls `transcribe()` when loaded |
+| `TestFasterWhisperBackendMetadata` | `backend_name == "faster_whisper"`; `supports_translation() == True` |
+
+**SortformerEngine** (18 tests — `test_sortformer_engine.py`):
+
+| Class | What is tested |
+|-------|---------------|
+| `TestSortformerAvailable` | `sortformer_available()` reflects `HAS_MLX_AUDIO` flag |
+| `TestSortformerEngineInitGuard` | `ImportError` when mlx-audio absent; init with custom threshold |
+| `TestSortformerEngineLifecycle` | `load()`, `unload()`, `is_loaded()`; idempotent `load()` |
+| `TestSortformerEngineDiarize` | `DiarizationResult` type; segment count/speakers/timestamps; auto-load; threshold forwarding; temp WAV path passed to `generate()` |
+
+**STT Backend Factory** (12 tests — `test_stt_backend_factory.py`):
+
+Covers `detect_backend_type` for all backend types, new `asr-fp16` MLX Whisper naming scheme,
+`is_mlx_model()` for VibeVoice and new Whisper IDs, and the `whisperx → FasterWhisperBackend`
+fallback in `create_backend()`.
 
 ---
 
@@ -3206,16 +3247,29 @@ Start/stop the server from the **Server** view using the native process controls
 
 ### 15.5 MLX Backend Notes
 
-- **Model selection**: The backend is auto-selected by the model name prefix:
-  - `mlx-community/parakeet-*` → MLXParakeetBackend
-  - `*/canary*-mlx` → MLXCanaryBackend
-  - `mlx-community/*` → MLXWhisperBackend
+- **Model selection**: The backend is auto-selected by the model name in this priority order:
+  - `mlx-community/parakeet-*` → `MLXParakeetBackend` (via `parakeet-mlx`)
+  - `*/canary*-mlx` → `MLXCanaryBackend` (via `canary-mlx`)
+  - `mlx-community/VibeVoice-ASR-*` → `MLXVibeVoiceBackend` (via `mlx-audio`; native diarization)
+  - `mlx-community/*` (catch-all) → `MLXWhisperBackend` (via `mlx-audio`)
+  - `Systran/faster-whisper-*` → `FasterWhisperBackend` (whisperx fallback when unavailable)
+- **New mlx-audio Whisper model IDs**: Models follow the `whisper-<size>-asr-<quant>` naming
+  scheme (e.g. `mlx-community/whisper-large-v3-turbo-asr-fp16`, `whisper-tiny-asr-fp16`).
+  These are hosted on mlx-community and served by the rewritten `MLXWhisperBackend` that uses
+  `mlx-audio` instead of the old standalone `mlx-whisper` package.
+- **Alignment heads monkey-patch**: `mlx-audio` ≤ 0.4.x has a bug that prevents word timestamps
+  unless `model._alignment_heads` is manually set. `MLXWhisperBackend.load()` applies this patch
+  automatically.
 - **Beam search**: MLX Whisper only supports greedy decoding. If `beam_size > 1`
   is configured (default is 5), the backend silently falls back to greedy.
   This has no user-visible impact.
-- **Diarization**: PyAnnote diarization works with all MLX backends — transcription
-  runs on Metal, diarization runs on MPS (or CPU if MPS is unavailable).
-- **Performance**: ~3 s per minute of audio on M-series with `whisper-large-v3-mlx`.
+- **Diarization on Metal**: Two options are available:
+  - *Sortformer* (`SortformerEngine`) — Metal-native via `mlx-audio`; up to 4 speakers;
+    no HuggingFace token required. Default for Apple Silicon.
+  - *PyAnnote* (`DiarizationEngine`) — MPS or CPU; requires HF token and model acceptance.
+- **Live Mode**: Uses `FasterWhisperBackend` on Metal (whisperx conflicts with mlx-audio);
+  auto-selected when whisperx is not importable.
+- **Performance**: ~3 s per minute of audio on M-series with `whisper-large-v3-turbo-asr-fp16`.
 - **Async safety**: All MLX transcription calls are wrapped in `asyncio.to_thread()`
   to prevent blocking the FastAPI event loop.
 
@@ -3273,7 +3327,7 @@ If `mlx.available` is `false`, check `mlx.reason`:
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `mlx_whisper not found` | MLX extra not installed | `cd server/backend && uv sync --extra mlx` |
+| `mlx_audio not found` / `ModuleNotFoundError: mlx_audio` | MLX extra not installed | `cd server/backend && uv sync --extra mlx` |
 | `features.mlx.available: false` | Not Apple Silicon or wrong Python | Check `uname -m` → must be `arm64` |
 | Diarization falls back to CPU | MPS memory pressure | Normal; use `device: cpu` in `config.yaml` to force |
 | `DATA_DIR` not found errors | Path not created | `mkdir -p "$DATA_DIR/logs" "$DATA_DIR/audio" "$DATA_DIR/tokens"` |
