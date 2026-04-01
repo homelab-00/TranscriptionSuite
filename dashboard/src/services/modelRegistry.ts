@@ -177,10 +177,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   // ── MLX VibeVoice (Apple Silicon / Metal) ────────────────────────────────
   {
     id: 'mlx-community/VibeVoice-ASR-4bit',
-    displayName: 'MLX VibeVoice ASR (4-bit)',
+    displayName: 'VibeVoice ASR (Q4)',
     family: 'mlx',
     description:
-      'Microsoft VibeVoice-ASR on MLX, 4-bit quantised. Native diarization + timestamps on Apple Silicon. Smallest VibeVoice variant (~5.7 GB).',
+      'Microsoft VibeVoice-ASR on MLX, Q4 quantised. Native diarization + timestamps on Apple Silicon. Smallest VibeVoice variant (~5.7 GB).',
     parameterCount: '9B',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/VibeVoice-ASR-4bit',
     capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
@@ -188,10 +188,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/VibeVoice-ASR-8bit',
-    displayName: 'MLX VibeVoice ASR (8-bit)',
+    displayName: 'VibeVoice ASR (Q8)',
     family: 'mlx',
     description:
-      'Microsoft VibeVoice-ASR on MLX, 8-bit quantised. Native diarization + timestamps on Apple Silicon (~9.5 GB).',
+      'Microsoft VibeVoice-ASR on MLX, Q8 quantised. Native diarization + timestamps on Apple Silicon (~9.5 GB).',
     parameterCount: '9B',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/VibeVoice-ASR-8bit',
     capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
@@ -199,10 +199,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/VibeVoice-ASR-bf16',
-    displayName: 'MLX VibeVoice ASR (bf16)',
+    displayName: 'VibeVoice ASR',
     family: 'mlx',
     description:
-      'Microsoft VibeVoice-ASR on MLX. Native diarization + timestamps on Apple Silicon. Very large (~18 GB).',
+      'Microsoft VibeVoice-ASR on MLX. Native diarization + timestamps on Apple Silicon. Full precision (~18 GB).',
     parameterCount: '9B',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/VibeVoice-ASR-bf16',
     capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
@@ -218,10 +218,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   // beats the 1.1b on all English benchmarks.
   {
     id: 'mlx-community/parakeet-tdt-0.6b-v3',
-    displayName: 'MLX Parakeet TDT 0.6B v3',
+    displayName: 'Parakeet TDT 0.6B v3',
     family: 'mlx',
     description:
-      'NVIDIA Parakeet-TDT 0.6B v3 on MLX. SOTA accuracy on Apple Silicon — 660K hours of training, native punctuation & capitalisation, 25 European languages.',
+      'NVIDIA Parakeet-TDT 0.6B v3 on MLX. SOTA accuracy on Apple Silicon — 660K hours of training, native punctuation & capitalisation, 25 European languages (~1.1 GB).',
     parameterCount: '600M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3',
     capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
@@ -233,10 +233,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   // No translation support in the MLX port (ASR only).
   {
     id: 'eelcor/canary-1b-v2-mlx',
-    displayName: 'MLX Canary 1B v2',
+    displayName: 'Canary 1B v2',
     family: 'mlx',
     description:
-      'NVIDIA Canary 1B v2 on MLX. ~8.5× real-time on Apple Silicon, native P&C, 25 European languages. Full precision (~3.7 GB).',
+      'NVIDIA Canary 1B v2 on MLX. ~8.5× real-time on Apple Silicon, native P&C, 25 European languages (~3.7 GB).',
     parameterCount: '1B',
     huggingfaceUrl: 'https://huggingface.co/eelcor/canary-1b-v2-mlx',
     capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
@@ -244,10 +244,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'Mediform/canary-1b-v2-mlx-q8',
-    displayName: 'MLX Canary 1B v2 (Q8)',
+    displayName: 'Canary 1B v2 (Q8)',
     family: 'mlx',
     description:
-      'NVIDIA Canary 1B v2 on MLX, Q8 quantised. Native P&C, 25 European languages. Smaller footprint (~1.1 GB).',
+      'NVIDIA Canary 1B v2 on MLX, Q8 quantised. Native P&C, 25 European languages (~1.1 GB).',
     parameterCount: '1B',
     huggingfaceUrl: 'https://huggingface.co/Mediform/canary-1b-v2-mlx-q8',
     capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
@@ -257,10 +257,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   // ── MLX Whisper (Apple Silicon / Metal via mlx-audio) ───────────────────
   {
     id: 'mlx-community/whisper-large-v3-turbo-asr-fp16',
-    displayName: 'MLX Whisper Large v3 Turbo',
+    displayName: 'Whisper Large v3 Turbo',
     family: 'mlx',
     description:
-      'Fast turbo variant of Whisper large-v3 on Apple Silicon. Best speed/accuracy tradeoff. Full precision.',
+      'Fast turbo variant of Whisper large-v3 on Apple Silicon. Best speed/accuracy tradeoff (~1.6 GB).',
     parameterCount: '809M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -268,10 +268,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/whisper-large-v3-turbo-asr-8bit',
-    displayName: 'MLX Whisper Large v3 Turbo (Q8)',
+    displayName: 'Whisper Large v3 Turbo (Q8)',
     family: 'mlx',
     description:
-      'Fast turbo variant of Whisper large-v3 on Apple Silicon. Q8 quantized — smaller footprint with minimal quality loss.',
+      'Fast turbo variant of Whisper large-v3 on Apple Silicon. Q8 quantized — smaller footprint with minimal quality loss (~0.8 GB).',
     parameterCount: '809M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-8bit',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -279,10 +279,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/whisper-large-v3-turbo-asr-4bit',
-    displayName: 'MLX Whisper Large v3 Turbo (Q4)',
+    displayName: 'Whisper Large v3 Turbo (Q4)',
     family: 'mlx',
     description:
-      'Fast turbo variant of Whisper large-v3 on Apple Silicon. Q4 quantized — lowest memory usage.',
+      'Fast turbo variant of Whisper large-v3 on Apple Silicon. Q4 quantized — lowest memory usage (~0.4 GB).',
     parameterCount: '809M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-4bit',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -290,10 +290,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/whisper-large-v3-asr-fp16',
-    displayName: 'MLX Whisper Large v3',
+    displayName: 'Whisper Large v3',
     family: 'mlx',
     description:
-      'Apple Silicon Metal-accelerated Whisper large-v3. Best accuracy on Mac bare-metal. Full precision.',
+      'Whisper large-v3 on Apple Silicon. Highest accuracy (~3 GB).',
     parameterCount: '1.5B',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-asr-fp16',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -301,10 +301,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/whisper-large-v3-asr-8bit',
-    displayName: 'MLX Whisper Large v3 (Q8)',
+    displayName: 'Whisper Large v3 (Q8)',
     family: 'mlx',
     description:
-      'Whisper large-v3 on Apple Silicon. Q8 quantized — smaller footprint with minimal quality loss.',
+      'Whisper large-v3 on Apple Silicon. Q8 quantized — smaller footprint with minimal quality loss (~1.5 GB).',
     parameterCount: '1.5B',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-asr-8bit',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -312,10 +312,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/whisper-large-v3-asr-4bit',
-    displayName: 'MLX Whisper Large v3 (Q4)',
+    displayName: 'Whisper Large v3 (Q4)',
     family: 'mlx',
     description:
-      'Whisper large-v3 on Apple Silicon. Q4 quantized — lowest memory usage.',
+      'Whisper large-v3 on Apple Silicon. Q4 quantized — lowest memory usage (~0.75 GB).',
     parameterCount: '1.5B',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-asr-4bit',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -323,9 +323,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/whisper-small-asr-fp16',
-    displayName: 'MLX Whisper Small',
+    displayName: 'Whisper Small',
     family: 'mlx',
-    description: 'Lightweight Metal-accelerated Whisper small. Full precision.',
+    description: 'Lightweight Whisper small on Apple Silicon (~0.5 GB).',
     parameterCount: '244M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-small-asr-fp16',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -333,9 +333,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/whisper-small-asr-8bit',
-    displayName: 'MLX Whisper Small (Q8)',
+    displayName: 'Whisper Small (Q8)',
     family: 'mlx',
-    description: 'Lightweight Metal-accelerated Whisper small. Q8 quantized.',
+    description: 'Lightweight Whisper small on Apple Silicon. Q8 quantized (~0.24 GB).',
     parameterCount: '244M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-small-asr-8bit',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -343,9 +343,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/whisper-small-asr-4bit',
-    displayName: 'MLX Whisper Small (Q4)',
+    displayName: 'Whisper Small (Q4)',
     family: 'mlx',
-    description: 'Lightweight Metal-accelerated Whisper small. Q4 quantized — smallest footprint.',
+    description: 'Lightweight Whisper small on Apple Silicon. Q4 quantized — smallest footprint (~0.12 GB).',
     parameterCount: '244M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-small-asr-4bit',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -353,9 +353,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/whisper-tiny-asr-fp16',
-    displayName: 'MLX Whisper Tiny',
+    displayName: 'Whisper Tiny',
     family: 'mlx',
-    description: 'Smallest Metal-accelerated model. Fastest but lowest accuracy. Full precision.',
+    description: 'Smallest Whisper model on Apple Silicon. Fastest but lowest accuracy (~78 MB).',
     parameterCount: '39M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-tiny-asr-fp16',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -363,9 +363,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/whisper-tiny-asr-8bit',
-    displayName: 'MLX Whisper Tiny (Q8)',
+    displayName: 'Whisper Tiny (Q8)',
     family: 'mlx',
-    description: 'Smallest Metal-accelerated model. Q8 quantized.',
+    description: 'Smallest Whisper model on Apple Silicon. Q8 quantized (~39 MB).',
     parameterCount: '39M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-tiny-asr-8bit',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -373,9 +373,9 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   },
   {
     id: 'mlx-community/whisper-tiny-asr-4bit',
-    displayName: 'MLX Whisper Tiny (Q4)',
+    displayName: 'Whisper Tiny (Q4)',
     family: 'mlx',
-    description: 'Smallest Metal-accelerated model. Q4 quantized — minimal memory usage.',
+    description: 'Smallest Whisper model on Apple Silicon. Q4 quantized — minimal memory usage (~20 MB).',
     parameterCount: '39M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-tiny-asr-4bit',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
