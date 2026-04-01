@@ -7,7 +7,7 @@
  * Supports 4 categories: download, server, warning, info.
  */
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   Container,
   Cpu,
@@ -22,6 +22,9 @@ import {
   Ban,
   Trash2,
   Clock,
+  ChevronRight,
+  ChevronDown,
+  Timer,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import {
@@ -122,79 +125,122 @@ function formatDuration(startMs: number, endMs?: number): string {
   return `${mins}m ${secs}s`;
 }
 
+function formatMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+}
+
 // ─── Row component ───────────────────────────────────────────────────────────
 
-function ActivityRow({ item }: { item: ActivityItem }) {
+function ActivityRow({
+  item,
+  expanded,
+  onToggleExpand,
+}: {
+  item: ActivityItem;
+  expanded: boolean;
+  onToggleExpand: () => void;
+}) {
   const isActive = item.status === 'active';
   const isDownload = item.category === 'download';
   const showProgress = isActive && isDownload && item.legacyType !== 'model-preload';
   const badge = STATUS_BADGE[item.status];
+  const hasExpandable = !!item.expandableDetail;
+  const isComplete = item.status === 'complete';
 
   return (
     <div
-      className={`border-glass-border flex items-center gap-4 border-b px-6 py-4 last:border-b-0 ${
+      className={`border-glass-border border-b last:border-b-0 ${
         item.category === 'warning' ? 'border-l-2 border-l-amber-500/50' : ''
       }`}
     >
-      {/* Type icon */}
-      <div className={`shrink-0 ${getColor(item)}`}>{getIcon(item)}</div>
-
-      {/* Info column */}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-3">
-          <span className="truncate text-sm font-medium text-white">{item.label}</span>
-          <span
-            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.className}`}
+      <div className="flex items-center gap-4 px-6 py-4">
+        {/* Expand toggle or type icon */}
+        {hasExpandable ? (
+          <button
+            onClick={onToggleExpand}
+            className={`shrink-0 ${getColor(item)} transition-colors hover:text-white`}
+            title={expanded ? 'Collapse details' : 'Expand details'}
           >
-            {badge.label}
-          </span>
-        </div>
+            {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+          </button>
+        ) : (
+          <div className={`shrink-0 ${getColor(item)}`}>{getIcon(item)}</div>
+        )}
 
-        <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-500">
-          <span>{getTypeLabel(item)}</span>
-          {item.totalSize && (
-            <span>
-              {item.downloadedSize ? `${item.downloadedSize} / ${item.totalSize}` : item.totalSize}
+        {/* Info column */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-3">
+            <span className="truncate text-sm font-medium text-white">{item.label}</span>
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.className}`}
+            >
+              {badge.label}
             </span>
-          )}
-          {item.detail && <span>{item.detail}</span>}
-          <span className="inline-flex items-center gap-1">
-            <Clock size={10} />
-            {formatTime(item.startedAt)}
-          </span>
-          {item.completedAt && <span>{formatDuration(item.startedAt, item.completedAt)}</span>}
-          {item.durationMs !== undefined && !item.completedAt && (
-            <span>{(item.durationMs / 1000).toFixed(1)}s</span>
-          )}
-        </div>
-
-        {/* Progress bar for active download items */}
-        {showProgress && (
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-            {item.progress !== undefined ? (
-              <div
-                className="bg-accent-cyan h-full rounded-full transition-all duration-300"
-                style={{ width: `${item.progress}%` }}
-              />
-            ) : (
-              <div className="bg-accent-cyan h-full w-1/3 animate-pulse rounded-full" />
+            {/* Duration badge for completed items */}
+            {isComplete && item.durationMs !== undefined && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-slate-700/60 px-2 py-0.5 text-[10px] text-slate-400">
+                <Timer size={9} />
+                {formatMs(item.durationMs)}
+              </span>
             )}
           </div>
-        )}
 
-        {/* Error message */}
-        {item.status === 'error' && item.error && (
-          <p className="mt-1 text-xs text-red-400">{item.error}</p>
-        )}
+          <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-500">
+            <span>{getTypeLabel(item)}</span>
+            {item.totalSize && (
+              <span>
+                {item.downloadedSize
+                  ? `${item.downloadedSize} / ${item.totalSize}`
+                  : item.totalSize}
+              </span>
+            )}
+            {item.detail && <span>{item.detail}</span>}
+            <span className="inline-flex items-center gap-1">
+              <Clock size={10} />
+              {formatTime(item.startedAt)}
+            </span>
+            {item.completedAt && <span>{formatDuration(item.startedAt, item.completedAt)}</span>}
+          </div>
+
+          {/* Progress bar for active download items */}
+          {showProgress && (
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+              {item.progress !== undefined ? (
+                <div
+                  className="bg-accent-cyan h-full rounded-full transition-all duration-300"
+                  style={{ width: `${item.progress}%` }}
+                />
+              ) : (
+                <div className="bg-accent-cyan h-full w-1/3 animate-pulse rounded-full" />
+              )}
+            </div>
+          )}
+
+          {/* Error message */}
+          {item.status === 'error' && item.error && (
+            <p className="mt-1 text-xs text-red-400">{item.error}</p>
+          )}
+        </div>
+
+        {/* Status icon */}
+        <div className="shrink-0">
+          {isActive && <Loader2 size={18} className="text-accent-cyan animate-spin" />}
+          {isComplete && <CheckCircle2 size={18} className="text-emerald-400" />}
+          {item.status === 'error' && <AlertCircle size={18} className="text-red-400" />}
+          {item.status === 'dismissed' && <Ban size={18} className="text-slate-500" />}
+        </div>
       </div>
 
-      {/* Status icon */}
-      <div className="shrink-0">
-        {isActive && <Loader2 size={18} className="text-accent-cyan animate-spin" />}
-        {item.status === 'complete' && <CheckCircle2 size={18} className="text-emerald-400" />}
-        {item.status === 'error' && <AlertCircle size={18} className="text-red-400" />}
-        {item.status === 'dismissed' && <Ban size={18} className="text-slate-500" />}
-      </div>
+      {/* Expandable detail */}
+      {hasExpandable && expanded && (
+        <div className="border-t border-white/5 bg-white/[0.02] px-6 py-3 pl-16">
+          <pre className="text-xs leading-relaxed break-words whitespace-pre-wrap text-slate-400">
+            {item.expandableDetail}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
@@ -218,6 +264,7 @@ function EmptyState() {
 export const ActivityPanel: React.FC = () => {
   const items = useActivityStore((s) => s.items);
   const clearAll = useActivityStore((s) => s.clearAll);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const hasHistory = items.some(
     (i) => i.status === 'complete' || i.status === 'error' || i.status === 'dismissed',
@@ -225,7 +272,20 @@ export const ActivityPanel: React.FC = () => {
 
   const handleClearHistory = useCallback(() => {
     clearAll();
+    setExpandedIds(new Set());
   }, [clearAll]);
+
+  const toggleExpand = useCallback((id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
 
   // Sort: active first, then by startedAt descending
   const sorted = [...items].sort((a, b) => {
@@ -258,7 +318,14 @@ export const ActivityPanel: React.FC = () => {
         {sorted.length === 0 ? (
           <EmptyState />
         ) : (
-          sorted.map((item) => <ActivityRow key={item.id} item={item} />)
+          sorted.map((item) => (
+            <ActivityRow
+              key={item.id}
+              item={item}
+              expanded={expandedIds.has(item.id)}
+              onToggleExpand={() => toggleExpand(item.id)}
+            />
+          ))
         )}
       </div>
     </div>

@@ -98,7 +98,13 @@ function StatusIcon({ item }: { item: ActivityItem }) {
   }
 }
 
-const AUTO_DISMISS_MS = 5_000;
+/** Auto-dismiss delay per category (milliseconds). */
+const AUTO_DISMISS_MS: Record<ActivityCategory, number> = {
+  server: 5_000,
+  download: 5_000,
+  info: 10_000,
+  warning: 10_000,
+};
 
 function ActivityCard({ item }: { item: ActivityItem }) {
   const dismiss = useActivityStore((s) => s.dismissActivity);
@@ -106,14 +112,15 @@ function ActivityCard({ item }: { item: ActivityItem }) {
   const isDownload = item.category === 'download';
   const showProgress = isActive && isDownload && item.legacyType !== 'model-preload';
 
-  // Auto-dismiss completed notifications after 5 seconds
-  // Persistent warnings are never auto-dismissed
+  // Auto-dismiss completed notifications using category-specific durations.
+  // Persistent warnings are never auto-dismissed.
   useEffect(() => {
     if (item.persistent) return;
     if (item.status !== 'complete' && item.status !== 'error') return;
-    const timer = setTimeout(() => dismiss(item.id), AUTO_DISMISS_MS);
+    const delay = AUTO_DISMISS_MS[item.category] ?? 5_000;
+    const timer = setTimeout(() => dismiss(item.id), delay);
     return () => clearTimeout(timer);
-  }, [item.status, item.id, item.persistent, dismiss]);
+  }, [item.status, item.id, item.category, item.persistent, dismiss]);
 
   return (
     <div

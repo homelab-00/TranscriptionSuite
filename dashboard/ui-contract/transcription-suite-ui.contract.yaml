@@ -40,7 +40,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-01T16:58:05.092Z
+    generated_at: 2026-04-01T18:47:50.263Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -438,6 +438,7 @@ utility_allowlist:
     - bg-slate-500
     - bg-slate-500/10
     - bg-slate-700
+    - bg-slate-700/60
     - bg-slate-800
     - bg-slate-900
     - bg-slate-900/80
@@ -741,6 +742,7 @@ utility_allowlist:
     - pl-0
     - pl-1
     - pl-12
+    - pl-16
     - pl-2
     - pl-4
     - pl-5
@@ -959,6 +961,7 @@ utility_allowlist:
     - bg-[#0b1120]
     - bg-[#0f172a]
     - bg-[rgba(22,31,50,0.9)]
+    - bg-white/[0.02]
     - ease-[cubic-bezier(0.22,1,0.36,1)]
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
     - ease-[cubic-bezier(0.32,0.72,0,1)]
@@ -1483,6 +1486,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   FieldRow:
     file: components/views/ServerConfigEditor.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  FloatingNotificationsSection:
+    file: components/views/SettingsModal.tsx
     required_tokens:
       - colors
       - motion

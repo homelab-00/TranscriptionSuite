@@ -37,6 +37,7 @@ import { buildSparseYaml } from '../../src/utils/configTree';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 import type { AuthToken } from '../../src/api/types';
 import { ServerConfigEditor } from './ServerConfigEditor';
+import { useActivityStore, type ActivityCategory } from '../../src/stores/activityStore';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -442,6 +443,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           label="Show desktop notifications"
         />
       </Section>
+      <FloatingNotificationsSection />
       <Section title="Docker Server">
         <AppleSwitch
           checked={appSettings.stopServerOnQuit}
@@ -1598,6 +1600,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     </>
   );
 };
+
+// ─── Floating Notifications preferences (instant-apply via activityStore) ────
+
+const NOTIFICATION_PREF_LABELS: { category: ActivityCategory; label: string }[] = [
+  { category: 'download', label: 'Downloads (model downloads, dependency installs)' },
+  { category: 'server', label: 'Server status (startup phases, server ready)' },
+  { category: 'warning', label: 'Warnings (feature unavailability, GPU issues)' },
+  { category: 'info', label: 'Info (GPU confirmation, cache hits)' },
+];
+
+function FloatingNotificationsSection() {
+  const prefs = useActivityStore((s) => s.notificationPreferences);
+  const setPref = useActivityStore((s) => s.setNotificationPreference);
+
+  return (
+    <Section title="Floating Notifications">
+      {NOTIFICATION_PREF_LABELS.map(({ category, label }) => (
+        <AppleSwitch
+          key={category}
+          checked={prefs[category] !== false}
+          onChange={(v) => setPref(category, v)}
+          label={label}
+        />
+      ))}
+      <p className="text-xs text-slate-500">
+        Controls the floating widget only — the Activity panel always shows all events.
+      </p>
+    </Section>
+  );
+}
 
 // Sub-components
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
