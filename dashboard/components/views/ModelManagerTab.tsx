@@ -34,6 +34,9 @@ const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+/** Families that require Docker and do not work in Metal mode. */
+const DOCKER_ONLY_FAMILIES: Set<ModelFamily> = new Set(['nemo', 'vibevoice']);
+
 export interface ModelManagerTabProps {
   mainModelSelection: string;
   setMainModelSelection: (value: string) => void;
@@ -50,6 +53,8 @@ export interface ModelManagerTabProps {
   modelCacheStatus: Record<string, { exists: boolean; size?: string }>;
   isRunning: boolean;
   refreshCacheStatus: (extraIds?: string[]) => void;
+  /** When true, hide families that require Docker (nemo, whisper, vibevoice). */
+  isMetal?: boolean;
 }
 
 // ─── Family section configuration ───────────────────────────────────────────
@@ -83,6 +88,13 @@ const FAMILY_SECTIONS: FamilySectionConfig[] = [
     borderClass: 'border-l-blue-400',
     badgeClass: 'bg-blue-500/10 text-blue-400',
     headerTextClass: 'text-blue-400',
+  },
+  {
+    family: 'mlx',
+    label: 'MLX Whisper (Apple Silicon)',
+    borderClass: 'border-l-orange-400',
+    badgeClass: 'bg-orange-500/10 text-orange-400',
+    headerTextClass: 'text-orange-400',
   },
   {
     family: 'diarization',
@@ -471,6 +483,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
   modelCacheStatus,
   isRunning,
   refreshCacheStatus,
+  isMetal = false,
 }) => {
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
   const [customModels, setCustomModels] = useState<string[]>([]);
@@ -687,6 +700,10 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
 
       {/* Family sections */}
       {FAMILY_SECTIONS.map((section) => {
+        // Metal mode: hide Docker-only families.  Non-Metal: hide MLX family.
+        if (isMetal && DOCKER_ONLY_FAMILIES.has(section.family)) return null;
+        if (!isMetal && section.family === 'mlx') return null;
+
         const models = getModelsByFamily(section.family);
         if (models.length === 0) return null;
 

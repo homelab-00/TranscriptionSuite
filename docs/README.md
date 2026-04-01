@@ -82,13 +82,13 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 ### 1.1 Features
 
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup*
-- **Multiple Models available**: *WhisperX* (all three sizes of the [`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU acceleration via Vulkan) are supported
-- **Speaker Diarization**: Speaker identification & diarization (subtitling) for Whisper, NeMo, and VibeVoice models; Whisper and NeMo use PyAnnote for diarization while VibeVoice does it by itself (not available for whisper.cpp models)
+- **Multiple Models available**: On **Docker/Linux/Windows**: *WhisperX* ([`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU via Vulkan). On **Apple Silicon (Metal)**: [*MLX Whisper*](https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16) (tiny → large-v3-turbo), [*MLX Parakeet v3*](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3), [*MLX Canary v2*](https://huggingface.co/mlx-community/canary-1b-v2), and [*MLX VibeVoice-ASR*](https://huggingface.co/mlx-community/VibeVoice-ASR-bf16) — all running natively without Docker
+- **Speaker Diarization**: Speaker identification & diarization (subtitling) for Whisper, NeMo, and VibeVoice models; Whisper and NeMo use PyAnnote for diarization while VibeVoice does it by itself (not available for whisper.cpp models). On Apple Silicon, [*Sortformer*](https://huggingface.co/mlx-community/diar_sortformer_4spk-v1-fp32) provides Metal-native diarization for up to 4 speakers — no HuggingFace token required
 - **Parallel Processing**: If your VRAM budget allows it, transcribe & diarize a recording at the same time - speeding up processing time significantly
-- **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [50 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
+- **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [51 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds; either using your mic or the system audio
 - **Session File Import**: Import existing audio files from the Session tab; transcription results are saved directly as `.txt` or `.srt` to a folder of your choice — no Notebook entry created
-- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (Whisper-only; not yet available for whisper.cpp)
+- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (available for Whisper on Docker and for MLX Whisper on Apple Silicon; not yet available for whisper.cpp)
 - **Global Keyboard Shortcuts**: System-wide shortcuts & paste-at-cursor functionality
 - **Remote Access**: Securely access your desktop at home running the model from anywhere (utilizing Tailscale) or share it on your local network via LAN
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view, full-text search, and LM Studio integration (chat with the AI about your notes)
@@ -164,8 +164,14 @@ After installation to make sure it's enabled, run `wsl --list --verbose` - if th
     * Not required if using CPU mode
 
 **macOS:**
-1. Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/) or [Podman Desktop](https://podman-desktop.io/)
-2. GPU mode is not available on macOS — the server runs in CPU mode automatically
+1. **Apple Silicon (M1+) — recommended:** Use the **Metal/MLX runtime** for native
+   hardware-accelerated transcription without Docker:
+   - Install Python deps: `cd server/backend && uv sync --extra mlx`
+   - Start the server bare-metal (see [README_DEV.md § 15](README_DEV.md#15-apple-silicon-metalmlx-development))
+   - In the dashboard **Settings → Runtime Profile**, select **Metal (Apple Silicon)**
+2. **Intel Mac / CPU-only:** Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
+   or [Podman Desktop](https://podman-desktop.io/) — GPU acceleration is not
+   available on Intel macOS; the server runs in CPU mode automatically.
 
 ### 2.2 Download the Dashboard app
 

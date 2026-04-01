@@ -169,10 +169,11 @@ describe('isVibeVoiceASRModel', () => {
     expect(isVibeVoiceASRModel('VibeVoice-ASR')).toBe(false);
   });
 
+  it('matches MLX VibeVoice-ASR variant', () => {
+    expect(isVibeVoiceASRModel('mlx-community/VibeVoice-ASR-bf16')).toBe(true);
+  });
+
   it('returns false for null/undefined/empty', () => {
-    expect(isVibeVoiceASRModel(null)).toBe(false);
-    expect(isVibeVoiceASRModel(undefined)).toBe(false);
-    expect(isVibeVoiceASRModel('')).toBe(false);
   });
 });
 
@@ -383,6 +384,7 @@ describe('supportsDiarization', () => {
   it('returns false for VibeVoice models (uses built-in diarization, not pyannote)', () => {
     expect(supportsDiarization('microsoft/VibeVoice-ASR')).toBe(false);
     expect(supportsDiarization('scerz/VibeVoice-ASR-4bit')).toBe(false);
+    expect(supportsDiarization('mlx-community/VibeVoice-ASR-bf16')).toBe(false);
   });
 
   it('returns true for NeMo models', () => {

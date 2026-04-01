@@ -169,6 +169,28 @@ def transcribe_and_diarize(
         )
         return result, None
 
+    # Sortformer uses MLX/Metal — running it in parallel with MLX Whisper
+    # (also Metal) deadlocks the GPU.  Fall back to sequential mode.
+    from server.core.sortformer_engine import SortformerEngine
+
+    if isinstance(diar_engine, SortformerEngine):
+        logger.info(
+            "Sortformer + MLX detected — switching to sequential mode "
+            "to avoid Metal deadlock"
+        )
+        return transcribe_then_diarize(
+            engine=engine,
+            model_manager=model_manager,
+            file_path=file_path,
+            language=language,
+            task=task,
+            translation_target_language=translation_target_language,
+            word_timestamps=word_timestamps,
+            expected_speakers=expected_speakers,
+            cancellation_check=cancellation_check,
+            progress_callback=progress_callback,
+        )
+
     # ------------------------------------------------------------------
     # Phase 2 — Parallel execution
     # ------------------------------------------------------------------

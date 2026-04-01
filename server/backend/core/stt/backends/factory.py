@@ -12,6 +12,13 @@ _PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNOREC
 _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
 _VIBEVOICE_ASR_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
 _WHISPERCPP_PATTERN = re.compile(r"((?:^|/)ggml-.*\.bin$|\.gguf$)", re.IGNORECASE)
+# MLX Parakeet and MLX Canary must be checked before the general mlx-community prefix.
+_MLX_PARAKEET_PATTERN = re.compile(r"^mlx-community/parakeet", re.IGNORECASE)
+# Matches community Canary MLX ports: eelcor/canary-1b-v2-mlx, Mediform/canary-1b-v2-mlx-q8, qfuxa/canary-mlx, etc.
+_MLX_CANARY_PATTERN = re.compile(r"^[^/]+/canary[^/]*-mlx", re.IGNORECASE)
+# MLX VibeVoice must be checked before the generic VibeVoice pattern.
+_MLX_VIBEVOICE_PATTERN = re.compile(r"^mlx-community/vibevoice-asr", re.IGNORECASE)
+_MLX_PATTERN = re.compile(r"^mlx-community/", re.IGNORECASE)
 
 
 def detect_backend_type(model_name: str) -> str:
@@ -21,10 +28,19 @@ def detect_backend_type(model_name: str) -> str:
         return "parakeet"
     if _CANARY_PATTERN.match(name):
         return "canary"
+    # MLX VibeVoice must be checked before the generic VibeVoice pattern.
+    if _MLX_VIBEVOICE_PATTERN.match(name):
+        return "mlx_vibevoice"
     if _VIBEVOICE_ASR_PATTERN.match(name):
         return "vibevoice_asr"
     if _WHISPERCPP_PATTERN.search(name):
         return "whispercpp"
+    if _MLX_PARAKEET_PATTERN.match(name):
+        return "mlx_parakeet"
+    if _MLX_CANARY_PATTERN.match(name):
+        return "mlx_canary"
+    if _MLX_PATTERN.match(name):
+        return "mlx_whisper"
     return "whisper"
 
 
@@ -53,6 +69,21 @@ def is_whispercpp_model(model_name: str) -> bool:
     return detect_backend_type(model_name) == "whispercpp"
 
 
+def is_mlx_model(model_name: str) -> bool:
+    """Return True if *model_name* is an MLX Community model (Apple Silicon)."""
+    return detect_backend_type(model_name) in (
+        "mlx_whisper",
+        "mlx_parakeet",
+        "mlx_canary",
+        "mlx_vibevoice",
+    )
+
+
+def is_mlx_parakeet_model(model_name: str) -> bool:
+    """Return True if *model_name* is an MLX-accelerated Parakeet model."""
+    return detect_backend_type(model_name) == "mlx_parakeet"
+
+
 def create_backend(model_name: str) -> STTBackend:
     """Instantiate the appropriate STTBackend for *model_name*."""
     backend_type = detect_backend_type(model_name)
@@ -75,6 +106,39 @@ def create_backend(model_name: str) -> STTBackend:
         from server.core.stt.backends.whispercpp_backend import WhisperCppBackend
 
         return WhisperCppBackend()
+
+    if backend_type == "mlx_parakeet":
+        from server.core.stt.backends.mlx_parakeet_backend import MLXParakeetBackend
+
+        return MLXParakeetBackend()
+
+    if backend_type == "mlx_canary":
+        from server.core.stt.backends.mlx_canary_backend import MLXCanaryBackend
+
+        return MLXCanaryBackend()
+
+    if backend_type == "mlx_vibevoice":
+        from server.core.stt.backends.mlx_vibevoice_backend import MLXVibeVoiceBackend
+
+        return MLXVibeVoiceBackend()
+
+    if backend_type == "mlx_whisper":
+        from server.core.stt.backends.mlx_whisper_backend import MLXWhisperBackend
+
+        return MLXWhisperBackend()
+
+    # Default: faster-whisper / WhisperX backend.
+    # Prefer WhisperX (alignment + diarization support) when available;
+    # fall back to lightweight FasterWhisperBackend when it isn't (e.g. MLX
+    # bare-metal environments where the whisper extra is not installed).
+    try:
+        import importlib
+
+        importlib.import_module("whisperx")
+    except ImportError:
+        from server.core.stt.backends.faster_whisper_backend import FasterWhisperBackend
+
+        return FasterWhisperBackend()
 
     from server.core.stt.backends.whisperx_backend import WhisperXBackend
 

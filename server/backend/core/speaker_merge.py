@@ -277,3 +277,110 @@ def build_speaker_segments(
 
     speakers.discard("UNKNOWN")
     return segments, labelled_words, len(speakers)
+
+
+def build_speaker_segments_nowords(
+    stt_segments: list[dict[str, Any]],
+    diar_segments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build speaker-attributed segments when word timestamps are unavailable.
+
+    Falls back to proportional text distribution based on overlap duration
+    between STT segments and diarization turns.  Each STT segment's text is
+    split across overlapping diarization turns proportional to their duration
+    overlap.  When only a single speaker overlaps a segment the whole text is
+    assigned directly.
+
+    Args:
+        stt_segments: Transcription segments with ``text``, ``start``, ``end``
+            (no ``words``).
+        diar_segments: Diarization turns with ``speaker``, ``start``, ``end``.
+
+    Returns:
+        List of dicts with ``text``, ``start``, ``end``, ``speaker``.
+    """
+    if not stt_segments or not diar_segments:
+        return []
+
+    result_segments: list[dict[str, Any]] = []
+
+    for stt_seg in stt_segments:
+        seg_start = float(stt_seg.get("start", 0.0))
+        seg_end = float(stt_seg.get("end", 0.0))
+        seg_text = str(stt_seg.get("text", "")).strip()
+
+        if not seg_text:
+            continue
+
+        # Find overlapping diarization segments and compute overlap durations
+        overlaps: list[tuple[dict[str, Any], float]] = []
+        for diar_seg in diar_segments:
+            d_start = float(diar_seg.get("start", 0.0))
+            d_end = float(diar_seg.get("end", 0.0))
+            overlap_start = max(seg_start, d_start)
+            overlap_end = min(seg_end, d_end)
+            overlap_dur = overlap_end - overlap_start
+            if overlap_dur > 0:
+                overlaps.append((diar_seg, overlap_dur))
+
+        if not overlaps:
+            # No diarization coverage — keep text without speaker
+            result_segments.append(
+                {
+                    "text": seg_text,
+                    "start": round(seg_start, 3),
+                    "end": round(seg_end, 3),
+                    "speaker": "UNKNOWN",
+                }
+            )
+            continue
+
+        if len(overlaps) == 1:
+            diar_seg, _ = overlaps[0]
+            d_start = float(diar_seg.get("start", 0.0))
+            d_end = float(diar_seg.get("end", 0.0))
+            result_segments.append(
+                {
+                    "text": seg_text,
+                    "start": round(max(seg_start, d_start), 3),
+                    "end": round(min(seg_end, d_end), 3),
+                    "speaker": diar_seg.get("speaker", "UNKNOWN"),
+                }
+            )
+            continue
+
+        # Multiple speakers — distribute text proportionally by overlap duration
+        total_overlap = sum(dur for _, dur in overlaps)
+        words = seg_text.split()
+        n_words = len(words)
+
+        word_idx = 0
+        for i, (diar_seg, dur) in enumerate(overlaps):
+            if word_idx >= n_words:
+                break
+
+            d_start = float(diar_seg.get("start", 0.0))
+            d_end = float(diar_seg.get("end", 0.0))
+
+            # Last overlap gets remaining words to avoid rounding errors
+            if i == len(overlaps) - 1:
+                chunk_words = words[word_idx:]
+            else:
+                fraction = dur / total_overlap
+                n_chunk = max(1, round(fraction * n_words))
+                chunk_words = words[word_idx : word_idx + n_chunk]
+                word_idx += len(chunk_words)
+
+            if not chunk_words:
+                continue
+
+            result_segments.append(
+                {
+                    "text": " ".join(chunk_words),
+                    "start": round(max(seg_start, d_start), 3),
+                    "end": round(min(seg_end, d_end), 3),
+                    "speaker": diar_seg.get("speaker", "UNKNOWN"),
+                }
+            )
+
+    return result_segments

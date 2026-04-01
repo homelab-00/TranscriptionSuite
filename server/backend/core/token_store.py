@@ -13,6 +13,7 @@ Stores tokens in a JSON file with support for:
 import hashlib
 import json
 import logging
+import os
 import secrets
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -23,7 +24,12 @@ from filelock import FileLock
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TOKEN_STORE_PATH = Path("/data/tokens/tokens.json")
+_data_dir_env = os.environ.get("DATA_DIR")
+DEFAULT_TOKEN_STORE_PATH = (
+    Path(_data_dir_env) / "tokens" / "tokens.json"
+    if _data_dir_env
+    else Path("/data/tokens/tokens.json")
+)
 
 # Default token expiration (30 days)
 DEFAULT_TOKEN_EXPIRY_DAYS = 30

@@ -21,6 +21,7 @@ import {
   Check,
   Send,
   Flame,
+  Zap,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
@@ -32,10 +33,11 @@ import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
-import { isVibeVoiceASRModel } from '../../src/services/modelCapabilities';
+import { isMLXModel, isVibeVoiceASRModel } from '../../src/services/modelCapabilities';
 import { buildSparseYaml } from '../../src/utils/configTree';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 import type { AuthToken } from '../../src/api/types';
+import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { ServerConfigEditor } from './ServerConfigEditor';
 
 interface SettingsModalProps {
@@ -66,6 +68,8 @@ function resolveConfiguredMainModel(cfg: Record<string, unknown>): string {
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
+  const { status: adminStatus } = useAdminStatus();
+  const metalSupported = (adminStatus?.models as any)?.features?.mlx?.available ?? false;
   const [activeTab, setActiveTab] = useState('App');
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [showAuthToken, setShowAuthToken] = useState(false);
@@ -119,7 +123,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     updateChecksEnabled: false,
     updateCheckIntervalMode: '24h',
     updateCheckCustomHours: 24,
-    runtimeProfile: 'gpu' as 'gpu' | 'cpu' | 'vulkan',
+    runtimeProfile: 'gpu' as 'gpu' | 'cpu' | 'vulkan' | 'metal',
     pasteAtCursor: false,
   });
   const [shortcutSettings, setShortcutSettings] = useState<{
@@ -251,7 +255,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 updateCheckCustomHours:
                   (cfg['app.updateCheckCustomHours'] as number) ?? prev.updateCheckCustomHours,
                 runtimeProfile:
-                  (cfg['server.runtimeProfile'] as 'gpu' | 'cpu' | 'vulkan') ?? prev.runtimeProfile,
+                  (cfg['server.runtimeProfile'] as 'gpu' | 'cpu' | 'vulkan' | 'metal') ?? prev.runtimeProfile,
                 pasteAtCursor: (cfg['app.pasteAtCursor'] as boolean) ?? prev.pasteAtCursor,
               }));
               setShortcutSettings((prev) => ({
@@ -390,8 +394,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   if (!isRendered) return null;
 
-  const sampleRateHz = isVibeVoiceASRModel(configuredMainModel) ? 24000 : 16000;
-  const sampleRateHint = isVibeVoiceASRModel(configuredMainModel)
+  const sampleRateHz = isVibeVoiceASRModel(configuredMainModel) && !isMLXModel(configuredMainModel) ? 24000 : 16000;
+  const sampleRateHint = isVibeVoiceASRModel(configuredMainModel) && !isMLXModel(configuredMainModel)
     ? 'Fixed for VibeVoice models'
     : 'Fixed for Faster Whisper and NeMo models';
 
@@ -498,13 +502,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             >
               CPU Only
             </button>
+            {metalSupported && (
+              <button
+                onClick={() => {
+                  setAppSettings((prev) => ({ ...prev, runtimeProfile: 'metal' }));
+                  setIsDirty(true);
+                }}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-all ${
+                  appSettings.runtimeProfile === 'metal'
+                    ? 'bg-violet-500/15 border-violet-500/40 text-violet-400'
+                    : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10'
+                }`}
+              >
+                <Zap className="h-3.5 w-3.5" />
+                Metal (MLX)
+              </button>
+            )}
           </div>
           <p className="text-xs text-slate-500 italic">
             {appSettings.runtimeProfile === 'vulkan'
               ? 'Vulkan mode: Uses whisper.cpp for AMD/Intel GPU acceleration. Requires a GGML model and /dev/dri access. No diarization or live mode.'
               : appSettings.runtimeProfile === 'cpu'
                 ? 'CPU mode: No GPU required. Works on macOS, Linux, and Windows. Expect slower transcription speeds.'
-                : 'GPU mode: Requires NVIDIA GPU with CUDA. Recommended for Linux and Windows with supported hardware.'}
+                : appSettings.runtimeProfile === 'metal'
+                  ? 'Metal mode: Apple Silicon MLX acceleration. Recommended for M-series Macs running bare-metal.'
+                  : 'GPU mode: Requires NVIDIA GPU with CUDA. Recommended for Linux and Windows with supported hardware.'}
           </p>
         </div>
       </Section>

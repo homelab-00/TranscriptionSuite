@@ -1,10 +1,10 @@
 meta:
-  spec_version: 1.0.15
+  spec_version: 1.0.16
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
   generated_from:
-    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
+    repo_path: /Users/haiiro/NoSync/TranscriptionSuite/dashboard
     source_files:
       - App.tsx
       - components/AudioVisualizer.tsx
@@ -127,6 +127,7 @@ foundation:
         - rgba(0, 0, 0, 0.7)
         - rgba(0,0,0,0.3)
         - rgba(0,0,0,0.4)
+        - rgba(167,139,250,0.15)
         - rgba(217, 70, 239, 0.5)
         - rgba(217,70,239,0.5)
         - rgba(22,31,50,0.9)
@@ -401,6 +402,7 @@ utility_allowlist:
     - bg-accent-orange
     - bg-accent-orange/10
     - bg-accent-rose/5
+    - bg-accent-violet/15
     - bg-amber-400/10
     - bg-amber-400/20
     - bg-amber-400/5
@@ -480,6 +482,7 @@ utility_allowlist:
     - border-l-amber-500
     - border-l-blue-400
     - border-l-green-400
+    - border-l-orange-400
     - border-l-red-500
     - border-l-slate-300
     - border-l-slate-500
@@ -548,6 +551,7 @@ utility_allowlist:
     - gap-2.5
     - gap-3
     - gap-4
+    - gap-5
     - gap-6
     - gap-8
     - gap-px
@@ -849,6 +853,8 @@ utility_allowlist:
     - text-accent-cyan
     - text-accent-magenta
     - text-accent-orange
+    - text-accent-violet
+    - text-accent-violet/80
     - text-amber-200
     - text-amber-300
     - text-amber-300/60
@@ -864,6 +870,7 @@ utility_allowlist:
     - text-left
     - text-lg
     - text-only
+    - text-orange-400
     - text-orange-500
     - text-red-100
     - text-red-200/90
