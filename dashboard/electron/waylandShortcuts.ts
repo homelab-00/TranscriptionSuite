@@ -171,6 +171,16 @@ export async function initWaylandShortcuts(
 
   currentGetWindow = getWindow;
 
+  // Close any leftover bus from a previous failed init before opening a new one.
+  if (bus) {
+    try {
+      bus.disconnect();
+    } catch {
+      // Ignore — stale reference.
+    }
+    bus = null;
+  }
+
   try {
     const dbus = require('@particle/dbus-next');
     bus = dbus.sessionBus();
@@ -183,7 +193,7 @@ export async function initWaylandShortcuts(
     portalProxy = portalObj.getInterface('org.freedesktop.portal.GlobalShortcuts');
   } catch (err) {
     console.warn('[WaylandShortcuts] Failed to connect to D-Bus GlobalShortcuts portal:', err);
-    cleanup();
+    cleanup(true);
     return false;
   }
 
@@ -213,7 +223,7 @@ export async function initWaylandShortcuts(
         response.code,
         ')',
       );
-      cleanup();
+      cleanup(true);
       return false;
     }
 
@@ -226,7 +236,7 @@ export async function initWaylandShortcuts(
     console.log('[WaylandShortcuts] Session created:', sessionPath);
   } catch (err) {
     console.warn('[WaylandShortcuts] Failed to create portal session:', err);
-    cleanup();
+    cleanup(true);
     return false;
   }
 
@@ -279,11 +289,12 @@ function waitForResponse(
       `member='Response'`;
 
     let settled = false;
+    let matchAdded = false;
 
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      cleanup();
+      removeResources();
       reject(new Error(`Portal response timeout on ${requestPath}`));
     }, timeoutMs);
 
@@ -297,27 +308,30 @@ function waitForResponse(
       ) {
         settled = true;
         clearTimeout(timer);
-        cleanup();
+        removeResources();
         const [code, results] = msg.body ?? [1, {}];
         resolve({ code, results });
       }
     }
 
-    function cleanup() {
+    function removeResources() {
       bus.removeListener('message', onMessage);
-      // Best-effort RemoveMatch — ignore errors (bus may be closing).
-      try {
-        const removeMsg = new Message({
-          destination: 'org.freedesktop.DBus',
-          path: '/org/freedesktop/DBus',
-          interface: 'org.freedesktop.DBus',
-          member: 'RemoveMatch',
-          signature: 's',
-          body: [matchRule],
-        });
-        bus.send(removeMsg);
-      } catch {
-        // Ignore — match may already be gone or bus disconnected.
+      // Only send RemoveMatch if AddMatch completed — otherwise we'd
+      // orphan the match rule if AddMatch finishes after this call.
+      if (matchAdded) {
+        try {
+          const removeMsg = new Message({
+            destination: 'org.freedesktop.DBus',
+            path: '/org/freedesktop/DBus',
+            interface: 'org.freedesktop.DBus',
+            member: 'RemoveMatch',
+            signature: 's',
+            body: [matchRule],
+          });
+          bus.send(removeMsg);
+        } catch {
+          // Ignore — match may already be gone or bus disconnected.
+        }
       }
     }
 
@@ -333,13 +347,35 @@ function waitForResponse(
       body: [matchRule],
     });
 
-    bus.call(addMatchMsg).catch((err: any) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      bus.removeListener('message', onMessage);
-      reject(err);
-    });
+    bus.call(addMatchMsg).then(
+      () => {
+        matchAdded = true;
+        // If already settled (timeout fired while AddMatch was in flight),
+        // clean up the match rule now that we know it was registered.
+        if (settled) {
+          try {
+            const removeMsg = new Message({
+              destination: 'org.freedesktop.DBus',
+              path: '/org/freedesktop/DBus',
+              interface: 'org.freedesktop.DBus',
+              member: 'RemoveMatch',
+              signature: 's',
+              body: [matchRule],
+            });
+            bus.send(removeMsg);
+          } catch {
+            // Ignore — bus may be closed.
+          }
+        }
+      },
+      (err: any) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        bus.removeListener('message', onMessage);
+        reject(err);
+      },
+    );
   });
 }
 
@@ -533,9 +569,13 @@ export function isPortalConnected(): boolean {
 }
 
 /**
- * Clean up internal state without closing the bus.
+ * Clean up internal state.
+ *
+ * @param closeBus — also disconnect the D-Bus connection.  Pass `true` on
+ *   error/teardown paths so orphaned connections don't degrade the session bus
+ *   (which is shared with libnotify and other D-Bus clients).
  */
-function cleanup(): void {
+function cleanup(closeBus = false): void {
   activatedUnsubscribe?.();
   shortcutsChangedUnsubscribe?.();
   activatedUnsubscribe = null;
@@ -544,20 +584,20 @@ function cleanup(): void {
   sessionPath = null;
   connected = false;
   currentGetWindow = null;
+  if (closeBus && bus) {
+    try {
+      bus.disconnect();
+    } catch {
+      // Best-effort — bus may already be closed or in a bad state.
+    }
+    bus = null;
+  }
 }
 
 /**
  * Destroy the portal session and disconnect from D-Bus.
  */
 export function destroyWaylandShortcuts(): void {
-  cleanup();
-  if (bus) {
-    try {
-      bus.disconnect();
-    } catch {
-      // Best-effort
-    }
-    bus = null;
-  }
+  cleanup(true);
   console.log('[WaylandShortcuts] Portal session destroyed');
 }

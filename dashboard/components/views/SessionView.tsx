@@ -51,6 +51,7 @@ import {
 import { isModelDisabled } from '../../src/services/modelSelection';
 import { SessionTab } from '../../types';
 import { SessionImportTab } from './SessionImportTab';
+import { toast } from 'sonner';
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
   clientRunning: boolean;
@@ -852,30 +853,28 @@ export const SessionView: React.FC<SessionViewProps> = ({
         }
       })();
 
-      // Desktop notification (if permission granted)
-      if (Notification.permission === 'granted') {
-        new Notification('Transcription Complete', {
-          body: text.slice(0, 100) + (text.length > 100 ? '...' : ''),
-          icon: '/logo.svg',
+      // Desktop notification via Electron's async Notification module (IPC).
+      // Falls back to in-app toast if the IPC channel is unavailable or the
+      // OS notification fails (e.g. broken D-Bus proxy on Wayland).
+      // Never uses the Web Notification API — its synchronous libnotify path
+      // blocks the main process for 100+ seconds when D-Bus is unresponsive.
+      const body = text.slice(0, 100) + (text.length > 100 ? '...' : '');
+      window.electronAPI?.notifications
+        ?.show({ title: 'Transcription Complete', body })
+        .catch(() => false)
+        .then((shown) => {
+          if (!shown) toast.success('Transcription Complete', { description: body });
         });
-      }
     }
     if (wasProcessing && transcription.status === 'error' && transcription.error) {
-      if (Notification.permission === 'granted') {
-        new Notification('Transcription Failed', {
-          body: transcription.error,
-          icon: '/logo.svg',
+      window.electronAPI?.notifications
+        ?.show({ title: 'Transcription Failed', body: transcription.error })
+        .catch(() => false)
+        .then((shown) => {
+          if (!shown) toast.error('Transcription Failed', { description: transcription.error });
         });
-      }
     }
   }, [transcription.status, transcription.result?.text, transcription.error]);
-
-  // Request notification permission on mount
-  useEffect(() => {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
 
   // Recovery notification — fetch undelivered results from a previous session
   const [recoveryJobs, setRecoveryJobs] = useState<

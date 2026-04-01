@@ -14,6 +14,7 @@ import {
   clipboard,
   desktopCapturer,
   ipcMain,
+  Notification,
   session,
   shell,
   dialog,
@@ -1790,6 +1791,44 @@ ipcMain.handle('shortcuts:rebind', async () => {
 ipcMain.handle('shortcuts:isWaylandPortal', () => {
   return isWaylandPortalActive();
 });
+
+// Desktop notifications via Electron's async Notification module.
+// The Web Notification API (`new Notification()` in the renderer) delegates to
+// Chromium's libnotify_notification.cc which calls notify_notification_show()
+// synchronously — blocking the main process for 100+ seconds when the D-Bus
+// notification proxy is unresponsive.  This IPC channel uses Electron's own
+// Notification class whose .show() is non-blocking.
+ipcMain.handle(
+  'notifications:show',
+  async (
+    _event,
+    options: { title: string; body: string; silent?: boolean; timeoutMs?: number },
+  ) => {
+    const timeout = options.timeoutMs ?? 3000;
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeout);
+      try {
+        const notification = new Notification({
+          title: options.title,
+          body: options.body,
+          silent: options.silent ?? true,
+        });
+        notification.on('show', () => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+        notification.on('failed', () => {
+          clearTimeout(timer);
+          resolve(false);
+        });
+        notification.show();
+      } catch {
+        clearTimeout(timer);
+        resolve(false);
+      }
+    });
+  },
+);
 
 app.on('before-quit', (event) => {
   if (shutdownPromise) {

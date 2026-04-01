@@ -221,6 +221,14 @@ export interface ElectronAPI {
       }) => void,
     ) => () => void;
   };
+  notifications: {
+    show: (options: {
+      title: string;
+      body: string;
+      silent?: boolean;
+      timeoutMs?: number;
+    }) => Promise<boolean>;
+  };
 }
 
 export interface ComponentUpdateStatus {
@@ -452,5 +460,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('watcher:filesDetected', handler);
       return () => ipcRenderer.removeListener('watcher:filesDetected', handler);
     },
+  },
+  notifications: {
+    show: (options: { title: string; body: string; silent?: boolean; timeoutMs?: number }) =>
+      ipcRenderer.invoke('notifications:show', options) as Promise<boolean>,
   },
 } satisfies ElectronAPI);

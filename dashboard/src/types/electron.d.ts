@@ -175,6 +175,14 @@ interface ElectronAPI {
     writeText: (filePath: string, content: string) => Promise<void>;
     selectFolder: () => Promise<string | null>;
   };
+  notifications: {
+    show: (options: {
+      title: string;
+      body: string;
+      silent?: boolean;
+      timeoutMs?: number;
+    }) => Promise<boolean>;
+  };
 }
 
 interface ComponentUpdateStatus {
