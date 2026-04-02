@@ -45,6 +45,10 @@ _bmad-output/
 .github/instructions/
 .github/prompts/
 
+# Finder, Windows Explorer, etc metadata
+.DS_Store
+Thumbs.db
+
 ## etc
 __pycache__/
 *.env
@@ -55,3 +59,5 @@ __pycache__/
 *.mp3
 .directory
 codeql-agent-results/
+benchmark_*.json
+benchmark_*.csv

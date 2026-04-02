@@ -12,6 +12,8 @@ import {
   isCanaryModel,
   isParakeetModel,
   isWhisperCppModel,
+  isMLXModel,
+  isMLXParakeetModel,
 } from './modelCapabilities';
 
 export type ModelFamily =
@@ -19,6 +21,7 @@ export type ModelFamily =
   | 'nemo'
   | 'vibevoice'
   | 'whispercpp'
+  | 'mlx'
   | 'diarization'
   | 'custom'
   | 'none';
@@ -311,6 +314,214 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     requiresRuntime: 'vulkan',
   },
 
+  // ── MLX VibeVoice (Apple Silicon / Metal) ────────────────────────────────
+  {
+    id: 'mlx-community/VibeVoice-ASR-4bit',
+    displayName: 'VibeVoice ASR (Q4)',
+    family: 'mlx',
+    description:
+      'Microsoft VibeVoice-ASR on MLX, Q4 quantised. Native diarization + timestamps on Apple Silicon. Smallest VibeVoice variant (~5.7 GB).',
+    parameterCount: '9B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/VibeVoice-ASR-4bit',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/VibeVoice-ASR-8bit',
+    displayName: 'VibeVoice ASR (Q8)',
+    family: 'mlx',
+    description:
+      'Microsoft VibeVoice-ASR on MLX, Q8 quantised. Native diarization + timestamps on Apple Silicon (~9.5 GB).',
+    parameterCount: '9B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/VibeVoice-ASR-8bit',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/VibeVoice-ASR-bf16',
+    displayName: 'VibeVoice ASR',
+    family: 'mlx',
+    description:
+      'Microsoft VibeVoice-ASR on MLX. Native diarization + timestamps on Apple Silicon. Full precision (~18 GB).',
+    parameterCount: '9B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/VibeVoice-ASR-bf16',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 51 },
+    roles: ['main'],
+  },
+
+  // ── MLX Parakeet (Apple Silicon / Metal) ───────────────────────────────
+  // Note: mlx-community/parakeet-tdt-1.1b is intentionally omitted.
+  // The 1.1b TDT model was trained to output lowercase text only (no native
+  // punctuation or capitalisation) and there is no MLX PnC variant.  The
+  // 0.6b-v3 is NVIDIA's September 2025 SOTA model trained on 660K hours
+  // (10× more data), supports 25 languages with native P&C, and matches or
+  // beats the 1.1b on all English benchmarks.
+  {
+    id: 'mlx-community/parakeet-tdt-0.6b-v3',
+    displayName: 'Parakeet TDT 0.6B v3',
+    family: 'mlx',
+    description:
+      'NVIDIA Parakeet-TDT 0.6B v3 on MLX. SOTA accuracy on Apple Silicon — 660K hours of training, native punctuation & capitalisation, 25 European languages (~1.1 GB).',
+    parameterCount: '600M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
+    roles: ['main'],
+  },
+
+  // ── MLX Canary (Apple Silicon / Metal) ─────────────────────────────────
+  // Community MLX ports of NVIDIA Canary 1B v2 using the canary-mlx package.
+  // No translation support in the MLX port (ASR only).
+  {
+    id: 'eelcor/canary-1b-v2-mlx',
+    displayName: 'Canary 1B v2',
+    family: 'mlx',
+    description:
+      'NVIDIA Canary 1B v2 on MLX. ~8.5× real-time on Apple Silicon, native P&C, 25 European languages (~3.7 GB).',
+    parameterCount: '1B',
+    huggingfaceUrl: 'https://huggingface.co/eelcor/canary-1b-v2-mlx',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
+    roles: ['main'],
+  },
+  {
+    id: 'Mediform/canary-1b-v2-mlx-q8',
+    displayName: 'Canary 1B v2 (Q8)',
+    family: 'mlx',
+    description:
+      'NVIDIA Canary 1B v2 on MLX, Q8 quantised. Native P&C, 25 European languages (~1.1 GB).',
+    parameterCount: '1B',
+    huggingfaceUrl: 'https://huggingface.co/Mediform/canary-1b-v2-mlx-q8',
+    capabilities: { translation: false, liveMode: false, diarization: true, languageCount: 25 },
+    roles: ['main'],
+  },
+
+  // ── MLX Whisper (Apple Silicon / Metal via mlx-audio) ───────────────────
+  {
+    id: 'mlx-community/whisper-large-v3-turbo-asr-fp16',
+    displayName: 'Whisper Large v3 Turbo',
+    family: 'mlx',
+    description:
+      'Fast turbo variant of Whisper large-v3 on Apple Silicon. Best speed/accuracy tradeoff (~1.6 GB).',
+    parameterCount: '809M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-large-v3-turbo-asr-8bit',
+    displayName: 'Whisper Large v3 Turbo (Q8)',
+    family: 'mlx',
+    description:
+      'Fast turbo variant of Whisper large-v3 on Apple Silicon. Q8 quantized — smaller footprint with minimal quality loss (~0.8 GB).',
+    parameterCount: '809M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-8bit',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-large-v3-turbo-asr-4bit',
+    displayName: 'Whisper Large v3 Turbo (Q4)',
+    family: 'mlx',
+    description:
+      'Fast turbo variant of Whisper large-v3 on Apple Silicon. Q4 quantized — lowest memory usage (~0.4 GB).',
+    parameterCount: '809M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-4bit',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-large-v3-asr-fp16',
+    displayName: 'Whisper Large v3',
+    family: 'mlx',
+    description:
+      'Whisper large-v3 on Apple Silicon. Highest accuracy (~3 GB).',
+    parameterCount: '1.5B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-asr-fp16',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-large-v3-asr-8bit',
+    displayName: 'Whisper Large v3 (Q8)',
+    family: 'mlx',
+    description:
+      'Whisper large-v3 on Apple Silicon. Q8 quantized — smaller footprint with minimal quality loss (~1.5 GB).',
+    parameterCount: '1.5B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-asr-8bit',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-large-v3-asr-4bit',
+    displayName: 'Whisper Large v3 (Q4)',
+    family: 'mlx',
+    description:
+      'Whisper large-v3 on Apple Silicon. Q4 quantized — lowest memory usage (~0.75 GB).',
+    parameterCount: '1.5B',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-asr-4bit',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-small-asr-fp16',
+    displayName: 'Whisper Small',
+    family: 'mlx',
+    description: 'Lightweight Whisper small on Apple Silicon (~0.5 GB).',
+    parameterCount: '244M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-small-asr-fp16',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-small-asr-8bit',
+    displayName: 'Whisper Small (Q8)',
+    family: 'mlx',
+    description: 'Lightweight Whisper small on Apple Silicon. Q8 quantized (~0.24 GB).',
+    parameterCount: '244M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-small-asr-8bit',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-small-asr-4bit',
+    displayName: 'Whisper Small (Q4)',
+    family: 'mlx',
+    description: 'Lightweight Whisper small on Apple Silicon. Q4 quantized — smallest footprint (~0.12 GB).',
+    parameterCount: '244M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-small-asr-4bit',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-tiny-asr-fp16',
+    displayName: 'Whisper Tiny',
+    family: 'mlx',
+    description: 'Smallest Whisper model on Apple Silicon. Fastest but lowest accuracy (~78 MB).',
+    parameterCount: '39M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-tiny-asr-fp16',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-tiny-asr-8bit',
+    displayName: 'Whisper Tiny (Q8)',
+    family: 'mlx',
+    description: 'Smallest Whisper model on Apple Silicon. Q8 quantized (~39 MB).',
+    parameterCount: '39M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-tiny-asr-8bit',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+  {
+    id: 'mlx-community/whisper-tiny-asr-4bit',
+    displayName: 'Whisper Tiny (Q4)',
+    family: 'mlx',
+    description: 'Smallest Whisper model on Apple Silicon. Q4 quantized — minimal memory usage (~20 MB).',
+    parameterCount: '39M',
+    huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-tiny-asr-4bit',
+    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
+    roles: ['main'],
+  },
+
   // ── Diarization ──────────────────────────────────────────────────────────
   {
     id: 'pyannote/speaker-diarization-community-1',
@@ -340,6 +551,9 @@ export function getModelById(id: string): ModelInfo | undefined {
 export function detectModelFamily(modelId: string): ModelFamily {
   if (isParakeetModel(modelId) || isCanaryModel(modelId)) return 'nemo';
   if (isNemoModel(modelId)) return 'nemo';
+  // MLX check must come before VibeVoice — mlx-community/VibeVoice-ASR-bf16
+  // matches both isMLXModel and isVibeVoiceASRModel.
+  if (isMLXParakeetModel(modelId) || isMLXModel(modelId)) return 'mlx';
   if (isVibeVoiceASRModel(modelId)) return 'vibevoice';
   if (isWhisperCppModel(modelId)) return 'whispercpp';
   return 'whisper';

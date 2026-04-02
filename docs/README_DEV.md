@@ -4,95 +4,229 @@ Technical documentation for developing and building TranscriptionSuite.
 
 ## Table of Contents
 
-- [1. Quick Reference](#1-quick-reference)
-  - [1.1 Development Commands](#11-development-commands)
-  - [1.2 Running from Source (Development)](#12-running-from-source-development)
-  - [1.3 Build Commands](#13-build-commands)
-  - [1.4 Common Tasks](#14-common-tasks)
-- [2. Architecture Overview](#2-architecture-overview)
-  - [2.1 Design Principles](#21-design-principles)
-  - [2.2 Platform Architectures](#22-platform-architectures)
-  - [2.3 Security Model](#23-security-model)
-  - [2.4 Architecture Diagrams](#24-architecture-diagrams)
-- [3. Project Structure](#3-project-structure)
-  - [3.1 Configuration Files](#31-configuration-files)
-  - [3.2 Version Management](#32-version-management)
-- [4. Development Workflow](#4-development-workflow)
-  - [4.1 Step 1: Environment Setup](#41-step-1-environment-setup)
-  - [4.2 Step 2: Build Docker Image](#42-step-2-build-docker-image)
-  - [4.3 Step 3: Run Dashboard Locally](#43-step-3-run-dashboard-locally)
-  - [4.4 Step 4: Run Dashboard Remotely (Tailscale)](#44-step-4-run-dashboard-remotely-tailscale)
-  - [4.5 Publishing Docker Images](#45-publishing-docker-images)
-- [5. Build Workflow](#5-build-workflow)
-  - [5.1 Prerequisites](#51-prerequisites)
-  - [5.2 Build Matrix](#52-build-matrix)
-  - [5.3 Linux AppImage](#53-linux-appimage)
-  - [5.4 Windows Installer](#54-windows-installer)
-  - [5.5 macOS DMG + ZIP (Unsigned)](#55-macos-dmg--zip-unsigned)
-  - [5.6 Build Assets](#56-build-assets)
-  - [5.7 End-User Verification Docs](#57-end-user-verification-docs)
-  - [5.8 Automated Release (CI/CD)](#58-automated-release-cicd)
-- [6. Docker Reference](#6-docker-reference)
-  - [6.1 Compose File Layering](#61-compose-file-layering)
-  - [6.2 Local vs Remote Mode](#62-local-vs-remote-mode)
-  - [6.3 CPU Mode](#63-cpu-mode)
-  - [6.4 Tailscale HTTPS Setup](#64-tailscale-https-setup)
-  - [6.5 Docker Volume Structure](#65-docker-volume-structure)
-  - [6.6 Docker Image Selection](#66-docker-image-selection)
-  - [6.7 Server Update Lifecycle](#67-server-update-lifecycle)
-  - [6.8 Differential Update Implementation](#68-differential-update-implementation)
-  - [6.9 Vulkan Sidecar (whisper.cpp)](#69-vulkan-sidecar-whispercpp)
-- [7. API Reference](#7-api-reference)
-  - [7.1 API Endpoints — Quick Reference](#71-api-endpoints--quick-reference)
-  - [7.2 Endpoint Details](#72-endpoint-details)
-    - [Health & Status](#health--status)
-    - [Authentication](#authentication)
-    - [Transcription](#transcription)
-    - [Audio Notebook](#audio-notebook)
-    - [Search](#search)
-    - [LLM Integration](#llm-integration)
-    - [Admin](#admin)
-  - [7.3 WebSocket Protocol](#73-websocket-protocol)
-  - [7.4 Live Mode WebSocket Protocol](#74-live-mode-websocket-protocol)
-  - [7.5 OpenAI-Compatible Endpoints](#75-openai-compatible-endpoints)
-  - [7.6 Outgoing Webhook System](#76-outgoing-webhook-system)
-- [8. Backend Development](#8-backend-development)
-  - [8.1 Backend Structure](#81-backend-structure)
-  - [8.2 Running the Server Locally](#82-running-the-server-locally)
-  - [8.3 Configuration System](#83-configuration-system)
-  - [8.4 Testing](#84-testing)
-- [9. Dashboard Development](#9-dashboard-development)
-  - [9.1 Running from Source](#91-running-from-source)
-  - [9.2 Tech Stack](#92-tech-stack)
-  - [9.3 Key Modules](#93-key-modules)
-  - [9.4 UI Contract System](#94-ui-contract-system)
-  - [9.5 Server Busy Handling](#95-server-busy-handling)
-  - [9.6 Model Management](#96-model-management)
-  - [9.7 Package Management](#97-package-management)
-  - [9.8 Reactive UI Updates & State Syncing](#98-reactive-ui-updates--state-syncing)
-- [10. Configuration Reference](#10-configuration-reference)
-  - [10.1 Server Configuration](#101-server-configuration)
-  - [10.2 Dashboard Configuration](#102-dashboard-configuration)
-- [11. Data Storage](#11-data-storage)
-  - [11.1 Database Schema](#111-database-schema)
-  - [11.2 Database Migrations](#112-database-migrations)
-  - [11.3 Automatic Backups](#113-automatic-backups)
-- [12. Code Quality Checks](#12-code-quality-checks)
-  - [12.1 Python Code Quality](#121-python-code-quality)
-  - [12.2 Complete Quality Check Workflow](#122-complete-quality-check-workflow)
-  - [12.3 GitHub CodeQL Layout](#123-github-codeql-layout)
-  - [12.4 Pre-Commit Hooks](#124-pre-commit-hooks)
-- [13. Troubleshooting](#13-troubleshooting)
-  - [13.1 Docker GPU Access](#131-docker-gpu-access)
-  - [13.2 Health Check Issues](#132-health-check-issues)
-  - [13.3 Tailscale DNS Resolution](#133-tailscale-dns-resolution)
-  - [13.4 AppImage Startup Failures](#134-appimage-startup-failures)
-  - [13.5 Windows / macOS Docker Networking](#135-windows--macos-docker-networking)
-  - [13.6 Checking Installed Packages](#136-checking-installed-packages)
-  - [13.7 macOS DMG Build Failure (dmgbuild binary)](#137-macos-dmg-build-failure-dmgbuild-binary)
-- [14. Dependencies](#14-dependencies)
-  - [14.1 Server (Docker)](#141-server-docker)
-  - [14.2 Dashboard](#142-dashboard)
+- [TranscriptionSuite - Developer Guide](#transcriptionsuite---developer-guide)
+  - [Table of Contents](#table-of-contents)
+  - [1. Quick Reference](#1-quick-reference)
+    - [1.1 Development Commands](#11-development-commands)
+    - [1.2 Running from Source (Development)](#12-running-from-source-development)
+    - [1.3 Build Commands](#13-build-commands)
+    - [1.4 Common Tasks](#14-common-tasks)
+  - [2. Architecture Overview](#2-architecture-overview)
+    - [2.1 Design Principles](#21-design-principles)
+    - [2.2 Platform Architectures](#22-platform-architectures)
+    - [2.3 Security Model](#23-security-model)
+    - [2.4 Architecture Diagrams](#24-architecture-diagrams)
+      - [High-Level Architecture](#high-level-architecture)
+      - [Server API \& Routing](#server-api--routing)
+      - [STT Backend Subsystem](#stt-backend-subsystem)
+      - [Dashboard Component Tree](#dashboard-component-tree)
+      - [Transcription Data Flows](#transcription-data-flows)
+  - [3. Project Structure](#3-project-structure)
+    - [3.1 Configuration Files](#31-configuration-files)
+    - [3.2 Version Management](#32-version-management)
+  - [4. Development Workflow](#4-development-workflow)
+    - [4.1 Step 1: Environment Setup](#41-step-1-environment-setup)
+    - [4.2 Step 2: Build Docker Image](#42-step-2-build-docker-image)
+    - [4.3 Step 3: Run Dashboard Locally](#43-step-3-run-dashboard-locally)
+    - [4.4 Step 4: Run Dashboard Remotely (Tailscale)](#44-step-4-run-dashboard-remotely-tailscale)
+    - [4.5 Publishing Docker Images](#45-publishing-docker-images)
+  - [5. Build Workflow](#5-build-workflow)
+    - [5.1 Prerequisites](#51-prerequisites)
+    - [5.2 Build Matrix](#52-build-matrix)
+    - [5.3 Linux AppImage](#53-linux-appimage)
+    - [5.4 Windows Installer](#54-windows-installer)
+    - [5.5 macOS DMG + ZIP (Unsigned)](#55-macos-dmg--zip-unsigned)
+    - [5.6 Build Assets](#56-build-assets)
+    - [5.7 End-User Verification Docs](#57-end-user-verification-docs)
+    - [5.8 Automated Release (CI/CD)](#58-automated-release-cicd)
+      - [Trigger](#trigger)
+      - [Pipeline Overview](#pipeline-overview)
+      - [GPG Signing](#gpg-signing)
+      - [Release Output](#release-output)
+  - [6. Docker Reference](#6-docker-reference)
+    - [6.1 Compose File Layering](#61-compose-file-layering)
+    - [6.2 Local vs Remote Mode](#62-local-vs-remote-mode)
+      - [Remote Profile Chooser Dialog](#remote-profile-chooser-dialog)
+    - [6.3 CPU Mode](#63-cpu-mode)
+    - [6.4 Tailscale HTTPS Setup](#64-tailscale-https-setup)
+      - [Certificate expiry](#certificate-expiry)
+    - [6.5 Docker Volume Structure](#65-docker-volume-structure)
+    - [6.6 Docker Image Selection](#66-docker-image-selection)
+    - [6.7 Server Update Lifecycle](#67-server-update-lifecycle)
+    - [6.8 Differential Update Implementation](#68-differential-update-implementation)
+      - [Two-fingerprint scheme](#two-fingerprint-scheme)
+      - [Three bootstrap paths](#three-bootstrap-paths)
+      - [Role of the uv wheel cache (`/runtime/cache`)](#role-of-the-uv-wheel-cache-runtimecache)
+      - [Optional extras and model-driven install](#optional-extras-and-model-driven-install)
+      - [Package delta logging](#package-delta-logging)
+      - [Bootstrap status file](#bootstrap-status-file)
+      - [Marker file](#marker-file)
+      - [Relevant environment variables](#relevant-environment-variables)
+    - [6.9 Vulkan Sidecar (whisper.cpp)](#69-vulkan-sidecar-whispercpp)
+      - [Architecture](#architecture)
+      - [How It Works](#how-it-works)
+      - [GGML Model Detection](#ggml-model-detection)
+      - [Docker Compose Setup](#docker-compose-setup)
+      - [Networking by Platform](#networking-by-platform)
+      - [Configuration](#configuration)
+      - [Capability Differences](#capability-differences)
+      - [Files](#files)
+      - [Limitations](#limitations)
+  - [7. API Reference](#7-api-reference)
+    - [7.1 API Endpoints — Quick Reference](#71-api-endpoints--quick-reference)
+    - [7.2 Endpoint Details](#72-endpoint-details)
+      - [Health \& Status](#health--status)
+        - [`GET /health`](#get-health)
+        - [`GET /ready`](#get-ready)
+        - [`GET /api/status`](#get-apistatus)
+      - [Authentication](#authentication)
+        - [`POST /api/auth/login`](#post-apiauthlogin)
+        - [`GET /api/auth/tokens` _(admin)_](#get-apiauthtokens-admin)
+        - [`POST /api/auth/tokens` _(admin)_](#post-apiauthtokens-admin)
+        - [`DELETE /api/auth/tokens/{token_id}` _(admin)_](#delete-apiauthtokenstoken_id-admin)
+      - [Transcription](#transcription)
+        - [`POST /api/transcribe/audio`](#post-apitranscribeaudio)
+        - [`POST /api/transcribe/quick`](#post-apitranscribequick)
+        - [`POST /api/transcribe/cancel`](#post-apitranscribecancel)
+        - [`POST /api/transcribe/import`](#post-apitranscribeimport)
+        - [`GET /api/transcribe/languages`](#get-apitranscribelanguages)
+          - [TranscriptionResult schema](#transcriptionresult-schema)
+      - [Audio Notebook](#audio-notebook)
+        - [`GET /api/notebook/recordings`](#get-apinotebookrecordings)
+        - [`GET /api/notebook/recordings/{id}`](#get-apinotebookrecordingsid)
+        - [`DELETE /api/notebook/recordings/{id}`](#delete-apinotebookrecordingsid)
+        - [`GET /api/notebook/recordings/{id}/audio`](#get-apinotebookrecordingsidaudio)
+        - [`GET /api/notebook/recordings/{id}/transcription`](#get-apinotebookrecordingsidtranscription)
+        - [`GET /api/notebook/recordings/{id}/export`](#get-apinotebookrecordingsidexport)
+        - [`PATCH /api/notebook/recordings/{id}/title`](#patch-apinotebookrecordingsidtitle)
+        - [`PATCH /api/notebook/recordings/{id}/date`](#patch-apinotebookrecordingsiddate)
+        - [`PATCH /api/notebook/recordings/{id}/summary`](#patch-apinotebookrecordingsidsummary)
+        - [`PUT /api/notebook/recordings/{id}/summary`](#put-apinotebookrecordingsidsummary)
+        - [`POST /api/notebook/transcribe/upload`](#post-apinotebooktranscribeupload)
+        - [`GET /api/notebook/calendar`](#get-apinotebookcalendar)
+        - [`GET /api/notebook/timeslot`](#get-apinotebooktimeslot)
+        - [`GET /api/notebook/backups`](#get-apinotebookbackups)
+        - [`POST /api/notebook/backup`](#post-apinotebookbackup)
+        - [`POST /api/notebook/restore`](#post-apinotebookrestore)
+      - [Search](#search)
+        - [`GET /api/search`](#get-apisearch)
+        - [`GET /api/search/words`](#get-apisearchwords)
+        - [`GET /api/search/recordings`](#get-apisearchrecordings)
+      - [LLM Integration](#llm-integration)
+        - [`GET /api/llm/status`](#get-apillmstatus)
+        - [`POST /api/llm/process` / `POST /api/llm/process/stream`](#post-apillmprocess--post-apillmprocessstream)
+        - [`POST /api/llm/summarize/{id}` / `POST /api/llm/summarize/{id}/stream`](#post-apillmsummarizeid--post-apillmsummarizeidstream)
+        - [`GET /api/llm/models/available`](#get-apillmmodelsavailable)
+        - [`POST /api/llm/model/load` / `POST /api/llm/model/unload`](#post-apillmmodelload--post-apillmmodelunload)
+        - [`POST /api/llm/server/start` / `POST /api/llm/server/stop`](#post-apillmserverstart--post-apillmserverstop)
+      - [Admin](#admin)
+        - [`GET /api/admin/status`](#get-apiadminstatus)
+        - [`GET /api/admin/config/full`](#get-apiadminconfigfull)
+        - [`PATCH /api/admin/config`](#patch-apiadminconfig)
+        - [`PATCH /api/admin/diarization`](#patch-apiadmindiarization)
+        - [`POST /api/admin/models/load`](#post-apiadminmodelsload)
+        - [`WebSocket /api/admin/models/load/stream`](#websocket-apiadminmodelsloadstream)
+        - [`POST /api/admin/models/unload`](#post-apiadminmodelsunload)
+        - [`POST /api/admin/webhook/test`](#post-apiadminwebhooktest)
+        - [`GET /api/admin/logs`](#get-apiadminlogs)
+    - [7.3 WebSocket Protocol](#73-websocket-protocol)
+    - [7.4 Live Mode WebSocket Protocol](#74-live-mode-websocket-protocol)
+    - [7.5 OpenAI-Compatible Endpoints](#75-openai-compatible-endpoints)
+      - [`POST /v1/audio/transcriptions`](#post-v1audiotranscriptions)
+      - [`POST /v1/audio/translations`](#post-v1audiotranslations)
+    - [7.6 Outgoing Webhook System](#76-outgoing-webhook-system)
+      - [Configuration](#configuration-1)
+      - [Event Types and Dispatch Points](#event-types-and-dispatch-points)
+      - [Payload Schemas](#payload-schemas)
+      - [Thread Safety](#thread-safety)
+      - [SSRF Guard](#ssrf-guard)
+      - [Module](#module)
+      - [Tests](#tests)
+  - [8. Backend Development](#8-backend-development)
+    - [8.1 Backend Structure](#81-backend-structure)
+    - [8.2 Running the Server Locally](#82-running-the-server-locally)
+    - [8.3 Configuration System](#83-configuration-system)
+    - [8.4 Testing](#84-testing)
+    - [8.5 whisper.cpp / Vulkan Backend](#85-whispercpp--vulkan-backend)
+      - [Architecture](#architecture-1)
+      - [Model Format](#model-format)
+      - [Factory Routing](#factory-routing)
+      - [Dependency Logic](#dependency-logic)
+      - [Download Flow](#download-flow)
+      - [Limitations](#limitations-1)
+  - [9. Dashboard Development](#9-dashboard-development)
+    - [9.1 Running from Source](#91-running-from-source)
+    - [9.2 Tech Stack](#92-tech-stack)
+    - [9.3 Key Modules](#93-key-modules)
+    - [9.4 UI Contract System](#94-ui-contract-system)
+      - [9.4.1 Contract Files](#941-contract-files)
+      - [9.4.2 Commands](#942-commands)
+      - [9.4.3 Contract Structure](#943-contract-structure)
+      - [9.4.4 Change Workflow](#944-change-workflow)
+      - [9.4.5 Validation Failures](#945-validation-failures)
+    - [9.5 Server Busy Handling](#95-server-busy-handling)
+    - [9.6 Model Management](#96-model-management)
+    - [9.7 Package Management](#97-package-management)
+    - [9.8 Reactive UI Updates \& State Syncing](#98-reactive-ui-updates--state-syncing)
+      - [Architecture](#architecture-2)
+      - [Key Files](#key-files)
+      - [`useServerEventReactor` — Transition Matrix](#useservereventreactor--transition-matrix)
+      - [`useAuthTokenSync` — Docker Log Token Detection](#useauthtokensync--docker-log-token-detection)
+      - [`SettingsModal` — Reactive Token Consumption](#settingsmodal--reactive-token-consumption)
+      - [`ServerView` — Reactive Token Read](#serverview--reactive-token-read)
+      - [Explicit Invalidation After Model Reload](#explicit-invalidation-after-model-reload)
+      - [`staleTime` Rationale](#staletime-rationale)
+      - [Future Enhancement: SSE](#future-enhancement-sse)
+  - [10. Configuration Reference](#10-configuration-reference)
+    - [10.1 Server Configuration](#101-server-configuration)
+    - [10.2 Dashboard Configuration](#102-dashboard-configuration)
+  - [11. Data Storage](#11-data-storage)
+    - [11.1 Database Schema](#111-database-schema)
+    - [11.2 Database Migrations](#112-database-migrations)
+    - [11.3 Automatic Backups](#113-automatic-backups)
+  - [12. Code Quality Checks](#12-code-quality-checks)
+    - [12.1 Python Code Quality](#121-python-code-quality)
+    - [12.2 Complete Quality Check Workflow](#122-complete-quality-check-workflow)
+    - [12.3 GitHub CodeQL Layout](#123-github-codeql-layout)
+    - [12.4 Pre-Commit Hooks](#124-pre-commit-hooks)
+      - [Hooks](#hooks)
+      - [Setup (one-time, per clone)](#setup-one-time-per-clone)
+      - [Running ad-hoc](#running-ad-hoc)
+      - [Extending](#extending)
+  - [12.5. AI Agent Instructions](#125-ai-agent-instructions)
+    - [File Overview](#file-overview)
+    - [How it works](#how-it-works-1)
+    - [Updating project-context.md](#updating-project-contextmd)
+    - [Updating GitNexus context](#updating-gitnexus-context)
+    - [Key rules](#key-rules)
+  - [13. Troubleshooting](#13-troubleshooting)
+    - [13.1 Docker GPU Access](#131-docker-gpu-access)
+      - [CUDA unknown error after system update](#cuda-unknown-error-after-system-update)
+      - [CUDA unknown error in CDI mode (cgroupv2 device filter regression)](#cuda-unknown-error-in-cdi-mode-cgroupv2-device-filter-regression)
+    - [13.2 Health Check Issues](#132-health-check-issues)
+    - [13.3 Tailscale DNS Resolution](#133-tailscale-dns-resolution)
+    - [13.4 AppImage Startup Failures](#134-appimage-startup-failures)
+    - [13.5 Windows / macOS Docker Networking](#135-windows--macos-docker-networking)
+    - [13.6 Checking Installed Packages](#136-checking-installed-packages)
+    - [13.7 macOS DMG Build Failure (dmgbuild binary)](#137-macos-dmg-build-failure-dmgbuild-binary)
+  - [14. Dependencies](#14-dependencies)
+    - [14.1 Server (Docker)](#141-server-docker)
+    - [14.2 Dashboard](#142-dashboard)
+  - [15. Apple Silicon (Metal/MLX) Development](#15-apple-silicon-metalmlx-development)
+    - [15.1 Prerequisites](#151-prerequisites)
+    - [15.2 Unit Tests (CI-safe, no GPU required)](#152-unit-tests-ci-safe-no-gpu-required)
+    - [15.3 Manual Server Test (Apple Silicon required)](#153-manual-server-test-apple-silicon-required)
+    - [15.4 Metal Runtime Profile — Dashboard](#154-metal-runtime-profile--dashboard)
+    - [15.5 MLX Backend Notes](#155-mlx-backend-notes)
+    - [15.6 Dashboard Integration Test](#156-dashboard-integration-test)
+    - [15.7 Tail the Structured Log](#157-tail-the-structured-log)
+    - [15.8 Confirming MLX is Active](#158-confirming-mlx-is-active)
+    - [15.9 Troubleshooting (MLX)](#159-troubleshooting-mlx)
+  - [16. STT Benchmark Tool](#16-stt-benchmark-tool)
+    - [16.1 Overview](#161-overview)
+    - [16.2 Usage](#162-usage)
+    - [16.3 Model Groups](#163-model-groups)
+    - [16.4 Output Files](#164-output-files)
 
 ---
 
@@ -123,6 +257,9 @@ cd dashboard && npm run dev:electron
 # 1. Run backend server (native Python)
 cd server/backend
 uv venv --python 3.13 && uv sync
+# The hatch editable install requires a self-referential symlink server/backend/server → .
+# It is gitignored and must be created once after each fresh clone or venv rebuild:
+ln -sf . server
 uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 9786
 
 # 2. Run dashboard (in a separate terminal)
@@ -378,10 +515,16 @@ TranscriptionSuite/
 │   │   │   │       ├── factory.py       # Backend detection + instantiation
 │   │   │   │       ├── whisper_backend.py       # Faster-whisper backend (shared GPU cache cleanup on unload)
 │   │   │   │       ├── whisperx_backend.py      # WhisperX (alignment + diarization, shared GPU cache cleanup)
+│   │   │   │       ├── faster_whisper_backend.py # Lightweight faster-whisper fallback (Metal / no-whisperx)
 │   │   │   │       ├── parakeet_backend.py      # NVIDIA NeMo Parakeet ASR (base warmup + reusable long-audio chunking)
 │   │   │   │       ├── canary_backend.py        # NVIDIA NeMo Canary (Canary warmup override, reuses Parakeet chunking)
-│   │   │   │       └── vibevoice_asr_backend.py # VibeVoice-ASR (experimental, shared GPU cache cleanup on unload)
+│   │   │   │       ├── vibevoice_asr_backend.py # VibeVoice-ASR (experimental, shared GPU cache cleanup on unload)
+│   │   │   │       ├── mlx_whisper_backend.py   # MLX Whisper via mlx-audio (word timestamps, alignment_heads patch)
+│   │   │   │       ├── mlx_parakeet_backend.py  # MLX Parakeet via parakeet-mlx
+│   │   │   │       ├── mlx_canary_backend.py    # MLX Canary via canary-mlx
+│   │   │   │       └── mlx_vibevoice_backend.py # MLX VibeVoice-ASR via mlx-audio (native diarization)
 │   │   │   ├── diarization_engine.py    # PyAnnote wrapper
+│   │   │   ├── sortformer_engine.py     # Metal-native Sortformer diarization via mlx-audio (no HF token)
 │   │   │   ├── model_manager.py         # Model lifecycle, job tracking
 │   │   │   ├── realtime_engine.py       # Async wrapper for real-time STT
 │   │   │   └── live_engine.py           # Live Mode engine (Whisper-only in v1)
@@ -1983,10 +2126,15 @@ server/backend/
 │           ├── factory.py        # Backend detection + instantiation
 │           ├── whisper_backend.py        # Faster-whisper backend (shared GPU cache cleanup on unload)
 │           ├── whisperx_backend.py       # WhisperX (alignment + diarization, shared GPU cache cleanup)
+│           ├── faster_whisper_backend.py # Lightweight faster-whisper (no WhisperX); Live Mode on Metal
 │           ├── parakeet_backend.py       # NVIDIA NeMo Parakeet ASR (local attention + configurable chunking + GPU cache cleanup)
 │           ├── canary_backend.py         # NVIDIA NeMo Canary (Canary warmup override, reuses Parakeet chunking)
 │           ├── vibevoice_asr_backend.py  # VibeVoice-ASR (experimental, 1-min chunking + inference_mode + GPU cache cleanup)
-│           └── whispercpp_backend.py     # whisper.cpp HTTP sidecar client (Vulkan GPU, WAV encoding, multipart POST)
+│           ├── whispercpp_backend.py     # whisper.cpp HTTP sidecar client (Vulkan GPU, WAV encoding, multipart POST)
+│           ├── mlx_whisper_backend.py    # MLX Whisper via mlx-audio (word timestamps, alignment_heads monkey-patch)
+│           ├── mlx_parakeet_backend.py   # MLX Parakeet via parakeet-mlx (long-audio chunking)
+│           ├── mlx_canary_backend.py     # MLX Canary via canary-mlx (multitask, reuses Parakeet chunking)
+│           └── mlx_vibevoice_backend.py  # MLX VibeVoice-ASR via mlx-audio (native diarization, JSON segment parse)
 ├── database/
 │   ├── database.py               # SQLite + FTS5 operations
 │   ├── job_repository.py         # Transcription job CRUD (persist-before-deliver, retry, recovery)
@@ -3062,3 +3210,417 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 - electron-builder (packaging)
 - electron-store (client config persistence)
 - Lucide React (icons)
+
+---
+
+## 15. Apple Silicon (Metal/MLX) Development
+
+The Metal/MLX backend provides hardware-accelerated transcription on Apple Silicon
+Macs using the `mlx-audio`, `parakeet-mlx`, and `canary-mlx` packages. When the
+Metal runtime profile is selected, the dashboard manages a native uvicorn server
+process directly — no Docker required.
+
+| Component | Details |
+|-----------|---------|
+| Acceleration | Apple Metal GPU via MLX framework |
+| Whisper models | `mlx-community/whisper-*-asr-fp16` (and quantized variants) via `mlx-audio` |
+| Parakeet (NeMo ASR) | `mlx-community/parakeet-*` via `parakeet-mlx` |
+| Canary (multitask) | `*/canary*-mlx` pattern via `canary-mlx` |
+| VibeVoice-ASR | `mlx-community/VibeVoice-ASR-*` via `mlx-audio` (native diarization) |
+| Diarization | Sortformer via `mlx-audio` (Metal-native, no HF token); PyAnnote on MPS as fallback |
+| Live Mode | faster-whisper via `mlx-audio`-compatible venv (no WhisperX conflict) |
+| Server | Native uvicorn (no Docker) |
+
+---
+
+### 15.1 Prerequisites
+
+1. **Apple Silicon Mac** (M1 or later) running macOS 12+.
+2. Python backend dependencies installed with the `mlx` extra:
+
+   ```bash
+   cd server/backend
+   uv sync --extra mlx
+   ```
+
+3. A [Hugging Face](https://huggingface.co/) account with access to the PyAnnote
+   diarization models (required only for diarization):
+   - Accept [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
+   - Accept [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
+   - Generate an API token at <https://huggingface.co/settings/tokens>
+
+4. A symlink so the server package resolves correctly when running outside pytest:
+
+   ```bash
+   ln -sf . server/backend/server
+   ```
+
+   > `mlxServerManager.ts` (Electron) creates this automatically on first start.
+
+---
+
+### 15.2 Unit Tests (CI-safe, no GPU required)
+
+```bash
+cd server/backend
+uv run pytest tests/test_mlx_whisper_backend.py tests/test_mlx_parakeet_backend.py tests/test_mlx_canary_backend.py tests/test_mlx_vibevoice_backend.py tests/test_faster_whisper_backend.py tests/test_sortformer_engine.py -v
+```
+
+All platform-independent tests use `patch.object` / `sys.modules` stubs and run
+on any platform without Apple Silicon.
+
+**MLX Whisper** (17 tests — `test_mlx_whisper_backend.py`):
+
+| Class | What is tested |
+|-------|---------------|
+| `TestFactoryDetection` | `detect_backend_type` returns `mlx_whisper` for `mlx-community/` prefix; `is_mlx_model()` helper |
+| `TestMLXWhisperBackendLifecycle` | `load()`, `unload()`, `is_loaded()`; `RuntimeError` when mlx-audio absent; `alignment_heads` monkey-patch |
+| `TestMLXWhisperBackendTranscribe` | Output structure (segments, words, info); empty segments; not-loaded guard; empty text filter |
+| `TestMLXWhisperBeamSizeFallback` | `beam_size > 1` silently falls back to greedy (`None`); `None` passes through |
+| `TestMLXWhisperResampling` | 44100 Hz audio triggers `scipy.signal.resample`; 16000 Hz skips it |
+
+**MLX VibeVoice** (15 tests — `test_mlx_vibevoice_backend.py`):  
+Factory detection for `mlx-community/VibeVoice-ASR-*` variants, lifecycle, native diarization segment parse, and `is_mlx_model()` inclusion.
+
+**MLX Parakeet** (33 tests — `test_mlx_parakeet_backend.py`):  
+Factory detection, lifecycle, transcribe, resampling, and error-path coverage for the `mlx-community/parakeet-*` variant.
+
+**MLX Canary** (33 tests — `test_mlx_canary_backend.py`):  
+Factory detection, lifecycle, transcribe, language/task config, and error-path coverage for the `*/canary*-mlx` variant.
+
+**FasterWhisperBackend** (16 tests — `test_faster_whisper_backend.py`):
+
+| Class | What is tested |
+|-------|---------------|
+| `TestFactoryFallback` | `detect_backend_type` for Systran/* models; `create_backend()` falls back to `FasterWhisperBackend` when `whisperx` absent |
+| `TestFasterWhisperBackendLifecycle` | `load()`, `unload()`, `is_loaded()`; `compute_type`/`download_root` kwargs forwarded |
+| `TestFasterWhisperBackendTranscribe` | Segments, word timestamps, empty output, multi-segment, `RuntimeError` when not loaded |
+| `TestFasterWhisperBackendWarmup` | No-op when not loaded; calls `transcribe()` when loaded |
+| `TestFasterWhisperBackendMetadata` | `backend_name == "faster_whisper"`; `supports_translation() == True` |
+
+**SortformerEngine** (18 tests — `test_sortformer_engine.py`):
+
+| Class | What is tested |
+|-------|---------------|
+| `TestSortformerAvailable` | `sortformer_available()` reflects `HAS_MLX_AUDIO` flag |
+| `TestSortformerEngineInitGuard` | `ImportError` when mlx-audio absent; init with custom threshold |
+| `TestSortformerEngineLifecycle` | `load()`, `unload()`, `is_loaded()`; idempotent `load()` |
+| `TestSortformerEngineDiarize` | `DiarizationResult` type; segment count/speakers/timestamps; auto-load; threshold forwarding; temp WAV path passed to `generate()` |
+
+**STT Backend Factory** (12 tests — `test_stt_backend_factory.py`):
+
+Covers `detect_backend_type` for all backend types, new `asr-fp16` MLX Whisper naming scheme,
+`is_mlx_model()` for VibeVoice and new Whisper IDs, and the `whisperx → FasterWhisperBackend`
+fallback in `create_backend()`.
+
+---
+
+### 15.3 Manual Server Test (Apple Silicon required)
+
+**Start the bare-metal server:**
+
+```bash
+cd /path/to/TranscriptionSuite
+
+DATA_DIR="$HOME/Library/Application Support/TranscriptionSuite/data"
+HF_HOME="$HOME/Library/Application Support/TranscriptionSuite/models"
+
+mkdir -p "$DATA_DIR/logs" "$DATA_DIR/audio" "$DATA_DIR/tokens"
+
+DATA_DIR="$DATA_DIR" \
+HF_HOME="$HF_HOME" \
+HF_TOKEN="hf_..." \
+MAIN_TRANSCRIBER_MODEL="mlx-community/whisper-small-mlx" \
+LOG_LEVEL=DEBUG \
+LOG_DIR="$DATA_DIR/logs" \
+server/backend/.venv/bin/uvicorn server.api.main:app \
+  --host 0.0.0.0 --port 9786
+```
+
+> **Tip:** All path arguments must be fully expanded — no `$HOME` inside quoted
+> env vars on macOS. Use the shell expansion above (outside the quotes) or substitute
+> the actual path.
+
+**Verify the server is ready:**
+
+```bash
+curl -s http://localhost:9786/ready | python3 -m json.tool
+# Expected: "loaded": true, "backend": "mlx_whisper", "features.mlx.available": true
+```
+
+**Transcribe a file:**
+
+```bash
+curl -s -X POST http://localhost:9786/api/transcribe/file \
+  -F "file=@samples/input/sample.wav" \
+  -w "\nHTTP_STATUS: %{http_code}\n" | python3 -m json.tool
+```
+
+**With diarization** (requires HF_TOKEN and PyAnnote model access):
+
+```bash
+curl -s -X POST http://localhost:9786/api/transcribe/file \
+  -F "file=@samples/input/sample.wav" \
+  -F "diarization=true" \
+  -w "\nHTTP_STATUS: %{http_code}\n" | python3 -m json.tool
+```
+
+The response is a JSON object:
+
+```jsonc
+{
+  "text": "...",                  // full transcript
+  "language": "en",
+  "language_probability": 1.0,
+  "duration": 60.0,
+  "num_speakers": 2,              // present when diarization=true
+  "segments": [
+    {
+      "text": "Hello world.",
+      "start": 0.0,
+      "end": 2.5,
+      "speaker": "SPEAKER_00",   // present when diarization=true
+      "words": [...]              // per-word timestamps + speaker
+    }
+  ],
+  "words": [...]                  // flat word list with speaker labels
+}
+```
+
+Useful optional form fields:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `language` | auto-detect | BCP-47 code, e.g. `"en"` |
+| `diarization` | `false` | Enable speaker diarization |
+| `min_speakers` | auto | Hint minimum speaker count |
+| `max_speakers` | auto | Hint maximum speaker count |
+| `initial_prompt` | none | Context string to guide transcription |
+
+**Observed benchmarks on M-series (whisper-large-v3-mlx):**
+
+| File          | Duration | Wall time | RTF    | Speakers |
+|---------------|----------|-----------|--------|----------|
+| 1min_test.wav | 60s      | ~3s       | ~20×   | —        |
+| 1min_test.wav | 60s      | ~6s       | ~10×   | 2 (SPEAKER_00/01) |
+| 10min.m4a     | 600s     | ~63s      | ~9.5×  | 3 (SPEAKER_00/01/02) |
+
+**Monitor GPU / ANE usage during transcription:**
+
+```bash
+# Install once
+brew install asitop
+
+# Run in a separate terminal before submitting the request
+sudo asitop
+```
+
+`asitop` shows CPU, GPU, and ANE utilization in real-time.  During MLX transcription
+the GPU row should spike to ~80–100 % and the ANE row may also show activity.
+Alternatively, open **Activity Monitor → Window → GPU History**.
+
+---
+
+### 15.4 Metal Runtime Profile — Dashboard
+
+The Metal profile can be selected from two places in the dashboard:
+
+**Settings → Server Profile**
+
+1. Open the dashboard (`npm run dev:electron` from `dashboard/`).
+2. Click the gear ⚙ icon → **Settings**.
+3. Under *Runtime Profile*, select **Metal (Apple Silicon)**.
+4. The model selector will show only `mlx-community/*` models.
+5. Click **Save**. The dashboard stores `runtimeProfile: "metal"` in its config.
+
+**Server View (quick toggle)**
+
+The Server panel also exposes the profile dropdown so you can switch without
+opening Settings.
+
+When `metal` is selected the dashboard bypasses Docker entirely. The Server view
+shows "Native Process Running" / "Server Offline" status and a ⚡ Metal badge.
+Start/stop the server from the **Server** view using the native process controls.
+
+---
+
+### 15.5 MLX Backend Notes
+
+- **Model selection**: The backend is auto-selected by the model name in this priority order:
+  - `mlx-community/parakeet-*` → `MLXParakeetBackend` (via `parakeet-mlx`)
+  - `*/canary*-mlx` → `MLXCanaryBackend` (via `canary-mlx`)
+  - `mlx-community/VibeVoice-ASR-*` → `MLXVibeVoiceBackend` (via `mlx-audio`; native diarization)
+  - `mlx-community/*` (catch-all) → `MLXWhisperBackend` (via `mlx-audio`)
+  - `Systran/faster-whisper-*` → `FasterWhisperBackend` (whisperx fallback when unavailable)
+- **New mlx-audio Whisper model IDs**: Models follow the `whisper-<size>-asr-<quant>` naming
+  scheme (e.g. `mlx-community/whisper-large-v3-turbo-asr-fp16`, `whisper-tiny-asr-fp16`).
+  These are hosted on mlx-community and served by the rewritten `MLXWhisperBackend` that uses
+  `mlx-audio` instead of the old standalone `mlx-whisper` package.
+- **Alignment heads monkey-patch**: `mlx-audio` ≤ 0.4.x has a bug that prevents word timestamps
+  unless `model._alignment_heads` is manually set. `MLXWhisperBackend.load()` applies this patch
+  automatically.
+- **Beam search**: MLX Whisper only supports greedy decoding. If `beam_size > 1`
+  is configured (default is 5), the backend silently falls back to greedy.
+  This has no user-visible impact.
+- **Diarization on Metal**: Two options are available:
+  - *Sortformer* (`SortformerEngine`) — Metal-native via `mlx-audio`; up to 4 speakers;
+    no HuggingFace token required. Default for Apple Silicon.
+  - *PyAnnote* (`DiarizationEngine`) — MPS or CPU; requires HF token and model acceptance.
+- **Live Mode**: Uses `FasterWhisperBackend` on Metal (whisperx conflicts with mlx-audio);
+  auto-selected when whisperx is not importable.
+- **Performance**: ~3 s per minute of audio on M-series with `whisper-large-v3-turbo-asr-fp16`.
+- **Async safety**: All MLX transcription calls are wrapped in `asyncio.to_thread()`
+  to prevent blocking the FastAPI event loop.
+
+---
+
+### 15.6 Dashboard Integration Test
+
+1. Run `npm run dev:electron` from `dashboard/`.
+2. Open **Server** view → select **Metal (MLX)** runtime profile.
+3. Click **Start Metal Server** — the status light should turn green within ~5 s.
+4. Verify the server log in the dashboard shows uvicorn startup output.
+5. Open the **Transcribe** view and upload an audio file — confirm the transcript appears.
+6. Click **Stop** in the Server view — the status light should go grey.
+7. Quit the app and relaunch — the server should auto-start if Metal is still selected.
+
+---
+
+### 15.7 Tail the Structured Log
+
+```bash
+tail -f "$HOME/Library/Application Support/TranscriptionSuite/data/logs/server.log" \
+  | python3 -c "import sys,json; [print(json.dumps(json.loads(l),indent=2)) for l in sys.stdin if l.strip()]"
+```
+
+Expected: one JSON object per request, including `event`, `level`, `timestamp`, and  
+for transcription requests: `model`, `duration_s`, `backend`.
+
+---
+
+### 15.8 Confirming MLX is Active
+
+The `/ready` endpoint reports whether MLX is available:
+
+```bash
+curl -s http://localhost:9786/ready | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print('Backend:', d.get('backend'))
+print('MLX available:', d.get('features', {}).get('mlx', {}).get('available'))
+print('Loaded:', d.get('loaded'))
+"
+```
+
+If `mlx.available` is `false`, check `mlx.reason`:
+
+| Reason | Fix |
+|--------|-----|
+| `not_apple_silicon` | Must run on Apple Silicon (arm64) |
+| `mlx_whisper_not_installed` | `cd server/backend && uv sync --extra mlx` |
+| `platform_not_darwin` | Only macOS is supported for Metal acceleration |
+
+---
+
+### 15.9 Troubleshooting (MLX)
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `mlx_audio not found` / `ModuleNotFoundError: mlx_audio` | MLX extra not installed | `cd server/backend && uv sync --extra mlx` |
+| `features.mlx.available: false` | Not Apple Silicon or wrong Python | Check `uname -m` → must be `arm64` |
+| Diarization falls back to CPU | MPS memory pressure | Normal; use `device: cpu` in `config.yaml` to force |
+| `DATA_DIR` not found errors | Path not created | `mkdir -p "$DATA_DIR/logs" "$DATA_DIR/audio" "$DATA_DIR/tokens"` |
+| Server won't start on port 9786 | Port in use | `lsof -i :9786` then kill or change `--port` |
+
+---
+
+## 16. STT Benchmark Tool
+
+### 16.1 Overview
+
+`scripts/benchmark_stt.py` batch-tests multiple STT models against one or more
+audio files and produces a timing comparison table, word-level diff, and JSON/CSV
+results.
+
+**Metrics measured:**
+
+| Metric | Description |
+|--------|-------------|
+| `setup_time` | `backend.load()` + warmup pass (cold start including JIT compile) |
+| `transcribe_time` | `backend.transcribe()` wall time for the audio |
+| `RTF` | `transcribe_time / audio_duration` — lower is faster; 1.0x = real-time |
+| `word_count` | Words in the transcription output |
+
+**Outputs:**
+
+- Console: ASCII timing table + per-model text + word-level diff vs. reference model
+- `benchmark_<timestamp>.json` — full results including segments
+- `benchmark_<timestamp>.csv` — summary rows, easy to open in a spreadsheet
+
+> Model download time is **not** included in `setup_time` if the model is already
+> cached. First-run times are dominated by download; subsequent runs measure pure
+> inference.
+
+---
+
+### 16.2 Usage
+
+```bash
+# Activate the venv first
+source server/backend/.venv/bin/activate
+
+# Run from the project root so the server package resolves correctly
+
+# Default: all MLX models (on Apple Silicon) on a file
+python scripts/benchmark_stt.py --input samples/input/clip.m4a
+
+# All files in a directory, specific group
+python scripts/benchmark_stt.py --dir samples/input/ --group mlx-whisper
+
+# Explicit model list — append @<device> to override device per model
+python scripts/benchmark_stt.py \
+  --models "mlx-community/whisper-tiny-asr-fp16" "Systran/faster-whisper-tiny@cpu" \
+  --input clip.m4a
+
+# List available model groups
+python scripts/benchmark_stt.py --list-groups
+
+# Skip warmup (first-inference JIT cost shows up in transcribe_time)
+python scripts/benchmark_stt.py --no-warmup --input clip.m4a
+
+# Save results to a specific directory
+python scripts/benchmark_stt.py --input clip.m4a --output-dir /tmp/results
+```
+
+---
+
+### 16.3 Model Groups
+
+| Group | Contents |
+|-------|----------|
+| `mlx` | Full MLX set: 3× VibeVoice + 12× Whisper (fp16/8bit/4bit × tiny/small/large-v3/large-v3-turbo) + parakeet-tdt-0.6b-v3 + 2× Canary (Apple Silicon default) |
+| `mlx-vibevoice` | 3× VibeVoice-ASR (bf16, 8bit, 4bit) with native diarization |
+| `mlx-whisper` | 12× MLX Whisper via mlx-audio: fp16/8bit/4bit × tiny/small/large-v3/large-v3-turbo |
+| `mlx-asr` | MLX Parakeet + 2× MLX Canary variants |
+| `whisper` | 10 Systran faster-whisper variants (CPU/CUDA) |
+| `nemo` | NVIDIA Parakeet + Canary (requires Docker/CUDA, not for bare-metal macOS) |
+| `all` | Every model from all groups above |
+
+The default group is auto-selected based on platform:
+- **Apple Silicon** → `mlx` group
+- **CUDA** → all MLX models + `whisper` + `nemo` groups
+- **Other** → `whisper` group only
+
+---
+
+### 16.4 Output Files
+
+Results are saved as `benchmark_<timestamp>.json` and `benchmark_<timestamp>.csv`
+in the current directory (or `--output-dir`). Both are gitignored (`benchmark_*.json`,
+`benchmark_*.csv`).
+
+The JSON file contains full output including segments and word-level data.
+The CSV file contains one row per `(model, file)` pair with the core metrics
+for quick comparison in a spreadsheet.
+
+

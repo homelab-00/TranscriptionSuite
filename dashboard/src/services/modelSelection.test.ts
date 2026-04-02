@@ -99,6 +99,15 @@ describe('modelFamilyFromName', () => {
     expect(modelFamilyFromName('Systran/faster-whisper-large-v3')).toBe('whisper');
   });
 
+  it('returns mlx for MLX VibeVoice-ASR (not vibevoice)', () => {
+    expect(modelFamilyFromName('mlx-community/VibeVoice-ASR-bf16')).toBe('mlx');
+  });
+
+  it('returns mlx for MLX whisper models', () => {
+    expect(modelFamilyFromName('mlx-community/whisper-large-v3-mlx')).toBe('mlx');
+    expect(modelFamilyFromName('mlx-community/whisper-large-v3-turbo-asr-fp16')).toBe('mlx');
+  });
+
   it('returns none for disabled/empty', () => {
     expect(modelFamilyFromName(null)).toBe('none');
     expect(modelFamilyFromName(DISABLED_MODEL_SENTINEL)).toBe('none');
