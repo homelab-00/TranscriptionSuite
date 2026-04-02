@@ -56,7 +56,23 @@ _ensure_server_package_alias()
 
 
 # ---------------------------------------------------------------------------
-# Session-scoped fixture: lightweight ``torch`` stub for tests that import
+# Autouse fixture: prevent tests from loading the developer's personal
+# config file.  On macOS, ServerConfig() picks up
+# ~/Library/Application Support/TranscriptionSuite/config.yaml before
+# server/config.yaml, so a minimal personal config causes test failures.
+# Redirecting get_user_config_dir() to an empty tmp dir forces the
+# fallback to the canonical dev config (server/config.yaml).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _isolate_user_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import server.config as config_mod
+
+    monkeypatch.setattr(config_mod, "get_user_config_dir", lambda: tmp_path)
+
+
+
 # ML modules but never actually run GPU code.
 # ---------------------------------------------------------------------------
 

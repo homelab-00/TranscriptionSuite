@@ -27,6 +27,9 @@ def test_live_mode_accepts_whisper_models_only() -> None:
     assert not is_live_mode_model_supported("nvidia/canary-1b-v2")
     assert not is_live_mode_model_supported("microsoft/VibeVoice-ASR")
     assert not is_live_mode_model_supported("scerz/VibeVoice-ASR-4bit")
+    assert not is_live_mode_model_supported("mlx-community/parakeet-tdt-0.6b-v3")
+    assert not is_live_mode_model_supported("mlx-community/whisper-large-v3-mlx")
+    assert not is_live_mode_model_supported("eelcor/canary-1b-v2-mlx")
     assert not is_live_mode_model_supported("")
     assert not is_live_mode_model_supported("__none__")
 

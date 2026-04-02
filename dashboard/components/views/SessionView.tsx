@@ -20,6 +20,7 @@ import {
   ExternalLink,
   Minimize2,
   AlertTriangle,
+  Zap,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -58,7 +59,7 @@ interface SessionViewProps {
   setClientRunning: (running: boolean) => void;
   onStartServer: (
     mode: 'local' | 'remote',
-    runtimeProfile: 'gpu' | 'cpu' | 'vulkan',
+    runtimeProfile: 'gpu' | 'cpu' | 'vulkan' | 'metal',
     imageTag?: string,
     models?: {
       mainTranscriberModel?: string;
@@ -96,14 +97,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [monitorVolumePct, setMonitorVolumePct] = useState<number | null>(null);
 
   // Runtime profile (read from persisted config)
-  const [runtimeProfile, setRuntimeProfile] = useState<'gpu' | 'cpu' | 'vulkan'>('gpu');
+  const [runtimeProfile, setRuntimeProfile] = useState<'gpu' | 'cpu' | 'vulkan' | 'metal'>('gpu');
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (api?.config) {
       api.config
         .get('server.runtimeProfile')
         .then((val: unknown) => {
-          if (val === 'gpu' || val === 'cpu' || val === 'vulkan') setRuntimeProfile(val);
+          if (val === 'gpu' || val === 'cpu' || val === 'vulkan' || val === 'metal') setRuntimeProfile(val);
         })
         .catch(() => {});
     }
@@ -263,7 +264,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Control Center State — real Docker container status
   const docker = useDockerContext();
-  const serverRunning = docker.container.running;
+  const isBareMetal = runtimeProfile === 'metal';
+  const serverRunning = isBareMetal ? serverConnection.reachable : docker.container.running;
 
   // serverMode effect — must live after docker/serverRunning are declared
   useEffect(() => {
@@ -1188,6 +1190,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
                                 ? 'Remote Server Ready'
                                 : 'Remote Server Loading\u2026'
                               : 'Remote Server Offline'
+                            : isBareMetal
+                              ? serverRunning
+                                ? 'Native Process Running'
+                                : 'Server Offline'
                             : serverRunning && docker.container.health === 'healthy'
                               ? 'Docker Container Running'
                               : serverRunning
@@ -1196,7 +1202,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
                                   ? 'Container Stopped'
                                   : 'Container Missing'}
                         </span>
-                        {serverRunning && serverMode && (
+                        {isBareMetal && serverRunning && (
+                          <span className="bg-accent-violet/15 text-accent-violet flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase">
+                            <Zap size={10} />
+                            metal
+                          </span>
+                        )}
+                        {!isBareMetal && serverRunning && serverMode && (
                           <span
                             className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
                           >
@@ -1212,6 +1224,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
                                   ? 'active'
                                   : 'warning'
                                 : 'inactive'
+                              : isBareMetal
+                                ? serverRunning
+                                  ? 'active'
+                                : 'inactive'
                               : serverRunning && docker.container.health === 'healthy'
                                 ? 'active'
                                 : docker.container.exists
@@ -1223,6 +1239,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                      {isBareMetal ? (
+                        <div className="text-accent-violet/80 flex items-center gap-1.5 text-xs">
+                          <Zap size={12} />
+                          Managed by native process — start from Server view
+                        </div>
+                      ) : (
                       <div className="flex flex-wrap gap-2">
                         <Button
                           variant="secondary"
@@ -1256,6 +1278,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           Stop
                         </Button>
                       </div>
+                      )}
                       <div className="ml-auto shrink-0">
                         <Button
                           variant={showUnloadModelsState ? 'danger' : 'secondary'}

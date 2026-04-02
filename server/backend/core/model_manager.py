@@ -272,7 +272,13 @@ class ModelManager:
         if token:
             self._set_diarization_feature_status(True, "ready")
         else:
-            self._set_diarization_feature_status(False, "token_missing")
+            # Sortformer (mlx-audio) works without a token on Apple Silicon.
+            from server.core.sortformer_engine import sortformer_available
+
+            if sortformer_available():
+                self._set_diarization_feature_status(True, "ready")
+            else:
+                self._set_diarization_feature_status(False, "token_missing")
 
     def _initialize_nemo_feature_status(self) -> None:
         """Initialize NeMo feature availability from bootstrap state/env."""
@@ -462,6 +468,22 @@ class ModelManager:
             status["error"] = self._vibevoice_asr_feature_error
         return status
 
+    def _get_mlx_feature_status(self) -> dict[str, Any]:
+        """Check if MLX (Apple Silicon Metal) STT is available via mlx-audio."""
+        import platform as _platform
+        import sys
+
+        if sys.platform != "darwin":
+            return {"available": False, "reason": "not_macos"}
+        if _platform.machine() != "arm64":
+            return {"available": False, "reason": "not_apple_silicon"}
+        try:
+            from mlx_audio.stt import load as _load  # noqa: F401
+
+            return {"available": True, "reason": "mlx_audio_installed"}
+        except ImportError:
+            return {"available": False, "reason": "mlx_audio_not_installed"}
+
     def get_whisper_feature_status(self) -> dict[str, Any]:
         """Return faster-whisper capability metadata for API clients."""
         return {
@@ -629,8 +651,8 @@ class ModelManager:
             self._transcription_engine.unload_model()
 
     @property
-    def diarization_engine(self) -> "DiarizationEngine":
-        """Get or create the diarization engine."""
+    def diarization_engine(self) -> "DiarizationEngine | Any":
+        """Get or create the diarization engine (PyAnnote or Sortformer)."""
         from server.core.diarization_engine import create_diarization_engine
 
         if self._diarization_engine is None:
@@ -834,6 +856,7 @@ class ModelManager:
                 },
                 "vibevoice_asr": self.get_vibevoice_asr_feature_status(),
                 "whispercpp": self.get_whispercpp_feature_status(),
+                "mlx": self._get_mlx_feature_status(),
             },
         }
         return status

@@ -9,6 +9,7 @@ Handles:
 
 import asyncio
 import logging
+import os
 import re
 import tempfile
 from datetime import datetime
@@ -600,7 +601,8 @@ def _run_transcription(
 
         # Convert audio to MP3 and save to permanent storage
         config = get_config()
-        audio_dir = Path(config.get("audio_notebook", "audio_dir", default="/data/audio"))
+        _data_dir = os.environ.get("DATA_DIR", "/data")
+        audio_dir = Path(config.get("audio_notebook", "audio_dir", default=f"{_data_dir}/audio"))
         audio_dir.mkdir(parents=True, exist_ok=True)
 
         # Keep original filename, convert to .mp3 extension
@@ -633,6 +635,16 @@ def _run_transcription(
             for seg in result.segments:
                 if "words" in seg:
                     word_timestamps_list.extend(seg["words"])
+
+        # When diarization was performed but no word timestamps are available
+        # (e.g. MLX Canary backend), fall back to segment-level speaker
+        # attribution so that the DB segments carry text instead of being empty.
+        if diarization_segments and not word_timestamps_list:
+            from server.core.speaker_merge import build_speaker_segments_nowords
+
+            diarization_segments = build_speaker_segments_nowords(
+                result.segments, diarization_segments
+            )
 
         # Save to database
         # Use provided title if given, otherwise database falls back to filename stem

@@ -63,3 +63,15 @@ documents:
         label: "Server Dependencies"
         sources:
           - server/backend/pyproject.toml
+      - anchor: "15-apple-silicon-metalmlx-development"
+        label: "Apple Silicon (Metal/MLX) Development"
+        sources:
+          - server/backend/core/stt/backends/factory.py
+          - server/backend/core/stt/backends/mlx_whisper_backend.py
+          - server/backend/core/stt/backends/mlx_parakeet_backend.py
+          - server/backend/core/stt/backends/mlx_canary_backend.py
+          - server/backend/pyproject.toml
+      - anchor: "16-stt-benchmark-tool"
+        label: "STT Benchmark Tool"
+        sources:
+          - scripts/benchmark_stt.py
