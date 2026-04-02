@@ -535,6 +535,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     },
     [mainModelSelection, liveModelSelection, docker.hasSidecarImage, docker.cancelSidecarPull],
   );
+  const containerStatus = docker.container;
   const isRunning = containerStatus.running;
   const isRunningAndHealthy = isRunning && containerStatus.health === 'healthy';
 

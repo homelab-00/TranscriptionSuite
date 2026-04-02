@@ -553,3 +553,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('mlx:logLine', handler);
     },
   },
+} satisfies ElectronAPI);
