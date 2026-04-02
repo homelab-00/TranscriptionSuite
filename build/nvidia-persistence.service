@@ -1,0 +1,12 @@
+[Unit]
+Description=Enable NVIDIA GPU Persistence Mode
+After=nvidia-persistenced.service
+ConditionPathExists=/dev/nvidiactl
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/nvidia-smi -pm 1
+
+[Install]
+WantedBy=multi-user.target

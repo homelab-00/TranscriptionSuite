@@ -89,7 +89,8 @@ class TestCudaHealthCheck:
         assert result["device_name"] == "NVIDIA RTX 3080"
         assert result["total_memory_gb"] == 10.0
 
-    def test_unknown_error_returns_unrecoverable(self):
+    def test_error_999_retries_then_unrecoverable(self):
+        """Error 999 retries 3 times with backoff, then marks unrecoverable."""
         mock_torch = MagicMock()
         mock_torch.cuda.init.side_effect = RuntimeError("CUDA unknown error")
 
@@ -97,13 +98,78 @@ class TestCudaHealthCheck:
             patch.object(au, "torch", mock_torch),
             patch.object(au, "HAS_TORCH", True),
             patch.object(au, "_capture_nvidia_smi", return_value="nvidia-smi output"),
+            patch.object(au, "time") as mock_time,
         ):
             result = au.cuda_health_check()
 
         assert result["status"] == "unrecoverable"
         assert "unknown error" in result["error"]
         assert result["nvidia_smi"] == "nvidia-smi output"
+        assert result["attempts"] == 4  # 1 initial + 3 retries
         assert au._cuda_probe_failed is True
+        # Verify exponential backoff delays: 1s, 2s, 4s
+        assert mock_time.sleep.call_count == 3
+        mock_time.sleep.assert_any_call(1)
+        mock_time.sleep.assert_any_call(2)
+        mock_time.sleep.assert_any_call(4)
+        # 1 initial + 3 retries = 4 total init calls
+        assert mock_torch.cuda.init.call_count == 4
+
+    def test_error_999_recovers_on_retry(self):
+        """Error 999 on first attempt, succeeds on second retry."""
+        mock_props = MagicMock()
+        mock_props.name = "NVIDIA RTX 3060"
+        mock_props.total_mem = 12 * 1024**3
+
+        mock_torch = MagicMock()
+        # First init raises 999, retry 1 raises 999, retry 2 succeeds
+        mock_torch.cuda.init.side_effect = [
+            RuntimeError("CUDA unknown error"),
+            RuntimeError("CUDA unknown error"),
+            None,
+        ]
+        mock_torch.cuda.get_device_properties.return_value = mock_props
+
+        with (
+            patch.object(au, "torch", mock_torch),
+            patch.object(au, "HAS_TORCH", True),
+            patch.object(au, "time") as mock_time,
+        ):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "healthy"
+        assert result["retried"] is True
+        assert result["attempts"] == 3  # 1 initial + 2 retries
+        assert au._cuda_probe_failed is False
+        assert mock_time.sleep.call_count == 2
+        mock_time.sleep.assert_any_call(1)
+        mock_time.sleep.assert_any_call(2)
+
+    def test_error_999_recovers_on_first_retry(self):
+        """Error 999 on first attempt, succeeds on first retry (attempts: 2)."""
+        mock_props = MagicMock()
+        mock_props.name = "NVIDIA RTX 3060"
+        mock_props.total_mem = 12 * 1024**3
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.init.side_effect = [
+            RuntimeError("CUDA unknown error"),
+            None,
+        ]
+        mock_torch.cuda.get_device_properties.return_value = mock_props
+
+        with (
+            patch.object(au, "torch", mock_torch),
+            patch.object(au, "HAS_TORCH", True),
+            patch.object(au, "time") as mock_time,
+        ):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "healthy"
+        assert result["retried"] is True
+        assert result["attempts"] == 2  # 1 initial + 1 retry
+        assert au._cuda_probe_failed is False
+        mock_time.sleep.assert_called_once_with(1)
 
     def test_no_cuda_device_returns_no_cuda(self):
         mock_torch = MagicMock()
@@ -137,24 +203,6 @@ class TestCudaHealthCheck:
         assert result.get("retried") is True
         mock_time.sleep.assert_called_once_with(0.5)
         assert mock_torch.cuda.init.call_count == 2
-
-    def test_no_retry_on_error_999(self):
-        """Error 999 (unrecoverable) must NOT retry — sets flag immediately."""
-        mock_torch = MagicMock()
-        mock_torch.cuda.init.side_effect = RuntimeError("CUDA unknown error (999)")
-
-        with (
-            patch.object(au, "torch", mock_torch),
-            patch.object(au, "HAS_TORCH", True),
-            patch.object(au, "_capture_nvidia_smi", return_value=""),
-            patch.object(au, "time") as mock_time,
-        ):
-            result = au.cuda_health_check()
-
-        assert result["status"] == "unrecoverable"
-        assert au._cuda_probe_failed is True
-        mock_time.sleep.assert_not_called()
-        assert mock_torch.cuda.init.call_count == 1
 
     def test_retry_also_fails_returns_no_cuda(self):
         """When both first attempt and retry fail with transient errors, return no_cuda."""

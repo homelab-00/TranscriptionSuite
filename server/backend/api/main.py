@@ -25,7 +25,6 @@ Provides a single API serving:
 import asyncio  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
-import threading  # noqa: E402
 from collections.abc import AsyncGenerator  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -350,43 +349,11 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         )
 
 
-def _start_import_prewarming() -> threading.Thread | None:
-    """Pre-import heavy ML packages in background to avoid cascading
-    import stalls during whisperx.load_model()."""
-    _HEAVY_PACKAGES = [
-        "numexpr",
-        "matplotlib.font_manager",
-        "pyannote.audio",
-    ]
-
-    def _prewarm() -> None:
-        import importlib
-        import warnings as _w
-
-        _w.filterwarnings(
-            "ignore",
-            message=r"torchcodec is not installed correctly",
-            category=UserWarning,
-        )
-        for pkg in _HEAVY_PACKAGES:
-            try:
-                importlib.import_module(pkg)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Import pre-warming skipped for %s: %s", pkg, exc)
-
-    thread = threading.Thread(target=_prewarm, name="import-prewarm", daemon=True)
-    thread.start()
-    return thread
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan handler for startup/shutdown."""
     # Lazy import to avoid loading torch/faster_whisper at module load time
     from server.core.model_manager import cleanup_models, get_model_manager
-
-    # Start pre-importing heavy ML packages in background
-    prewarm_thread = _start_import_prewarming()
 
     # Startup
     lifespan_start = _time.perf_counter()
@@ -460,23 +427,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     _log_time("token store initialized")
     logger.info("Token store initialized")
 
-    # Wait for ML package pre-warming before touching CUDA
-    # (concurrent CUDA init from prewarm thread + ModelManager is not thread-safe)
-    imports_start = _time.perf_counter()
-    emit_event("lifespan-imports", "server", "Loading ML libraries...", phase="lifespan")
-    if prewarm_thread is not None and prewarm_thread.is_alive():
-        _log_time("waiting for import pre-warming to finish...")
-        prewarm_thread.join(timeout=60)
-    _log_time("import pre-warming complete")
-    emit_event(
-        "lifespan-imports",
-        "server",
-        "ML libraries loaded",
-        status="complete",
-        durationMs=round((_time.perf_counter() - imports_start) * 1000),
-        phase="lifespan",
-    )
-
     # CUDA health probe — detect unrecoverable GPU state before ModelManager
     from server.core.audio_utils import cuda_health_check
 
@@ -530,7 +480,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
         app.state.gpu_error = gpu_health
 
-    # Initialize model manager (accesses CUDA — must come after prewarm join)
+    # Initialize model manager (accesses CUDA — must come after health check)
     manager = get_model_manager(config.config)
     _log_time("model manager created")
     logger.info(f"Model manager initialized (GPU: {manager.gpu_available})")

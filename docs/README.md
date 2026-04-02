@@ -728,7 +728,13 @@ The dashboard detects CDI automatically and uses the correct GPU configuration. 
 sudo nvidia-smi -pm 1
 ```
 
-This keeps the driver context warm across container lifecycle events. The setting persists until the next reboot; add it to a startup script (e.g. `/etc/rc.local` or a systemd unit) to make it permanent.
+This keeps the driver context warm across container lifecycle events. The setting persists until the next reboot. To make it permanent, install the included systemd unit:
+
+```bash
+sudo cp build/nvidia-persistence.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now nvidia-persistence.service
+```
 
 **Alternative:** Reboot the host to fully reset the driver state.
 

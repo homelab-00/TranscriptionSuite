@@ -44,7 +44,7 @@ repos:
       - id: codespell
         args:
           - "--skip=*.lock,*.svg,*.ico,*.icns,*.png,*.woff,*.woff2,*package-lock.json,node_modules,dist-electron,release,.git,dashboard/dist,contract-baseline.json"
-          - "--ignore-words-list=ect,crate,ser"
+          - "--ignore-words-list=ect,crate,ser,ane"
         exclude: "^(dashboard/release/|dashboard/dist-electron/)"
 
   # ── Dashboard: Prettier format ───────────────────────────────────────────

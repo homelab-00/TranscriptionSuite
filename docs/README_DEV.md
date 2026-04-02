@@ -2104,7 +2104,7 @@ server/backend/
 │   ├── main.py                   # App factory, lifespan, routing
 │   └── routes/                   # API endpoint modules
 ├── core/
-│   ├── audio_utils.py            # Audio conversion, resampling, VAD helpers, GPU cache management
+│   ├── audio_utils.py            # Audio conversion, resampling, VAD helpers, GPU cache, CUDA health check (error 999 retry with backoff)
 │   ├── client_detector.py        # Client/host detection utilities
 │   ├── diarization_engine.py     # PyAnnote wrapper
 │   ├── ffmpeg_utils.py           # FFmpeg-based audio loading and resampling (soxr / swr_linear)
@@ -2965,6 +2965,19 @@ docker run --rm --device nvidia.com/gpu=all nvidia/cuda:12.9.0-base-ubuntu24.04 
 
 # Check container logs
 docker compose logs -f
+```
+
+#### CUDA error 999 resilience
+
+The server's `cuda_health_check()` (in `audio_utils.py`) retries CUDA error 999 up to 3 times with exponential backoff (1 s, 2 s, 4 s) before marking the GPU as unrecoverable. This handles transient driver states during boot or after container lifecycle events. Only after all retries fail is `_cuda_probe_failed` set to `True`, disabling GPU for the session. Non-999 transient errors still use a single 500 ms retry.
+
+Import pre-warming (`_start_import_prewarming`) was removed from `main.py` to eliminate an early CUDA probe triggered by `pyannote.audio`'s import of `torch`. Heavy ML packages now load lazily on first model use instead of in a background thread at startup.
+
+For host-level mitigation, enable NVIDIA Persistence Mode via the included systemd unit (`build/nvidia-persistence.service`):
+
+```bash
+sudo cp build/nvidia-persistence.service /etc/systemd/system/
+sudo systemctl enable --now nvidia-persistence.service
 ```
 
 #### CUDA unknown error after system update

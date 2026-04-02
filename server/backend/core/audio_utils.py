@@ -162,6 +162,9 @@ def cuda_health_check() -> dict[str, Any]:
 
     _log_cuda_diagnostics()
 
+    # Error 999 retry delays in seconds (exponential backoff).
+    _error_999_delays = [1, 2, 4]
+
     try:
         torch.cuda.init()
         props = torch.cuda.get_device_properties(0)
@@ -170,53 +173,61 @@ def cuda_health_check() -> dict[str, Any]:
             "device_name": props.name,
             "total_memory_gb": round(props.total_mem / 1024**3, 2),
         }
-    except RuntimeError as e:
-        err_lower = str(e).lower()
-        if "unknown error" in err_lower or "error 999" in err_lower:
-            _cuda_probe_failed = True
-            smi_output = _capture_nvidia_smi()
-            logger.error(
-                "CUDA health check: unrecoverable GPU state detected",
-                exc_info=True,
-                extra={"nvidia_smi": smi_output},
-            )
-            return {
-                "status": "unrecoverable",
-                "error": str(e),
-                "nvidia_smi": smi_output,
-            }
-        # Transient error — retry once after a short delay.
-        logger.warning(
-            "CUDA health check: transient error, retrying in 500ms",
-            extra={"error": str(e)},
-        )
-        time.sleep(0.5)
-        try:
-            torch.cuda.init()
-            props = torch.cuda.get_device_properties(0)
-            return {
-                "status": "healthy",
-                "device_name": props.name,
-                "total_memory_gb": round(props.total_mem / 1024**3, 2),
-                "retried": True,
-            }
-        except Exception as retry_e:
-            return {"status": "no_cuda", "error": str(retry_e)}
     except Exception as e:
         err_lower = str(e).lower()
-        if "unknown error" in err_lower or "error 999" in err_lower:
+        is_error_999 = "unknown error" in err_lower or "error 999" in err_lower
+
+        if is_error_999:
+            # Error 999 can be transient (driver settling after boot / container
+            # lifecycle).  Retry with exponential backoff before giving up.
+            last_exc: Exception = e
+            for attempt, delay in enumerate(_error_999_delays, start=1):
+                logger.warning(
+                    "CUDA health check: error 999, retry %d/%d in %ds",
+                    attempt,
+                    len(_error_999_delays),
+                    delay,
+                    extra={"error": str(last_exc)},
+                )
+                time.sleep(delay)
+                try:
+                    torch.cuda.init()
+                    props = torch.cuda.get_device_properties(0)
+                    logger.info("CUDA health check: recovered after %d retries", attempt)
+                    return {
+                        "status": "healthy",
+                        "device_name": props.name,
+                        "total_memory_gb": round(props.total_mem / 1024**3, 2),
+                        "retried": True,
+                        "attempts": attempt + 1,
+                    }
+                except Exception as retry_exc:
+                    logger.debug(
+                        "CUDA health check: retry %d/%d failed: %s",
+                        attempt,
+                        len(_error_999_delays),
+                        retry_exc,
+                    )
+                    last_exc = retry_exc
+                    continue
+
+            # All retries exhausted — mark as unrecoverable.
             _cuda_probe_failed = True
             smi_output = _capture_nvidia_smi()
             logger.error(
-                "CUDA health check: unrecoverable GPU state detected",
-                exc_info=True,
+                "CUDA health check: unrecoverable GPU state after %d retries",
+                len(_error_999_delays),
+                exc_info=last_exc,
                 extra={"nvidia_smi": smi_output},
             )
             return {
                 "status": "unrecoverable",
-                "error": str(e),
+                "error": str(last_exc),
                 "nvidia_smi": smi_output,
+                "attempts": len(_error_999_delays) + 1,
             }
+
+        # Non-999 transient error — single retry after a short delay.
         logger.warning(
             "CUDA health check: transient error, retrying in 500ms",
             extra={"error": str(e)},
