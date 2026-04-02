@@ -604,6 +604,9 @@ function createWindow(): void {
 
 // ─── IPC Handlers ───────────────────────────────────────────────────────────
 
+// Microtask coalescing flag for shortcut re-registration (see config:set handler).
+let shortcutReregisterScheduled = false;
+
 // Config: get/set client settings via electron-store
 // Use store.has() so that unset keys return null rather than the electron-store
 // default value. This lets the renderer-side defaults (DEFAULT_CONFIG / ??-chains)
@@ -620,11 +623,21 @@ ipcMain.handle('config:set', async (_event, key: string, value: unknown) => {
   if (key.startsWith('app.updateCheck')) {
     updateManager.reconfigure();
   }
-  // Re-register shortcuts when accelerators change
+  // Re-register shortcuts when accelerators change.
+  // Best-effort coalescing: if multiple shortcuts.* writes land in the same
+  // microtask checkpoint they merge into one call.  IPC handlers may run on
+  // separate event-loop turns, so the serialization guard in registerShortcuts()
+  // is the primary protection against concurrent D-Bus sessions.
   if (key.startsWith('shortcuts.')) {
-    registerShortcuts(store, () => mainWindow).catch((err) =>
-      console.warn('[Shortcuts] Re-registration failed:', err),
-    );
+    if (!shortcutReregisterScheduled) {
+      shortcutReregisterScheduled = true;
+      queueMicrotask(() => {
+        shortcutReregisterScheduled = false;
+        registerShortcuts(store, () => mainWindow).catch((err) =>
+          console.warn('[Shortcuts] Re-registration failed:', err),
+        );
+      });
+    }
   }
 });
 
@@ -1757,8 +1770,7 @@ app.whenReady().then(() => {
       resolvedLiveModel = 'Systran/faster-whisper-medium';
     }
 
-    const diarizationModel =
-      (store.get('server.diarizationModelSelection') as string) || undefined;
+    const diarizationModel = (store.get('server.diarizationModelSelection') as string) || undefined;
 
     mlxServerManager
       .start({

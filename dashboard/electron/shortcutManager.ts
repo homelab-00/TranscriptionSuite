@@ -36,14 +36,56 @@ export function isKdePlasma(): boolean {
 const registeredAccelerators: string[] = [];
 let waylandMode = false;
 
+// ─── Serialization guard ───────────────────────────────────────────────────
+// Concurrent registerShortcuts() calls (e.g. from rapid config:set events)
+// are serialized: if a registration is already in-flight we store the latest
+// args and re-run once the current call completes (last-write-wins).
+let registrationInFlight = false;
+let pendingRegistration: { store: ReadableStore; getWindow: () => BrowserWindow | null } | null =
+  null;
+
 /**
  * Register global keyboard shortcuts from config.
  * On Wayland: attempts registration via the GlobalShortcutsPortal feature
  * (works on KDE Plasma, Hyprland).  Falls back to CLI/signal guidance if
  * the compositor doesn't support the portal.
  * On failure (key already taken by another app): log warning, don't crash.
+ *
+ * Concurrent calls are coalesced: only one D-Bus session runs at a time.
  */
 export async function registerShortcuts(
+  store: ReadableStore,
+  getWindow: () => BrowserWindow | null,
+): Promise<void> {
+  if (registrationInFlight) {
+    // A registration is already running — just record that we need another pass.
+    pendingRegistration = { store, getWindow };
+    return;
+  }
+
+  registrationInFlight = true;
+  try {
+    await doRegisterShortcuts(store, getWindow);
+  } finally {
+    registrationInFlight = false;
+
+    // If another call came in while we were running, drain it now.
+    if (pendingRegistration) {
+      const { store: nextStore, getWindow: nextGetWindow } = pendingRegistration;
+      pendingRegistration = null;
+      // Don't await — let the caller return immediately; the next pass
+      // will serialize further concurrent calls via the same guard.
+      registerShortcuts(nextStore, nextGetWindow).catch((err) =>
+        console.warn('[Shortcuts] Deferred re-registration failed:', err),
+      );
+    }
+  }
+}
+
+/**
+ * Inner implementation of shortcut registration (no concurrency guard).
+ */
+async function doRegisterShortcuts(
   store: ReadableStore,
   getWindow: () => BrowserWindow | null,
 ): Promise<void> {

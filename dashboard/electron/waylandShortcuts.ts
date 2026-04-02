@@ -185,6 +185,12 @@ export async function initWaylandShortcuts(
     const dbus = require('@particle/dbus-next');
     bus = dbus.sessionBus();
 
+    // Catch socket-level errors (e.g. ERR_STREAM_WRITE_AFTER_END) so they
+    // don't become uncaught exceptions and crash the Electron main process.
+    bus.on('error', (err: unknown) => {
+      console.warn('[WaylandShortcuts] D-Bus bus error (caught):', err);
+    });
+
     // Get the portal proxy
     const portalObj = await bus.getProxyObject(
       'org.freedesktop.portal.Desktop',
@@ -315,7 +321,7 @@ function waitForResponse(
     }
 
     function removeResources() {
-      bus.removeListener('message', onMessage);
+      bus?.removeListener('message', onMessage);
       // Only send RemoveMatch if AddMatch completed — otherwise we'd
       // orphan the match rule if AddMatch finishes after this call.
       if (matchAdded) {
@@ -372,7 +378,7 @@ function waitForResponse(
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        bus.removeListener('message', onMessage);
+        bus?.removeListener('message', onMessage);
         reject(err);
       },
     );
