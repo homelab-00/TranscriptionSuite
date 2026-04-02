@@ -21,7 +21,7 @@ Usage examples
 
   # Explicit model list with devices:
   python scripts/benchmark_stt.py \
-      --models "mlx-community/whisper-tiny-mlx" "Systran/faster-whisper-tiny@cpu" \
+      --models "mlx-community/whisper-tiny-asr-fp16" "Systran/faster-whisper-tiny@cpu" \
       --input clip.m4a
 
   # List available model groups:
@@ -87,20 +87,43 @@ _bootstrap_server_package()
 
 MODEL_GROUPS: dict[str, list[str]] = {
     "mlx": [
-        "mlx-community/whisper-tiny-mlx",
-        "mlx-community/whisper-small-mlx",
-        "mlx-community/whisper-medium-mlx",
-        "mlx-community/whisper-large-v3-mlx",
+        "mlx-community/VibeVoice-ASR-4bit",
+        "mlx-community/VibeVoice-ASR-8bit",
+        "mlx-community/VibeVoice-ASR-bf16",
+        "mlx-community/whisper-tiny-asr-4bit",
+        "mlx-community/whisper-tiny-asr-8bit",
+        "mlx-community/whisper-tiny-asr-fp16",
+        "mlx-community/whisper-small-asr-4bit",
+        "mlx-community/whisper-small-asr-8bit",
+        "mlx-community/whisper-small-asr-fp16",
+        "mlx-community/whisper-large-v3-asr-4bit",
+        "mlx-community/whisper-large-v3-asr-8bit",
+        "mlx-community/whisper-large-v3-asr-fp16",
+        "mlx-community/whisper-large-v3-turbo-asr-4bit",
+        "mlx-community/whisper-large-v3-turbo-asr-8bit",
+        "mlx-community/whisper-large-v3-turbo-asr-fp16",
         "mlx-community/parakeet-tdt-0.6b-v3",
         "Mediform/canary-1b-v2-mlx-q8",
+        "eelcor/canary-1b-v2-mlx",
+    ],
+    "mlx-vibevoice": [
+        "mlx-community/VibeVoice-ASR-4bit",
+        "mlx-community/VibeVoice-ASR-8bit",
+        "mlx-community/VibeVoice-ASR-bf16",
     ],
     "mlx-whisper": [
-        "mlx-community/whisper-tiny-mlx",
-        "mlx-community/whisper-base-mlx",
-        "mlx-community/whisper-small-mlx",
-        "mlx-community/whisper-medium-mlx",
-        "mlx-community/whisper-large-v3-mlx",
-        "mlx-community/whisper-large-v3-turbo",
+        "mlx-community/whisper-tiny-asr-4bit",
+        "mlx-community/whisper-tiny-asr-8bit",
+        "mlx-community/whisper-tiny-asr-fp16",
+        "mlx-community/whisper-small-asr-4bit",
+        "mlx-community/whisper-small-asr-8bit",
+        "mlx-community/whisper-small-asr-fp16",
+        "mlx-community/whisper-large-v3-asr-4bit",
+        "mlx-community/whisper-large-v3-asr-8bit",
+        "mlx-community/whisper-large-v3-asr-fp16",
+        "mlx-community/whisper-large-v3-turbo-asr-4bit",
+        "mlx-community/whisper-large-v3-turbo-asr-8bit",
+        "mlx-community/whisper-large-v3-turbo-asr-fp16",
     ],
     "mlx-asr": [
         "mlx-community/parakeet-tdt-0.6b-v3",
@@ -124,9 +147,9 @@ MODEL_GROUPS: dict[str, list[str]] = {
         "nvidia/canary-1b-v2",
     ],
     "all": [
-        "mlx-community/whisper-tiny-mlx",
-        "mlx-community/whisper-small-mlx",
-        "mlx-community/whisper-large-v3-mlx",
+        "mlx-community/whisper-tiny-asr-fp16",
+        "mlx-community/whisper-small-asr-fp16",
+        "mlx-community/whisper-large-v3-turbo-asr-fp16",
         "mlx-community/parakeet-tdt-0.6b-v3",
         "Mediform/canary-1b-v2-mlx-q8",
         "Systran/faster-whisper-large-v3",
