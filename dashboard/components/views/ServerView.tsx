@@ -102,9 +102,7 @@ const DIARIZATION_MODEL_SELECTION_OPTIONS = new Set([
 ]);
 
 // IDs of models that require the Metal/MLX runtime.
-const MLX_MODEL_IDS = new Set(
-  MODEL_REGISTRY.filter((m) => m.family === 'mlx').map((m) => m.id),
-);
+const MLX_MODEL_IDS = new Set(MODEL_REGISTRY.filter((m) => m.family === 'mlx').map((m) => m.id));
 
 const UI_SENTINEL_VALUES = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
@@ -207,8 +205,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [liveCustomModel, setLiveCustomModel] = useState('');
   const [localSelectionsHydrated, setLocalSelectionsHydrated] = useState(false);
   const [modelsHydrated, setModelsHydrated] = useState(false);
-  const [diarizationModelSelection, setDiarizationModelSelection] =
-    useState(DIARIZATION_SORTFORMER_OPTION);
+  const [diarizationModelSelection, setDiarizationModelSelection] = useState(
+    DIARIZATION_SORTFORMER_OPTION,
+  );
   const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
   const [diarizationHydrated, setDiarizationHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -223,7 +222,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('gpu');
 
   // Metal (Apple Silicon) detection – derived from server-side feature check
-  const mlxFeature = (adminStatus?.models as any)?.features?.mlx as { available: boolean; reason: string } | undefined;
+  const mlxFeature = (adminStatus?.models as any)?.features?.mlx as
+    | { available: boolean; reason: string }
+    | undefined;
   const metalSupported = mlxFeature?.available ?? false;
   const [isDarwin] = useState<boolean>(() => {
     return (window as any).electronAPI?.app?.getPlatform?.() === 'darwin';
@@ -238,10 +239,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (!api?.app?.getConfigDir) return;
-    api.app.getConfigDir().then((dir: string) => {
-      setNativeDataDir(dir + '/data');
-      setNativeModelsDir(dir + '/models');
-    }).catch(() => {});
+    api.app
+      .getConfigDir()
+      .then((dir: string) => {
+        setNativeDataDir(dir + '/data');
+        setNativeModelsDir(dir + '/models');
+      })
+      .catch(() => {});
   }, []);
 
   // Derive model option lists filtered by the active runtime profile.
@@ -255,7 +259,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     return [...presets, MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
   }, [isMetal]);
   const liveModelOptions = useMemo(() => {
-    return [LIVE_MODEL_SAME_AS_MAIN_OPTION, ...LIVE_MODEL_PRESETS, MODEL_DISABLED_OPTION, LIVE_MODEL_CUSTOM_OPTION];
+    return [
+      LIVE_MODEL_SAME_AS_MAIN_OPTION,
+      ...LIVE_MODEL_PRESETS,
+      MODEL_DISABLED_OPTION,
+      LIVE_MODEL_CUSTOM_OPTION,
+    ];
   }, []);
 
   // Auth token display in Instance Settings
@@ -502,22 +511,35 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           try {
             const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
             const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
-            const storedModel = (await api.config?.get('server.mainModelSelection').catch(() => '')) ?? '';
-            const storedCustomModel = (await api.config?.get('server.mainCustomModel').catch(() => '')) ?? '';
-            const storedLiveModel = (await api.config?.get('server.liveModelSelection').catch(() => '')) ?? '';
-            const storedLiveCustom = (await api.config?.get('server.liveCustomModel').catch(() => '')) ?? '';
-            const storedDiarizationModel = (await api.config?.get('server.diarizationModelSelection').catch(() => '')) ?? '';
-            const storedDiarizationCustom_auto = (await api.config?.get('server.diarizationCustomModel').catch(() => '')) ?? '';
+            const storedModel =
+              (await api.config?.get('server.mainModelSelection').catch(() => '')) ?? '';
+            const storedCustomModel =
+              (await api.config?.get('server.mainCustomModel').catch(() => '')) ?? '';
+            const storedLiveModel =
+              (await api.config?.get('server.liveModelSelection').catch(() => '')) ?? '';
+            const storedLiveCustom =
+              (await api.config?.get('server.liveCustomModel').catch(() => '')) ?? '';
+            const storedDiarizationModel =
+              (await api.config?.get('server.diarizationModelSelection').catch(() => '')) ?? '';
+            const storedDiarizationCustom_auto =
+              (await api.config?.get('server.diarizationCustomModel').catch(() => '')) ?? '';
             const resolvedDiarization =
               storedDiarizationModel === DIARIZATION_MODEL_CUSTOM_OPTION
                 ? storedDiarizationCustom_auto.trim()
-                : storedDiarizationModel === DIARIZATION_SORTFORMER_OPTION
-                    || storedDiarizationModel === 'Auto (best available)'
-                    || !storedDiarizationModel
+                : storedDiarizationModel === DIARIZATION_SORTFORMER_OPTION ||
+                    storedDiarizationModel === 'Auto (best available)' ||
+                    !storedDiarizationModel
                   ? ''
                   : storedDiarizationModel;
-            const resolvedMain = resolveMainModelSelectionValue(storedModel, storedCustomModel, '') || MLX_DEFAULT_MODEL;
-            const resolvedLive = resolveLiveModelSelectionValue(storedLiveModel, storedLiveCustom, resolvedMain, '');
+            const resolvedMain =
+              resolveMainModelSelectionValue(storedModel, storedCustomModel, '') ||
+              MLX_DEFAULT_MODEL;
+            const resolvedLive = resolveLiveModelSelectionValue(
+              storedLiveModel,
+              storedLiveCustom,
+              resolvedMain,
+              '',
+            );
             const normalizedLive = normalizeLiveModelToWhisper(resolvedLive);
             await api.mlx.start({
               port: Number(port),
@@ -547,11 +569,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (!api?.mlx) return;
-    api.mlx.getStatus().then(setMlxStatus).catch(() => {});
+    api.mlx
+      .getStatus()
+      .then(setMlxStatus)
+      .catch(() => {});
     const unsub = api.mlx.onStatusChanged((status: MLXStatus) => setMlxStatus(status));
     return unsub;
   }, []);
-
 
   const hasImages = docker.images.length > 0;
   const statusLabel = containerStatus.exists
@@ -681,7 +705,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     }
 
     setDiarizationHydrated(true);
-  }, [adminStatus, configuredDiarizationModel, diarizationHydrated, diarizationModelSelection, localSelectionsHydrated]);
+  }, [
+    adminStatus,
+    configuredDiarizationModel,
+    diarizationHydrated,
+    diarizationModelSelection,
+    localSelectionsHydrated,
+  ]);
 
   const activeTranscriber = resolveMainModelSelectionValue(
     mainModelSelection,
@@ -954,7 +984,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const metalSatisfied = isAppleSilicon && (mlxFeature === undefined || metalSupported);
   const needsDocker = runtimeProfile !== 'metal';
   const needsNvidia = runtimeProfile === 'gpu';
-  const needsMetal  = runtimeProfile === 'metal';
+  const needsMetal = runtimeProfile === 'metal';
   const setupChecks = [
     {
       label: `${rtName} installed`,
@@ -968,9 +998,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       label: `${rtName} image pulled`,
       ok: docker.images.length > 0,
       na: !needsDocker,
-      hint: !needsDocker
-        ? 'Not needed for Metal runtime'
-        : 'Pull an image below to get started',
+      hint: !needsDocker ? 'Not needed for Metal runtime' : 'Pull an image below to get started',
     },
     {
       label: 'NVIDIA GPU detected',
@@ -993,7 +1021,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       hint: !needsMetal
         ? 'Not needed for selected runtime'
         : metalSatisfied
-          ? mlxFeature === undefined ? 'Apple Silicon detected' : 'MLX acceleration available'
+          ? mlxFeature === undefined
+            ? 'Apple Silicon detected'
+            : 'MLX acceleration available'
           : mlxFeature?.reason === 'not_apple_silicon'
             ? 'Intel Mac — not supported'
             : mlxFeature?.reason === 'mlx_whisper_not_installed'
@@ -1086,7 +1116,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     {allPassed ? 'Setup Complete' : 'Setup Checklist'}
                   </span>
                   <span className="font-mono text-xs text-slate-500">
-                    {setupChecks.filter((c) => !c.na && c.ok).length}/{setupChecks.filter((c) => !c.na).length} checks passed
+                    {setupChecks.filter((c) => !c.na && c.ok).length}/
+                    {setupChecks.filter((c) => !c.na).length} checks passed
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1161,7 +1192,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       >
                         {check.label}
                       </span>
-                      <span className={`ml-auto text-xs ${(check as any).na ? 'text-slate-700' : 'text-slate-500'}`}>{check.hint}</span>
+                      <span
+                        className={`ml-auto text-xs ${(check as any).na ? 'text-slate-700' : 'text-slate-500'}`}
+                      >
+                        {check.hint}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1169,130 +1204,336 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             </div>
           )}
 
-          {/* 1. Instance Settings Card */}
-          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-            <div
-              className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${hasImages ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}
-            >
-              <Download size={14} />
-            </div>
-            <GlassCard
-              title="1. Docker Image"
-              className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
-            >
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-3">
-                    <StatusLight status={hasImages ? 'active' : 'inactive'} />
-                    <span
-                      className={`font-mono text-sm transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
-                    >
-                      {hasImages
-                        ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available`
-                        : 'No images'}
-                    </span>
-
-                    {hasImages && docker.images[0] && (
-                      <div className="flex gap-2 transition-opacity duration-300">
-                        <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
-                          {docker.images[0].created.split(' ')[0]}
-                        </span>
-                        <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
-                          {docker.images[0].size}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-500">
-                      Select Image Tag
-                    </label>
-                    <CustomSelect
-                      value={selectedImage}
-                      onChange={setSelectedImage}
-                      options={imageOptions}
-                      className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+          {/* 1. Docker Image or Inference Server (metal) Card */}
+          {runtimeProfile === 'metal' ? (
+            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+              <div
+                className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${mlxStatus === 'running' ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : mlxStatus === 'starting' || mlxStatus === 'stopping' ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+              >
+                <Zap size={14} />
+              </div>
+              <GlassCard
+                title="1. Inference Server"
+                className={`transition-all duration-500 ease-in-out ${mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+              >
+                <div className="flex flex-wrap items-center gap-5">
+                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
+                    <StatusLight
+                      status={
+                        mlxStatus === 'running'
+                          ? 'active'
+                          : mlxStatus === 'starting' || mlxStatus === 'stopping'
+                            ? 'warning'
+                            : 'inactive'
+                      }
+                      animate={mlxStatus === 'running'}
                     />
+                    <span
+                      className={`font-mono text-sm transition-colors ${
+                        mlxStatus === 'running'
+                          ? 'text-slate-300'
+                          : mlxStatus === 'starting' || mlxStatus === 'stopping'
+                            ? 'text-accent-orange'
+                            : 'text-slate-500'
+                      }`}
+                    >
+                      {mlxStatus === 'running'
+                        ? 'Running'
+                        : mlxStatus === 'starting'
+                          ? 'Starting…'
+                          : mlxStatus === 'stopping'
+                            ? 'Stopping…'
+                            : mlxStatus === 'error'
+                              ? 'Error'
+                              : 'Stopped'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Button
+                      variant="secondary"
+                      className="h-9 px-4"
+                      onClick={handleMLXStart}
+                      disabled={
+                        mlxStatus === 'running' ||
+                        mlxStatus === 'starting' ||
+                        mlxStatus === 'stopping'
+                      }
+                    >
+                      {mlxStatus === 'starting' ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" /> Starting…
+                        </>
+                      ) : (
+                        <>
+                          <Zap size={14} /> Start Metal Server
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      className="h-9 px-4"
+                      onClick={handleMLXStop}
+                      disabled={mlxStatus !== 'running' && mlxStatus !== 'starting'}
+                    >
+                      {mlxStatus === 'stopping' ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" /> Stopping…
+                        </>
+                      ) : (
+                        'Stop'
+                      )}
+                    </Button>
+                    {mlxStatus === 'error' && (
+                      <span className="text-xs text-red-400">Error — check logs</span>
+                    )}
                   </div>
                 </div>
-                <div className="flex flex-col justify-end space-y-2">
-                  <Button
-                    variant="secondary"
-                    className="h-10 w-full"
-                    onClick={() => docker.refreshImages()}
-                    disabled={docker.operating}
-                  >
-                    <RefreshCw size={14} className="mr-2" />
-                    Scan Local Images
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    className="h-10 w-full"
-                    onClick={async () => {
-                      const dlId = `docker-image-${selectedTagForActions}`;
-                      const store = useActivityStore.getState();
-                      store.addActivity({
-                        id: dlId,
-                        category: 'download',
-                        label: `Server Image (${selectedTagForActions})`,
-                        legacyType: 'docker-image',
-                      });
-                      try {
-                        await docker.pullImage(selectedTagForActions);
-                        useActivityStore
-                          .getState()
-                          .updateActivity(dlId, { status: 'complete', completedAt: Date.now() });
-                      } catch (err: unknown) {
-                        const msg = err instanceof Error ? err.message : 'Pull failed';
-                        useActivityStore.getState().updateActivity(dlId, {
-                          status: 'error',
-                          error: msg,
-                          completedAt: Date.now(),
+              </GlassCard>
+            </div>
+          ) : (
+            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+              <div
+                className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${hasImages ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+              >
+                <Download size={14} />
+              </div>
+              <GlassCard
+                title="1. Docker Image"
+                className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+              >
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-3">
+                      <StatusLight status={hasImages ? 'active' : 'inactive'} />
+                      <span
+                        className={`font-mono text-sm transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
+                      >
+                        {hasImages
+                          ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available`
+                          : 'No images'}
+                      </span>
+
+                      {hasImages && docker.images[0] && (
+                        <div className="flex gap-2 transition-opacity duration-300">
+                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
+                            {docker.images[0].created.split(' ')[0]}
+                          </span>
+                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
+                            {docker.images[0].size}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-500">
+                        Select Image Tag
+                      </label>
+                      <CustomSelect
+                        value={selectedImage}
+                        onChange={setSelectedImage}
+                        options={imageOptions}
+                        className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col justify-end space-y-2">
+                    <Button
+                      variant="secondary"
+                      className="h-10 w-full"
+                      onClick={() => docker.refreshImages()}
+                      disabled={docker.operating}
+                    >
+                      <RefreshCw size={14} className="mr-2" />
+                      Scan Local Images
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-10 w-full"
+                      onClick={async () => {
+                        const dlId = `docker-image-${selectedTagForActions}`;
+                        const store = useActivityStore.getState();
+                        store.addActivity({
+                          id: dlId,
+                          category: 'download',
+                          label: `Server Image (${selectedTagForActions})`,
+                          legacyType: 'docker-image',
                         });
-                      }
-                    }}
-                    disabled={docker.operating}
-                  >
-                    {docker.pulling ? (
-                      <>
-                        <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
-                      </>
-                    ) : (
-                      'Fetch Fresh Image'
+                        try {
+                          await docker.pullImage(selectedTagForActions);
+                          useActivityStore
+                            .getState()
+                            .updateActivity(dlId, { status: 'complete', completedAt: Date.now() });
+                        } catch (err: unknown) {
+                          const msg = err instanceof Error ? err.message : 'Pull failed';
+                          useActivityStore.getState().updateActivity(dlId, {
+                            status: 'error',
+                            error: msg,
+                            completedAt: Date.now(),
+                          });
+                        }
+                      }}
+                      disabled={docker.operating}
+                    >
+                      {docker.pulling ? (
+                        <>
+                          <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
+                        </>
+                      ) : (
+                        'Fetch Fresh Image'
+                      )}
+                    </Button>
+                    {docker.pulling && (
+                      <Button
+                        variant="danger"
+                        className="h-10 w-full"
+                        onClick={() => {
+                          docker.cancelPull();
+                          const dlId = `docker-image-${selectedTagForActions}`;
+                          useActivityStore.getState().updateActivity(dlId, { status: 'dismissed' });
+                        }}
+                      >
+                        Cancel Pull
+                      </Button>
                     )}
-                  </Button>
-                  {docker.pulling && (
                     <Button
                       variant="danger"
                       className="h-10 w-full"
-                      onClick={() => {
-                        docker.cancelPull();
-                        const dlId = `docker-image-${selectedTagForActions}`;
-                        useActivityStore.getState().updateActivity(dlId, { status: 'dismissed' });
-                      }}
+                      onClick={() => docker.removeImage(selectedTagForActions)}
+                      disabled={docker.operating || docker.images.length === 0}
                     >
-                      Cancel Pull
+                      Remove Image
                     </Button>
-                  )}
-                  <Button
-                    variant="danger"
-                    className="h-10 w-full"
-                    onClick={() => docker.removeImage(selectedTagForActions)}
-                    disabled={docker.operating || docker.images.length === 0}
-                  >
-                    Remove Image
-                  </Button>
+                  </div>
                 </div>
-              </div>
-              {docker.operationError && (
-                <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                  {docker.operationError}
+                {docker.operationError && (
+                  <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                    {docker.operationError}
+                  </div>
+                )}
+                <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-white/5 pt-4">
+                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
+                    <StatusLight
+                      status={
+                        isRunningAndHealthy
+                          ? 'active'
+                          : containerStatus.exists
+                            ? 'warning'
+                            : 'inactive'
+                      }
+                      animate={isRunningAndHealthy}
+                    />
+                    <span
+                      className={`font-mono text-sm transition-colors ${
+                        isRunning
+                          ? 'text-slate-300'
+                          : containerStatus.exists
+                            ? 'text-accent-orange'
+                            : 'text-slate-500'
+                      }`}
+                    >
+                      {statusLabel}
+                    </span>
+                    {isRunning && serverMode && (
+                      <span
+                        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                      >
+                        {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
+                        {serverMode}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        className="h-9 px-4"
+                        onClick={() =>
+                          onStartServer('local', runtimeProfile, selectedTagForStart, {
+                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                            diarizationModel: sanitizeModelName(activeDiarizationModel),
+                          })
+                        }
+                        disabled={
+                          docker.operating ||
+                          isRunning ||
+                          startupFlowPending ||
+                          !liveModelWhisperOnlyCompatible
+                        }
+                      >
+                        {docker.operating || startupFlowPending ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          'Start Local'
+                        )}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-9 px-4"
+                        onClick={() =>
+                          onStartServer('remote', runtimeProfile, selectedTagForStart, {
+                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                            diarizationModel: sanitizeModelName(activeDiarizationModel),
+                          })
+                        }
+                        disabled={
+                          docker.operating ||
+                          isRunning ||
+                          startupFlowPending ||
+                          !liveModelWhisperOnlyCompatible
+                        }
+                      >
+                        Start Remote
+                      </Button>
+                      <Button
+                        variant="danger"
+                        className="h-9 px-4"
+                        onClick={() => docker.stopContainer()}
+                        disabled={docker.operating || !isRunning}
+                      >
+                        Stop
+                      </Button>
+                    </div>
+                    <Button
+                      variant="danger"
+                      className="h-9 px-4"
+                      onClick={() => docker.removeContainer()}
+                      disabled={docker.operating || isRunning || !containerStatus.exists}
+                    >
+                      Remove Container
+                    </Button>
+                  </div>
                 </div>
-              )}
-            </GlassCard>
-          </div>
+                {docker.operationError && (
+                  <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                    {docker.operationError}
+                  </div>
+                )}
+                {containerStatus.startedAt && isRunning && (
+                  <div className="mt-2 font-mono text-xs text-slate-500">
+                    Started: {new Date(containerStatus.startedAt).toLocaleString()}
+                    {containerStatus.health && (
+                      <span className="ml-3">
+                        Health:{' '}
+                        <span
+                          className={
+                            containerStatus.health === 'healthy'
+                              ? 'text-green-400'
+                              : 'text-accent-orange'
+                          }
+                        >
+                          {containerStatus.health}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                )}
+              </GlassCard>
+            </div>
+          )}
 
-          {/* 2. Container Card (Config & Controls) */}
+          {/* 2. Instance Settings Card */}
           <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
             <div
               className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning || mlxStatus === 'running' ? `bg-accent-cyan text-slate-900 ${isRunningAndHealthy || mlxStatus === 'running' ? 'shadow-[0_0_15px_rgba(34,211,238,0.5)]' : ''}` : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
@@ -1300,7 +1541,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               <Box size={16} />
             </div>
             <GlassCard
-              title="1. Instance Settings"
+              title="2. Instance Settings"
               className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy || mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
             >
               <div className="space-y-6">
@@ -1352,7 +1593,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         disabled={isRunning}
                         className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
                           runtimeProfile === 'metal'
-                            ? 'bg-violet-500/15 border-violet-500/40 text-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.15)]'
+                            ? 'border-violet-500/40 bg-violet-500/15 text-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.15)]'
                             : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
                         } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
                       >
@@ -1525,298 +1766,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     </div>
                   </div>
                 )}
-
               </div>
             </GlassCard>
           </div>
-
-          {/* 2. Inference Server (metal) or Docker Image (docker/cpu/gpu) Card */}
-          {runtimeProfile === 'metal' ? (
-            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-              <div
-                className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${mlxStatus === 'running' ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : mlxStatus === 'starting' || mlxStatus === 'stopping' ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
-              >
-                <Zap size={14} />
-              </div>
-              <GlassCard
-                title="2. Inference Server"
-                className={`transition-all duration-500 ease-in-out ${mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
-              >
-                <div className="flex flex-wrap items-center gap-5">
-                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
-                    <StatusLight
-                      status={
-                        mlxStatus === 'running'
-                          ? 'active'
-                          : mlxStatus === 'starting' || mlxStatus === 'stopping'
-                            ? 'warning'
-                            : 'inactive'
-                      }
-                      animate={mlxStatus === 'running'}
-                    />
-                    <span
-                      className={`font-mono text-sm transition-colors ${
-                        mlxStatus === 'running'
-                          ? 'text-slate-300'
-                          : mlxStatus === 'starting' || mlxStatus === 'stopping'
-                            ? 'text-accent-orange'
-                            : 'text-slate-500'
-                      }`}
-                    >
-                      {mlxStatus === 'running'
-                        ? 'Running'
-                        : mlxStatus === 'starting'
-                          ? 'Starting…'
-                          : mlxStatus === 'stopping'
-                            ? 'Stopping…'
-                            : mlxStatus === 'error'
-                              ? 'Error'
-                              : 'Stopped'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Button
-                      variant="secondary"
-                      className="h-9 px-4"
-                      onClick={handleMLXStart}
-                      disabled={mlxStatus === 'running' || mlxStatus === 'starting' || mlxStatus === 'stopping'}
-                    >
-                      {mlxStatus === 'starting' ? (
-                        <><Loader2 size={14} className="animate-spin" /> Starting…</>
-                      ) : (
-                        <><Zap size={14} /> Start Metal Server</>
-                      )}
-                    </Button>
-                    <Button
-                      variant="danger"
-                      className="h-9 px-4"
-                      onClick={handleMLXStop}
-                      disabled={mlxStatus !== 'running' && mlxStatus !== 'starting'}
-                    >
-                      {mlxStatus === 'stopping' ? (
-                        <><Loader2 size={14} className="animate-spin" /> Stopping…</>
-                      ) : (
-                        'Stop'
-                      )}
-                    </Button>
-                    {mlxStatus === 'error' && (
-                      <span className="text-xs text-red-400">Error — check logs</span>
-                    )}
-                  </div>
-                </div>
-              </GlassCard>
-            </div>
-          ) : (
-            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-              <div
-                className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${hasImages ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}
-              >
-                <Download size={14} />
-              </div>
-              <GlassCard
-                title="2. Docker Image"
-                className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
-              >
-                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                  <div className="space-y-4">
-                    <div className="flex items-center space-x-3">
-                      <StatusLight status={hasImages ? 'active' : 'inactive'} />
-                      <span
-                        className={`font-mono text-sm transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
-                      >
-                        {hasImages
-                          ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available`
-                          : 'No images'}
-                      </span>
-
-                      {hasImages && docker.images[0] && (
-                        <div className="flex gap-2 transition-opacity duration-300">
-                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
-                            {docker.images[0].created.split(' ')[0]}
-                          </span>
-                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
-                            {docker.images[0].size}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-500">
-                        Select Image Tag
-                      </label>
-                      <CustomSelect
-                        value={selectedImage}
-                        onChange={setSelectedImage}
-                        options={imageOptions}
-                        className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex flex-col justify-end space-y-2">
-                    <Button
-                      variant="secondary"
-                      className="h-10 w-full"
-                      onClick={() => docker.refreshImages()}
-                      disabled={docker.operating}
-                    >
-                      <RefreshCw size={14} className="mr-2" />
-                      Scan Local Images
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-10 w-full"
-                      onClick={() => docker.pullImage(selectedTagForActions)}
-                      disabled={docker.operating}
-                    >
-                      {docker.pulling ? (
-                        <>
-                          <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
-                        </>
-                      ) : (
-                        'Fetch Fresh Image'
-                      )}
-                    </Button>
-                    {docker.pulling && (
-                      <Button
-                        variant="danger"
-                        className="h-10 w-full"
-                        onClick={() => docker.cancelPull()}
-                      >
-                        Cancel Pull
-                      </Button>
-                    )}
-                    <Button
-                      variant="danger"
-                      className="h-10 w-full"
-                      onClick={() => docker.removeImage(selectedTagForActions)}
-                      disabled={docker.operating || docker.images.length === 0}
-                    >
-                      Remove Image
-                    </Button>
-                  </div>
-                </div>
-                <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-white/5 pt-4">
-                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
-                    <StatusLight
-                      status={
-                        isRunningAndHealthy
-                          ? 'active'
-                          : containerStatus.exists
-                            ? 'warning'
-                            : 'inactive'
-                      }
-                      animate={isRunningAndHealthy}
-                    />
-                    <span
-                      className={`font-mono text-sm transition-colors ${
-                        isRunning
-                          ? 'text-slate-300'
-                          : containerStatus.exists
-                            ? 'text-accent-orange'
-                            : 'text-slate-500'
-                      }`}
-                    >
-                      {statusLabel}
-                    </span>
-                    {isRunning && serverMode && (
-                      <span
-                        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
-                      >
-                        {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
-                        {serverMode}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
-                    <div className="flex gap-2">
-                      <Button
-                        variant="secondary"
-                        className="h-9 px-4"
-                        onClick={() =>
-                          onStartServer('local', runtimeProfile, selectedTagForStart, {
-                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                            diarizationModel: sanitizeModelName(activeDiarizationModel),
-                          })
-                        }
-                        disabled={
-                          docker.operating ||
-                          isRunning ||
-                          startupFlowPending ||
-                          !liveModelWhisperOnlyCompatible
-                        }
-                      >
-                        {docker.operating || startupFlowPending ? (
-                          <Loader2 size={14} className="animate-spin" />
-                        ) : (
-                          'Start Local'
-                        )}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        className="h-9 px-4"
-                        onClick={() =>
-                          onStartServer('remote', runtimeProfile, selectedTagForStart, {
-                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                            diarizationModel: sanitizeModelName(activeDiarizationModel),
-                          })
-                        }
-                        disabled={
-                          docker.operating ||
-                          isRunning ||
-                          startupFlowPending ||
-                          !liveModelWhisperOnlyCompatible
-                        }
-                      >
-                        Start Remote
-                      </Button>
-                      <Button
-                        variant="danger"
-                        className="h-9 px-4"
-                        onClick={() => docker.stopContainer()}
-                        disabled={docker.operating || !isRunning}
-                      >
-                        Stop
-                      </Button>
-                    </div>
-                    <Button
-                      variant="danger"
-                      className="h-9 px-4"
-                      onClick={() => docker.removeContainer()}
-                      disabled={docker.operating || isRunning || !containerStatus.exists}
-                    >
-                      Remove Container
-                    </Button>
-                  </div>
-                </div>
-                {docker.operationError && (
-                  <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                    {docker.operationError}
-                  </div>
-                )}
-                {containerStatus.startedAt && isRunning && (
-                  <div className="mt-2 font-mono text-xs text-slate-500">
-                    Started: {new Date(containerStatus.startedAt).toLocaleString()}
-                    {containerStatus.health && (
-                      <span className="ml-3">
-                        Health:{' '}
-                        <span
-                          className={
-                            containerStatus.health === 'healthy'
-                              ? 'text-green-400'
-                              : 'text-accent-orange'
-                          }
-                        >
-                          {containerStatus.health}
-                        </span>
-                      </span>
-                    )}
-                  </div>
-                )}
-              </GlassCard>
-            </div>
-          )}
 
           {/* 3. ASR Models Card */}
           <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
@@ -1996,7 +1948,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <CustomSelect
                   value={diarizationModelSelection}
                   onChange={setDiarizationModelSelection}
-                  options={[DIARIZATION_SORTFORMER_OPTION, DIARIZATION_DEFAULT_MODEL, DIARIZATION_MODEL_CUSTOM_OPTION]}
+                  options={[
+                    DIARIZATION_SORTFORMER_OPTION,
+                    DIARIZATION_DEFAULT_MODEL,
+                    DIARIZATION_MODEL_CUSTOM_OPTION,
+                  ]}
                   className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                   disabled={isRunning}
                 />
@@ -2023,14 +1979,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               title="5. Persistent Volumes"
               action={
                 !isMetal ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={<RefreshCw size={14} />}
-                  onClick={() => docker.refreshVolumes()}
-                >
-                  Refresh
-                </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<RefreshCw size={14} />}
+                    onClick={() => docker.refreshVolumes()}
+                  >
+                    Refresh
+                  </Button>
                 ) : undefined
               }
             >
@@ -2040,20 +1996,28 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   <>
                     {[
                       { label: 'Data directory', path: nativeDataDir, color: 'bg-blue-500' },
-                      { label: 'Models cache (HF_HOME)', path: nativeModelsDir, color: 'bg-purple-500' },
+                      {
+                        label: 'Models cache (HF_HOME)',
+                        path: nativeModelsDir,
+                        color: 'bg-purple-500',
+                      },
                     ].map(({ label, path: dir, color }) => (
                       <div key={label} className="flex items-center justify-between py-1 text-sm">
                         <div className="flex items-center gap-3">
                           <div className={`h-2 w-2 rounded-full ${color}`} />
                           <span className="text-slate-300">{label}</span>
                         </div>
-                        <span className="max-w-[55%] truncate text-right font-mono text-xs text-slate-400" title={dir ?? ''}>
+                        <span
+                          className="max-w-[55%] truncate text-right font-mono text-xs text-slate-400"
+                          title={dir ?? ''}
+                        >
                           {dir ?? '…'}
                         </span>
                       </div>
                     ))}
                     <p className="text-xs text-slate-500 italic">
-                      Managed by the native server process. Delete these directories to clear cached models or transcription data.
+                      Managed by the native server process. Delete these directories to clear cached
+                      models or transcription data.
                     </p>
                   </>
                 ) : docker.volumes.length > 0 ? (
