@@ -115,9 +115,21 @@ export class MLXServerManager {
     this._emit('mlx:statusChanged', 'starting');
     this._appendLog(`[MLX] Starting uvicorn on port ${opts.port}…`);
 
+    // Use 'python -m uvicorn' rather than the uvicorn console-script so that
+    // the invocation stays portable after the .app bundle is copied/moved
+    // (console-scripts embed an absolute shebang pointing to the venv path at
+    // build time, which breaks when the app is placed in a different location).
+    // The python binary in the venv is a symlink to uv's managed Python; that
+    // target is stable on the user's machine, and CPython resolves pyvenv.cfg
+    // relative to the symlink location, so site-packages are found correctly.
+    const binDir = path.dirname(uvicornPath);
+    const pythonBin =
+      (['python3', 'python'] as const).map((n) => path.join(binDir, n)).find(fs.existsSync) ??
+      uvicornPath;
+
     const child = spawn(
-      uvicornPath,
-      ['server.api.main:app', '--host', '0.0.0.0', '--port', String(opts.port)],
+      pythonBin,
+      ['-m', 'uvicorn', 'server.api.main:app', '--host', '0.0.0.0', '--port', String(opts.port)],
       {
         cwd: serverBackendDir, // server/backend/ is the package root for uvicorn
         env,
