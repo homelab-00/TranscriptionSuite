@@ -170,10 +170,25 @@ After installation to make sure it's enabled, run `wsl --list --verbose` - if th
 
 **macOS:**
 1. **Apple Silicon (M1+) — recommended:** Use the **Metal/MLX runtime** for native
-   hardware-accelerated transcription without Docker:
-   - Install Python deps: `cd server/backend && uv sync --extra mlx`
-   - Start the server bare-metal (see [README_DEV.md § 15](README_DEV.md#15-apple-silicon-metalmlx-development))
-   - In the dashboard **Settings → Runtime Profile**, select **Metal (Apple Silicon)**
+   hardware-accelerated transcription without Docker.
+
+   Run the one-liner setup script from the repository root — it installs all
+   dependencies, builds the Electron dashboard, and bundles the Python/MLX
+   backend into a self-contained `TranscriptionSuite.app` you can drag straight
+   to your Applications folder:
+   ```bash
+   bash build/setup-macos-metal.sh
+   # optional flag to install directly to /Applications/:
+   bash build/setup-macos-metal.sh --install
+   ```
+   > The script needs Homebrew (will offer to install it if absent), and downloads
+   > Node.js, uv, Python 3.13, and ~3–5 GB of ML packages on first run.
+   > See [README_DEV.md § 15](README_DEV.md#15-apple-silicon-metalmlx-development)
+   > for manual / dev-mode instructions.
+
+   In the dashboard: **Settings → Runtime Profile → Metal (Apple Silicon)**,
+   then click **Start Metal Server**.
+
 2. **Intel Mac / CPU-only:** Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
    or [Podman Desktop](https://podman-desktop.io/) — GPU acceleration is not
    available on Intel macOS; the server runs in CPU mode automatically.
