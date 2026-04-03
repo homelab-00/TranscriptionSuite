@@ -496,6 +496,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         docker.cancelSidecarPull();
         useActivityStore.getState().updateActivity('sidecar-vulkan', { status: 'dismissed' });
       }
+      // Warn if Metal selected on unsupported hardware (still allow the selection)
+      if (profile === 'metal' && !(isAppleSilicon && (mlxFeature === undefined || metalSupported))) {
+        toast.error(
+          mlxFeature?.reason === 'not_apple_silicon' || !isAppleSilicon
+            ? 'Metal requires Apple Silicon (M-series Mac).'
+            : mlxFeature?.reason === 'mlx_whisper_not_installed'
+              ? 'mlx-whisper is not installed. Run: uv sync --extra mlx'
+              : 'Metal (MLX) is not available on this machine.',
+        );
+      }
+
       // Handle MLX native server start/stop for Metal
       if (!api?.mlx) return;
       if (profile !== 'metal') {
@@ -1587,20 +1598,18 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       <Cpu size={14} />
                       CPU Only
                     </button>
-                    {isDarwin && (
-                      <button
-                        onClick={() => handleRuntimeProfileChange('metal')}
-                        disabled={isRunning}
-                        className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
-                          runtimeProfile === 'metal'
-                            ? 'border-violet-500/40 bg-violet-500/15 text-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.15)]'
-                            : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
-                        } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-                      >
-                        <Zap size={14} />
-                        GPU (Metal)
-                      </button>
-                    )}
+                    <button
+                      onClick={() => handleRuntimeProfileChange('metal')}
+                      disabled={isRunning}
+                      className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
+                        runtimeProfile === 'metal'
+                          ? 'border-violet-500/40 bg-violet-500/15 text-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.15)]'
+                          : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                      } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                    >
+                      <Zap size={14} />
+                      GPU (Metal)
+                    </button>
                   </div>
                   {runtimeProfile === 'vulkan' && !isRunning && (
                     <span className="text-xs text-slate-500 italic">

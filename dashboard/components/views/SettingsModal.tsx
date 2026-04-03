@@ -70,7 +70,10 @@ function resolveConfiguredMainModel(cfg: Record<string, unknown>): string {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const { status: adminStatus } = useAdminStatus();
-  const metalSupported = (adminStatus?.models as any)?.features?.mlx?.available ?? false;
+  const mlxFeature = (adminStatus?.models as any)?.features?.mlx as
+    | { available: boolean; reason: string }
+    | undefined;
+  const metalSupported = mlxFeature?.available ?? false;
   const [activeTab, setActiveTab] = useState('App');
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [showAuthToken, setShowAuthToken] = useState(false);
@@ -510,22 +513,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             >
               CPU Only
             </button>
-            {metalSupported && (
-              <button
-                onClick={() => {
-                  setAppSettings((prev) => ({ ...prev, runtimeProfile: 'metal' }));
-                  setIsDirty(true);
-                }}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-all ${
-                  appSettings.runtimeProfile === 'metal'
-                    ? 'border-violet-500/40 bg-violet-500/15 text-violet-400'
-                    : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10'
-                }`}
-              >
-                <Zap className="h-3.5 w-3.5" />
-                Metal (MLX)
-              </button>
-            )}
+            <button
+              onClick={() => {
+                setAppSettings((prev) => ({ ...prev, runtimeProfile: 'metal' }));
+                setIsDirty(true);
+              }}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-all ${
+                appSettings.runtimeProfile === 'metal'
+                  ? 'border-violet-500/40 bg-violet-500/15 text-violet-400'
+                  : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10'
+              }`}
+            >
+              <Zap className="h-3.5 w-3.5" />
+              Metal (MLX)
+            </button>
           </div>
           <p className="text-xs text-slate-500 italic">
             {appSettings.runtimeProfile === 'vulkan'
@@ -536,6 +537,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   ? 'Metal mode: Apple Silicon MLX acceleration. Recommended for M-series Macs running bare-metal.'
                   : 'GPU mode: Requires NVIDIA GPU with CUDA. Recommended for Linux and Windows with supported hardware.'}
           </p>
+          {appSettings.runtimeProfile === 'metal' && adminStatus !== null && !metalSupported && (
+            <p className="text-xs text-red-400">
+              {mlxFeature?.reason === 'not_apple_silicon'
+                ? 'Metal requires Apple Silicon (M-series Mac) — not supported on this machine.'
+                : mlxFeature?.reason === 'mlx_whisper_not_installed'
+                  ? 'mlx-whisper is not installed. Run: uv sync --extra mlx'
+                  : 'Metal (MLX) is not available on this machine. Select a different runtime.'}
+            </p>
+          )}
         </div>
       </Section>
       <Section title="Window">
