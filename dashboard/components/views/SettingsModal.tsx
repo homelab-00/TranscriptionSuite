@@ -157,6 +157,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     port: DEFAULT_SERVER_PORT,
     useHttps: false,
     hfToken: '',
+    hideTimestamps: false,
   });
 
   // Sync auth token from the centralized useAuthTokenSync hook's cache
@@ -241,6 +242,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 numSpeakers: (cfg['diarization.numSpeakers'] as number) ?? prev.numSpeakers,
                 autoAddNotebook: (cfg['notebook.autoAdd'] as boolean) ?? prev.autoAddNotebook,
                 hfToken: (cfg['server.hfToken'] as string) ?? prev.hfToken,
+                hideTimestamps: (cfg['output.hideTimestamps'] as boolean) ?? prev.hideTimestamps,
               }));
               setAppSettings((prev) => ({
                 ...prev,
@@ -256,7 +258,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 updateCheckCustomHours:
                   (cfg['app.updateCheckCustomHours'] as number) ?? prev.updateCheckCustomHours,
                 runtimeProfile:
-                  (cfg['server.runtimeProfile'] as 'gpu' | 'cpu' | 'vulkan' | 'metal') ?? prev.runtimeProfile,
+                  (cfg['server.runtimeProfile'] as 'gpu' | 'cpu' | 'vulkan' | 'metal') ??
+                  prev.runtimeProfile,
                 pasteAtCursor: (cfg['app.pasteAtCursor'] as boolean) ?? prev.pasteAtCursor,
               }));
               setShortcutSettings((prev) => ({
@@ -353,6 +356,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['diarization.numSpeakers', clientSettings.numSpeakers],
         ['notebook.autoAdd', clientSettings.autoAddNotebook],
         ['server.hfToken', clientSettings.hfToken],
+        ['output.hideTimestamps', clientSettings.hideTimestamps],
         ['app.autoCopy', appSettings.autoCopy],
         ['app.showNotifications', appSettings.showNotifications],
         ['app.stopServerOnQuit', appSettings.stopServerOnQuit],
@@ -395,10 +399,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   if (!isRendered) return null;
 
-  const sampleRateHz = isVibeVoiceASRModel(configuredMainModel) && !isMLXModel(configuredMainModel) ? 24000 : 16000;
-  const sampleRateHint = isVibeVoiceASRModel(configuredMainModel) && !isMLXModel(configuredMainModel)
-    ? 'Fixed for VibeVoice models'
-    : 'Fixed for Faster Whisper and NeMo models';
+  const sampleRateHz =
+    isVibeVoiceASRModel(configuredMainModel) && !isMLXModel(configuredMainModel) ? 24000 : 16000;
+  const sampleRateHint =
+    isVibeVoiceASRModel(configuredMainModel) && !isMLXModel(configuredMainModel)
+      ? 'Fixed for VibeVoice models'
+      : 'Fixed for Faster Whisper and NeMo models';
 
   const renderAppTab = () => (
     <div className="space-y-6">
@@ -512,7 +518,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 }}
                 className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-all ${
                   appSettings.runtimeProfile === 'metal'
-                    ? 'bg-violet-500/15 border-violet-500/40 text-violet-400'
+                    ? 'border-violet-500/40 bg-violet-500/15 text-violet-400'
                     : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10'
                 }`}
               >
@@ -877,6 +883,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </button>
           </div>
         </div>
+      </Section>
+
+      <Section title="Output">
+        <AppleSwitch
+          checked={clientSettings.hideTimestamps}
+          onChange={(v) => {
+            setClientSettings((prev) => ({ ...prev, hideTimestamps: v }));
+            setIsDirty(true);
+          }}
+          label="Hide timestamps"
+          description="Remove timestamps from transcript display and file output. Useful when feeding transcripts to LLMs."
+        />
       </Section>
 
       <Section title="HuggingFace Token">

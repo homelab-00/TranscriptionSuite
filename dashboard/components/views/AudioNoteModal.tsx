@@ -33,6 +33,7 @@ import { apiClient } from '../../src/api/client';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { useWordHighlighter } from '../../src/hooks/useWordHighlighter';
+import { getConfig } from '../../src/config/store';
 import type { ChatMessage, Conversation } from '../../src/api/types';
 
 /** Local type for chat message display (simpler than API's ChatMessage) */
@@ -465,6 +466,15 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const [chatMessages, setChatMessages] = useState<DisplayMessage[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [isChatLoading, setIsChatLoading] = useState(false);
+
+  // Output formatting
+  const [hideTimestamps, setHideTimestamps] = useState(false);
+  useEffect(() => {
+    if (!isOpen) return;
+    getConfig<boolean>('output.hideTimestamps').then((v) => {
+      if (v != null) setHideTimestamps(v);
+    });
+  }, [isOpen]);
 
   // Real recording data
   const {
@@ -1418,9 +1428,11 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                                   {seg.speaker}
                                 </div>
                               )}
-                              <div className="font-mono text-[10px] text-slate-500">
-                                {formatRecSecs(seg.start)}
-                              </div>
+                              {!hideTimestamps && (
+                                <div className="font-mono text-[10px] text-slate-500">
+                                  {formatRecSecs(seg.start)}
+                                </div>
+                              )}
                             </div>
                           )}
                           <div className="selectable-text min-w-0 flex-1 leading-relaxed text-slate-300 transition-colors group-hover:text-white">
@@ -1437,7 +1449,11 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                                       }
                                     }}
                                     className="hover:bg-accent-cyan/20 hover:text-accent-cyan cursor-pointer rounded px-px transition-colors duration-150"
-                                    title={`${formatRecSecs(w.start)} → ${formatRecSecs(w.end)}`}
+                                    title={
+                                      hideTimestamps
+                                        ? undefined
+                                        : `${formatRecSecs(w.start)} → ${formatRecSecs(w.end)}`
+                                    }
                                   >
                                     {w.word}
                                   </span>
@@ -1452,7 +1468,9 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                                     audioRef.current.play().catch(() => {});
                                   }
                                 }}
-                                title={`Seek to ${formatRecSecs(seg.start)}`}
+                                title={
+                                  hideTimestamps ? undefined : `Seek to ${formatRecSecs(seg.start)}`
+                                }
                               >
                                 {seg.text}
                               </p>

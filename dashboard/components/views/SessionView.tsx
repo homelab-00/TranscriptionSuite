@@ -332,6 +332,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Bidirectional translation target (used when Canary + source=English)
   const [mainBidiTarget, setMainBidiTarget] = useState('Off');
 
+  // Output formatting
+  const [hideTimestamps, setHideTimestamps] = useState(false);
+
   // Live Mode State
   const isLive = live.status !== 'idle' && live.status !== 'error';
   const [liveLanguage, setLiveLanguage] = useState('English');
@@ -352,12 +355,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
         savedSystemDevice,
         savedMainLanguage,
         savedLiveLanguage,
+        savedHideTimestamps,
       ] = await Promise.all([
         getConfig<'mic' | 'system'>('session.audioSource'),
         getConfig<string>('session.micDevice'),
         getConfig<string>('session.systemDevice'),
         getConfig<string>('session.mainLanguage'),
         getConfig<string>('session.liveLanguage'),
+        getConfig<boolean>('output.hideTimestamps'),
       ]);
       if (!active) return;
 
@@ -381,6 +386,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         persistedSelectionsRef.current.liveLanguage = savedLiveLanguage;
         setLiveLanguage(savedLiveLanguage);
       }
+      if (savedHideTimestamps != null) setHideTimestamps(savedHideTimestamps);
     })().catch(() => {});
 
     return () => {
@@ -1994,19 +2000,23 @@ export const SessionView: React.FC<SessionViewProps> = ({
                             )}
                             {live.sentences.map((s, i) => (
                               <div key={i} className="mb-2">
-                                <span className="mr-2 text-slate-500 select-none">
-                                  {new Date(s.timestamp).toLocaleTimeString('en-US', {
-                                    hour12: false,
-                                  })}
-                                </span>
+                                {!hideTimestamps && (
+                                  <span className="mr-2 text-slate-500 select-none">
+                                    {new Date(s.timestamp).toLocaleTimeString('en-US', {
+                                      hour12: false,
+                                    })}
+                                  </span>
+                                )}
                                 <span>{s.text}</span>
                               </div>
                             ))}
                             {live.partial && (
                               <div className="mb-2 opacity-60">
-                                <span className="mr-2 text-slate-500 select-none">
-                                  {new Date().toLocaleTimeString('en-US', { hour12: false })}
-                                </span>
+                                {!hideTimestamps && (
+                                  <span className="mr-2 text-slate-500 select-none">
+                                    {new Date().toLocaleTimeString('en-US', { hour12: false })}
+                                  </span>
+                                )}
                                 <span className="italic">{live.partial}</span>
                                 <span className="bg-accent-cyan ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom"></span>
                               </div>
@@ -2163,19 +2173,23 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         )}
                         {live.sentences.map((s, i) => (
                           <div key={i} className="mb-2">
-                            <span className="mr-2 text-slate-500 select-none">
-                              {new Date(s.timestamp).toLocaleTimeString('en-US', {
-                                hour12: false,
-                              })}
-                            </span>
+                            {!hideTimestamps && (
+                              <span className="mr-2 text-slate-500 select-none">
+                                {new Date(s.timestamp).toLocaleTimeString('en-US', {
+                                  hour12: false,
+                                })}
+                              </span>
+                            )}
                             <span>{s.text}</span>
                           </div>
                         ))}
                         {live.partial && (
                           <div className="mb-2 opacity-60">
-                            <span className="mr-2 text-slate-500 select-none">
-                              {new Date().toLocaleTimeString('en-US', { hour12: false })}
-                            </span>
+                            {!hideTimestamps && (
+                              <span className="mr-2 text-slate-500 select-none">
+                                {new Date().toLocaleTimeString('en-US', { hour12: false })}
+                              </span>
+                            )}
                             <span className="italic">{live.partial}</span>
                             <span className="bg-accent-cyan ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom"></span>
                           </div>

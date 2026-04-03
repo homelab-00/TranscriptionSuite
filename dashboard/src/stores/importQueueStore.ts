@@ -16,6 +16,7 @@ import type {
   UploadResponse,
 } from '../api/types';
 import { renderSrt, renderAss, renderTxt } from '../services/transcriptionFormatters';
+import { getConfig } from '../config/store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -275,15 +276,20 @@ async function processSessionJob(
   if (!result.transcription) throw new Error('Server returned no transcription data');
 
   const { sessionConfig } = store.getState();
+  const hideTimestamps = (await getConfig<boolean>('output.hideTimestamps')) ?? false;
   const diarizationPerformed = result.diarization?.performed ?? false;
   const diarizedFormat = sessionConfig.diarizedFormat ?? 'srt';
-  const outputFilename = buildOutputFilename(filename, diarizationPerformed, diarizedFormat);
+  const outputFilename = hideTimestamps
+    ? `${filename.replace(/\.[^.]+$/, '')}.txt`
+    : buildOutputFilename(filename, diarizationPerformed, diarizedFormat);
   const stem = filename.replace(/\.[^.]+$/, '');
-  const content = diarizationPerformed
-    ? diarizedFormat === 'ass'
-      ? renderAss(result.transcription, stem)
-      : renderSrt(result.transcription)
-    : renderTxt(result.transcription);
+  const content = hideTimestamps
+    ? renderTxt(result.transcription)
+    : diarizationPerformed
+      ? diarizedFormat === 'ass'
+        ? renderAss(result.transcription, stem)
+        : renderSrt(result.transcription)
+      : renderTxt(result.transcription);
 
   // Update status to 'writing'
   store.setState((s) => ({

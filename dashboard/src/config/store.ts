@@ -64,6 +64,10 @@ export interface ClientConfig {
     startRecording: string;
     stopTranscribe: string;
   };
+  /** Output formatting */
+  output: {
+    hideTimestamps: boolean;
+  };
   /** UI preferences */
   ui: {
     sidebarCollapsed: boolean;
@@ -122,6 +126,9 @@ const DEFAULT_CONFIG: ClientConfig = {
   shortcuts: {
     startRecording: 'Alt+Ctrl+Z',
     stopTranscribe: 'Alt+Ctrl+X',
+  },
+  output: {
+    hideTimestamps: false,
   },
   ui: {
     sidebarCollapsed: false,

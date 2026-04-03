@@ -12,6 +12,7 @@ import { useState, useCallback, useRef } from 'react';
 import { apiClient } from '../api/client';
 import type { TranscriptionUploadOptions, FileImportJobResult } from '../api/types';
 import { renderSrt, renderAss, renderTxt } from '../services/transcriptionFormatters';
+import { getConfig } from '../config/store';
 
 export type SessionImportJobStatus = 'pending' | 'processing' | 'writing' | 'success' | 'error';
 
@@ -195,19 +196,20 @@ export function useSessionImportQueue(
           }
 
           // Determine output format based on whether diarization was performed
+          const hideTimestamps = (await getConfig<boolean>('output.hideTimestamps')) ?? false;
           const diarizationPerformed = result.diarization?.performed ?? false;
           const diarizedFormat = configRef.current.diarizedFormat ?? 'srt';
-          const outputFilename = buildOutputFilename(
-            file.name,
-            diarizationPerformed,
-            diarizedFormat,
-          );
+          const outputFilename = hideTimestamps
+            ? `${file.name.replace(/\.[^.]+$/, '')}.txt`
+            : buildOutputFilename(file.name, diarizationPerformed, diarizedFormat);
           const stem = file.name.replace(/\.[^.]+$/, '');
-          const content = diarizationPerformed
-            ? diarizedFormat === 'ass'
-              ? renderAss(result.transcription, stem)
-              : renderSrt(result.transcription)
-            : renderTxt(result.transcription);
+          const content = hideTimestamps
+            ? renderTxt(result.transcription)
+            : diarizationPerformed
+              ? diarizedFormat === 'ass'
+                ? renderAss(result.transcription, stem)
+                : renderSrt(result.transcription)
+              : renderTxt(result.transcription);
 
           // Update status to 'writing'
           updateJobs((prev) =>

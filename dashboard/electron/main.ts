@@ -414,6 +414,7 @@ const store = new Store({
     'app.updateCheckIntervalMode': '24h',
     'app.updateCheckCustomHours': 24,
     'app.modelSelectionOnboardingCompleted': false,
+    'output.hideTimestamps': false,
     'ui.sidebarCollapsed': false,
     'server.host': 'localhost',
     'server.port': 9786,
