@@ -45,7 +45,7 @@ See `tests/test_job_repository_imports.py` and `tests/test_transcription_durabil
 - When modifying files in `.doc-freshness.yaml`: run `node build/scripts/check-doc-freshness.mjs` (suggestions only).
 - Target platforms: Linux KDE Wayland (primary), Windows 11, macOS. Document what doesn't work.
 - Read `docs/README_DEV.md` for architecture overview.
-- When writing commit messages, use the following style:
+- When writing commit messages, use the following style below. Make sure to not break up long lines by splitting them with newlines.
 
 feat/fix/chore/etc(impacted area e.g. tests, stt, dashboard, ui, server, etc): Summary of all changes
 

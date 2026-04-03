@@ -160,25 +160,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     hideTimestamps: false,
   });
 
-  // Sync auth token from the centralized useAuthTokenSync hook's cache
+  // Sync auth token from the centralized useAuthTokenSync hook's cache.
+  // Handles both new tokens (from Docker log detection) and token clearing
+  // (stale-token guard sets cache to '' when the server rejects it).
   const queryClient = useQueryClient();
   useEffect(() => {
+    const syncToken = (token: string | undefined) => {
+      const value = token ?? '';
+      setClientSettings((prev) =>
+        prev.authToken === value ? prev : { ...prev, authToken: value },
+      );
+    };
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
       if (event?.query?.queryKey?.[0] !== 'authToken') return;
       const token = queryClient.getQueryData<string>(['authToken']);
-      if (token && token !== clientSettings.authToken) {
-        setClientSettings((prev) =>
-          prev.authToken === token ? prev : { ...prev, authToken: token },
-        );
-      }
+      if (token !== undefined) syncToken(token);
     });
     // Seed from cache on mount
     const cached = queryClient.getQueryData<string>(['authToken']);
-    if (cached && cached !== clientSettings.authToken) {
-      setClientSettings((prev) =>
-        prev.authToken === cached ? prev : { ...prev, authToken: cached },
-      );
-    }
+    if (cached) syncToken(cached);
     return unsubscribe;
   }, [queryClient]);
 

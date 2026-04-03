@@ -317,7 +317,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 
         token = None
         if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header[7:]
+            token = auth_header[7:].strip()
         elif auth_cookie:
             token = auth_cookie
         elif NOTEBOOK_QUERY_TOKEN_ROUTES.match(path):
