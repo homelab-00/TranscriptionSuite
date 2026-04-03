@@ -9,6 +9,10 @@ import { extractAdminTokenFromDockerLogLine } from '../utils/dockerLogParsing';
  * view is active. Also publishes the token to the React Query cache
  * under `['authToken']` so any consumer can subscribe reactively.
  *
+ * **Remote-mode guard:** When `connection.useRemote` is true, the hook
+ * skips Docker log scanning entirely — the local container holds a
+ * different admin token than the remote server.
+ *
  * In non-Electron environments (browser dev mode), this is a no-op.
  */
 export function useAuthTokenSync(serverReachable: boolean): void {
@@ -21,6 +25,8 @@ export function useAuthTokenSync(serverReachable: boolean): void {
     if (!docker) return;
 
     let cancelled = false;
+    let pollId: number | undefined;
+    let unsubscribe: (() => void) | undefined;
 
     const applyDetectedToken = (token: string) => {
       const normalized = token.trim();
@@ -48,43 +54,60 @@ export function useAuthTokenSync(serverReachable: boolean): void {
       }
     };
 
-    void scanRecentLogs();
-
-    const unsubscribe =
-      typeof docker.onLogLine === 'function'
-        ? docker.onLogLine((line: string) => {
-            const token = extractAdminTokenFromDockerLogLine(line);
-            if (token) applyDetectedToken(token);
-          })
-        : undefined;
-
-    const pollId = window.setInterval(() => {
-      if (!knownTokenRef.current) {
-        void scanRecentLogs();
+    // Single async init: seed from config first, then decide whether to scan.
+    // This eliminates the race between the old config-seed effect and the
+    // Docker-scan effect — the config read always completes before scanning.
+    const init = async () => {
+      // 1. Seed knownTokenRef from persisted config so we don't overwrite
+      //    an existing token with the same value from logs.
+      try {
+        const saved = await api?.config?.get?.('connection.authToken');
+        if (typeof saved === 'string' && saved.trim()) {
+          knownTokenRef.current = saved.trim();
+          qc.setQueryData(['authToken'], saved.trim());
+        }
+      } catch {
+        // Config unavailable — continue with empty ref.
       }
-    }, 2000);
+
+      if (cancelled) return;
+
+      // 2. If the app is configured for a remote server, skip Docker log
+      //    scanning entirely. The local container's admin token is different
+      //    from the remote server's token and must not overwrite it.
+      try {
+        const useRemote = await api?.config?.get?.('connection.useRemote');
+        if (useRemote) return;
+      } catch {
+        // Config unavailable — fall through to scan (safe default for local).
+      }
+
+      if (cancelled) return;
+
+      // 3. Local mode — scan Docker logs for the admin token.
+      void scanRecentLogs();
+
+      unsubscribe =
+        typeof docker.onLogLine === 'function'
+          ? docker.onLogLine((line: string) => {
+              const token = extractAdminTokenFromDockerLogLine(line);
+              if (token) applyDetectedToken(token);
+            })
+          : undefined;
+
+      pollId = window.setInterval(() => {
+        if (!knownTokenRef.current) {
+          void scanRecentLogs();
+        }
+      }, 2000);
+    };
+
+    void init();
 
     return () => {
       cancelled = true;
-      window.clearInterval(pollId);
+      if (pollId !== undefined) window.clearInterval(pollId);
       unsubscribe?.();
     };
-  }, [qc]);
-
-  // Seed the ref from electron-store on mount so we don't overwrite
-  // an existing persisted token with one from logs.
-  useEffect(() => {
-    const api = (window as any).electronAPI;
-    if (api?.config) {
-      api.config
-        .get('connection.authToken')
-        .then((val: unknown) => {
-          if (typeof val === 'string' && val.trim()) {
-            knownTokenRef.current = val.trim();
-            qc.setQueryData(['authToken'], val.trim());
-          }
-        })
-        .catch(() => {});
-    }
   }, [qc]);
 }
