@@ -51,7 +51,7 @@ package "Docker Container" as docker #181825 {
 
   package "Core Engine" as core {
     component "Model Manager" as modelMgr
-    component "STT Backends\n(WhisperX, Parakeet,\nCanary, VibeVoice)" as sttBackends
+    component "STT Backends\n(WhisperX, NeMo, VibeVoice,\nwhisper.cpp, MLX variants)" as sttBackends
     component "Live Engine" as liveEngine
     component "Diarization\n(PyAnnote)" as diarEngine
   }

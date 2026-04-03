@@ -51,41 +51,98 @@ abstract class STTBackend <<base.py>> {
   + transcribe_with_diarization(...): DiarizedTranscriptionResult | None
 }
 
-' ── Concrete Backends ─────────────────────────────
-class WhisperXBackend <<whisperx_backend.py>> {
-  + backend_name = "whisperx"
-  + supports_translation(): bool
-  + transcribe_with_diarization(...)
-  -- uses --
-  faster-whisper / WhisperX
-  Integrated diarization support
+' ── CUDA/Docker Backends ─────────────────────────
+package "CUDA / Docker Backends" as cudaBackends {
+  class WhisperXBackend <<whisperx_backend.py>> {
+    + backend_name = "whisperx"
+    + supports_translation(): bool
+    + transcribe_with_diarization(...)
+    -- uses --
+    faster-whisper / WhisperX
+    Integrated diarization support
+  }
+
+  class FasterWhisperBackend <<faster_whisper_backend.py>> {
+    + backend_name = "faster_whisper"
+    + supports_translation(): bool
+    -- uses --
+    faster-whisper (no WhisperX)
+    Live Mode on Metal bare-metal
+  }
+
+  class ParakeetBackend <<parakeet_backend.py>> {
+    + backend_name = "parakeet"
+    + supports_translation() = False
+    -- uses --
+    NVIDIA NeMo ASR
+    20min chunk splitting
+    CUDA graph workaround
+  }
+
+  class CanaryBackend <<canary_backend.py>> {
+    + backend_name = "canary"
+    + supports_translation() = True
+    -- uses --
+    NVIDIA NeMo Canary
+    20min chunk splitting
+    24 EU target languages
+  }
+
+  class VibeVoiceASRBackend <<vibevoice_asr_backend.py>> {
+    + backend_name = "vibevoice_asr"
+    + supports_translation() = False
+    + DEFAULT_MAX_CHUNK_DURATION_S = 60
+    -- uses --
+    VibeVoice-ASR
+    Semantic tokenizer
+  }
+
+  class WhisperCppBackend <<whispercpp_backend.py>> {
+    + backend_name = "whispercpp"
+    + supports_translation(): bool
+    -- uses --
+    HTTP sidecar (Vulkan GPU)
+    Multipart POST, WAV encoding
+    No in-process model loading
+  }
 }
 
-class ParakeetBackend <<parakeet_backend.py>> {
-  + backend_name = "parakeet"
-  + supports_translation() = False
-  -- uses --
-  NVIDIA NeMo ASR
-  20min chunk splitting
-  CUDA graph workaround
-}
+' ── MLX / Apple Silicon Backends ─────────────────
+package "MLX / Apple Silicon Backends" as mlxBackends {
+  class MLXWhisperBackend <<mlx_whisper_backend.py>> {
+    + backend_name = "mlx_whisper"
+    + supports_translation(): bool
+    -- uses --
+    mlx-audio (Metal acceleration)
+    -asr- model naming required
+    alignment_heads monkey-patch
+  }
 
-class CanaryBackend <<canary_backend.py>> {
-  + backend_name = "canary"
-  + supports_translation() = True
-  -- uses --
-  NVIDIA NeMo Canary
-  20min chunk splitting
-  24 EU target languages
-}
+  class MLXParakeetBackend <<mlx_parakeet_backend.py>> {
+    + backend_name = "mlx_parakeet"
+    + supports_translation() = False
+    -- uses --
+    parakeet-mlx
+    Long-audio chunking
+  }
 
-class VibeVoiceASRBackend <<vibevoice_asr_backend.py>> {
-  + backend_name = "vibevoice_asr"
-  + supports_translation() = False
-  + DEFAULT_MAX_CHUNK_DURATION_S = 120
-  -- uses --
-  VibeVoice-ASR
-  Semantic tokenizer
+  class MLXCanaryBackend <<mlx_canary_backend.py>> {
+    + backend_name = "mlx_canary"
+    + supports_translation() = True
+    -- uses --
+    canary-mlx
+    Reuses Parakeet chunking
+  }
+
+  class MLXVibeVoiceBackend <<mlx_vibevoice_backend.py>> {
+    + backend_name = "mlx_vibevoice"
+    + supports_translation() = False
+    + transcribe_with_diarization(...)
+    -- uses --
+    mlx-audio (native diarization)
+    24 kHz input (resampled internally)
+    JSON segment parsing
+  }
 }
 
 ' ── Factory ───────────────────────────────────────
@@ -96,15 +153,24 @@ class "factory.py" as factory <<factory>> {
   + is_canary_model(model_name): bool
   + is_nemo_model(model_name): bool
   + is_vibevoice_asr_model(model_name): bool
+  + is_whispercpp_model(model_name): bool
+  + is_mlx_model(model_name): bool
+  + is_mlx_parakeet_model(model_name): bool
 }
 
 note right of factory
-  Model name routing:
-  nvidia/parakeet*        -> "parakeet"
+  Detection order (first match wins):
+  nvidia/parakeet*         -> "parakeet"
   nvidia/nemotron-speech*  -> "parakeet"
   nvidia/canary*           -> "canary"
+  mlx-community/vibevoice* -> "mlx_vibevoice"
   */vibevoice-asr*         -> "vibevoice_asr"
-  (everything else)        -> "whisperx"
+  ggml-*.bin / *.gguf      -> "whispercpp"
+  mlx-community/parakeet*  -> "mlx_parakeet"
+  */canary*-mlx            -> "mlx_canary"
+  mlx-community/*          -> "mlx_whisper"
+  else -> "whisperx" (or
+    "faster_whisper" fallback)
 end note
 
 ' ── Model Manager ─────────────────────────────────
@@ -140,14 +206,26 @@ class LiveModeEngine <<live_engine.py>> {
 
 ' ── Relationships ─────────────────────────────────
 STTBackend <|-- WhisperXBackend
+STTBackend <|-- FasterWhisperBackend
 STTBackend <|-- ParakeetBackend
 STTBackend <|-- CanaryBackend
 STTBackend <|-- VibeVoiceASRBackend
+STTBackend <|-- WhisperCppBackend
+STTBackend <|-- MLXWhisperBackend
+STTBackend <|-- MLXParakeetBackend
+STTBackend <|-- MLXCanaryBackend
+STTBackend <|-- MLXVibeVoiceBackend
 
 factory ..> WhisperXBackend : creates
+factory ..> FasterWhisperBackend : creates
 factory ..> ParakeetBackend : creates
 factory ..> CanaryBackend : creates
 factory ..> VibeVoiceASRBackend : creates
+factory ..> WhisperCppBackend : creates
+factory ..> MLXWhisperBackend : creates
+factory ..> MLXParakeetBackend : creates
+factory ..> MLXCanaryBackend : creates
+factory ..> MLXVibeVoiceBackend : creates
 
 ModelManager --> factory : "create_backend()"
 ModelManager *-- STTBackend : "holds active backend"

@@ -329,8 +329,8 @@ TranscriptionSuite uses a **client-server architecture**:
 │  ┌───────────────────────────────────────────────────┐  │
 │  │  TranscriptionSuite Server                        │  │
 │  │  - FastAPI REST API + WebSocket                   │  │
-│  │  - Multi-backend STT (Whisper/NeMo/VibeVoice)     │  │
-│  │  - Live Mode (Whisper-only in v1) continuous STT  │  │
+│  │  - Multi-backend STT (Whisper/NeMo/VibeVoice/MLX) │  │
+│  │  - Live Mode continuous STT                       │  │
 │  │  - Real-time STT with VAD (Silero + WebRTC)       │  │
 │  │  - PyAnnote diarization                           │  │
 │  │  - SQLite + FTS5 search                           │  │
@@ -356,8 +356,8 @@ TranscriptionSuite uses a **client-server architecture**:
 - **SQLite + FTS5**: Lightweight full-text search without external dependencies
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD
 - **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
-- **Multi-backend STT**: Pluggable backend architecture — Whisper, NeMo Parakeet/Canary, WhisperX, VibeVoice-ASR — auto-detected from the model name
-- **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM (Whisper-only in v1)
+- **Multi-backend STT**: Pluggable backend architecture — Whisper, NeMo Parakeet/Canary, WhisperX, VibeVoice-ASR, whisper.cpp (Vulkan), MLX (Apple Silicon: Whisper, Parakeet, Canary, VibeVoice) — auto-detected from the model name
+- **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM; works with all backends
 - **LM Studio Integration**: Native v1 REST API support for LM Studio 0.4.0+ with stateful chat sessions and Docker-compatible model management
 
 ### 2.2 Platform Architectures
@@ -501,7 +501,10 @@ TranscriptionSuite/
 │   │   ├── docker-compose.yml    # Base container orchestration (service, env, volumes)
 │   │   ├── docker-compose.linux-host.yml   # Linux overlay: host networking
 │   │   ├── docker-compose.desktop-vm.yml   # macOS/Windows overlay: bridge + port mapping
-│   │   ├── docker-compose.gpu.yml          # NVIDIA GPU overlay
+│   │   ├── docker-compose.gpu.yml          # NVIDIA GPU overlay (legacy)
+│   │   ├── docker-compose.gpu-cdi.yml      # NVIDIA GPU overlay (modern CDI mode)
+│   │   ├── podman-compose.gpu.yml          # Podman GPU overlay (CDI)
+│   │   ├── docker-compose.vulkan.yml       # Vulkan sidecar overlay (whisper.cpp)
 │   │   └── entrypoint.py         # Container entrypoint
 │   ├── backend/                  # FastAPI backend
 │   │   ├── api/                  # FastAPI routes
@@ -527,7 +530,7 @@ TranscriptionSuite/
 │   │   │   ├── sortformer_engine.py     # Metal-native Sortformer diarization via mlx-audio (no HF token)
 │   │   │   ├── model_manager.py         # Model lifecycle, job tracking
 │   │   │   ├── realtime_engine.py       # Async wrapper for real-time STT
-│   │   │   └── live_engine.py           # Live Mode engine (Whisper-only in v1)
+│   │   │   └── live_engine.py           # Live Mode engine (VAD + backend transcription)
 │   │   ├── database/             # SQLite + FTS5 + migrations
 │   │   └── pyproject.toml        # Server dependencies (pinned versions)
 │   └── config.yaml               # Server configuration template
@@ -2112,7 +2115,7 @@ server/backend/
 │   ├── model_manager.py          # Model lifecycle, job tracking, feature availability + disabled-slot state
 │   ├── parallel_diarize.py       # Parallel transcription + diarisation orchestration
 │   ├── realtime_engine.py        # Async wrapper for real-time STT
-│   ├── live_engine.py            # Live Mode engine (Whisper-only in v1)
+│   ├── live_engine.py            # Live Mode engine (VAD + backend transcription)
 │   ├── speaker_merge.py          # Speaker assignment via overlap, fallback chain, micro-turn smoothing
 │   ├── subtitle_export.py        # SRT/ASS subtitle rendering
 │   ├── token_store.py            # Token hashing, generation, validation, expiry, migration
