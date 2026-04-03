@@ -164,6 +164,9 @@
       ],
       "category": "public.app-category.utilities",
       "icon": "../docs/assets/logo.icns",
+      "hardenedRuntime": true,
+      "entitlements": "../build/entitlements.mac.plist",
+      "entitlementsInherit": "../build/entitlements.mac.plist",
       "extendInfo": {
         "NSAudioCaptureUsageDescription": "TranscriptionSuite needs access to system audio for transcription.",
         "NSAppleEventsUsageDescription": "TranscriptionSuite needs to paste transcribed text at your cursor position."

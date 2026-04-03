@@ -69,6 +69,16 @@ export class MLXServerManager {
     const dataDir = this._resolveDataDir();
     const hfHome = this._resolveHfHome();
 
+    // macOS .app bundles launched from Finder inherit only a minimal PATH
+    // (/usr/bin:/bin:/usr/sbin:/sbin) — Homebrew's bin directories are not
+    // included.  Prepend the most common Homebrew prefix locations so that
+    // system tools like ffmpeg that the Python backend shells out to are found.
+    const homebrewBins = ['/opt/homebrew/bin', '/usr/local/bin'].join(':');
+    const inheritedPath = (process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin');
+    const augmentedPath = inheritedPath.includes('/opt/homebrew')
+      ? inheritedPath
+      : `${homebrewBins}:${inheritedPath}`;
+
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
       DATA_DIR: dataDir,
@@ -78,6 +88,7 @@ export class MLXServerManager {
       // Force line-buffered stdout so the Electron parent sees output
       // immediately instead of waiting for the 8KB pipe buffer to fill.
       PYTHONUNBUFFERED: '1',
+      PATH: augmentedPath,
     };
     if (opts.hfToken) env.HF_TOKEN = opts.hfToken;
     if (opts.mainTranscriberModel) env.MAIN_TRANSCRIBER_MODEL = opts.mainTranscriberModel;

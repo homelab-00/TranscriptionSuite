@@ -106,7 +106,16 @@ fi
 echo "✓  Node.js: $(node --version), npm: $(npm --version)"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. logo.icns — needed by electron-builder
+# 5. ffmpeg — required by the Python backend for audio decoding
+# ─────────────────────────────────────────────────────────────────────────────
+if ! command -v ffmpeg &>/dev/null; then
+  echo "→ Installing ffmpeg via Homebrew…"
+  brew install ffmpeg
+fi
+echo "✓  ffmpeg: $(ffmpeg -version 2>&1 | head -1)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. logo.icns — needed by electron-builder
 # ─────────────────────────────────────────────────────────────────────────────
 ICNS_PATH="$PROJECT_ROOT/docs/assets/logo.icns"
 if [[ ! -f "$ICNS_PATH" ]]; then
@@ -129,7 +138,7 @@ if [[ ! -f "$ICNS_PATH" ]]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. Build the Electron dashboard
+# 7. Build the Electron dashboard
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "─── Electron Build ───────────────────────────────────────────────────────"
@@ -154,7 +163,7 @@ fi
 echo "✓  App bundle built."
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7. Place the .app at its final location
+# 8. Place the .app at its final location
 #    The Python venv is created AFTER this move so that all absolute paths
 #    embedded in the venv (e.g. the uvicorn console-script shebang) point to
 #    the location the app will actually run from.
@@ -173,16 +182,16 @@ else
 fi
 
 if [[ -d "$FINAL_APP" ]]; then
-  echo "   Removing existing $FINAL_APP…"
+  echo "   Removing existing ${FINAL_APP}..."
   rm -rf "$FINAL_APP"
 fi
 
 # Copy (not move) so the release/ directory is preserved for reference.
 cp -a "$RELEASE_APP" "$FINAL_APP"
-echo "✓  App placed at: $FINAL_APP"
+echo "OK App placed at: ${FINAL_APP}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. Install the Python/MLX backend into the app bundle
+# 9. Install the Python/MLX backend into the app bundle
 # ─────────────────────────────────────────────────────────────────────────────
 # The venv lives inside the app bundle so the server spawned by Electron
 # (via mlxServerManager.ts) finds uvicorn at:
@@ -229,7 +238,7 @@ echo ""
 echo "✓  Python/MLX backend installed."
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 9. Summary
+# 10. Summary
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "=================================================="

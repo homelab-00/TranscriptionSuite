@@ -24,6 +24,9 @@ dashboard/*.njsproj
 dashboard/*.sln
 dashboard/*.sw?
 
+## Dashboard app
+TranscriptionSuite.app
+
 
 # AI Stuff
 
