@@ -14,6 +14,7 @@
  */
 
 import { execFile } from 'child_process';
+import net from 'net';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -39,6 +40,10 @@ export interface DetectionResult {
   binaryFoundButNotRunning: boolean;
   /** Which binary was found (for error messaging) */
   binaryFound: string | null;
+  /** True when Podman CLI works but the API socket is not listening */
+  socketDead?: boolean;
+  /** Actionable guidance for the user when detection fails */
+  guidance?: string;
 }
 
 // ─── Socket Paths ────────────────────────────────────────────────────────────
@@ -108,6 +113,56 @@ async function probeBinary(bin: string): Promise<boolean> {
   }
 }
 
+/**
+ * Verify that the API socket for a container runtime is actually listening.
+ * Podman's CLI can work without a socket (it forks internally), but
+ * `docker-compose` (used by `podman compose` as external provider) requires
+ * an active socket.  Returns true if a TCP/Unix connection succeeds.
+ */
+async function probeSocket(kind: ContainerRuntimeKind): Promise<boolean> {
+  if (process.platform !== 'linux') return true; // macOS/Windows use Docker Desktop
+  if (typeof process.getuid !== 'function') return true;
+
+  // If an explicit host is configured (e.g. tcp://...), the socket file check
+  // is irrelevant — the runtime will connect via the configured transport.
+  const paths = getSocketPaths(kind);
+  if (process.env[paths.envVar] || process.env.DOCKER_HOST) return true;
+
+  const uid = process.getuid();
+  // Prefer user socket for rootless, fall back to system socket
+  const candidates = [paths.user(uid), paths.system];
+  const socketPath = candidates.find((p) => existsSync(p));
+  if (!socketPath) {
+    console.warn(`[ContainerRuntime] No ${kind} socket file found at: ${candidates.join(', ')}`);
+    return false;
+  }
+  console.log(`[ContainerRuntime] Probing ${kind} socket at ${socketPath}`);
+
+  return new Promise<boolean>((resolve) => {
+    const sock = net.connect({ path: socketPath });
+    const timer = setTimeout(() => {
+      sock.destroy();
+      resolve(false);
+    }, 3_000);
+    sock.on('connect', () => {
+      clearTimeout(timer);
+      sock.destroy();
+      resolve(true);
+    });
+    sock.on('error', () => {
+      clearTimeout(timer);
+      sock.destroy();
+      resolve(false);
+    });
+  });
+}
+
+const PODMAN_SOCKET_GUIDANCE =
+  'Podman was detected but its API socket is not active. ' +
+  'External compose providers (docker-compose) require the socket to be running. ' +
+  'Fix: run  systemctl --user enable --now podman.socket  — ' +
+  'then click "Retry Detection" in the app.';
+
 function makeRuntime(kind: ContainerRuntimeKind): ContainerRuntime {
   return {
     kind,
@@ -134,6 +189,18 @@ export async function detectRuntime(): Promise<DetectionResult> {
     console.log(
       `[ContainerRuntime] Override CONTAINER_RUNTIME=${override}, daemon ${running ? 'running' : 'not running'}`,
     );
+    if (running && override === 'podman' && !(await probeSocket('podman'))) {
+      console.warn(
+        '[ContainerRuntime] Override: Podman CLI responds but API socket is not listening.',
+      );
+      return {
+        runtime: null,
+        binaryFoundButNotRunning: true,
+        binaryFound: override,
+        socketDead: true,
+        guidance: PODMAN_SOCKET_GUIDANCE,
+      };
+    }
     return {
       runtime: running ? runtime : null,
       binaryFoundButNotRunning: !running,
@@ -150,6 +217,21 @@ export async function detectRuntime(): Promise<DetectionResult> {
 
   // Try Podman
   if (await probeRuntime('podman')) {
+    // Podman CLI works, but verify the API socket is alive — external compose
+    // providers (docker-compose) connect via socket, not the CLI.
+    if (!(await probeSocket('podman'))) {
+      console.warn(
+        '[ContainerRuntime] Podman CLI responds but API socket is not listening. ' +
+          'Run: systemctl --user enable --now podman.socket',
+      );
+      return {
+        runtime: null,
+        binaryFoundButNotRunning: true,
+        binaryFound: 'podman',
+        socketDead: true,
+        guidance: PODMAN_SOCKET_GUIDANCE,
+      };
+    }
     const runtime = makeRuntime('podman');
     console.log('[ContainerRuntime] Podman detected');
     return { runtime, binaryFoundButNotRunning: false, binaryFound: 'podman' };

@@ -783,6 +783,9 @@ async function runtimeBin(): Promise<string> {
   return bin;
 }
 
+/** Guidance string from the most recent detection, if any */
+let _detectionGuidance: string | null = null;
+
 /**
  * Detect container runtime (Docker or Podman) availability.
  *
@@ -794,6 +797,8 @@ async function runtimeBin(): Promise<string> {
 async function dockerAvailable(): Promise<boolean> {
   const result = await getDetectionResult();
 
+  _detectionGuidance = result.guidance ?? null;
+
   if (result.runtime) {
     detectedRuntimeKind = result.runtime.kind;
     console.log(
@@ -803,9 +808,18 @@ async function dockerAvailable(): Promise<boolean> {
   }
 
   if (result.binaryFoundButNotRunning) {
-    console.log(
-      `[DockerManager] ${result.binaryFound} binary found but daemon/service is not running`,
-    );
+    if (result.socketDead) {
+      console.warn(
+        `[DockerManager] ${result.binaryFound} binary works but API socket is not listening`,
+      );
+      if (result.guidance) {
+        console.warn(`[DockerManager] ${result.guidance}`);
+      }
+    } else {
+      console.log(
+        `[DockerManager] ${result.binaryFound} binary found but daemon/service is not running`,
+      );
+    }
   } else {
     console.error('[DockerManager] No container runtime found (Docker or Podman).');
     console.error('[DockerManager] Verify Docker or Podman is installed and available on PATH.');
@@ -814,12 +828,17 @@ async function dockerAvailable(): Promise<boolean> {
   return false;
 }
 
+function getDetectionGuidance(): string | null {
+  return _detectionGuidance;
+}
+
 /**
  * Reset cached runtime detection. Call when the user clicks "Retry Detection".
  */
 function retryDetection(): void {
   resetDetection();
   detectedRuntimeKind = null;
+  _detectionGuidance = null;
 }
 
 // ─── Image Operations ───────────────────────────────────────────────────────
@@ -2372,6 +2391,7 @@ async function getRuntimeKind(): Promise<string | null> {
 
 export const dockerManager = {
   dockerAvailable,
+  getDetectionGuidance,
   retryDetection,
   getRuntimeKind,
   checkGpu,

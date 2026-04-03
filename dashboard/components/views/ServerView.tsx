@@ -992,7 +992,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       na: !needsDocker,
       hint: !needsDocker
         ? 'Not needed for Metal runtime'
-        : 'Install Docker Engine, Docker Desktop, or Podman',
+        : (docker.detectionGuidance ?? 'Install Docker Engine, Docker Desktop, or Podman'),
     },
     {
       label: `${rtName} image pulled`,

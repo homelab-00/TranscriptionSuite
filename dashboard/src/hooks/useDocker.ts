@@ -58,6 +58,8 @@ export interface UseDockerReturn {
   loading: boolean;
   /** Detected runtime display name ('Docker' or 'Podman'), null if not detected */
   runtimeKind: string | null;
+  /** Actionable guidance when detection fails (e.g. Podman socket not active) */
+  detectionGuidance: string | null;
 
   // Image state
   images: DockerImage[];
@@ -118,6 +120,7 @@ export function useDocker(): UseDockerReturn {
   const [available, setAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [runtimeKind, setRuntimeKind] = useState<string | null>(null);
+  const [detectionGuidance, setDetectionGuidance] = useState<string | null>(null);
   const [images, setImages] = useState<DockerImage[]>([]);
   const [container, setContainer] = useState<ContainerStatus>(EMPTY_CONTAINER);
   const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
@@ -139,8 +142,12 @@ export function useDocker(): UseDockerReturn {
 
     (async () => {
       try {
-        const ok = await docker.available();
+        const [ok, guidance] = await Promise.all([
+          docker.available(),
+          docker.getDetectionGuidance().catch(() => null),
+        ]);
         setAvailable(ok);
+        setDetectionGuidance(guidance);
         if (ok) {
           docker
             .getRuntimeKind()
@@ -218,7 +225,9 @@ export function useDocker(): UseDockerReturn {
     setOperationError(null);
     try {
       const ok = await docker.retryDetection();
+      const guidance = await docker.getDetectionGuidance().catch(() => null);
       setAvailable(ok);
+      setDetectionGuidance(guidance);
       if (ok) {
         docker
           .getRuntimeKind()
@@ -475,6 +484,7 @@ export function useDocker(): UseDockerReturn {
     available,
     loading,
     runtimeKind,
+    detectionGuidance,
     images,
     refreshImages,
     pullImage,

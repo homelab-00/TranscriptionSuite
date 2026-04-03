@@ -88,6 +88,7 @@ export interface ElectronAPI {
     available: () => Promise<boolean>;
     retryDetection: () => Promise<boolean>;
     getRuntimeKind: () => Promise<string | null>;
+    getDetectionGuidance: () => Promise<string | null>;
     checkGpu: () => Promise<{ gpu: boolean; toolkit: boolean }>;
     listImages: () => Promise<
       Array<{ tag: string; fullName: string; size: string; created: string; id: string }>
@@ -250,7 +251,13 @@ export interface ElectronAPI {
     }) => Promise<boolean>;
   };
   mlx: {
-    start: (opts: { port: number; hfToken?: string; mainTranscriberModel?: string; liveTranscriberModel?: string; diarizationModel?: string }) => Promise<void>;
+    start: (opts: {
+      port: number;
+      hfToken?: string;
+      mainTranscriberModel?: string;
+      liveTranscriberModel?: string;
+      diarizationModel?: string;
+    }) => Promise<void>;
     stop: () => Promise<void>;
     getStatus: () => Promise<'stopped' | 'starting' | 'running' | 'stopping' | 'error'>;
     getLogs: (tail?: number) => Promise<string[]>;
@@ -316,6 +323,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     available: () => ipcRenderer.invoke('docker:available'),
     retryDetection: () => ipcRenderer.invoke('docker:retryDetection'),
     getRuntimeKind: () => ipcRenderer.invoke('docker:getRuntimeKind') as Promise<string | null>,
+    getDetectionGuidance: () =>
+      ipcRenderer.invoke('docker:getDetectionGuidance') as Promise<string | null>,
     checkGpu: () => ipcRenderer.invoke('docker:checkGpu'),
     listImages: () => ipcRenderer.invoke('docker:listImages'),
     pullImage: (tag: string) => ipcRenderer.invoke('docker:pullImage', tag),
@@ -529,8 +538,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('notifications:show', options) as Promise<boolean>,
   },
   mlx: {
-    start: (opts: { port: number; hfToken?: string; mainTranscriberModel?: string; liveTranscriberModel?: string; diarizationModel?: string }) =>
-      ipcRenderer.invoke('mlx:start', opts) as Promise<void>,
+    start: (opts: {
+      port: number;
+      hfToken?: string;
+      mainTranscriberModel?: string;
+      liveTranscriberModel?: string;
+      diarizationModel?: string;
+    }) => ipcRenderer.invoke('mlx:start', opts) as Promise<void>,
     stop: () => ipcRenderer.invoke('mlx:stop') as Promise<void>,
     getStatus: () =>
       ipcRenderer.invoke('mlx:getStatus') as Promise<

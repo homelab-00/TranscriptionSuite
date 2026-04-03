@@ -150,7 +150,12 @@ To begin with, you need to install Docker (or Podman).
     * For Arch run `sudo pacman -S --needed podman`
     * For Fedora/RHEL: Podman is pre-installed
     * For other distros refer to the [Podman documentation](https://podman.io/docs/installation)
-2. For GPU mode, configure CDI (Container Device Interface):
+2. Enable the Podman API socket (required for compose operations):
+    ```bash
+    systemctl --user enable --now podman.socket
+    ```
+    * `podman compose` delegates to an external compose provider (e.g. `docker-compose`) that connects via this socket. Without it, compose commands will fail with "Cannot connect to the Docker daemon" even though `podman` itself works.
+3. For GPU mode, configure CDI (Container Device Interface):
     ```bash
     sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
     ```

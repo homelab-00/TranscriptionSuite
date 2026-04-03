@@ -904,6 +904,10 @@ ipcMain.handle('docker:getRuntimeKind', async () => {
   return dockerManager.getRuntimeKind();
 });
 
+ipcMain.handle('docker:getDetectionGuidance', async () => {
+  return dockerManager.getDetectionGuidance();
+});
+
 ipcMain.handle('docker:checkGpu', async () => {
   return dockerManager.checkGpu();
 });

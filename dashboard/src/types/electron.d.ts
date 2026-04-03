@@ -111,6 +111,7 @@ interface ElectronAPI {
     available: () => Promise<boolean>;
     retryDetection: () => Promise<boolean>;
     getRuntimeKind: () => Promise<string | null>;
+    getDetectionGuidance: () => Promise<string | null>;
     checkGpu: () => Promise<{ gpu: boolean; toolkit: boolean }>;
     listImages: () => Promise<
       Array<{ tag: string; fullName: string; size: string; created: string; id: string }>
