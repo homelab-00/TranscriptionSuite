@@ -32,10 +32,10 @@ async function recordSession(
   await electronApp.close();
 
   // Rename the auto-generated video file to our desired name
-  const files = fs.readdirSync(OUTPUT_DIR).filter((f) => f.endsWith('.webm'));
+  const files = fs.readdirSync(OUTPUT_DIR).filter((f: string) => f.endsWith('.webm'));
   const newest = files
-    .map((f) => ({ f, mtime: fs.statSync(path.join(OUTPUT_DIR, f)).mtimeMs }))
-    .sort((a, b) => b.mtime - a.mtime)[0];
+    .map((f: string) => ({ f, mtime: fs.statSync(path.join(OUTPUT_DIR, f)).mtimeMs }))
+    .sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime)[0];
 
   if (newest) {
     const dest = path.join(OUTPUT_DIR, `${name}.webm`);
