@@ -13,7 +13,7 @@ import {
   Search,
   Upload,
   Bug,
-  Download,
+  History,
 } from 'lucide-react';
 import logoUrl from '../../docs/assets/logo.png';
 import { StatusLight } from './ui/StatusLight';
@@ -176,7 +176,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       id: View.ACTIVITY,
       label: 'Activity',
-      icon: <Download size={20} />,
+      icon: <History size={20} />,
     },
     {
       id: View.LOGS,
