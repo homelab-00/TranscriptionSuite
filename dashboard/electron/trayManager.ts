@@ -44,6 +44,9 @@ export interface TrayMenuState {
   isLocalConnection: boolean;
   canCancel: boolean;
   isStandby: boolean;
+  /** true when the server is healthy and not in mic-recording or live mode —
+   *  allows "Transcribe File..." even while a file transcription is processing. */
+  canTranscribeFile: boolean;
 }
 
 // ─── Runtime Icon Generation ────────────────────────────────────────────────
@@ -108,6 +111,7 @@ export class TrayManager {
     isLocalConnection: true,
     canCancel: false,
     isStandby: false,
+    canTranscribeFile: false,
   };
   private completeTimer: ReturnType<typeof setTimeout> | null = null;
   private isDev: boolean;
@@ -429,7 +433,7 @@ export class TrayManager {
 
     template.push({
       label: 'Transcribe File…',
-      enabled: isStandby,
+      enabled: this.menuState.canTranscribeFile,
       click: () => this.actions.transcribeFile?.(),
     });
 

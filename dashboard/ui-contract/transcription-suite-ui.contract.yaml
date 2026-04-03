@@ -4,7 +4,7 @@ meta:
   source_scope: mockup_repo
   validation_method: static_source_scan
   generated_from:
-    repo_path: /Users/haiiro/NoSync/TranscriptionSuite/dashboard
+    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
     source_files:
       - App.tsx
       - components/AudioVisualizer.tsx
@@ -40,7 +40,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-02T00:03:01.350Z
+    generated_at: 2026-04-03T09:17:32.855Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -869,7 +869,6 @@ utility_allowlist:
     - text-indigo-400
     - text-left
     - text-lg
-    - text-only
     - text-orange-400
     - text-orange-500
     - text-red-100

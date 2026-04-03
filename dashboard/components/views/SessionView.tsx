@@ -52,6 +52,7 @@ import {
 import { isModelDisabled } from '../../src/services/modelSelection';
 import { SessionTab } from '../../types';
 import { SessionImportTab } from './SessionImportTab';
+import { useImportQueueStore } from '../../src/stores/importQueueStore';
 import { toast } from 'sonner';
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
@@ -104,7 +105,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
       api.config
         .get('server.runtimeProfile')
         .then((val: unknown) => {
-          if (val === 'gpu' || val === 'cpu' || val === 'vulkan' || val === 'metal') setRuntimeProfile(val);
+          if (val === 'gpu' || val === 'cpu' || val === 'vulkan' || val === 'metal')
+            setRuntimeProfile(val);
         })
         .catch(() => {});
     }
@@ -600,27 +602,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
         live.toggleMute();
       }
     },
-    onTranscribeFile: async (filePath: string) => {
-      try {
-        const { name, buffer, mimeType } = await window.electronAPI!.app.readLocalFile(filePath);
-        const file = new File([buffer], name, { type: mimeType });
-        // Use the quick endpoint: text-only, no timestamps, no diarization, not saved to notebook.
-        const result = await apiClient.transcribeQuick(file);
-        if (result.text) {
-          writeToClipboard(result.text).catch(() => {});
-          if (window.electronAPI?.clipboard?.pasteAtCursor) {
-            getConfig<boolean>('app.pasteAtCursor').then((enabled) => {
-              if (enabled) {
-                window.electronAPI!.clipboard.pasteAtCursor(result.text).catch((err: any) => {
-                  console.error('Tray transcribe file paste failed:', err);
-                });
-              }
-            });
-          }
-        }
-      } catch (err: any) {
-        console.error('Tray transcribe file failed:', err);
-      }
+    onTranscribeFile: (filePath: string) => {
+      // Queue the file with highest priority — preempts any running transcription
+      useImportQueueStore.getState().addPriorityFiles([filePath], 'notebook-normal');
     },
     onStartLiveMode: () => handleLiveToggle(true),
     onStopLiveMode: () => live.stop(),
@@ -1194,13 +1178,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
                               ? serverRunning
                                 ? 'Native Process Running'
                                 : 'Server Offline'
-                            : serverRunning && docker.container.health === 'healthy'
-                              ? 'Docker Container Running'
-                              : serverRunning
-                                ? 'Container Starting\u2026'
-                                : docker.container.exists
-                                  ? 'Container Stopped'
-                                  : 'Container Missing'}
+                              : serverRunning && docker.container.health === 'healthy'
+                                ? 'Docker Container Running'
+                                : serverRunning
+                                  ? 'Container Starting\u2026'
+                                  : docker.container.exists
+                                    ? 'Container Stopped'
+                                    : 'Container Missing'}
                         </span>
                         {isBareMetal && serverRunning && (
                           <span className="bg-accent-violet/15 text-accent-violet flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase">
@@ -1227,12 +1211,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
                               : isBareMetal
                                 ? serverRunning
                                   ? 'active'
-                                : 'inactive'
-                              : serverRunning && docker.container.health === 'healthy'
-                                ? 'active'
-                                : docker.container.exists
-                                  ? 'warning'
                                   : 'inactive'
+                                : serverRunning && docker.container.health === 'healthy'
+                                  ? 'active'
+                                  : docker.container.exists
+                                    ? 'warning'
+                                    : 'inactive'
                           }
                           className="h-2 w-2"
                         />
@@ -1245,39 +1229,39 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           Managed by native process — start from Server view
                         </div>
                       ) : (
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => onStartServer('local', runtimeProfile)}
-                          disabled={serverRunning || docker.operating || startupFlowPending}
-                          className="px-3 text-xs"
-                        >
-                          {docker.operating || startupFlowPending ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            'Start Local'
-                          )}
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => onStartServer('remote', runtimeProfile)}
-                          disabled={serverRunning || docker.operating || startupFlowPending}
-                          className="px-3 text-xs"
-                        >
-                          Start Remote
-                        </Button>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => docker.stopContainer()}
-                          disabled={!serverRunning || docker.operating}
-                          className="px-3 text-xs"
-                        >
-                          Stop
-                        </Button>
-                      </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => onStartServer('local', runtimeProfile)}
+                            disabled={serverRunning || docker.operating || startupFlowPending}
+                            className="px-3 text-xs"
+                          >
+                            {docker.operating || startupFlowPending ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              'Start Local'
+                            )}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => onStartServer('remote', runtimeProfile)}
+                            disabled={serverRunning || docker.operating || startupFlowPending}
+                            className="px-3 text-xs"
+                          >
+                            Start Remote
+                          </Button>
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={() => docker.stopContainer()}
+                            disabled={!serverRunning || docker.operating}
+                            className="px-3 text-xs"
+                          >
+                            Stop
+                          </Button>
+                        </div>
                       )}
                       <div className="ml-auto shrink-0">
                         <Button

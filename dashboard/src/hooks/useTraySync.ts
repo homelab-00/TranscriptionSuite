@@ -174,6 +174,17 @@ export function useTraySync(deps: TrySyncDeps): void {
       !isRecording &&
       !isLive;
 
+    // canTranscribeFile: server healthy, not in mic-recording or live mode.
+    // Allowed during file transcription processing — the running job will be preempted.
+    const isMicRecording =
+      transcriptionStatus === 'connecting' || transcriptionStatus === 'recording';
+    const canTranscribeFile =
+      containerRunning &&
+      containerHealth === 'healthy' &&
+      serverStatus === 'active' &&
+      !isMicRecording &&
+      !isLive;
+
     window.electronAPI!.tray.setMenuState({
       serverRunning: containerRunning,
       isRecording,
@@ -183,6 +194,7 @@ export function useTraySync(deps: TrySyncDeps): void {
       isLocalConnection: isLocalConnection ?? true,
       canCancel,
       isStandby,
+      canTranscribeFile,
     });
   }, [
     containerRunning,

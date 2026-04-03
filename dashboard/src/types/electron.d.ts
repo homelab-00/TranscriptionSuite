@@ -50,6 +50,7 @@ interface TrayMenuState {
   isLocalConnection?: boolean;
   canCancel?: boolean;
   isStandby?: boolean;
+  canTranscribeFile?: boolean;
 }
 
 type DownloadEventType = 'runtime-dep' | 'ml-model' | 'model-preload';

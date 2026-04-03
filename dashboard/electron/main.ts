@@ -1569,6 +1569,7 @@ ipcMain.handle(
       isLocalConnection?: boolean;
       canCancel?: boolean;
       isStandby?: boolean;
+      canTranscribeFile?: boolean;
     },
   ) => {
     trayManager.setMenuState(menuState);
