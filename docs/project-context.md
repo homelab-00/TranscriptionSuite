@@ -1,10 +1,10 @@
 ---
 project_name: 'TranscriptionSuite'
 user_name: 'Bill'
-date: '2026-03-30'
+date: '2026-04-03'
 sections_completed: ['technology_stack', 'language_rules', 'framework_rules', 'testing_rules', 'code_quality', 'workflow_rules', 'critical_rules']
 status: 'complete'
-rule_count: 82
+rule_count: 90
 optimized_for_llm: true
 ---
 
@@ -27,20 +27,20 @@ _This file contains critical rules and patterns that AI agents must follow when 
   - `nemo`: nemo_toolkit[asr] 2.7.0
   - `vibevoice_asr`: Microsoft VibeVoice (git pin)
   - `whispercpp`: whisper.cpp Vulkan sidecar (HTTP, AMD/Intel GPU support via docker-compose.vulkan.yml)
-  - `mlx`: mlx-whisper ≥0.4.1 + parakeet-mlx ≥0.2.0 + canary-mlx ≥0.1.0 (Apple Silicon only)
+  - `mlx`: mlx-audio ≥0.4.1 + parakeet-mlx ≥0.2.0 + canary-mlx ≥0.1.0 + faster-whisper ≥1.2.1 (Apple Silicon only; conflicts with whisper/nemo/vibevoice_asr extras — never co-installed)
 - **VAD**: webrtcvad 2.0.10 + silero-vad 6.2.1
 - **Logging**: structlog 25.5.0
 - **Package manager**: uv (NEVER pip)
 - **Build system**: hatchling
 
 ### Frontend (Electron/React/TypeScript)
-- **Electron 40.8.0** — desktop shell
+- **Electron ^40.8.5** — desktop shell
 - **React 19.2.4** + react-dom 19.2.4
 - **TypeScript 5.9.3** — target ES2022, bundler moduleResolution, noEmit
 - **Vite 7.3.1** — dev server on port 3000, `base: './'` for Electron file:// protocol
 - **Tailwind CSS 4.2.1** — via @tailwindcss/vite plugin + custom oklab-strip PostCSS plugin
 - **@tanstack/react-query 5.90.21** — server state
-- **zustand 5.0.12** — client-only ephemeral state (import queue)
+- **zustand 5.0.12** — client-only ephemeral state (import queue, activity tracking)
 - **@headlessui/react 2.2.9** — accessible UI primitives
 - **lucide-react 0.564.0** — icons
 - **Prettier 3.8.1** — singleQuote, semi, trailingComma: "all", printWidth: 100, prettier-plugin-tailwindcss
@@ -50,14 +50,15 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Frontend**: Vitest 4.0.18 + @testing-library/react 16.3.2 + jsdom 28.1.0
 
 ### Infrastructure
-- **Docker**: Ubuntu 24.04 base, 6 compose variants (base, linux-host, desktop-vm, gpu, gpu-cdi, vulkan)
-- **CI**: GitHub Actions — CodeQL analysis, dashboard-quality, scripts-lint
+- **Docker**: Ubuntu 24.04 base, 7 compose variants (base, linux-host, desktop-vm, gpu, gpu-cdi, vulkan, podman-gpu)
+- **CI**: GitHub Actions — CodeQL analysis, dashboard-quality, scripts-lint, release
 - **Packaging**: electron-builder 26.8.1 (AppImage, NSIS, DMG)
 
 ### Version Constraints
 - PyTorch MUST use cu129 index (not default cu128) — explicit `[tool.uv.sources]` override
 - setuptools pinned <81 — webrtcvad imports pkg_resources, removed in setuptools>=81
 - Python strictly 3.13.x — NeMo + lhotse compatibility
+- MLX extra conflicts with whisper/nemo/vibevoice_asr extras — `[tool.uv]` `conflicts` block enforces mutual exclusion; macOS-only, never co-installed with CUDA extras
 
 ## Critical Implementation Rules
 
@@ -117,15 +118,19 @@ durability:
 - **Detection order** (first match wins):
   - `nvidia/parakeet*` or `nvidia/nemotron-speech*` → ParakeetBackend (NeMo, Docker)
   - `nvidia/canary*` → CanaryBackend (NeMo, Docker)
+  - `mlx-community/vibevoice-asr*` → MLXVibeVoiceBackend (Apple Silicon) — checked before generic VibeVoice
   - `[user]/vibevoice-asr*` → VibeVoiceASRBackend
+  - GGML pattern (`ggml-*.bin`, `.gguf`) → WhisperCppBackend
   - `mlx-community/parakeet*` → MLXParakeetBackend (Apple Silicon)
   - `[user]/canary*-mlx` → MLXCanaryBackend (Apple Silicon)
   - `mlx-community/*` → MLXWhisperBackend (Apple Silicon)
-  - GGML pattern (`ggml-*.bin`, `.gguf`) → WhisperCppBackend
-  - else → WhisperBackend (faster-whisper, CPU/CUDA)
+  - else → WhisperXBackend (faster-whisper + alignment + diarization); falls back to FasterWhisperBackend if WhisperX not installed
 - **Abstract base**: `base.py::STTBackend` — all backends implement `load()`, `unload()`, `transcribe()`
 - **NeMo backends require temp WAV files** — no direct array transcription in older NeMo versions
-- **MLX backends**: Apple Silicon only; all calls wrapped in `asyncio.to_thread()`; beam_size > 1 silently falls back to greedy
+- **MLX backends**: Apple Silicon only; beam_size > 1 silently falls back to greedy
+- **MLX Whisper model naming**: Only `-asr-` HuggingFace repo IDs supported (e.g. `mlx-community/whisper-large-v3-asr-fp16`); older `whisper-*-mlx` IDs lack the required HuggingFace processor
+- **MLX VibeVoice**: Native speaker diarization via `transcribe_with_diarization()` (returns real results, not `None`); expects 24 kHz audio (resampled internally from 16 kHz); no translation support
+- **FasterWhisperBackend**: Lightweight `faster_whisper.WhisperModel` wrapper without WhisperX — exists for Live Mode on Apple Silicon bare-metal where the `whisper` extra is not installed
 
 #### WhisperCpp Sidecar Backend
 - **HTTP sidecar**: Multipart POST to whisper.cpp server — no in-process model loading
@@ -140,24 +145,25 @@ durability:
 
 #### React/Electron (Frontend)
 - **Server state**: @tanstack/react-query for server data (`useQuery`, `useMutation`, `useQueryClient`)
-- **Client state**: Zustand for ephemeral client-only state (import queue, folder watch, pause/resume)
+- **Client state**: Zustand for ephemeral client-only state (import queue, activity tracking, folder watch, pause/resume)
 - **Custom hooks pattern**: Each feature has a dedicated hook (`useTranscription`, `useLiveMode`, `useDocker`, etc.)
-- **UI primitives**: @headlessui/react for accessible components, custom `ui/` directory for shared components (GlassCard, Button, AppleSwitch, StatusLight, CustomSelect)
+- **UI primitives**: @headlessui/react for accessible components, custom `ui/` directory for shared components (GlassCard, Button, AppleSwitch, StatusLight, CustomSelect, ErrorFallback, ShortcutCapture, LogTerminal, ActivityNotifications, QueuePausedBanner)
 - **Tailwind CSS v4**: Utility-first styling, custom oklab-strip PostCSS plugin to force sRGB fallbacks
 - **Vite base `'./'`**: Required for Electron `file://` protocol — never change to `/`
 
 #### Zustand (Client State)
-- **Zustand for client-only state**: Import queue, pause/resume, folder watch — ephemeral, not persisted
+- **Zustand for client-only state**: Import queue, activity tracking, pause/resume, folder watch — ephemeral, not persisted
 - **React Query for server state**: Models, recordings, admin status — cached with staleTime/refetch
 - **Selector pattern**: Always use `useImportQueueStore(selector)` — never subscribe to whole store
 - **useShallow for arrays**: `useShallow(selectSessionJobs)` prevents re-renders on array identity changes
 - **Module-level processing**: Async queue processing happens outside the store via `getState()` to avoid stale closures
 - **Stores directory**: `dashboard/src/stores/` — one store per feature domain
+- **activityStore**: Replaced former downloadStore (deleted) — unified 4-category model (download, server, warning, info) with status lifecycle (active → complete/error/dismissed). Do NOT reference `downloadStore` — it no longer exists
 
 ### Testing Rules
 
 #### Backend (pytest)
-- **40+ test files**, 650+ passing tests in `server/backend/tests/`
+- **48 test files**, 868 passing tests in `server/backend/tests/`
 - **conftest.py is critical**: Contains `_ensure_server_package_alias()` that MUST run at import time — enables `from server.xxx import ...` without pip-install
 - **Torch stub**: Session-scoped `torch_stub` fixture — lightweight stand-in for tests that import ML modules but never run GPU code
 - **Token store mock**: `_TestTokenStore` (in-memory, no file I/O); must be patched in 3 modules: `main`, `utils`, `auth`
@@ -169,7 +175,7 @@ durability:
 - **asyncio_mode = "auto"**: No `@pytest.mark.asyncio` needed
 
 #### Frontend (Vitest)
-- **4 test files** in `dashboard/src/` — `services/*.test.ts`, `utils/*.test.ts`
+- **7 test files** in `dashboard/src/` — `services/*.test.ts`, `utils/*.test.ts`, `stores/*.test.ts`, `hooks/*.test.ts`
 - **Setup**: `src/test/setup.ts` imports `@testing-library/jest-dom/vitest`
 - **Test include paths**: `src/**/*.test.ts`, `src/**/*.test.tsx`, `components/**/*.test.tsx`
 - **Environment**: jsdom
@@ -197,7 +203,7 @@ durability:
 #### File Organization
 - **Backend**: Feature modules in `server/backend/core/`, API routes in `server/backend/api/routes/`, WebSocket in `api/routes/live.py`, durability layer in `server/backend/database/job_repository.py` + `audio_cleanup.py`
 - **Frontend**: Components in `dashboard/components/` (with `ui/` and `views/` subdirs), logic in `dashboard/src/` (`hooks/`, `services/`, `stores/`, `api/`, `utils/`, `types/`, `config/`)
-- **Shared UI**: `dashboard/components/ui/` — 8 reusable primitives (GlassCard, Button, AppleSwitch, StatusLight, ErrorFallback, CustomSelect, ShortcutCapture, LogTerminal)
+- **Shared UI**: `dashboard/components/ui/` — 10 reusable primitives (GlassCard, Button, AppleSwitch, StatusLight, ErrorFallback, CustomSelect, ShortcutCapture, LogTerminal, ActivityNotifications, QueuePausedBanner)
 
 ### Development Workflow Rules
 
@@ -234,6 +240,7 @@ durability:
 - **NEVER use default exports** in frontend hooks/services — always named exports
 - **NEVER mock at the source module** for lazily-imported code — patch at the call site
 - **NEVER skip `_ensure_server_package_alias()`** in new test files — import conftest or it won't resolve `server.*`
+- **NEVER reference `downloadStore`** — it was replaced by `activityStore`. The old store is deleted
 
 #### CUDA / GPU Gotchas
 - **CUDA graph workaround**: ParakeetBackend calls `_disable_cuda_graphs()` for CUDA >= 12.8 — do not remove
@@ -260,7 +267,7 @@ durability:
 #### Docker / Deployment
 - **Bootstrap at first run**: Python deps installed at first container startup into `/runtime/.venv`, not baked into image
 - **Model storage**: `HF_HOME=/models`, `TORCH_HOME=/models/torch-cache` — mounted volumes, not in container
-- **6 compose variants**: Base, linux-host (host network), desktop-vm, gpu (runtime=nvidia), gpu-cdi (CDI device passthrough), vulkan (whisper.cpp sidecar with /dev/dri)
+- **7 compose variants**: Base, linux-host (host network), desktop-vm, gpu (runtime=nvidia), gpu-cdi (CDI device passthrough), vulkan (whisper.cpp sidecar with /dev/dri), podman-gpu (Podman with GPU passthrough)
 
 #### Security
 - **Auth via first WS message**: WebSocket endpoints authenticate from the first JSON message, not headers
@@ -282,4 +289,4 @@ durability:
 - Review quarterly for outdated rules
 - Remove rules that become obvious over time
 
-Last Updated: 2026-03-30
+Last Updated: 2026-04-03
