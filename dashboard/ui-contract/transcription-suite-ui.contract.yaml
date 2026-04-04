@@ -21,7 +21,6 @@ meta:
       - components/ui/ShortcutCapture.tsx
       - components/ui/StatusLight.tsx
       - components/views/AboutModal.tsx
-      - components/views/ActivityPanel.tsx
       - components/views/AddNoteModal.tsx
       - components/views/AudioNoteModal.tsx
       - components/views/BugReportModal.tsx
@@ -40,7 +39,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-03T09:17:32.855Z
+    generated_at: 2026-04-04T18:27:31.092Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -417,7 +416,6 @@ utility_allowlist:
     - bg-black/75
     - bg-blue-400
     - bg-blue-500/10
-    - bg-emerald-900/40
     - bg-glass-100
     - bg-glass-100/30
     - bg-glass-100/50
@@ -435,11 +433,9 @@ utility_allowlist:
     - bg-red-500/10
     - bg-red-500/25
     - bg-red-500/5
-    - bg-red-900/40
     - bg-slate-500
     - bg-slate-500/10
     - bg-slate-700
-    - bg-slate-700/60
     - bg-slate-800
     - bg-slate-900
     - bg-slate-900/80
@@ -479,7 +475,6 @@ utility_allowlist:
     - border-l
     - border-l-2
     - border-l-accent-magenta
-    - border-l-amber-500
     - border-l-blue-400
     - border-l-green-400
     - border-l-orange-400
@@ -745,7 +740,6 @@ utility_allowlist:
     - pl-0
     - pl-1
     - pl-12
-    - pl-16
     - pl-2
     - pl-4
     - pl-5
@@ -782,7 +776,6 @@ utility_allowlist:
     - py-12
     - py-2
     - py-2.5
-    - py-20
     - py-3
     - py-3.5
     - py-4
@@ -965,7 +958,6 @@ utility_allowlist:
     - bg-[#0b1120]
     - bg-[#0f172a]
     - bg-[rgba(22,31,50,0.9)]
-    - bg-white/[0.02]
     - ease-[cubic-bezier(0.22,1,0.36,1)]
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
     - ease-[cubic-bezier(0.32,0.72,0,1)]
@@ -1105,40 +1097,6 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   ActivityNotifications:
     file: components/ui/ActivityNotifications.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  ActivityPanel:
-    file: components/views/ActivityPanel.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  ActivityRow:
-    file: components/views/ActivityPanel.tsx
     required_tokens:
       - colors
       - motion
@@ -1454,23 +1412,6 @@ component_contracts:
     state_rules:
       - id: active-option-dot
         rule: Selected option indicator dot color/shadow must follow accentColor variant mapping.
-  EmptyState:
-    file: components/views/ActivityPanel.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   ErrorFallback:
     file: components/ui/ErrorFallback.tsx
     required_tokens:
@@ -1490,23 +1431,6 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   FieldRow:
     file: components/views/ServerConfigEditor.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  FloatingNotificationsSection:
-    file: components/views/SettingsModal.tsx
     required_tokens:
       - colors
       - motion

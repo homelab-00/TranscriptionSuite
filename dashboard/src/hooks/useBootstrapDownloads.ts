@@ -56,7 +56,7 @@ export function useBootstrapDownloads(): void {
 
         store.addActivity({
           id: event.id,
-          category: event.category as 'download' | 'server' | 'warning' | 'info',
+          category: 'download',
           label: event.label,
           status: (event.status ?? 'active') as 'active' | 'complete' | 'error',
           ...(event.progress !== undefined ? { progress: event.progress } : {}),

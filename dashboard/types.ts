@@ -3,7 +3,6 @@ export enum View {
   NOTEBOOK = 'NOTEBOOK',
   SERVER = 'SERVER',
   MODEL_MANAGER = 'MODEL_MANAGER',
-  ACTIVITY = 'ACTIVITY',
   LOGS = 'LOGS',
 }
 

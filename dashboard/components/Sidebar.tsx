@@ -13,7 +13,6 @@ import {
   Search,
   Upload,
   Bug,
-  History,
 } from 'lucide-react';
 import logoUrl from '../../docs/assets/logo.png';
 import { StatusLight } from './ui/StatusLight';
@@ -172,11 +171,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: View.MODEL_MANAGER,
       label: 'Models',
       icon: <Library size={20} />,
-    },
-    {
-      id: View.ACTIVITY,
-      label: 'Activity',
-      icon: <History size={20} />,
     },
     {
       id: View.LOGS,

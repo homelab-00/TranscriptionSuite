@@ -6,7 +6,6 @@ import { SessionView } from './components/views/SessionView';
 import { NotebookView } from './components/views/NotebookView';
 import { ServerView } from './components/views/ServerView';
 import { LogsView } from './components/views/LogsView';
-import { ActivityPanel } from './components/views/ActivityPanel';
 import { ModelManagerView } from './components/views/ModelManagerView';
 import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
@@ -105,9 +104,13 @@ const AppInner: React.FC = () => {
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (api?.config) {
-      api.config.get('server.runtimeProfile').then((val: unknown) => {
-        if (val === 'gpu' || val === 'cpu' || val === 'vulkan' || val === 'metal') setRuntimeProfile(val);
-      }).catch(() => {});
+      api.config
+        .get('server.runtimeProfile')
+        .then((val: unknown) => {
+          if (val === 'gpu' || val === 'cpu' || val === 'vulkan' || val === 'metal')
+            setRuntimeProfile(val);
+        })
+        .catch(() => {});
     }
   }, []);
 
@@ -117,8 +120,13 @@ const AppInner: React.FC = () => {
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (!api?.mlx) return;
-    api.mlx.getStatus().then((s: string) => setMlxProcessAlive(s === 'starting' || s === 'running')).catch(() => {});
-    const unsub = api.mlx.onStatusChanged((s: string) => setMlxProcessAlive(s === 'starting' || s === 'running'));
+    api.mlx
+      .getStatus()
+      .then((s: string) => setMlxProcessAlive(s === 'starting' || s === 'running'))
+      .catch(() => {});
+    const unsub = api.mlx.onStatusChanged((s: string) =>
+      setMlxProcessAlive(s === 'starting' || s === 'running'),
+    );
     return unsub;
   }, []);
 
@@ -623,12 +631,6 @@ const AppInner: React.FC = () => {
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
             <ModelManagerView />
-          </ErrorBoundary>
-        );
-      case View.ACTIVITY:
-        return (
-          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
-            <ActivityPanel />
           </ErrorBoundary>
         );
       case View.LOGS:

@@ -1,18 +1,14 @@
 /**
- * Global activity store — tracks all activity across the app.
+ * Global activity store — tracks download activity across the app.
  *
- * Replaces the former downloadStore with a unified 4-category model:
- * download, server, warning, info.
- *
- * Components that produce activity push events here (addActivity, updateActivity, etc.),
- * and the UI (floating notifications + Activity panel) subscribes to the store.
+ * Consumers push events via addActivity/updateActivity. The floating
+ * notification widget (ActivityNotifications) subscribes here.
  */
 
 import { create } from 'zustand';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type ActivityCategory = 'download' | 'server' | 'warning' | 'info';
 export type ActivityStatus = 'active' | 'complete' | 'error' | 'dismissed';
 
 /**
@@ -28,7 +24,7 @@ export type LegacyDownloadType =
 
 export interface ActivityItem {
   id: string;
-  category: ActivityCategory;
+  category: 'download';
   label: string;
   status: ActivityStatus;
   startedAt: number;
@@ -53,8 +49,7 @@ export interface ActivityItem {
   expandableDetail?: string;
 
   // UI state (frontend-only, not from server)
-  dismissed: boolean; // User dismissed from floating widget
-  sessionId: string; // Groups items by server start
+  dismissed: boolean;
 
   /** Legacy download type — preserved for icon/color mapping in UI */
   legacyType?: LegacyDownloadType;
@@ -65,25 +60,15 @@ export interface ActivityItem {
 
 interface ActivityStore {
   items: ActivityItem[];
-  sessionId: string;
 
   // Core operations
   addActivity: (
-    item: Partial<ActivityItem> & { id: string; category: ActivityCategory; label: string },
+    item: Partial<ActivityItem> & { id: string; category: 'download'; label: string },
   ) => void;
   updateActivity: (id: string, updates: Partial<ActivityItem>) => void;
 
   // UI operations
   dismissActivity: (id: string) => void;
-  clearSession: (sessionId: string) => void;
-  clearAll: () => void;
-
-  // Settings
-  notificationPreferences: Record<ActivityCategory, boolean>;
-  setNotificationPreference: (category: ActivityCategory, enabled: boolean) => void;
-
-  // Session management
-  setSessionId: (sessionId: string) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -96,37 +81,10 @@ function updateItem(
   return items.map((item) => (item.id === id ? { ...item, ...patch } : item));
 }
 
-const DEFAULT_PREFERENCES: Record<ActivityCategory, boolean> = {
-  download: true,
-  server: true,
-  warning: true,
-  info: true,
-};
-
-function loadPreferences(): Record<ActivityCategory, boolean> {
-  try {
-    const stored = localStorage.getItem('activity-notification-preferences');
-    if (stored) return { ...DEFAULT_PREFERENCES, ...JSON.parse(stored) };
-  } catch {
-    // Ignore parse errors
-  }
-  return { ...DEFAULT_PREFERENCES };
-}
-
-function savePreferences(prefs: Record<ActivityCategory, boolean>): void {
-  try {
-    localStorage.setItem('activity-notification-preferences', JSON.stringify(prefs));
-  } catch {
-    // Ignore storage errors
-  }
-}
-
 // ─── Store ───────────────────────────────────────────────────────────────────
 
 export const useActivityStore = create<ActivityStore>((set) => ({
   items: [],
-  sessionId: `session-${Date.now()}`,
-  notificationPreferences: loadPreferences(),
 
   addActivity: (item) =>
     set((state) => {
@@ -138,7 +96,6 @@ export const useActivityStore = create<ActivityStore>((set) => ({
             ...item,
             // Preserve UI state unless explicitly overridden
             dismissed: item.dismissed ?? existing.dismissed,
-            sessionId: item.sessionId ?? existing.sessionId,
             // Preserve startedAt from original item
             startedAt: existing.startedAt,
           }),
@@ -151,7 +108,6 @@ export const useActivityStore = create<ActivityStore>((set) => ({
             status: 'active' as ActivityStatus,
             startedAt: Date.now(),
             dismissed: false,
-            sessionId: state.sessionId,
             ...item,
           },
         ],
@@ -167,25 +123,6 @@ export const useActivityStore = create<ActivityStore>((set) => ({
     set((state) => ({
       items: updateItem(state.items, id, { dismissed: true }),
     })),
-
-  clearSession: (sessionId) =>
-    set((state) => ({
-      items: state.items.filter((item) => item.sessionId !== sessionId),
-    })),
-
-  clearAll: () =>
-    set((state) => ({
-      items: state.items.filter((item) => item.status === 'active'),
-    })),
-
-  setNotificationPreference: (category, enabled) =>
-    set((state) => {
-      const updated = { ...state.notificationPreferences, [category]: enabled };
-      savePreferences(updated);
-      return { notificationPreferences: updated };
-    }),
-
-  setSessionId: (sessionId) => set({ sessionId }),
 }));
 
 // ─── Selectors ───────────────────────────────────────────────────────────────

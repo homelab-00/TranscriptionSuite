@@ -1,29 +1,25 @@
 /**
  * Floating activity notification widget — bottom-right overlay.
  *
- * Shows active and recent activity as a vertical stack of small cards.
- * Each notification is individually dismissable. Supports all 4 activity
- * categories: download, server, warning, info.
+ * Shows active and recent download activity as a vertical stack of small cards.
+ * Each notification is individually dismissable.
  */
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect } from 'react';
 import {
   X,
   Container,
   Cpu,
   BrainCircuit,
   Cog,
-  Server,
-  AlertTriangle,
-  Info,
   Loader2,
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react';
 import {
   useActivityStore,
+  selectVisibleNotifications,
   type ActivityItem,
-  type ActivityCategory,
   type LegacyDownloadType,
 } from '../../src/stores/activityStore';
 
@@ -45,41 +41,23 @@ const LEGACY_TYPE_COLOR: Record<LegacyDownloadType, string> = {
   'model-preload': 'text-slate-400',
 };
 
-const CATEGORY_ICON: Record<ActivityCategory, React.ReactNode> = {
-  download: <BrainCircuit size={16} />,
-  server: <Server size={16} />,
-  warning: <AlertTriangle size={16} />,
-  info: <Info size={16} />,
-};
-
-const CATEGORY_COLOR: Record<ActivityCategory, string> = {
-  download: 'text-accent-cyan',
-  server: 'text-slate-400',
-  warning: 'text-amber-400',
-  info: 'text-emerald-400',
-};
-
 function getIcon(item: ActivityItem): React.ReactNode {
   if (item.legacyType && LEGACY_TYPE_ICON[item.legacyType]) {
     return LEGACY_TYPE_ICON[item.legacyType];
   }
-  return CATEGORY_ICON[item.category];
+  return <BrainCircuit size={16} />;
 }
 
 function getColor(item: ActivityItem): string {
   if (item.legacyType && LEGACY_TYPE_COLOR[item.legacyType]) {
     return LEGACY_TYPE_COLOR[item.legacyType];
   }
-  return CATEGORY_COLOR[item.category];
+  return 'text-accent-cyan';
 }
 
-/** Border accent for warning/error items. */
+/** Border accent for error items. */
 function getBorderClass(item: ActivityItem): string {
-  if (item.category === 'warning') {
-    return item.severity === 'error'
-      ? 'border-l-2 border-l-red-500'
-      : 'border-l-2 border-l-amber-500';
-  }
+  if (item.severity === 'error') return 'border-l-2 border-l-red-500';
   return '';
 }
 
@@ -98,13 +76,7 @@ function StatusIcon({ item }: { item: ActivityItem }) {
   }
 }
 
-/** Auto-dismiss delay per category (milliseconds). */
-const AUTO_DISMISS_MS: Record<ActivityCategory, number> = {
-  server: 5_000,
-  download: 5_000,
-  info: 10_000,
-  warning: 10_000,
-};
+const AUTO_DISMISS_MS = 5_000;
 
 function ActivityCard({ item }: { item: ActivityItem }) {
   const dismiss = useActivityStore((s) => s.dismissActivity);
@@ -112,15 +84,13 @@ function ActivityCard({ item }: { item: ActivityItem }) {
   const isDownload = item.category === 'download';
   const showProgress = isActive && isDownload && item.legacyType !== 'model-preload';
 
-  // Auto-dismiss completed notifications using category-specific durations.
-  // Persistent warnings are never auto-dismissed.
+  // Auto-dismiss completed notifications. Persistent items are never auto-dismissed.
   useEffect(() => {
     if (item.persistent) return;
     if (item.status !== 'complete' && item.status !== 'error') return;
-    const delay = AUTO_DISMISS_MS[item.category] ?? 5_000;
-    const timer = setTimeout(() => dismiss(item.id), delay);
+    const timer = setTimeout(() => dismiss(item.id), AUTO_DISMISS_MS);
     return () => clearTimeout(timer);
-  }, [item.status, item.id, item.category, item.persistent, dismiss]);
+  }, [item.status, item.id, item.persistent, dismiss]);
 
   return (
     <div
@@ -183,13 +153,7 @@ function ActivityCard({ item }: { item: ActivityItem }) {
 // ─── Main widget ─────────────────────────────────────────────────────────────
 
 export const ActivityNotifications: React.FC = () => {
-  const allItems = useActivityStore((s) => s.items);
-  const prefs = useActivityStore((s) => s.notificationPreferences);
-
-  const items = useMemo(
-    () => allItems.filter((item) => !item.dismissed && prefs[item.category] !== false),
-    [allItems, prefs],
-  );
+  const items = useActivityStore(selectVisibleNotifications);
 
   if (items.length === 0) return null;
 
