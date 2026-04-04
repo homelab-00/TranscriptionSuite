@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "deepwiki": {
+      "type": "http",
+      "url": "https://mcp.deepwiki.com/mcp"
+    },
+    "exa": {
+      "type": "http",
+      "url": "https://mcp.exa.ai/mcp"
+    },
+    "fetch": {
+      "args": ["mcp-server-fetch"],
+      "command": "uvx"
+    },
+    "filesystem": {
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", ""],
+      "command": "npx"
+    },
+    "git": {
+      "args": ["mcp-server-git"],
+      "command": "uvx"
+    },
+    "gitnexus": {
+      "args": ["/home/Bill/Code_Projects/GitNexus/gitnexus/dist/cli/index.js", "mcp"],
+      "command": "node"
+    }
+  }
+}

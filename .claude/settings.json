@@ -1,0 +1,7 @@
+{
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "everything-claude-code@everything-claude-code": true,
+    "github@claude-plugins-official": true
+  }
+}
