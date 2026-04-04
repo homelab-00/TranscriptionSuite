@@ -7,7 +7,6 @@
  */
 
 import {
-  isNemoModel,
   isVibeVoiceASRModel,
   isCanaryModel,
   isParakeetModel,
@@ -432,8 +431,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     id: 'mlx-community/whisper-large-v3-asr-fp16',
     displayName: 'Whisper Large v3',
     family: 'mlx',
-    description:
-      'Whisper large-v3 on Apple Silicon. Highest accuracy (~3 GB).',
+    description: 'Whisper large-v3 on Apple Silicon. Highest accuracy (~3 GB).',
     parameterCount: '1.5B',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-large-v3-asr-fp16',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -485,7 +483,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     id: 'mlx-community/whisper-small-asr-4bit',
     displayName: 'Whisper Small (Q4)',
     family: 'mlx',
-    description: 'Lightweight Whisper small on Apple Silicon. Q4 quantized — smallest footprint (~0.12 GB).',
+    description:
+      'Lightweight Whisper small on Apple Silicon. Q4 quantized — smallest footprint (~0.12 GB).',
     parameterCount: '244M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-small-asr-4bit',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -515,7 +514,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     id: 'mlx-community/whisper-tiny-asr-4bit',
     displayName: 'Whisper Tiny (Q4)',
     family: 'mlx',
-    description: 'Smallest Whisper model on Apple Silicon. Q4 quantized — minimal memory usage (~20 MB).',
+    description:
+      'Smallest Whisper model on Apple Silicon. Q4 quantized — minimal memory usage (~20 MB).',
     parameterCount: '39M',
     huggingfaceUrl: 'https://huggingface.co/mlx-community/whisper-tiny-asr-4bit',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
@@ -550,7 +550,6 @@ export function getModelById(id: string): ModelInfo | undefined {
 /** Detect the display family for an arbitrary model ID. */
 export function detectModelFamily(modelId: string): ModelFamily {
   if (isParakeetModel(modelId) || isCanaryModel(modelId)) return 'nemo';
-  if (isNemoModel(modelId)) return 'nemo';
   // MLX check must come before VibeVoice — mlx-community/VibeVoice-ASR-bf16
   // matches both isMLXModel and isVibeVoiceASRModel.
   if (isMLXParakeetModel(modelId) || isMLXModel(modelId)) return 'mlx';

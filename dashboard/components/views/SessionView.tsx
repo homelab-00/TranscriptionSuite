@@ -706,7 +706,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
     }
   }, [transcription, isLinux]);
 
+  const cancellingRef = useRef(false);
   const handleCancelProcessing = useCallback(async () => {
+    if (cancellingRef.current) return;
+    cancellingRef.current = true;
     try {
       // During recording/connecting the server has no processing job yet —
       // the REST cancel would 404. Only call it during processing.
@@ -722,6 +725,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         window.electronAPI?.audio?.disableSystemAudioLoopback?.();
       }
       transcription.reset();
+      cancellingRef.current = false;
     }
   }, [transcription, isLinux]);
 
