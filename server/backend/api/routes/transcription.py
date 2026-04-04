@@ -268,9 +268,7 @@ async def transcribe_audio(
                         # to segment-level speaker attribution.
                         from server.core.speaker_merge import build_speaker_segments_nowords
 
-                        fallback = build_speaker_segments_nowords(
-                            result.segments, diar_dicts
-                        )
+                        fallback = build_speaker_segments_nowords(result.segments, diar_dicts)
                         if fallback:
                             speakers = {s["speaker"] for s in fallback} - {"UNKNOWN"}
                             result.segments = fallback
@@ -648,9 +646,7 @@ def _run_file_import(
                                 build_speaker_segments_nowords,
                             )
 
-                            fallback = build_speaker_segments_nowords(
-                                result.segments, diar_dicts
-                            )
+                            fallback = build_speaker_segments_nowords(result.segments, diar_dicts)
                             if fallback:
                                 speakers = {s["speaker"] for s in fallback} - {"UNKNOWN"}
                                 result.segments = fallback
@@ -910,8 +906,12 @@ async def retry_transcription(
         )
 
     audio_path = job.get("audio_path")
-    if not audio_path or not Path(audio_path).exists():
-        raise HTTPException(status_code=410, detail="Audio file not available — cannot retry")
+    if not audio_path:
+        raise HTTPException(
+            status_code=410, detail="Audio was not preserved for this job — cannot retry"
+        )
+    if not Path(audio_path).exists():
+        raise HTTPException(status_code=410, detail="Audio file has been deleted — cannot retry")
 
     reset_for_retry(job_id)
     background_tasks.add_task(_run_retry, job_id, audio_path, job, request.app.state)
@@ -982,6 +982,20 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
         # Leave delivered=0 so the result surfaces in the recovery banner.
         # The client calls GET /result/{job_id} to retrieve it, which marks delivered.
         logger.info("Retry transcription complete for job %s", sanitize_log_value(job_id))
+
+    except FileNotFoundError:
+        logger.warning(
+            "Audio file removed before retry could complete for job %s: %s",
+            sanitize_log_value(job_id),
+            sanitize_log_value(audio_path),
+        )
+        try:
+            mark_failed(job_id, "Audio file was removed before retry could complete")
+        except Exception as _mf_err:
+            logger.warning(
+                "Failed to mark retry job %s as failed: %s", sanitize_log_value(job_id), _mf_err
+            )
+        return
 
     except Exception as exc:
         logger.error(

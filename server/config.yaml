@@ -601,3 +601,8 @@ durability:
     # Used by Wave 3 startup recovery. Set in minutes.
     # Default: 10
     orphan_job_timeout_minutes: 10
+
+    # How often (in minutes) to sweep for orphaned jobs while the server is running.
+    # Startup already runs orphan recovery once. Set to 0 to disable periodic sweeps.
+    # Default: 30
+    orphan_sweep_interval_minutes: 30

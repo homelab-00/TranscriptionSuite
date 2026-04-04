@@ -110,6 +110,52 @@ async def recover_orphaned_jobs(timeout_minutes: int) -> None:
         logger.error("Orphan job recovery failed — continuing startup", exc_info=True)
 
 
+async def periodic_orphan_sweep(timeout_minutes: int, interval_minutes: int) -> None:
+    """Periodically sweep for orphaned 'processing' jobs and mark them failed.
+
+    Unlike ``recover_orphaned_jobs`` (which runs once at startup), this runs on
+    a repeating schedule so that orphans are caught even when the server runs
+    continuously without restarts.
+
+    Does NOT run immediately — startup already calls ``recover_orphaned_jobs``.
+    If *interval_minutes* <= 0, logs that the sweep is disabled and returns.
+
+    Follows the same cancel-safe pattern as
+    :func:`server.database.audio_cleanup.periodic_cleanup`.
+    """
+    if interval_minutes <= 0:
+        logger.info("Periodic orphan sweep disabled (interval_minutes=%d)", interval_minutes)
+        return
+
+    interval_seconds = interval_minutes * 60
+    logger.info(
+        "Periodic orphan sweep armed (every %dm, timeout=%dm)", interval_minutes, timeout_minutes
+    )
+
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+        except asyncio.CancelledError:
+            logger.info("Periodic orphan sweep cancelled (shutdown)")
+            return
+        try:
+            from server.database.job_repository import get_orphaned_jobs
+            from server.database.job_repository import mark_failed as _mark_failed_repo
+
+            orphaned = get_orphaned_jobs(timeout_minutes)
+            for job in orphaned:
+                job_id = job.get("id", "")
+                audio_path = job.get("audio_path")
+                if audio_path and Path(audio_path).exists():
+                    reason = "Orphan sweep — use retry to re-transcribe"
+                else:
+                    reason = "Orphan sweep — audio not preserved"
+                _mark_failed_repo(job_id, reason)
+                logger.info("Orphan sweep: marked job %s failed (%s)", job_id, reason)
+        except Exception:
+            logger.exception("Periodic orphan sweep failed — will retry next interval")
+
+
 # Check if TLS mode is enabled (requires authentication for all routes)
 TLS_MODE = os.environ.get("TLS_ENABLED", "false").lower() == "true"
 
@@ -361,6 +407,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("TranscriptionSuite server starting...")
     emit_event("lifespan-start", "server", "Starting server...", phase="lifespan")
 
+    _orphan_sweep_task = None
+
     config = get_config()
     _log_time("config loaded")
 
@@ -424,6 +472,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         _recordings_dir,
         _max_age_days,
         _cleanup_interval_hours,
+    )
+
+    # Schedule periodic orphan sweep in background (non-blocking, Wave 3)
+    _orphan_sweep_interval = durability_config.get("orphan_sweep_interval_minutes", 30)
+    _orphan_sweep_task = asyncio.create_task(
+        periodic_orphan_sweep(_orphan_timeout, _orphan_sweep_interval)
+    )
+    _log_time("orphan sweep scheduled (async, periodic)")
+    logger.info(
+        "Orphan sweep scheduled (timeout=%dm, interval=%dm)",
+        _orphan_timeout,
+        _orphan_sweep_interval,
     )
 
     # Initialize token store (generates admin token on first run)
@@ -549,6 +609,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         _cleanup_task.cancel()
         try:
             await _cleanup_task
+        except asyncio.CancelledError:
+            pass
+
+    # Cancel periodic orphan sweep task
+    if _orphan_sweep_task and not _orphan_sweep_task.done():
+        _orphan_sweep_task.cancel()
+        try:
+            await _orphan_sweep_task
         except asyncio.CancelledError:
             pass
 

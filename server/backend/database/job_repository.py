@@ -184,7 +184,8 @@ def reset_for_retry(job_id: str) -> None:
                 completed_at = NULL,
                 result_text = NULL,
                 result_json = NULL,
-                delivered = 0
+                delivered = 0,
+                created_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
             (job_id,),
