@@ -1212,6 +1212,13 @@ def main() -> int:
 
     if require_hf_token and not hf_token:
         log("HF token required by configuration but not provided")
+        emit_event(
+            "bootstrap-env",
+            "server",
+            "HuggingFace token required but not provided",
+            status="error",
+            phase="bootstrap",
+        )
         return 1
 
     # Compute extras to include in uv sync based on env flags.
@@ -1274,6 +1281,13 @@ def main() -> int:
     venv_python = venv_dir / "bin/python"
     if not venv_python.exists():
         log("Runtime Python not found after bootstrap")
+        emit_event(
+            "bootstrap-deps",
+            "server",
+            "Runtime Python not found after dependency install",
+            status="error",
+            phase="bootstrap",
+        )
         return 1
 
     model_config_start = time.perf_counter()
