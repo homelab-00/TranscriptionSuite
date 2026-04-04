@@ -2099,9 +2099,10 @@ function unsubscribeFromDownloadEvents(callback: (event: BootstrapDownloadEvent)
  * Check for NVIDIA GPU + container toolkit availability.
  * Returns { gpu: boolean, toolkit: boolean }.
  */
-async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean }> {
+async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean; vulkan: boolean }> {
   let gpu = false;
   let toolkit = false;
+  let vulkan = false;
   try {
     const gpuName = await exec('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader']);
     gpu = true;
@@ -2148,7 +2149,24 @@ async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean }> {
       console.warn(`[DockerManager] NVIDIA container toolkit: not found (${hint})`);
     }
   }
-  return { gpu, toolkit };
+
+  // Detect non-NVIDIA GPU with DRI support (AMD/Intel) — suggests Vulkan profile.
+  // Only relevant on Linux where /dev/dri is the kernel DRI device node.
+  if (!gpu && process.platform === 'linux') {
+    try {
+      const fs = await import('fs');
+      vulkan = fs.existsSync('/dev/dri/renderD128');
+      if (vulkan) {
+        console.log(
+          '[DockerManager] Non-NVIDIA GPU detected: /dev/dri/renderD128 present (Vulkan candidate)',
+        );
+      }
+    } catch {
+      // fs access failed — leave vulkan false
+    }
+  }
+
+  return { gpu, toolkit, vulkan };
 }
 
 // ─── Model Cache Inspection ─────────────────────────────────────────────────

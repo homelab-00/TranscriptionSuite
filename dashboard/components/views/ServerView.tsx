@@ -137,7 +137,8 @@ function getString(value: unknown): string | null {
 }
 
 // Session-level GPU detection cache — survives view unmount/remount
-let cachedGpuInfo: { gpu: boolean; toolkit: boolean } | null | undefined = undefined; // undefined = not yet checked
+let cachedGpuInfo: { gpu: boolean; toolkit: boolean; vulkan: boolean } | null | undefined =
+  undefined; // undefined = not yet checked
 
 function normalizeModelName(value: string): string {
   return value.trim().toLowerCase();
@@ -960,9 +961,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   const [setupDismissed, setSetupDismissed] = useState(true); // hide until loaded
   const [setupExpanded, setSetupExpanded] = useState(true);
-  const [gpuInfo, setGpuInfo] = useState<{ gpu: boolean; toolkit: boolean } | null>(
-    cachedGpuInfo ?? null,
-  );
+  const [gpuInfo, setGpuInfo] = useState<{
+    gpu: boolean;
+    toolkit: boolean;
+    vulkan: boolean;
+  } | null>(cachedGpuInfo ?? null);
 
   // Load dismissed state and GPU info on mount (GPU check cached per session)
   useEffect(() => {
@@ -981,11 +984,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (cachedGpuInfo === undefined && api?.docker?.checkGpu) {
       api.docker
         .checkGpu()
-        .then((info: { gpu: boolean; toolkit: boolean }) => {
+        .then((info: { gpu: boolean; toolkit: boolean; vulkan: boolean }) => {
           cachedGpuInfo = info;
           setGpuInfo(info);
           // Auto-set runtime profile based on hardware detection (only if not already configured).
-          // Priority: Metal (Apple Silicon) > NVIDIA GPU > CPU
+          // Priority: Metal (Apple Silicon) > NVIDIA GPU > Vulkan (AMD/Intel) > CPU
           api.config
             ?.get('server.runtimeProfile')
             .then((val: unknown) => {
@@ -1005,6 +1008,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     .catch(() => {});
                 } else if (info.gpu && info.toolkit) {
                   handleRuntimeProfileChange('gpu');
+                } else if (info.vulkan) {
+                  handleRuntimeProfileChange('vulkan');
                 } else {
                   handleRuntimeProfileChange('cpu');
                 }
