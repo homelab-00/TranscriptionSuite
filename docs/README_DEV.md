@@ -222,6 +222,7 @@ Technical documentation for developing and building TranscriptionSuite.
     - [15.7 Tail the Structured Log](#157-tail-the-structured-log)
     - [15.8 Confirming MLX is Active](#158-confirming-mlx-is-active)
     - [15.9 Troubleshooting (MLX)](#159-troubleshooting-mlx)
+    - [15.10 Bare-Metal Build Script](#1510-bare-metal-build-script)
   - [16. STT Benchmark Tool](#16-stt-benchmark-tool)
     - [16.1 Overview](#161-overview)
     - [16.2 Usage](#162-usage)
@@ -718,6 +719,9 @@ uv sync
 | **Linux** | Electron + electron-builder | AppImage | None |
 | **Windows** | Electron + electron-builder | NSIS installer | None |
 | **macOS** | Electron + electron-builder | DMG + ZIP (arm64) | Python 3 + pip (for `dmgbuild`, see §13.7) |
+| **macOS Metal** | Local build script | Unpacked `.app` (~5 GB) | Apple Silicon Mac, Homebrew (see §15.10) |
+
+> **Note:** The macOS Metal build is **not** part of the CI release pipeline. It bundles a full Python 3.13 venv with MLX/PyTorch dependencies into the `.app`, making it ~5 GB — too large for a GitHub Release artifact. Users build it locally via `build/setup-macos-metal.sh`. See [§15.10](#1510-bare-metal-build-script) for details.
 
 ### 5.3 Linux AppImage
 
@@ -3547,6 +3551,62 @@ If `mlx.available` is `false`, check `mlx.reason`:
 | Diarization falls back to CPU | MPS memory pressure | Normal; use `device: cpu` in `config.yaml` to force |
 | `DATA_DIR` not found errors | Path not created | `mkdir -p "$DATA_DIR/logs" "$DATA_DIR/audio" "$DATA_DIR/tokens"` |
 | Server won't start on port 9786 | Port in use | `lsof -i :9786` then kill or change `--port` |
+
+---
+
+### 15.10 Bare-Metal Build Script
+
+`build/setup-macos-metal.sh` is a local, user-facing setup script that produces a **self-contained** `TranscriptionSuite.app` with the Python/MLX backend embedded inside. It is not part of the CI release pipeline (see the note in [§5.2](#52-build-matrix) for why).
+
+#### How it differs from the CI macOS build
+
+| | `build-electron-mac.sh` (CI — §5.5) | `setup-macos-metal.sh` (local — this section) |
+|---|---|---|
+| **Purpose** | Produce release artifacts for GitHub | One-command local setup for Metal users |
+| **Runner** | GitHub Actions `macos-14` | User's own Apple Silicon Mac |
+| **electron-builder target** | `--mac dmg zip` | `--mac dir --arm64` (unpacked `.app`) |
+| **Python backend** | Not bundled (server runs in Docker) | Full Python 3.13 venv + MLX baked into `Contents/Resources/backend/` |
+| **System deps** | Assumes CI environment | Installs Homebrew, uv, Node.js, ffmpeg if missing |
+| **Output size** | ~200 MB (DMG + ZIP) | ~5 GB (venv + MLX + PyTorch) |
+| **Distributable** | Yes (GitHub Release artifact) | No (local only) |
+
+#### Usage
+
+```bash
+# Build and leave the .app in the repo root
+bash build/setup-macos-metal.sh
+
+# Build and install directly to /Applications
+bash build/setup-macos-metal.sh --install
+```
+
+The script performs these steps:
+
+1. Verifies Apple Silicon (`arm64`) and macOS
+2. Installs system dependencies via Homebrew (uv, Node.js ≥ 20, ffmpeg)
+3. Generates `logo.icns` from `docs/assets/logo.png` if missing
+4. Runs `npm ci` + `npm run build:electron` in `dashboard/`
+5. Packages with `npx electron-builder --mac dir --arm64` (unpacked `.app`, no DMG)
+6. Copies the `.app` to its final location (repo root or `/Applications`)
+7. Creates a Python 3.13 venv inside `<app>/Contents/Resources/backend/.venv`
+8. Installs all server dependencies with `uv sync --extra mlx --no-editable`
+
+> **Why `--no-editable`?** This bakes the server package into `site-packages` instead of creating a `.pth` symlink back to the source tree. The resulting `.app` is fully self-contained — it does not depend on the cloned repo at runtime.
+
+> **Why is the venv created after the copy?** The venv is created at the _final_ app location so that any absolute paths written during `uv sync` (e.g. the `uvicorn` console-script shebang) point to the correct path. In practice, `mlxServerManager.ts` invokes `python -m uvicorn` instead of the console script, but in-place creation avoids surprises.
+
+#### Entitlements
+
+PR #52 also added `build/entitlements.mac.plist`, which grants the hardened-runtime entitlements needed for the bundled `.app`:
+
+| Entitlement | Reason |
+|-------------|--------|
+| `com.apple.security.cs.allow-jit` | Electron V8 JIT compilation |
+| `com.apple.security.cs.allow-unsigned-executable-memory` | Electron runtime requirement |
+| `com.apple.security.cs.disable-library-validation` | Load Python dylibs from the embedded venv |
+| `com.apple.security.device.audio-input` | Microphone access for live transcription |
+
+> **Note:** These entitlements are not currently referenced by the CI macOS build (`build-electron-mac.sh`), which does not code-sign the app.
 
 ---
 
