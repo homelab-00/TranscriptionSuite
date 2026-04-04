@@ -405,21 +405,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         _log_time("backup check scheduled (async)")
         logger.info(f"Backup check scheduled (max_age={max_age_hours}h, max_backups={max_backups})")
 
-    # Schedule audio cleanup in background (non-blocking, Wave 2)
+    # Schedule periodic audio cleanup in background (non-blocking, Wave 2)
     durability_config = config.config.get("durability", {})
     _recordings_dir = (
         durability_config.get("recordings_dir", "/data/recordings") or "/data/recordings"
     )
     _max_age_days = durability_config.get("audio_retention_days", 7)
+    _cleanup_interval_hours = durability_config.get("cleanup_interval_hours", 24)
 
-    from server.database.audio_cleanup import cleanup_old_recordings
+    from server.database.audio_cleanup import periodic_cleanup
 
-    asyncio.create_task(cleanup_old_recordings(_recordings_dir, _max_age_days))
-    _log_time("audio cleanup scheduled (async)")
+    _cleanup_task = asyncio.create_task(
+        periodic_cleanup(_recordings_dir, _max_age_days, _cleanup_interval_hours)
+    )
+    _log_time("audio cleanup scheduled (async, periodic)")
     logger.info(
-        "Audio cleanup scheduled (recordings_dir=%s, retention=%d days)",
+        "Audio cleanup scheduled (recordings_dir=%s, retention=%d days, interval=%dh)",
         _recordings_dir,
         _max_age_days,
+        _cleanup_interval_hours,
     )
 
     # Initialize token store (generates admin token on first run)
@@ -539,6 +543,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Shutdown
     logger.info("Server shutting down...")
+
+    # Cancel periodic audio cleanup task
+    if _cleanup_task and not _cleanup_task.done():
+        _cleanup_task.cancel()
+        try:
+            await _cleanup_task
+        except asyncio.CancelledError:
+            pass
 
     # Graceful drain: stop any active recording sessions before killing the model.
     # Wave 1 already persisted results to DB, so a timeout just means the result

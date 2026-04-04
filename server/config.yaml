@@ -592,6 +592,11 @@ durability:
     # Default: 7
     audio_retention_days: 7
 
+    # How often (in hours) to re-run audio cleanup while the server is running.
+    # Cleanup always runs once at startup. Set to 0 for startup-only (no repeats).
+    # Default: 24
+    cleanup_interval_hours: 24
+
     # Jobs stuck in 'processing' longer than this are considered orphaned on startup.
     # Used by Wave 3 startup recovery. Set in minutes.
     # Default: 10

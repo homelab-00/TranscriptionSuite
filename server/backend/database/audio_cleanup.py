@@ -8,10 +8,50 @@ it records that a transcription happened. Only the audio file is removed.
 Never deletes audio for failed or undelivered jobs.
 """
 
+import asyncio
 import logging
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+async def periodic_cleanup(
+    recordings_dir: str, max_age_days: int, interval_hours: int = 24
+) -> None:
+    """Run cleanup_old_recordings on a repeating schedule.
+
+    First run executes immediately (preserving startup cleanup behavior).
+    Subsequent runs repeat every *interval_hours*.  If *interval_hours* <= 0,
+    runs once and returns (backwards-compatible one-shot mode).
+
+    Designed to be launched via ``asyncio.create_task`` and cancelled on
+    shutdown via ``task.cancel()``.
+    """
+    # Always run once immediately
+    try:
+        await cleanup_old_recordings(recordings_dir, max_age_days)
+    except Exception:
+        logger.exception("Initial audio cleanup failed — periodic retries will continue")
+
+    if interval_hours <= 0:
+        logger.info("Periodic audio cleanup disabled (interval_hours=%d)", interval_hours)
+        return
+
+    interval_seconds = interval_hours * 3600
+    logger.info(
+        "Periodic audio cleanup armed (every %dh, retention=%dd)", interval_hours, max_age_days
+    )
+
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+        except asyncio.CancelledError:
+            logger.info("Periodic audio cleanup cancelled (shutdown)")
+            return
+        try:
+            await cleanup_old_recordings(recordings_dir, max_age_days)
+        except Exception:
+            logger.exception("Periodic audio cleanup failed — will retry next interval")
 
 
 async def cleanup_old_recordings(recordings_dir: str, max_age_days: int) -> None:
