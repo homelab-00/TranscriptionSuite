@@ -140,3 +140,37 @@ export function renderAss(response: TranscriptionResponse, title = 'Export'): st
 export function renderTxt(response: TranscriptionResponse): string {
   return response.text;
 }
+
+/**
+ * Determine the output filename and rendered content for a transcription result.
+ *
+ * Centralizes the hideTimestamps / diarization / format branching that was
+ * previously duplicated in importQueueStore and useSessionImportQueue.
+ */
+export function resolveTranscriptionOutput(
+  filename: string,
+  transcription: TranscriptionResponse,
+  options: {
+    hideTimestamps: boolean;
+    diarizationPerformed: boolean;
+    diarizedFormat: 'srt' | 'ass';
+  },
+): { outputFilename: string; content: string } {
+  const stem = filename.replace(/\.[^.]+$/, '');
+
+  if (options.hideTimestamps) {
+    return { outputFilename: `${stem}.txt`, content: renderTxt(transcription) };
+  }
+
+  const outputFilename = options.diarizationPerformed
+    ? `${stem}.${options.diarizedFormat}`
+    : `${stem}.txt`;
+
+  const content = options.diarizationPerformed
+    ? options.diarizedFormat === 'ass'
+      ? renderAss(transcription, stem)
+      : renderSrt(transcription)
+    : renderTxt(transcription);
+
+  return { outputFilename, content };
+}

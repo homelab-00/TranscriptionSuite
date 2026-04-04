@@ -15,6 +15,10 @@ vi.mock('../services/transcriptionFormatters', () => ({
   renderSrt: vi.fn(() => 'srt-content'),
   renderAss: vi.fn(() => 'ass-content'),
   renderTxt: vi.fn(() => 'txt-content'),
+  resolveTranscriptionOutput: vi.fn(() => ({
+    outputFilename: 'test.txt',
+    content: 'txt-content',
+  })),
 }));
 
 // Stub window.electronAPI

@@ -15,7 +15,7 @@ import type {
   JobTrackerResult,
   UploadResponse,
 } from '../api/types';
-import { renderSrt, renderAss, renderTxt } from '../services/transcriptionFormatters';
+import { resolveTranscriptionOutput } from '../services/transcriptionFormatters';
 import { getConfig } from '../config/store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -161,16 +161,6 @@ function nextJobId(type: ImportJobType): string {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function buildOutputFilename(
-  audioFilename: string,
-  diarizationPerformed: boolean,
-  diarizedFormat: 'srt' | 'ass' = 'srt',
-): string {
-  const stem = audioFilename.replace(/\.[^.]+$/, '');
-  if (!diarizationPerformed) return `${stem}.txt`;
-  return `${stem}.${diarizedFormat}`;
-}
-
 function browserDownload(filename: string, content: string): void {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -277,19 +267,11 @@ async function processSessionJob(
 
   const { sessionConfig } = store.getState();
   const hideTimestamps = (await getConfig<boolean>('output.hideTimestamps')) ?? false;
-  const diarizationPerformed = result.diarization?.performed ?? false;
-  const diarizedFormat = sessionConfig.diarizedFormat ?? 'srt';
-  const outputFilename = hideTimestamps
-    ? `${filename.replace(/\.[^.]+$/, '')}.txt`
-    : buildOutputFilename(filename, diarizationPerformed, diarizedFormat);
-  const stem = filename.replace(/\.[^.]+$/, '');
-  const content = hideTimestamps
-    ? renderTxt(result.transcription)
-    : diarizationPerformed
-      ? diarizedFormat === 'ass'
-        ? renderAss(result.transcription, stem)
-        : renderSrt(result.transcription)
-      : renderTxt(result.transcription);
+  const { outputFilename, content } = resolveTranscriptionOutput(filename, result.transcription, {
+    hideTimestamps,
+    diarizationPerformed: result.diarization?.performed ?? false,
+    diarizedFormat: sessionConfig.diarizedFormat ?? 'srt',
+  });
 
   // Update status to 'writing'
   store.setState((s) => ({

@@ -11,7 +11,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { apiClient } from '../api/client';
 import type { TranscriptionUploadOptions, FileImportJobResult } from '../api/types';
-import { renderSrt, renderAss, renderTxt } from '../services/transcriptionFormatters';
+import { resolveTranscriptionOutput } from '../services/transcriptionFormatters';
 import { getConfig } from '../config/store';
 
 export type SessionImportJobStatus = 'pending' | 'processing' | 'writing' | 'success' | 'error';
@@ -71,19 +71,6 @@ interface UseSessionImportQueueConfig {
 let jobIdCounter = 0;
 function nextJobId(): string {
   return `session-import-${Date.now()}-${++jobIdCounter}`;
-}
-
-/**
- * Derive output filename from the audio filename and format.
- */
-function buildOutputFilename(
-  audioFilename: string,
-  diarizationPerformed: boolean,
-  diarizedFormat: 'srt' | 'ass' = 'srt',
-): string {
-  const stem = audioFilename.replace(/\.[^.]+$/, '');
-  if (!diarizationPerformed) return `${stem}.txt`;
-  return `${stem}.${diarizedFormat}`;
 }
 
 /**
@@ -197,19 +184,15 @@ export function useSessionImportQueue(
 
           // Determine output format based on whether diarization was performed
           const hideTimestamps = (await getConfig<boolean>('output.hideTimestamps')) ?? false;
-          const diarizationPerformed = result.diarization?.performed ?? false;
-          const diarizedFormat = configRef.current.diarizedFormat ?? 'srt';
-          const outputFilename = hideTimestamps
-            ? `${file.name.replace(/\.[^.]+$/, '')}.txt`
-            : buildOutputFilename(file.name, diarizationPerformed, diarizedFormat);
-          const stem = file.name.replace(/\.[^.]+$/, '');
-          const content = hideTimestamps
-            ? renderTxt(result.transcription)
-            : diarizationPerformed
-              ? diarizedFormat === 'ass'
-                ? renderAss(result.transcription, stem)
-                : renderSrt(result.transcription)
-              : renderTxt(result.transcription);
+          const { outputFilename, content } = resolveTranscriptionOutput(
+            file.name,
+            result.transcription,
+            {
+              hideTimestamps,
+              diarizationPerformed: result.diarization?.performed ?? false,
+              diarizedFormat: configRef.current.diarizedFormat ?? 'srt',
+            },
+          );
 
           // Update status to 'writing'
           updateJobs((prev) =>
