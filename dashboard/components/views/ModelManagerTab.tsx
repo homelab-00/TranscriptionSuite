@@ -35,7 +35,7 @@ const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 /** Families that require Docker and do not work in Metal mode. */
-const DOCKER_ONLY_FAMILIES: Set<ModelFamily> = new Set(['nemo', 'vibevoice']);
+const DOCKER_ONLY_FAMILIES: Set<ModelFamily> = new Set(['nemo', 'vibevoice', 'whispercpp']);
 
 export interface ModelManagerTabProps {
   mainModelSelection: string;
@@ -88,6 +88,13 @@ const FAMILY_SECTIONS: FamilySectionConfig[] = [
     borderClass: 'border-l-blue-400',
     badgeClass: 'bg-blue-500/10 text-blue-400',
     headerTextClass: 'text-blue-400',
+  },
+  {
+    family: 'whispercpp',
+    label: 'Whisper.cpp (Vulkan)',
+    borderClass: 'border-l-purple-400',
+    badgeClass: 'bg-purple-500/10 text-purple-400',
+    headerTextClass: 'text-purple-400',
   },
   {
     family: 'mlx',
