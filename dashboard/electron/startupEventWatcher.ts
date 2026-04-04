@@ -98,6 +98,12 @@ export class StartupEventWatcher {
     try {
       const fd = fs.openSync(this.filePath, 'r');
       const stat = fs.fstatSync(fd);
+
+      // File was truncated (e.g. container restart) — reset to beginning
+      if (stat.size < this.offset) {
+        this.offset = 0;
+      }
+
       const bytesToRead = stat.size - this.offset;
       if (bytesToRead <= 0) {
         fs.closeSync(fd);
