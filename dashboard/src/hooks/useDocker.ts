@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import type { RuntimeProfile } from '../types/runtime';
 
 // ─── Types (mirrors electron.d.ts shapes) ───────────────────────────────────
 
@@ -108,8 +109,6 @@ export interface UseDockerReturn {
   // Re-run Docker availability and image detection
   retryDetection: () => Promise<void>;
 }
-
-type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan';
 
 const api = () => (window as any).electronAPI?.docker as ElectronAPI['docker'] | undefined;
 const appApi = () => (window as any).electronAPI?.app as ElectronAPI['app'] | undefined;

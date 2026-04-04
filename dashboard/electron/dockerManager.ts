@@ -110,6 +110,7 @@ function getComposeDir(): string {
   return composeDir;
 }
 
+// Keep in sync with src/types/runtime.ts (canonical) and src/types/electron.d.ts
 /** Runtime profile: GPU (NVIDIA CUDA), Vulkan (AMD/Intel GPU), CPU-only, or Metal (Apple Silicon MLX) */
 export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';

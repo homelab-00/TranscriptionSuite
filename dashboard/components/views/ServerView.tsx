@@ -57,8 +57,7 @@ import {
 import { getModelById } from '../../src/services/modelRegistry';
 import type { OptionMeta } from '../ui/CustomSelect';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
-
-type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
+import type { RuntimeProfile } from '../../src/types/runtime';
 
 const MLX_DEFAULT_MODEL = 'mlx-community/parakeet-tdt-0.6b-v3';
 
@@ -497,7 +496,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         useActivityStore.getState().updateActivity('sidecar-vulkan', { status: 'dismissed' });
       }
       // Warn if Metal selected on unsupported hardware (still allow the selection)
-      if (profile === 'metal' && !(isAppleSilicon && (mlxFeature === undefined || metalSupported))) {
+      if (
+        profile === 'metal' &&
+        !(isAppleSilicon && (mlxFeature === undefined || metalSupported))
+      ) {
         toast.error(
           mlxFeature?.reason === 'not_apple_silicon' || !isAppleSilicon
             ? 'Metal requires Apple Silicon (M-series Mac).'

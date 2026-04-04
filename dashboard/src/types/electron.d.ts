@@ -15,7 +15,8 @@ type TrayState =
   | 'error'
   | 'disconnected';
 
-type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan';
+// Keep in sync with src/types/runtime.ts (canonical) and electron/preload.ts
+type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 type ClientLogType = 'info' | 'success' | 'error' | 'warning';
 

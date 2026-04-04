@@ -39,6 +39,7 @@ import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 import type { AuthToken } from '../../src/api/types';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { ServerConfigEditor } from './ServerConfigEditor';
+import type { RuntimeProfile } from '../../src/types/runtime';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -126,7 +127,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     updateChecksEnabled: false,
     updateCheckIntervalMode: '24h',
     updateCheckCustomHours: 24,
-    runtimeProfile: 'gpu' as 'gpu' | 'cpu' | 'vulkan' | 'metal',
+    runtimeProfile: 'gpu' as RuntimeProfile,
     pasteAtCursor: false,
   });
   const [shortcutSettings, setShortcutSettings] = useState<{
@@ -260,8 +261,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 updateCheckCustomHours:
                   (cfg['app.updateCheckCustomHours'] as number) ?? prev.updateCheckCustomHours,
                 runtimeProfile:
-                  (cfg['server.runtimeProfile'] as 'gpu' | 'cpu' | 'vulkan' | 'metal') ??
-                  prev.runtimeProfile,
+                  (cfg['server.runtimeProfile'] as RuntimeProfile) ?? prev.runtimeProfile,
                 pasteAtCursor: (cfg['app.pasteAtCursor'] as boolean) ?? prev.pasteAtCursor,
               }));
               setShortcutSettings((prev) => ({

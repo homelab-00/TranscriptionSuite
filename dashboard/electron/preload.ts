@@ -29,6 +29,7 @@ export interface TrayMenuState {
   isStandby?: boolean;
 }
 
+// Keep in sync with src/types/runtime.ts (canonical) and src/types/electron.d.ts
 export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 export type ClientLogType = 'info' | 'success' | 'error' | 'warning';

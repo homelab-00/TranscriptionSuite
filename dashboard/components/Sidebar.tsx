@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import logoUrl from '../../docs/assets/logo.png';
 import { StatusLight } from './ui/StatusLight';
+import type { RuntimeProfile } from '../src/types/runtime';
 
 interface SidebarProps {
   currentView: View;
@@ -32,7 +33,7 @@ interface SidebarProps {
   containerHealth?: string;
   clientRunning: boolean;
   gpuError?: string;
-  runtimeProfile?: 'gpu' | 'cpu' | 'vulkan' | 'metal';
+  runtimeProfile?: RuntimeProfile;
   serverReachable?: boolean;
   mlxProcessAlive?: boolean;
 }

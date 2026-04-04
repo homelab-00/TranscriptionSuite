@@ -54,13 +54,15 @@ import { SessionTab } from '../../types';
 import { SessionImportTab } from './SessionImportTab';
 import { useImportQueueStore } from '../../src/stores/importQueueStore';
 import { toast } from 'sonner';
+import type { RuntimeProfile } from '../../src/types/runtime';
+
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
   clientRunning: boolean;
   setClientRunning: (running: boolean) => void;
   onStartServer: (
     mode: 'local' | 'remote',
-    runtimeProfile: 'gpu' | 'cpu' | 'vulkan' | 'metal',
+    runtimeProfile: RuntimeProfile,
     imageTag?: string,
     models?: {
       mainTranscriberModel?: string;
@@ -98,7 +100,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [monitorVolumePct, setMonitorVolumePct] = useState<number | null>(null);
 
   // Runtime profile (read from persisted config)
-  const [runtimeProfile, setRuntimeProfile] = useState<'gpu' | 'cpu' | 'vulkan' | 'metal'>('gpu');
+  const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('gpu');
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (api?.config) {
