@@ -592,6 +592,11 @@ durability:
     # Default: 7
     audio_retention_days: 7
 
+    # Whether to run periodic audio cleanup. Set to false to disable cleanup
+    # entirely (audio files are kept forever regardless of audio_retention_days).
+    # Default: true
+    cleanup_enabled: true
+
     # How often (in hours) to re-run audio cleanup while the server is running.
     # Cleanup always runs once at startup. Set to 0 for startup-only (no repeats).
     # Default: 24

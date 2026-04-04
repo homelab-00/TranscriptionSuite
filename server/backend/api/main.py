@@ -407,6 +407,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("TranscriptionSuite server starting...")
     emit_event("lifespan-start", "server", "Starting server...", phase="lifespan")
 
+    _cleanup_task = None
     _orphan_sweep_task = None
 
     config = get_config()
@@ -455,24 +456,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Schedule periodic audio cleanup in background (non-blocking, Wave 2)
     durability_config = config.config.get("durability", {})
-    _recordings_dir = (
-        durability_config.get("recordings_dir", "/data/recordings") or "/data/recordings"
-    )
-    _max_age_days = durability_config.get("audio_retention_days", 7)
-    _cleanup_interval_hours = durability_config.get("cleanup_interval_hours", 24)
+    _cleanup_enabled = durability_config.get("cleanup_enabled", True)
 
-    from server.database.audio_cleanup import periodic_cleanup
+    if _cleanup_enabled:
+        _recordings_dir = (
+            durability_config.get("recordings_dir", "/data/recordings") or "/data/recordings"
+        )
+        _max_age_days = durability_config.get("audio_retention_days", 7)
+        _cleanup_interval_hours = durability_config.get("cleanup_interval_hours", 24)
 
-    _cleanup_task = asyncio.create_task(
-        periodic_cleanup(_recordings_dir, _max_age_days, _cleanup_interval_hours)
-    )
-    _log_time("audio cleanup scheduled (async, periodic)")
-    logger.info(
-        "Audio cleanup scheduled (recordings_dir=%s, retention=%d days, interval=%dh)",
-        _recordings_dir,
-        _max_age_days,
-        _cleanup_interval_hours,
-    )
+        from server.database.audio_cleanup import periodic_cleanup
+
+        _cleanup_task = asyncio.create_task(
+            periodic_cleanup(_recordings_dir, _max_age_days, _cleanup_interval_hours)
+        )
+        _log_time("audio cleanup scheduled (async, periodic)")
+        logger.info(
+            "Audio cleanup scheduled (recordings_dir=%s, retention=%d days, interval=%dh)",
+            _recordings_dir,
+            _max_age_days,
+            _cleanup_interval_hours,
+        )
+    else:
+        logger.info("Audio cleanup disabled (cleanup_enabled=false)")
 
     # Schedule periodic orphan sweep in background (non-blocking, Wave 3)
     _orphan_sweep_interval = durability_config.get("orphan_sweep_interval_minutes", 30)
