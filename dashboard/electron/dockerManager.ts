@@ -1321,6 +1321,11 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
       composeEnv['WHISPERCPP_MODEL'] = whispercppModel;
       envUpdates['WHISPERCPP_MODEL'] = whispercppModel;
     }
+  } else {
+    // Clear stale vulkan env vars from a previous profile switch so they
+    // don't linger in the .env file.
+    envUpdates['WHISPERCPP_SERVER_URL'] = '';
+    envUpdates['WHISPERCPP_MODEL'] = '';
   }
 
   upsertComposeEnvValues(envUpdates);
