@@ -632,7 +632,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   );
 
   // Helpers for main transcription controls
-  const _isRecording = transcription.status === 'recording'; // codeql[js/unused-local-variable] — reserved for upcoming recording-state UI
+  const isRecording = transcription.status === 'recording';
   const isProcessing = transcription.status === 'processing';
   const isConnecting = transcription.status === 'connecting';
   const canStartRecording =
@@ -706,11 +706,17 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const handleCancelProcessing = useCallback(async () => {
     try {
       await apiClient.cancelTranscription();
-      transcription.reset();
     } catch (err) {
       console.error('Failed to cancel transcription:', err);
+    } finally {
+      if (isLinux) {
+        window.electronAPI?.audio?.removeMonitorLoopback?.();
+      } else {
+        window.electronAPI?.audio?.disableSystemAudioLoopback?.();
+      }
+      transcription.reset();
     }
-  }, [transcription]);
+  }, [transcription, isLinux]);
 
   // Copy transcription result to clipboard
   const handleCopyTranscription = useCallback(() => {
@@ -1491,7 +1497,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                                 : 'Processing...'
                               : 'Stop Recording'}
                           </Button>
-                          {isProcessing && (
+                          {(isConnecting || isRecording || isProcessing) && (
                             <Button
                               variant="secondary"
                               className="shrink-0"
