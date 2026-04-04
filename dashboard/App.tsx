@@ -344,6 +344,7 @@ const AppInner: React.FC = () => {
         mainTranscriberModel?: string;
         liveTranscriberModel?: string;
         diarizationModel?: string;
+        whispercppModel?: string;
       },
     ) => {
       // Bare-metal mode: server is managed externally (native process). Skip Docker entirely.
@@ -595,6 +596,7 @@ const AppInner: React.FC = () => {
             mainTranscriberModel: selectedMainModel,
             liveTranscriberModel: selectedLiveModel,
             ...(models?.diarizationModel ? { diarizationModel: models.diarizationModel } : {}),
+            ...(models?.whispercppModel ? { whispercppModel: models.whispercppModel } : {}),
           },
         );
       } finally {

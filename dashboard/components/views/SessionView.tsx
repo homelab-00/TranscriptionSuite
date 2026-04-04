@@ -68,6 +68,7 @@ interface SessionViewProps {
       mainTranscriberModel?: string;
       liveTranscriberModel?: string;
       diarizationModel?: string;
+      whispercppModel?: string;
     },
   ) => Promise<void>;
   startupFlowPending: boolean;

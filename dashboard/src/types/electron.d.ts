@@ -40,6 +40,7 @@ interface StartContainerOptions {
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;
+  whispercppModel?: string;
 }
 
 interface TrayMenuState {

@@ -46,6 +46,7 @@ export interface StartContainerOnboardingOptions {
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;
+  whispercppModel?: string;
 }
 
 export interface CleanAllOptions {
