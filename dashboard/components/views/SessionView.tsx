@@ -708,7 +708,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   const handleCancelProcessing = useCallback(async () => {
     try {
-      await apiClient.cancelTranscription();
+      // During recording/connecting the server has no processing job yet —
+      // the REST cancel would 404. Only call it during processing.
+      if (transcription.status === 'processing') {
+        await apiClient.cancelTranscription();
+      }
     } catch (err) {
       console.error('Failed to cancel transcription:', err);
     } finally {
