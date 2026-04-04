@@ -314,6 +314,7 @@ export function useTranscription(): TranscriptionState {
                     language: r.language,
                     duration: r.duration,
                   });
+                  setProcessingProgress(null);
                   setStatusTracked('complete');
                   return;
                 }
@@ -335,6 +336,9 @@ export function useTranscription(): TranscriptionState {
                 if (!pollCancelledRef.current && retries < maxRetries) {
                   retries++;
                   setTimeout(poll, 3000);
+                } else if (!pollCancelledRef.current) {
+                  setStatusTracked('error');
+                  setError('Could not retrieve transcription result');
                 }
               }
             };
