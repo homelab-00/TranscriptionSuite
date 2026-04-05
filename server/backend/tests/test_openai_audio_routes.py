@@ -301,3 +301,169 @@ def test_openai_error_shape(openai_client):
     assert "type" in err
     assert "param" in err
     assert "code" in err
+
+
+# ------------------------------------------------------------------
+# P3-OAPI-001: OpenAI API format edge cases
+# ------------------------------------------------------------------
+
+
+@pytest.mark.p3
+@pytest.mark.openai_api
+class TestOpenaiEdgeCases:
+    """P3-OAPI-001: Edge cases for OpenAI-compatible API format."""
+
+    def test_empty_transcription_json(self, openai_client):
+        """Empty transcription text returns valid JSON with empty string."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(text="", segments=[], words=[])
+        resp = _upload(client)
+        assert resp.status_code == 200
+        assert resp.json() == {"text": ""}
+
+    def test_empty_transcription_verbose_json(self, openai_client):
+        """Empty transcription in verbose_json returns empty segments list."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(
+            text="", segments=[], words=[], duration=0.0
+        )
+        resp = _upload(client, response_format="verbose_json")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["text"] == ""
+        assert body["segments"] == []
+        assert body["duration"] == 0.0
+
+    def test_empty_transcription_srt(self, openai_client):
+        """Empty transcription produces valid (minimal) SRT output."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(text="", segments=[], words=[])
+        resp = _upload(client, response_format="srt")
+        assert resp.status_code == 200
+        # SRT with no cues is either empty or whitespace-only
+        assert "text/plain" in resp.headers["content-type"]
+
+    def test_empty_transcription_vtt(self, openai_client):
+        """Empty transcription produces valid VTT with header only."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(text="", segments=[], words=[])
+        resp = _upload(client, response_format="vtt")
+        assert resp.status_code == 200
+        assert resp.text.startswith("WEBVTT")
+
+    def test_special_chars_in_srt(self, openai_client):
+        """SRT handles segments with special characters (&, <, >, newlines)."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(
+            text="Tom & Jerry <said> 'hello'\nnewline",
+            segments=[
+                {"start_time": 0.0, "end_time": 3.0, "text": "Tom & Jerry <said> 'hello'\nnewline"},
+            ],
+        )
+        resp = _upload(client, response_format="srt")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Tom & Jerry" in body
+        assert "<said>" in body
+
+    def test_special_chars_in_vtt(self, openai_client):
+        """VTT handles segments with special characters."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(
+            text="Price: $100 & tax <5%>",
+            segments=[
+                {"start_time": 0.0, "end_time": 2.0, "text": "Price: $100 & tax <5%>"},
+            ],
+        )
+        resp = _upload(client, response_format="vtt")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "WEBVTT" in body
+        assert "Price: $100 & tax <5%>" in body
+
+    def test_segments_with_fallback_keys(self, openai_client):
+        """verbose_json handles segments using 'start'/'end' keys instead of 'start_time'/'end_time'."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(
+            segments=[
+                {"start": 0.0, "end": 1.5, "text": "Hello"},
+                {"start": 1.5, "end": 3.0, "text": "world"},
+            ],
+        )
+        resp = _upload(client, response_format="verbose_json")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["segments"][0]["start"] == 0.0
+        assert body["segments"][0]["end"] == 1.5
+        assert body["segments"][1]["text"] == "world"
+
+    def test_segments_with_missing_times_default_to_zero(self, openai_client):
+        """verbose_json defaults to 0.0 when segment time keys are entirely absent."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(
+            segments=[{"text": "No timestamps here"}],
+        )
+        resp = _upload(client, response_format="verbose_json")
+        assert resp.status_code == 200
+        seg = resp.json()["segments"][0]
+        assert seg["start"] == 0.0
+        assert seg["end"] == 0.0
+        assert seg["text"] == "No timestamps here"
+
+    def test_verbose_json_word_timestamps_empty_words(self, openai_client):
+        """verbose_json with word granularity but no words returns empty words list."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(
+            text="hello", words=[], segments=[{"start_time": 0.0, "end_time": 1.0, "text": "hello"}]
+        )
+        files = {"file": ("test.wav", io.BytesIO(b"RIFF" + b"\x00" * 100), "audio/wav")}
+        data = {
+            "model": "whisper-1",
+            "response_format": "verbose_json",
+            "timestamp_granularities[]": "word",
+        }
+        resp = client.post("/v1/audio/transcriptions", files=files, data=data)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "words" in body
+        assert body["words"] == []
+
+    def test_translation_empty_result(self, openai_client):
+        """Translation endpoint handles empty transcription result."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(text="", segments=[], words=[])
+        resp = _upload(client, path="/v1/audio/translations")
+        assert resp.status_code == 200
+        assert resp.json() == {"text": ""}
+
+    def test_words_with_fallback_keys(self, openai_client):
+        """verbose_json words fall back to 'text'/'start'/'end' key names."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(
+            words=[
+                {"text": "Hello", "start": 0.0, "end": 0.5},
+                {"text": "world", "start": 0.5, "end": 1.0},
+            ],
+            segments=[{"start_time": 0.0, "end_time": 1.0, "text": "Hello world"}],
+        )
+        files = {"file": ("test.wav", io.BytesIO(b"RIFF" + b"\x00" * 100), "audio/wav")}
+        data = {
+            "model": "whisper-1",
+            "response_format": "verbose_json",
+            "timestamp_granularities[]": "word",
+        }
+        resp = client.post("/v1/audio/transcriptions", files=files, data=data)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["words"][0]["word"] == "Hello"
+        assert body["words"][0]["start"] == 0.0
+        assert body["words"][1]["word"] == "world"
+
+    def test_empty_file_upload(self, openai_client):
+        """A zero-byte file upload is accepted — engine decides the result."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result(text="", segments=[], words=[])
+        files = {"file": ("empty.wav", io.BytesIO(b""), "audio/wav")}
+        resp = _upload(client, files=files)
+        assert resp.status_code == 200
+        assert resp.json() == {"text": ""}
