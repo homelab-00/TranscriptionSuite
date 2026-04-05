@@ -147,6 +147,12 @@ class LiveModeSession:
             await self.send_message("error", {"message": "Engine already running"})
             return False
 
+        # R-003: Track whether the main model has been displaced (detached or
+        # unloaded).  The finally block uses this to guarantee restoration on
+        # ANY exit — including asyncio.CancelledError which bypasses
+        # ``except Exception``.
+        _model_displaced = False
+
         try:
             # Build config from client data
             server_cfg = get_config()
@@ -279,6 +285,12 @@ class LiveModeSession:
                         "falling back to full load"
                     )
                     can_share = False
+                else:
+                    _model_displaced = True
+                    # Assign immediately so _restore_or_reload_main_model()
+                    # can reattach (not reload) if a CancelledError fires
+                    # before we reach the engine-creation block below.
+                    self._shared_backend = shared_backend
 
             if not can_share:
                 if is_same_model:
@@ -302,6 +314,7 @@ class LiveModeSession:
                 await self.send_message("status", {"message": "Unloading main model..."})
                 try:
                     model_manager.unload_transcription_model()
+                    _model_displaced = True
                     logger.info("Unloaded main transcription model for Live Mode")
                 except Exception as e:
                     logger.warning(f"Failed to unload main model (may not be loaded): {e}")
@@ -324,20 +337,31 @@ class LiveModeSession:
             # Start the engine
             if self._engine.start():
                 self._running = True
+                _model_displaced = False  # Engine owns the model now
                 logger.info(f"Live Mode started for {self.client_name}")
                 return True
             else:
-                # If start failed, restore main model
-                await self._restore_or_reload_main_model()
                 await self.send_message("error", {"message": "Failed to start engine"})
-                return False
+                return False  # finally will restore
 
         except Exception as e:
             logger.error(f"Failed to start Live Mode: {e}")
-            # Restore main model on failure
-            await self._restore_or_reload_main_model()
             await self.send_message("error", {"message": str(e)})
-            return False
+            return False  # finally will restore
+
+        finally:
+            # R-003: Guarantee main-model restoration on ANY exit path —
+            # including asyncio.CancelledError (BaseException) from a WS
+            # disconnect during the model-swap window.  On the success path
+            # _model_displaced is already False, so this is a no-op.
+            if _model_displaced:
+                try:
+                    await self._restore_or_reload_main_model()
+                except Exception as _restore_err:
+                    logger.error(
+                        "Failed to restore main model after live-mode failure: %s",
+                        _restore_err,
+                    )
 
     async def _reload_main_model(self) -> None:
         """Reload the main transcription model after Live Mode ends."""

@@ -319,6 +319,23 @@ class TranscriptionSession:
                         "Failed to mark job %s as delivered: %s", self._current_job_id, _e
                     )
 
+            # R-001 zombie-job guard: if persistence failed, explicitly mark the
+            # job as failed so it doesn't sit in 'processing' forever.  The result
+            # was delivered to the client (best-effort) but is NOT in the database;
+            # orphan recovery needs a terminal state, not a timeout guess.
+            if self._current_job_id and not _result_persisted:
+                try:
+                    _mark_failed(
+                        self._current_job_id,
+                        "Persistence failed — result delivered to client but not saved to database",
+                    )
+                except Exception as _mf_err:
+                    logger.warning(
+                        "Failed to mark job %s as failed after persistence failure: %s",
+                        self._current_job_id,
+                        _mf_err,
+                    )
+
             logger.info(f"Transcription complete for {self.client_name}")
 
             # Fire outgoing webhook (separate guard so failures don't
