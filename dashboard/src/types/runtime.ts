@@ -5,4 +5,9 @@
  * and in electron/preload.ts (isolated Electron main-process build).
  * Keep all three in sync when adding new profiles.
  */
-export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
+const RUNTIME_PROFILES = ['gpu', 'cpu', 'vulkan', 'metal'] as const;
+export type RuntimeProfile = (typeof RUNTIME_PROFILES)[number];
+
+export function isRuntimeProfile(value: unknown): value is RuntimeProfile {
+  return typeof value === 'string' && (RUNTIME_PROFILES as readonly string[]).includes(value);
+}

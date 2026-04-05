@@ -911,6 +911,11 @@ async def retry_transcription(
             status_code=410, detail="Audio was not preserved for this job — cannot retry"
         )
     if not Path(audio_path).exists():
+        if audio_path.startswith("/tmp/"):
+            raise HTTPException(
+                status_code=410,
+                detail="Audio was in temporary storage (/tmp) and lost on server restart — cannot retry",
+            )
         raise HTTPException(status_code=410, detail="Audio file has been deleted — cannot retry")
 
     reset_for_retry(job_id)

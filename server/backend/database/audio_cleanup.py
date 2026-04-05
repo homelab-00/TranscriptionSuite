@@ -72,7 +72,7 @@ async def cleanup_old_recordings(recordings_dir: str, max_age_days: int) -> None
     from .job_repository import get_jobs_for_cleanup
 
     try:
-        jobs = get_jobs_for_cleanup(max_age_days)
+        jobs = await asyncio.to_thread(get_jobs_for_cleanup, max_age_days)
     except Exception as exc:
         logger.error("Audio cleanup: failed to query expired jobs: %s", exc)
         return

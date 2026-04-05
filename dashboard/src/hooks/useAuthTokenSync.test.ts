@@ -87,7 +87,7 @@ describe('useAuthTokenSync', () => {
     delete (window as any).electronAPI;
     const { wrapper } = createWrapper();
 
-    const { unmount } = renderHook(() => useAuthTokenSync(false), { wrapper });
+    const { unmount } = renderHook(() => useAuthTokenSync(false, false), { wrapper });
 
     expect(apiClient.setAuthToken).not.toHaveBeenCalled();
     unmount();
@@ -105,7 +105,7 @@ describe('useAuthTokenSync', () => {
       }),
     });
 
-    renderHook(() => useAuthTokenSync(false), { wrapper });
+    renderHook(() => useAuthTokenSync(false, false), { wrapper });
     await flushEffects();
 
     expect(qc.getQueryData(['authToken'])).toBe('saved-token-123');
@@ -122,7 +122,7 @@ describe('useAuthTokenSync', () => {
     const { wrapper, qc } = createWrapper();
     (window as any).electronAPI = electronAPI;
 
-    renderHook(() => useAuthTokenSync(false), { wrapper });
+    renderHook(() => useAuthTokenSync(false, false), { wrapper });
     await flushEffects();
 
     expect(qc.getQueryData(['authToken'])).toBe('abc-token-xyz');
@@ -141,7 +141,7 @@ describe('useAuthTokenSync', () => {
         ]),
     });
 
-    renderHook(() => useAuthTokenSync(false), { wrapper });
+    renderHook(() => useAuthTokenSync(false, false), { wrapper });
     await flushEffects();
 
     expect(qc.getQueryData(['authToken'])).toBe('ansi-token-456');
@@ -157,7 +157,7 @@ describe('useAuthTokenSync', () => {
       }),
     });
 
-    renderHook(() => useAuthTokenSync(false), { wrapper });
+    renderHook(() => useAuthTokenSync(false, false), { wrapper });
     await flushEffects();
 
     // Simulate a live log line arriving
@@ -182,7 +182,7 @@ describe('useAuthTokenSync', () => {
       onLogLine,
     });
 
-    renderHook(() => useAuthTokenSync(false), { wrapper });
+    renderHook(() => useAuthTokenSync(false, true), { wrapper });
     await flushEffects();
 
     expect(getLogs).not.toHaveBeenCalled();
@@ -205,7 +205,7 @@ describe('useAuthTokenSync', () => {
 
     // Mount with serverReachable=false, then re-render with true
     const { rerender } = renderHook(
-      ({ reachable }: { reachable: boolean }) => useAuthTokenSync(reachable),
+      ({ reachable }: { reachable: boolean }) => useAuthTokenSync(reachable, false),
       { wrapper, initialProps: { reachable: false } },
     );
     await flushEffects();
@@ -234,7 +234,7 @@ describe('useAuthTokenSync', () => {
     (window as any).electronAPI = electronAPI;
 
     // Mount with server already reachable — init() validates inline
-    renderHook(() => useAuthTokenSync(true), { wrapper });
+    renderHook(() => useAuthTokenSync(true, false), { wrapper });
     await flushEffects();
 
     // Token should be cleared everywhere
@@ -258,7 +258,7 @@ describe('useAuthTokenSync', () => {
       }),
     });
 
-    renderHook(() => useAuthTokenSync(true), { wrapper });
+    renderHook(() => useAuthTokenSync(true, false), { wrapper });
     await flushEffects();
 
     // Token should NOT be cleared — still set from config seed
@@ -275,7 +275,7 @@ describe('useAuthTokenSync', () => {
       onLogLine: vi.fn(() => unsubscribe),
     });
 
-    const { unmount } = renderHook(() => useAuthTokenSync(false), { wrapper });
+    const { unmount } = renderHook(() => useAuthTokenSync(false, false), { wrapper });
     await flushEffects();
 
     unmount();
@@ -297,7 +297,7 @@ describe('useAuthTokenSync', () => {
       getLogs,
     });
 
-    renderHook(() => useAuthTokenSync(false), { wrapper });
+    renderHook(() => useAuthTokenSync(false, false), { wrapper });
     await flushEffects();
 
     // Verify logs WERE scanned (proving dedup is the reason, not scan failure)

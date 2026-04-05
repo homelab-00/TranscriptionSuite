@@ -95,8 +95,13 @@ export class StartupEventWatcher {
     if (!this.filePath || !this.onEvent) return;
 
     let content: string;
+    let fd: number;
     try {
-      const fd = fs.openSync(this.filePath, 'r');
+      fd = fs.openSync(this.filePath, 'r');
+    } catch {
+      return; // File not openable — will retry on next watch event
+    }
+    try {
       const stat = fs.fstatSync(fd);
 
       // File was truncated (e.g. container restart) — reset to beginning
@@ -105,19 +110,17 @@ export class StartupEventWatcher {
       }
 
       const bytesToRead = stat.size - this.offset;
-      if (bytesToRead <= 0) {
-        fs.closeSync(fd);
-        return;
-      }
+      if (bytesToRead <= 0) return;
 
       const buffer = Buffer.alloc(bytesToRead);
       fs.readSync(fd, buffer, 0, bytesToRead, this.offset);
-      fs.closeSync(fd);
 
       this.offset = stat.size;
       content = buffer.toString('utf-8');
     } catch {
       return; // File not readable — will retry on next watch event
+    } finally {
+      fs.closeSync(fd);
     }
 
     const lines = content.split('\n');

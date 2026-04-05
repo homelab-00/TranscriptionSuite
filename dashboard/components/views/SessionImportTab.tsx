@@ -158,10 +158,10 @@ export const SessionImportTab: React.FC = () => {
       .catch(() => {});
   }, []);
 
-  // Sync outputDir and diarizedFormat to the unified Zustand store
+  // Sync outputDir, diarizedFormat, and hideTimestamps to the unified Zustand store
   useEffect(() => {
-    updateSessionConfig({ outputDir, diarizedFormat });
-  }, [outputDir, diarizedFormat, updateSessionConfig]);
+    updateSessionConfig({ outputDir, diarizedFormat, hideTimestamps });
+  }, [outputDir, diarizedFormat, hideTimestamps, updateSessionConfig]);
 
   useEffect(() => {
     if (!supportsExplicitWordTimestampToggle) {

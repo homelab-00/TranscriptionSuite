@@ -82,6 +82,7 @@ export function useTranscription(): TranscriptionState {
   // useEffect cleanup on unmount (a plain `let cancelled` in the onClose closure
   // cannot be reached from the cleanup function).
   const pollCancelledRef = useRef(false);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep statusRef in sync so onClose can read the latest status without stale closure
   const setStatusTracked = useCallback((s: TranscriptionStatus) => {
@@ -105,6 +106,10 @@ export function useTranscription(): TranscriptionState {
       const active = statusRef.current === 'recording' || statusRef.current === 'processing';
       if (!active) {
         pollCancelledRef.current = true;
+        if (pollTimerRef.current !== null) {
+          clearTimeout(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
         captureRef.current?.stop();
         socketRef.current?.disconnect();
       }
@@ -290,7 +295,8 @@ export function useTranscription(): TranscriptionState {
           // If we were processing when the socket closed, poll for the result
           const currentJobId = jobIdRef.current;
           if (statusRef.current === 'processing' && currentJobId) {
-            let retries = 0;
+            let pollRetries = 0;
+            let networkErrors = 0;
             const maxRetries = 10;
             pollCancelledRef.current = false;
 
@@ -318,9 +324,9 @@ export function useTranscription(): TranscriptionState {
                   setStatusTracked('complete');
                   return;
                 }
-                if (resp.status === 202 && retries < maxRetries) {
-                  retries++;
-                  setTimeout(poll, 3000);
+                if (resp.status === 202 && pollRetries < maxRetries) {
+                  pollRetries++;
+                  pollTimerRef.current = setTimeout(poll, 3000);
                   return;
                 }
                 // 410 = server says job failed
@@ -333,9 +339,9 @@ export function useTranscription(): TranscriptionState {
                 setStatusTracked('error');
                 setError('Transcription result unavailable');
               } catch {
-                if (!pollCancelledRef.current && retries < maxRetries) {
-                  retries++;
-                  setTimeout(poll, 3000);
+                if (!pollCancelledRef.current && networkErrors < maxRetries) {
+                  networkErrors++;
+                  pollTimerRef.current = setTimeout(poll, 3000);
                 } else if (!pollCancelledRef.current) {
                   setStatusTracked('error');
                   setError('Could not retrieve transcription result');

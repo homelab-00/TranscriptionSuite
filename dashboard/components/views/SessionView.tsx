@@ -54,7 +54,7 @@ import { SessionTab } from '../../types';
 import { SessionImportTab } from './SessionImportTab';
 import { useImportQueueStore } from '../../src/stores/importQueueStore';
 import { toast } from 'sonner';
-import type { RuntimeProfile } from '../../src/types/runtime';
+import { isRuntimeProfile, type RuntimeProfile } from '../../src/types/runtime';
 
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
@@ -108,8 +108,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       api.config
         .get('server.runtimeProfile')
         .then((val: unknown) => {
-          if (val === 'gpu' || val === 'cpu' || val === 'vulkan' || val === 'metal')
-            setRuntimeProfile(val);
+          if (isRuntimeProfile(val)) setRuntimeProfile(val);
         })
         .catch(() => {});
     }
@@ -300,6 +299,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
     null,
   );
   const modelsLoadCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      modelsLoadCleanupRef.current?.();
+    },
+    [],
+  );
 
   // Model capabilities (activeModel / activeLiveModel derived above near useLanguages)
   const canTranslate = supportsTranslation(activeModel);

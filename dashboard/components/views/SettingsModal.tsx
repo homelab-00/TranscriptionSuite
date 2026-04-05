@@ -377,6 +377,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     // Sync API client with new config so connection target updates immediately
     await apiClient.syncFromConfig();
     apiClient.setAuthToken(clientSettings.authToken || null);
+    // Sync query cache so useAuthTokenSync's knownTokenRef stays current,
+    // and force admin status re-fetch to give immediate token validity feedback
+    queryClient.setQueryData(['authToken'], clientSettings.authToken);
+    queryClient.invalidateQueries({ queryKey: ['adminStatus'] });
 
     // Save server config.yaml changes (if any) — write sparse overrides to local file
     if (Object.keys(serverConfigUpdates).length > 0) {

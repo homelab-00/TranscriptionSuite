@@ -96,7 +96,7 @@ async def recover_orphaned_jobs(timeout_minutes: int) -> None:
         from server.database.job_repository import get_orphaned_jobs
         from server.database.job_repository import mark_failed as _mark_failed_repo
 
-        orphaned = get_orphaned_jobs(timeout_minutes)
+        orphaned = await asyncio.to_thread(get_orphaned_jobs, timeout_minutes)
         for job in orphaned:
             job_id = job.get("id", "")
             audio_path = job.get("audio_path")
@@ -104,18 +104,26 @@ async def recover_orphaned_jobs(timeout_minutes: int) -> None:
                 reason = "Server restarted — use retry to re-transcribe"
             else:
                 reason = "Server restarted — audio not preserved"
-            _mark_failed_repo(job_id, reason)
+            await asyncio.to_thread(_mark_failed_repo, job_id, reason)
             logger.info("Recovered orphaned job %s (%s)", job_id, reason)
     except Exception:
         logger.error("Orphan job recovery failed — continuing startup", exc_info=True)
 
 
-async def periodic_orphan_sweep(timeout_minutes: int, interval_minutes: int) -> None:
+async def periodic_orphan_sweep(
+    timeout_minutes: int,
+    interval_minutes: int,
+    job_tracker: object | None = None,
+) -> None:
     """Periodically sweep for orphaned 'processing' jobs and mark them failed.
 
     Unlike ``recover_orphaned_jobs`` (which runs once at startup), this runs on
     a repeating schedule so that orphans are caught even when the server runs
     continuously without restarts.
+
+    When *job_tracker* is provided, the sweep is skipped if a job is currently
+    active — this prevents falsely reaping a legitimate long-running recording
+    session.
 
     Does NOT run immediately — startup already calls ``recover_orphaned_jobs``.
     If *interval_minutes* <= 0, logs that the sweep is disabled and returns.
@@ -139,10 +147,18 @@ async def periodic_orphan_sweep(timeout_minutes: int, interval_minutes: int) -> 
             logger.info("Periodic orphan sweep cancelled (shutdown)")
             return
         try:
+            # Skip sweep if a job is actively running — prevents falsely reaping
+            # a legitimate long-running recording session (item 39).
+            if job_tracker is not None:
+                is_busy, _ = job_tracker.is_busy()
+                if is_busy:
+                    logger.debug("Orphan sweep skipped — a job is currently active")
+                    continue
+
             from server.database.job_repository import get_orphaned_jobs
             from server.database.job_repository import mark_failed as _mark_failed_repo
 
-            orphaned = get_orphaned_jobs(timeout_minutes)
+            orphaned = await asyncio.to_thread(get_orphaned_jobs, timeout_minutes)
             for job in orphaned:
                 job_id = job.get("id", "")
                 audio_path = job.get("audio_path")
@@ -150,7 +166,7 @@ async def periodic_orphan_sweep(timeout_minutes: int, interval_minutes: int) -> 
                     reason = "Orphan sweep — use retry to re-transcribe"
                 else:
                     reason = "Orphan sweep — audio not preserved"
-                _mark_failed_repo(job_id, reason)
+                await asyncio.to_thread(_mark_failed_repo, job_id, reason)
                 logger.info("Orphan sweep: marked job %s failed (%s)", job_id, reason)
         except Exception:
             logger.exception("Periodic orphan sweep failed — will retry next interval")
@@ -480,17 +496,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     else:
         logger.info("Audio cleanup disabled (cleanup_enabled=false)")
 
-    # Schedule periodic orphan sweep in background (non-blocking, Wave 3)
+    # Orphan sweep scheduling deferred until after model manager creation (needs job tracker)
     _orphan_sweep_interval = durability_config.get("orphan_sweep_interval_minutes", 30)
-    _orphan_sweep_task = asyncio.create_task(
-        periodic_orphan_sweep(_orphan_timeout, _orphan_sweep_interval)
-    )
-    _log_time("orphan sweep scheduled (async, periodic)")
-    logger.info(
-        "Orphan sweep scheduled (timeout=%dm, interval=%dm)",
-        _orphan_timeout,
-        _orphan_sweep_interval,
-    )
 
     # Initialize token store (generates admin token on first run)
     _ts_mod.get_token_store()
@@ -593,6 +600,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Store config in app state
     app.state.config = config
     app.state.model_manager = manager
+
+    # Schedule periodic orphan sweep (deferred until after model manager creation
+    # so the sweep can check the in-memory job tracker before reaping)
+    _orphan_sweep_task = asyncio.create_task(
+        periodic_orphan_sweep(_orphan_timeout, _orphan_sweep_interval, manager.job_tracker)
+    )
+    _log_time("orphan sweep scheduled (async, periodic)")
+    logger.info(
+        "Orphan sweep scheduled (timeout=%dm, interval=%dm)",
+        _orphan_timeout,
+        _orphan_sweep_interval,
+    )
 
     logger.info("Server startup complete")
     _log_time("lifespan startup complete")

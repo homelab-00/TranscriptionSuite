@@ -43,7 +43,7 @@ function resetStore() {
   useImportQueueStore.setState({
     jobs: [],
     isPaused: false,
-    sessionConfig: { outputDir: '', diarizedFormat: 'srt' },
+    sessionConfig: { outputDir: '', diarizedFormat: 'srt', hideTimestamps: false },
     notebookCallbacks: {},
     sessionWatchPath: '',
     sessionWatchActive: false,

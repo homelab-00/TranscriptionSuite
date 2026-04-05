@@ -21,7 +21,7 @@ import { extractAdminTokenFromDockerLogLine } from '../utils/dockerLogParsing';
  *
  * In non-Electron environments (browser dev mode), this is a no-op.
  */
-export function useAuthTokenSync(serverReachable: boolean): void {
+export function useAuthTokenSync(serverReachable: boolean, useRemote: boolean): void {
   const qc = useQueryClient();
   const knownTokenRef = useRef('');
   const validatedRef = useRef(false);
@@ -75,6 +75,10 @@ export function useAuthTokenSync(serverReachable: boolean): void {
     // This eliminates the race between the old config-seed effect and the
     // Docker-scan effect — the config read always completes before scanning.
     const init = async () => {
+      // Re-entering init (e.g. useRemote changed) — force re-validation
+      // so a token that went stale during a remote period is caught.
+      validatedRef.current = false;
+
       // 1. Seed knownTokenRef from persisted config so we don't overwrite
       //    an existing token with the same value from logs.
       try {
@@ -112,12 +116,7 @@ export function useAuthTokenSync(serverReachable: boolean): void {
       // 2. If the app is configured for a remote server, skip Docker log
       //    scanning entirely. The local container's admin token is different
       //    from the remote server's token and must not overwrite it.
-      try {
-        const useRemote = await api?.config?.get?.('connection.useRemote');
-        if (useRemote) return;
-      } catch {
-        // Config unavailable — fall through to scan (safe default for local).
-      }
+      if (useRemote) return;
 
       if (cancelled) return;
 
@@ -146,7 +145,7 @@ export function useAuthTokenSync(serverReachable: boolean): void {
       if (pollId !== undefined) window.clearInterval(pollId);
       unsubscribe?.();
     };
-  }, [qc]);
+  }, [qc, useRemote]);
 
   // ── Stale-token validation (fires when server becomes reachable) ───────
   // Validates the cached token once per session against POST /api/auth/login

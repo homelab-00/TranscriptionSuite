@@ -57,7 +57,7 @@ import {
 import { getModelById } from '../../src/services/modelRegistry';
 import type { OptionMeta } from '../ui/CustomSelect';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
-import type { RuntimeProfile } from '../../src/types/runtime';
+import { isRuntimeProfile, type RuntimeProfile } from '../../src/types/runtime';
 
 const MLX_DEFAULT_MODEL = 'mlx-community/parakeet-tdt-0.6b-v3';
 
@@ -308,7 +308,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       api.config
         .get('server.runtimeProfile')
         .then((val: unknown) => {
-          if (val === 'gpu' || val === 'cpu' || val === 'vulkan' || val === 'metal') {
+          if (isRuntimeProfile(val)) {
             setRuntimeProfile(val);
             if (val === 'vulkan') {
               docker

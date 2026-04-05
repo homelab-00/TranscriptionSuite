@@ -47,7 +47,7 @@ import {
   toBackendModelEnvValue,
 } from './src/services/modelSelection';
 
-import type { RuntimeProfile } from './src/types/runtime';
+import { isRuntimeProfile, type RuntimeProfile } from './src/types/runtime';
 
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 type MissingFamily = 'whisper' | 'nemo' | 'vibevoice';
@@ -77,8 +77,19 @@ const AppInner: React.FC = () => {
 
   // Reactive cache invalidations on server state transitions
   useServerEventReactor(serverConnection);
+
+  // Track remote mode so useAuthTokenSync re-evaluates on mode switch
+  const [useRemote, setUseRemote] = useState(false);
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    api?.config
+      ?.get?.('connection.useRemote')
+      .then((v: unknown) => setUseRemote(v === true))
+      .catch(() => {});
+  }, [serverConnection.reachable]);
+
   // Always-on Docker log token scanner
-  useAuthTokenSync(serverConnection.reachable);
+  useAuthTokenSync(serverConnection.reachable, useRemote);
   // Bridge bootstrap log events → download store (runs regardless of active tab)
   useBootstrapDownloads();
 
@@ -108,8 +119,7 @@ const AppInner: React.FC = () => {
       api.config
         .get('server.runtimeProfile')
         .then((val: unknown) => {
-          if (val === 'gpu' || val === 'cpu' || val === 'vulkan' || val === 'metal')
-            setRuntimeProfile(val);
+          if (isRuntimeProfile(val)) setRuntimeProfile(val);
         })
         .catch(() => {});
     }
