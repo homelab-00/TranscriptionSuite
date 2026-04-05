@@ -310,14 +310,22 @@ class LiveModeSession:
                         },
                     )
 
-                # Unload the main transcription model to free VRAM for Live Mode
+                # Unload the main transcription model to free VRAM for Live Mode.
+                # unload_transcription_model() handles "nothing loaded" gracefully
+                # (silent return), so an exception here means a genuine failure —
+                # proceeding would risk CUDA OOM when loading the live model.
                 await self.send_message("status", {"message": "Unloading main model..."})
                 try:
                     model_manager.unload_transcription_model()
                     _model_displaced = True
                     logger.info("Unloaded main transcription model for Live Mode")
                 except Exception as e:
-                    logger.warning(f"Failed to unload main model (may not be loaded): {e}")
+                    logger.error(f"Failed to unload main model — aborting Live Mode start: {e}")
+                    await self.send_message(
+                        "error",
+                        {"message": f"Failed to free GPU memory for Live Mode: {e}"},
+                    )
+                    return False
 
             # Create engine with callbacks (and shared backend when available)
             if shared_backend is not None:
@@ -355,9 +363,20 @@ class LiveModeSession:
             # disconnect during the model-swap window.  On the success path
             # _model_displaced is already False, so this is a no-op.
             if _model_displaced:
+                # Stop and discard any partially-constructed engine to
+                # prevent daemon-thread leaks from a failed start().
+                if self._engine is not None:
+                    try:
+                        self._engine.stop()
+                    except Exception:
+                        pass
+                    self._engine = None
+                # asyncio.shield() keeps the restore coroutine running
+                # even if CancelledError fires during the await — the
+                # model reload completes in the background.
                 try:
-                    await self._restore_or_reload_main_model()
-                except Exception as _restore_err:
+                    await asyncio.shield(self._restore_or_reload_main_model())
+                except BaseException as _restore_err:
                     logger.error(
                         "Failed to restore main model after live-mode failure: %s",
                         _restore_err,
