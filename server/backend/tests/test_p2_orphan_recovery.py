@@ -96,6 +96,47 @@ class TestP2Orph001:
         assert "retry" in marked[0][1].lower()
 
 
+# ── Deferred: Empty job ID edge case ────────────────────────────────────────
+
+
+@pytest.mark.p2
+class TestOrphanEmptyJobId:
+    """Edge case: orphan row with id=None → mark_failed("") is called."""
+
+    def test_orphan_with_none_id_calls_mark_failed_with_empty_string(
+        self, repo, main_mod, monkeypatch
+    ):
+        """When DB returns an orphan row whose 'id' is None (or missing),
+        recover_orphaned_jobs defaults to '' and calls mark_failed('')."""
+        # Simulate a DB row missing the "id" key entirely
+        monkeypatch.setattr(repo, "get_orphaned_jobs", lambda _timeout: [{"audio_path": None}])
+
+        marked: list[tuple[str, str]] = []
+        monkeypatch.setattr(repo, "mark_failed", lambda jid, msg: marked.append((jid, msg)))
+
+        asyncio.run(main_mod.recover_orphaned_jobs(timeout_minutes=10))
+
+        assert len(marked) == 1
+        assert marked[0][0] == "", "job_id should be empty string from .get('id', '')"
+
+    def test_orphan_with_explicit_none_id(self, repo, main_mod, monkeypatch):
+        """When DB returns id=None explicitly, .get('id', '') returns None
+        (not the default), so mark_failed(None, ...) is called."""
+        # dict.get("id", "") returns None when key exists but value is None
+        monkeypatch.setattr(
+            repo, "get_orphaned_jobs", lambda _timeout: [{"id": None, "audio_path": None}]
+        )
+
+        marked: list[tuple] = []
+        monkeypatch.setattr(repo, "mark_failed", lambda jid, msg: marked.append((jid, msg)))
+
+        asyncio.run(main_mod.recover_orphaned_jobs(timeout_minutes=10))
+
+        assert len(marked) == 1
+        # dict.get returns None when key exists with value None — the default is NOT used
+        assert marked[0][0] is None
+
+
 # ── P2-ORPH-002: Startup vs periodic sweep is_busy behaviour ────────────────
 
 

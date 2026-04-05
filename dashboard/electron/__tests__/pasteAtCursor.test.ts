@@ -61,13 +61,15 @@ beforeEach(() => {
   setAllCommandsSucceed();
 });
 
-import { pasteAtCursor } from '../pasteAtCursor.js';
+import { pasteAtCursor, _resetCommandCache } from '../pasteAtCursor.js';
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('[P2] pasteAtCursor', () => {
   afterEach(() => {
+    _resetCommandCache();
     vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
   it('writes text to clipboard before simulating paste', async () => {
@@ -113,6 +115,61 @@ describe('[P2] pasteAtCursor', () => {
     const writeCalls = mockClipboard.writeText.mock.calls;
     expect(writeCalls).toHaveLength(1);
     expect(writeCalls[0][0]).toBe('paste me');
+  });
+
+  it('throws descriptive error when no paste tools are available (Wayland)', async () => {
+    // Reset cache so previous "all succeed" results don't bleed in
+    _resetCommandCache();
+    mockIsWayland.mockReturnValue(true);
+
+    // All `which` calls fail — no tools installed
+    mockExecFile.mockImplementation(
+      (cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
+        if (typeof cb === 'function') {
+          if (cmd === 'which') {
+            (cb as (err: Error | null) => void)(new Error('not found'));
+          } else {
+            (cb as (err: Error | null) => void)(new Error('command not available'));
+          }
+        }
+      },
+    );
+
+    vi.useFakeTimers();
+    // Attach .catch immediately to prevent unhandled rejection during timer advance
+    const promise = pasteAtCursor('test text').catch((e: Error) => e);
+    await vi.advanceTimersByTimeAsync(200);
+    const error = await promise;
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/No keystroke simulation tool found for Wayland/);
+  });
+
+  it('throws descriptive error when no paste tools are available (X11)', async () => {
+    _resetCommandCache();
+    mockIsWayland.mockReturnValue(false);
+
+    mockExecFile.mockImplementation(
+      (cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
+        if (typeof cb === 'function') {
+          if (cmd === 'which') {
+            (cb as (err: Error | null) => void)(new Error('not found'));
+          } else {
+            (cb as (err: Error | null) => void)(new Error('command not available'));
+          }
+        }
+      },
+    );
+
+    vi.useFakeTimers();
+    const promise = pasteAtCursor('test text').catch((e: Error) => e);
+    await vi.advanceTimersByTimeAsync(200);
+    const error = await promise;
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/No keystroke simulation tool found for X11/);
   });
 
   it('PasteOptions interface accepts preserveClipboard boolean', () => {

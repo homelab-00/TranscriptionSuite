@@ -297,6 +297,35 @@ class TestSwap003RapidStartStop:
         assert mm.unload_transcription_model.call_count == 5
         assert mm.load_transcription_model.call_count == 5
 
+    async def test_detach_returns_none_falls_back_to_full_unload(self, monkeypatch):
+        """When can_share=True but detach returns None, falls back to full
+        unload path — unloads main model, then reloads on failure."""
+        # _mock_model_manager(backend=None) still returns a MagicMock from detach
+        # (the helper uses `backend or MagicMock()`). Override explicitly for None.
+        mm = _mock_model_manager(is_same=True, backend=None)
+        mm.detach_transcription_backend = MagicMock(return_value=None)
+        monkeypatch.setattr(live_mod, "get_model_manager", lambda: mm)
+
+        # Engine constructor raises to trigger finally-block restore
+        def _raise_error(**kw):
+            raise RuntimeError("Engine init failed")
+
+        monkeypatch.setattr(live_mod, "LiveModeEngine", _raise_error)
+
+        loop = asyncio.get_running_loop()
+        session = _make_live_session(loop=loop)
+
+        result = await session.start_engine()
+
+        assert result is False
+        # Detach was attempted and returned None
+        mm.detach_transcription_backend.assert_called_once()
+        # Fell back to full unload path
+        mm.unload_transcription_model.assert_called_once()
+        # Finally-block reloads (not reattaches) because _shared_backend is None
+        mm.load_transcription_model.assert_called_once()
+        mm.attach_transcription_backend.assert_not_called()
+
     async def test_alternating_success_and_failure(self, monkeypatch):
         """Mixed success/failure cycles still leave model_manager consistent."""
         shared_backend = MagicMock(name="shared-backend")

@@ -18,6 +18,11 @@ const execFileAsync = promisify(execFile);
 
 const commandCache = new Map<string, boolean>();
 
+/** @internal Test-only — clear the cached tool-detection results. */
+export function _resetCommandCache(): void {
+  commandCache.clear();
+}
+
 async function hasCommand(name: string): Promise<boolean> {
   const cached = commandCache.get(name);
   if (cached !== undefined) return cached;

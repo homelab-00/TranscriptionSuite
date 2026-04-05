@@ -85,6 +85,42 @@ class TestP2Route001ListRecordings:
 
 
 @pytest.mark.p2
+class TestP2Route001ListRecordingsAsymmetricDates:
+    """[P2] Asymmetric date params: only start_date or only end_date provided."""
+
+    def test_only_start_date_returns_all_recordings(self, monkeypatch):
+        """When start_date is provided but end_date is None, the handler
+        ignores the date filter and returns all recordings."""
+        recs = [_recording(1), _recording(2, title="Second")]
+        monkeypatch.setattr(notebook, "get_all_recordings", lambda: recs)
+        # get_recordings_by_date_range should NOT be called
+        monkeypatch.setattr(
+            notebook,
+            "get_recordings_by_date_range",
+            lambda _s, _e: pytest.fail("should not filter by date range"),
+        )
+
+        result = asyncio.run(notebook.list_recordings(start_date="2026-01-01", end_date=None))
+
+        assert len(result) == 2
+
+    def test_only_end_date_returns_all_recordings(self, monkeypatch):
+        """When end_date is provided but start_date is None, the handler
+        ignores the date filter and returns all recordings."""
+        recs = [_recording(1)]
+        monkeypatch.setattr(notebook, "get_all_recordings", lambda: recs)
+        monkeypatch.setattr(
+            notebook,
+            "get_recordings_by_date_range",
+            lambda _s, _e: pytest.fail("should not filter by date range"),
+        )
+
+        result = asyncio.run(notebook.list_recordings(start_date=None, end_date="2026-12-31"))
+
+        assert len(result) == 1
+
+
+@pytest.mark.p2
 class TestP2Route001RecordingDetail:
     """[P2] GET /api/notebook/recordings/{id} — recording detail."""
 

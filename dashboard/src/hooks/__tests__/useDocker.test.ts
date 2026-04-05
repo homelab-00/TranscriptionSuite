@@ -125,6 +125,25 @@ describe('[P2] useDocker', () => {
     });
   });
 
+  it('returns loading=false and no-ops when electronAPI is undefined', async () => {
+    // Simulate browser dev mode — no Electron IPC available
+    delete (window as any).electronAPI;
+
+    const { result } = renderHook(() => useDocker());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.available).toBe(false);
+    // Callbacks should no-op without throwing
+    await act(async () => {
+      await result.current.refreshImages();
+      await result.current.refreshVolumes();
+    });
+    expect(result.current.operationError).toBeNull();
+  });
+
   it('sets operationError on IPC failure during pullImage', async () => {
     const dockerApi = makeDockerAPI({
       pullImage: vi.fn().mockRejectedValue(new Error('Network timeout')),
