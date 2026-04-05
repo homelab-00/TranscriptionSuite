@@ -1,10 +1,10 @@
 ---
 project_name: 'TranscriptionSuite'
 user_name: 'Bill'
-date: '2026-04-03'
+date: '2026-04-05'
 sections_completed: ['technology_stack', 'language_rules', 'framework_rules', 'testing_rules', 'code_quality', 'workflow_rules', 'critical_rules']
 status: 'complete'
-rule_count: 90
+rule_count: 101
 optimized_for_llm: true
 ---
 
@@ -74,14 +74,17 @@ All transcription code paths MUST persist results to the `transcription_jobs` SQ
 - **Client recovery**: `useTranscription.ts` polls `GET /api/transcribe/result/{job_id}` on disconnect; `SessionView.tsx` shows recovery banner for undelivered results on mount
 - **Large results**: Payloads >1MB sent as `result_ready` reference — client fetches via HTTP instead of WebSocket
 - **Graceful shutdown**: Lifespan drain gives active sessions 120s to complete; Docker `stop_grace_period: 130s`
-- **Audio cleanup**: `audio_cleanup.py` runs at startup, deletes completed+delivered recordings older than `durability.audio_retention_days`
+- **Audio cleanup**: `audio_cleanup.periodic_cleanup()` runs immediately at startup then repeats every `cleanup_interval_hours`; deletes completed+delivered recordings older than `durability.audio_retention_days`; gated by `cleanup_enabled` flag
 
 **Config** (`config.yaml`):
 ```yaml
 durability:
     recordings_dir: "/data/recordings"
     audio_retention_days: 7
-    orphan_job_timeout_minutes: 10
+    cleanup_enabled: true              # gate audio cleanup on/off
+    cleanup_interval_hours: 24         # periodic interval (0 = startup only)
+    orphan_job_timeout_minutes: 60
+    orphan_sweep_interval_minutes: 30  # periodic orphan detection (0 = disabled)
 ```
 
 **Key rule**: If you add a new transcription code path, it MUST call `create_job()` → `save_result()` → deliver → `mark_delivered()`. Never send results without persisting first.
@@ -112,6 +115,13 @@ durability:
 - **Middleware in main.py**: Auth middleware + other middleware defined as classes with `async def dispatch()`
 - **Global exception handler**: Registered on the app, returns `JSONResponse`
 - **Lifespan pattern**: `async def lifespan(app)` as `AsyncGenerator` for startup/shutdown
+
+#### Periodic Background Tasks
+- **Pattern**: `async def periodic_X()` — immediate first run, then `while True: await asyncio.sleep(interval); run()`
+- **Cancel-safe**: Always catch `asyncio.CancelledError` with logging (never silent `pass`) for clean shutdown
+- **Gating**: Each task has a config flag (e.g., `cleanup_enabled`, `orphan_sweep_interval_minutes <= 0`) — check before entering loop
+- **Active instances**: `audio_cleanup.periodic_cleanup()` (24h default) and `main.periodic_orphan_sweep()` (30min default)
+- **Orphan sweep guard**: Must check `job_tracker.is_busy()` before marking stuck jobs failed — prevents false reaping during long transcriptions
 
 #### STT Backend Architecture
 - **Factory pattern**: `create_backend(model_name)` in `factory.py` routes to correct backend class
@@ -151,6 +161,23 @@ durability:
 - **Tailwind CSS v4**: Utility-first styling, custom oklab-strip PostCSS plugin to force sRGB fallbacks
 - **Vite base `'./'`**: Required for Electron `file://` protocol — never change to `/`
 
+#### Docker Compose V2 Validation
+- **Two-stage check**: `probeCompose(bin)` in `containerRuntime.ts` validates `bin compose version` (5s timeout) → `composeAvailable` field in `DetectionResult`
+- **Startup guard**: `dockerManager.ts` early-returns with human-readable error if `composeAvailable === false`
+- **UI**: "Compose available" checklist row in ServerView; Start buttons disabled when missing
+- **Guidance**: Distinct install instructions for Docker (`apt install docker-compose-v2`) vs Podman (`pip install podman-compose`)
+
+#### GPU Detection Priority
+- **Session-level cache**: `cachedGpuInfo` survives component remount — avoids re-running detection on every render
+- **Profile auto-selection priority**: Metal (Apple Silicon) > NVIDIA GPU (runtime=nvidia) > Vulkan (AMD/Intel via `/dev/dri/renderD128`) > CPU
+- **Vulkan detection**: Linux-only, checks `fs.existsSync('/dev/dri/renderD128')` — no NVIDIA toolkit needed
+
+#### GGML Model Selection (Vulkan Sidecar)
+- **Registry-driven**: `getModelsByFamily('whispercpp')` from `modelRegistry.ts` — filtered at module level
+- **Bidirectional Map**: `GGML_DISPLAY_TO_ID` / `GGML_ID_TO_DISPLAY` for UI ↔ backend conversion
+- **Persistence**: Stored in electron-store as `server.whispercppModel`; `/models/` prefix prepended when passing to compose
+- **Visibility**: GGML dropdown only shown when Vulkan profile active; `DOCKER_ONLY_FAMILIES` hides whispercpp on Metal
+
 #### Zustand (Client State)
 - **Zustand for client-only state**: Import queue, activity tracking, pause/resume, folder watch — ephemeral, not persisted
 - **React Query for server state**: Models, recordings, admin status — cached with staleTime/refetch
@@ -175,7 +202,7 @@ durability:
 - **asyncio_mode = "auto"**: No `@pytest.mark.asyncio` needed
 
 #### Frontend (Vitest)
-- **7 test files** in `dashboard/src/` — `services/*.test.ts`, `utils/*.test.ts`, `stores/*.test.ts`, `hooks/*.test.ts`
+- **8 test files** in `dashboard/src/` — `services/*.test.ts`, `utils/*.test.ts`, `stores/*.test.ts`, `hooks/*.test.ts`
 - **Setup**: `src/test/setup.ts` imports `@testing-library/jest-dom/vitest`
 - **Test include paths**: `src/**/*.test.ts`, `src/**/*.test.tsx`, `components/**/*.test.tsx`
 - **Environment**: jsdom
@@ -241,6 +268,8 @@ durability:
 - **NEVER mock at the source module** for lazily-imported code — patch at the call site
 - **NEVER skip `_ensure_server_package_alias()`** in new test files — import conftest or it won't resolve `server.*`
 - **NEVER reference `downloadStore`** — it was replaced by `activityStore`. The old store is deleted
+- **NEVER use silent `except: pass`** for `asyncio.CancelledError` — always log at debug level for clean shutdown tracing (CodeQL flags this)
+- **NEVER overwrite `created_at` on retry** — `reset_for_retry()` preserves the original timestamp; orphan sweep uses it to detect stuck jobs
 
 #### CUDA / GPU Gotchas
 - **CUDA graph workaround**: ParakeetBackend calls `_disable_cuda_graphs()` for CUDA >= 12.8 — do not remove
@@ -257,6 +286,12 @@ durability:
 - **Frontend priority**: `deriveStatus()` in `useServerStatus.ts` checks GPU error **before** `ready` flag — GPU error overrides all other states
 - **Crash-safe sentinel** (Linux only): `setsid sh -c ...` polls Electron PID every 2s, stops Docker container on crash (survives SIGBUS/SIGKILL)
 - **Sentinel killed in graceful shutdown**: Prevents race between Electron and sentinel both stopping container
+
+#### Retry & TOCTOU Safety
+- **Retry preserves `created_at`**: `reset_for_retry()` in `job_repository.py` only resets status/attempts — original timestamp is the orphan sweep's clock
+- **TOCTOU on audio files**: Periodic cleanup can delete audio between the retry endpoint's `exists()` check and actual file read — catch `FileNotFoundError`
+- **Distinct 410 messages**: Retry returns "Audio was not preserved" (NULL path) vs "Audio file has been deleted" (path set, file missing) — never merge into one generic message
+- **Orphan sweep vs active jobs**: `periodic_orphan_sweep()` checks `job_tracker.is_busy()` before reaping — a 2-hour transcription is not an orphan
 
 #### Live Mode Lifecycle
 - **Model swap sequence**: Main model unloads → live engine loads live model → on stop: live engine unloads → main model reloads
@@ -289,4 +324,4 @@ durability:
 - Review quarterly for outdated rules
 - Remove rules that become obvious over time
 
-Last Updated: 2026-04-03
+Last Updated: 2026-04-05
