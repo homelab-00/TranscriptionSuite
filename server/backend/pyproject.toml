@@ -91,6 +91,13 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "p0: Critical — data integrity, security, core functionality",
+    "p1: High — core user journeys, integration points",
+    "durability: Transcription result persistence and failure recovery",
+    "live_mode: Live Mode transcription engine and session",
+    "model_swap: Model swap lifecycle and recovery",
+]
 
 # The section below is needed to specifically get CUDA 12.9 (and not the default 12.8)
 [[tool.uv.index]]
