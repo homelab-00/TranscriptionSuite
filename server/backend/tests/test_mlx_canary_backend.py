@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, call, patch
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -424,8 +423,6 @@ class TestMLXCanaryResampling:
 
         segments, _ = backend.transcribe(audio_int16)
 
-        # Model receives a float32 array — verify via call arg inspection
-        call_args = mock_model.transcribe.call_args
         # First positional arg is a temp file path (str) — audio conversion is
         # implicit before sf.write; no dtype assertion needed on the path itself.
         assert isinstance(segments, list)

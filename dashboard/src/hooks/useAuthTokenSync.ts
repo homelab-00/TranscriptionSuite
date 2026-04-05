@@ -118,8 +118,6 @@ export function useAuthTokenSync(serverReachable: boolean, useRemote: boolean): 
       //    from the remote server's token and must not overwrite it.
       if (useRemote) return;
 
-      if (cancelled) return;
-
       // 3. Local mode — scan Docker logs for the admin token.
       void scanRecentLogs();
 

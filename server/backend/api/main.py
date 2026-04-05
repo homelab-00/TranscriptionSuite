@@ -635,7 +635,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         try:
             await _cleanup_task
         except asyncio.CancelledError:
-            pass
+            logger.debug("Audio cleanup task cancelled")
 
     # Cancel periodic orphan sweep task
     if _orphan_sweep_task and not _orphan_sweep_task.done():
@@ -643,7 +643,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         try:
             await _orphan_sweep_task
         except asyncio.CancelledError:
-            pass
+            logger.debug("Orphan sweep task cancelled")
 
     # Graceful drain: stop any active recording sessions before killing the model.
     # Wave 1 already persisted results to DB, so a timeout just means the result

@@ -10,11 +10,9 @@ from __future__ import annotations
 import sys
 import types
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -110,7 +108,7 @@ class TestFactoryDetection:
 
 class TestMLXVibeVoiceBackend:
     def test_load_and_unload(self) -> None:
-        mock_model = _install_mlx_audio_stubs()
+        _install_mlx_audio_stubs()
         from server.core.stt.backends.mlx_vibevoice_backend import MLXVibeVoiceBackend
 
         backend = MLXVibeVoiceBackend()

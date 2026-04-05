@@ -236,9 +236,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     | { available: boolean; reason: string }
     | undefined;
   const metalSupported = mlxFeature?.available ?? false;
-  const [isDarwin] = useState<boolean>(() => {
-    return (window as any).electronAPI?.app?.getPlatform?.() === 'darwin';
-  });
   const [isAppleSilicon] = useState<boolean>(() => {
     return (window as any).electronAPI?.app?.getArch?.() === 'arm64';
   });
