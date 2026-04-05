@@ -679,10 +679,16 @@ function checkTailscaleCertsExist(): boolean {
 /**
  * Build the list of compose file args (-f ...) based on platform, runtime profile,
  * and container runtime (Docker vs Podman).
+ *
+ * @param gpuMode - Override for the detected GPU mode. When omitted, falls back
+ *                  to the module-level `detectedGpuMode` (set by `checkGpu()`).
+ *                  Exposed as a parameter so unit tests can exercise all branches
+ *                  without mutating module state.
  */
-function composeFileArgs(
+export function composeFileArgs(
   runtimeProfile: RuntimeProfile,
   runtimeKind: ContainerRuntimeKind = 'docker',
+  gpuMode: 'cdi' | 'legacy' | null = detectedGpuMode,
 ): string[] {
   const files: string[] = ['docker-compose.yml'];
 
@@ -698,7 +704,7 @@ function composeFileArgs(
   if (runtimeProfile === 'gpu') {
     if (runtimeKind === 'podman') {
       files.push('podman-compose.gpu.yml');
-    } else if (detectedGpuMode === 'cdi') {
+    } else if (gpuMode === 'cdi') {
       files.push('docker-compose.gpu-cdi.yml');
     } else {
       files.push('docker-compose.gpu.yml'); // legacy nvidia runtime
@@ -1374,7 +1380,11 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   // Rotate the persistent server log — adds a session marker and trims old sessions.
   rotateServerLog();
 
-  const fileArgs = composeFileArgs(runtimeProfile, detectedRuntimeKind ?? undefined);
+  const fileArgs = composeFileArgs(
+    runtimeProfile,
+    detectedRuntimeKind ?? undefined,
+    detectedGpuMode,
+  );
 
   const upArgs = ['compose', ...fileArgs, 'up', '-d'];
   // --no-build: the build section is for manual dev builds only; the packaged
