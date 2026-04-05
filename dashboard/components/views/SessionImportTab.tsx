@@ -82,6 +82,7 @@ export const SessionImportTab: React.FC = () => {
   const [diarization, setDiarization] = useState(true);
   const [diarizedFormat, setDiarizedFormat] = useState<'srt' | 'ass'>('srt');
   const [wordTimestamps, setWordTimestamps] = useState(true);
+  const [hideTimestamps, setHideTimestamps] = useState(false);
   const [parallelDiarization, setParallelDiarization] = useState<boolean>(false);
   const [parallelDefault, setParallelDefault] = useState<boolean>(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -104,10 +105,12 @@ export const SessionImportTab: React.FC = () => {
     ? supportsExplicitWordTimestampToggleForModel(activeModel)
     : backendType !== 'vibevoice_asr';
 
-  // Fetch downloads path on mount
+  // Fetch downloads path and hideTimestamps setting on mount
   useEffect(() => {
     const init = async () => {
       const electronAPI = (window as any).electronAPI;
+
+      getConfig<boolean>('output.hideTimestamps').then((v) => setHideTimestamps(v ?? false));
 
       // Try to load persisted output dir from config
       const savedDir = await getConfig('sessionImport.outputDir');
@@ -610,8 +613,9 @@ export const SessionImportTab: React.FC = () => {
       <div className="flex items-start gap-2 rounded-lg bg-white/5 px-3 py-2.5">
         <Info size={14} className="mt-0.5 shrink-0 text-slate-500" />
         <p className="text-xs leading-relaxed text-slate-500">
-          Transcriptions are saved as .txt (plain text) or .srt/.ass (subtitles with speaker labels
-          when diarization is enabled) to the output folder.
+          {hideTimestamps
+            ? 'Transcriptions are saved as .txt (plain text) to the output folder. Timestamp output is disabled in Settings.'
+            : 'Transcriptions are saved as .txt (plain text) or .srt/.ass (subtitles with speaker labels when diarization is enabled) to the output folder.'}
         </p>
       </div>
 
@@ -622,7 +626,11 @@ export const SessionImportTab: React.FC = () => {
             checked={diarization}
             onChange={handleDiarizationChange}
             label="Speaker Diarization"
-            description="Identify distinct speakers — output saved as a subtitle file with speaker labels"
+            description={
+              hideTimestamps
+                ? 'Identify distinct speakers — output saved as .txt (timestamps disabled in Settings)'
+                : 'Identify distinct speakers — output saved as a subtitle file with speaker labels'
+            }
           />
           {diarization && (
             <>
