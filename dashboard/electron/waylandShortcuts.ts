@@ -187,8 +187,10 @@ export async function initWaylandShortcuts(
 
     // Catch socket-level errors (e.g. ERR_STREAM_WRITE_AFTER_END) so they
     // don't become uncaught exceptions and crash the Electron main process.
+    // Mark disconnected so shortcut operations gracefully no-op.
     bus.on('error', (err: unknown) => {
-      console.warn('[WaylandShortcuts] D-Bus bus error (caught):', err);
+      console.warn('[WaylandShortcuts] D-Bus bus error — shortcuts disabled until restart:', err);
+      connected = false;
     });
 
     // Get the portal proxy
