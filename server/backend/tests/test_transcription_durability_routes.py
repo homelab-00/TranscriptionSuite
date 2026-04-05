@@ -27,8 +27,14 @@ def _request() -> object:
     return object()
 
 
+def _mock_model_manager() -> SimpleNamespace:
+    """Model manager stub with a not-busy job tracker."""
+    return SimpleNamespace(job_tracker=SimpleNamespace(is_busy=lambda: (False, None)))
+
+
 def _request_with_state(**state_attrs) -> SimpleNamespace:
     """Request stub with app.state — required by the retry success path."""
+    state_attrs.setdefault("model_manager", _mock_model_manager())
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(**state_attrs)))
 
 
@@ -251,7 +257,9 @@ class TestRetryTranscription:
         )
 
         with pytest.raises(HTTPException) as exc:
-            asyncio.run(transcription.retry_transcription("job-na", _request(), _BgTasksMock()))
+            asyncio.run(
+                transcription.retry_transcription("job-na", _request_with_state(), _BgTasksMock())
+            )
         assert exc.value.status_code == 410
 
     def test_410_when_audio_file_missing_from_disk(self, repo, monkeypatch, tmp_path):
@@ -266,7 +274,11 @@ class TestRetryTranscription:
         )
 
         with pytest.raises(HTTPException) as exc:
-            asyncio.run(transcription.retry_transcription("job-nofile", _request(), _BgTasksMock()))
+            asyncio.run(
+                transcription.retry_transcription(
+                    "job-nofile", _request_with_state(), _BgTasksMock()
+                )
+            )
         assert exc.value.status_code == 410
 
     def test_202_accepted_when_audio_exists(self, repo, monkeypatch, tmp_path):

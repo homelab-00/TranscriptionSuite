@@ -905,6 +905,18 @@ async def retry_transcription(
             detail=f"Only failed jobs can be retried (current status: {job['status']})",
         )
 
+    # Pre-check model availability so we don't reset the job to 'processing'
+    # only to immediately fail. A TOCTOU race is still possible (model becomes
+    # busy between this check and try_start_job in _run_retry), but the
+    # background task handles that gracefully.
+    model_manager = request.app.state.model_manager
+    is_busy, active_user = model_manager.job_tracker.is_busy()
+    if is_busy:
+        raise HTTPException(
+            status_code=409,
+            detail="Model is currently busy. Try again when the active session ends.",
+        )
+
     audio_path = job.get("audio_path")
     if not audio_path:
         raise HTTPException(

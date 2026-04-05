@@ -173,7 +173,10 @@ def reset_for_retry(job_id: str) -> None:
     """Reset a job to 'processing' state so it can be re-transcribed.
 
     Clears result fields and error_message. The audio_path is preserved
-    so the retry can read the same file.
+    so the retry can read the same file. ``created_at`` is intentionally
+    NOT overwritten — the orphan sweep's ``is_busy()`` guard (item 39)
+    protects active retries, while preserving the original timestamp for
+    audit trails.
     """
     with get_connection() as conn:
         conn.execute(
@@ -184,8 +187,7 @@ def reset_for_retry(job_id: str) -> None:
                 completed_at = NULL,
                 result_text = NULL,
                 result_json = NULL,
-                delivered = 0,
-                created_at = CURRENT_TIMESTAMP
+                delivered = 0
             WHERE id = ?
             """,
             (job_id,),
