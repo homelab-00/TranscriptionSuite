@@ -1043,6 +1043,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         : (docker.detectionGuidance ?? 'Install Docker Engine, Docker Desktop, or Podman'),
     },
     {
+      label: `${rtName} Compose available`,
+      ok: docker.composeAvailable,
+      na: !needsDocker,
+      hint: !needsDocker
+        ? 'Not needed for Metal runtime'
+        : 'Install docker-compose-v2 (Debian/Ubuntu) or Docker Desktop',
+    },
+    {
       label: `${rtName} image pulled`,
       ok: docker.images.length > 0,
       na: !needsDocker,
@@ -1511,7 +1519,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           docker.operating ||
                           isRunning ||
                           startupFlowPending ||
-                          !liveModelWhisperOnlyCompatible
+                          !liveModelWhisperOnlyCompatible ||
+                          (needsDocker && !docker.composeAvailable)
                         }
                       >
                         {docker.operating || startupFlowPending ? (
@@ -1539,7 +1548,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           docker.operating ||
                           isRunning ||
                           startupFlowPending ||
-                          !liveModelWhisperOnlyCompatible
+                          !liveModelWhisperOnlyCompatible ||
+                          (needsDocker && !docker.composeAvailable)
                         }
                       >
                         Start Remote

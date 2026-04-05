@@ -787,6 +787,9 @@ async function runtimeBin(): Promise<string> {
 /** Guidance string from the most recent detection, if any */
 let _detectionGuidance: string | null = null;
 
+/** Whether `<runtime> compose` is available (set during detection) */
+let _composeAvailable: boolean | null = null;
+
 /**
  * Detect container runtime (Docker or Podman) availability.
  *
@@ -799,6 +802,7 @@ async function dockerAvailable(): Promise<boolean> {
   const result = await getDetectionResult();
 
   _detectionGuidance = result.guidance ?? null;
+  _composeAvailable = result.composeAvailable ?? null;
 
   if (result.runtime) {
     detectedRuntimeKind = result.runtime.kind;
@@ -833,6 +837,12 @@ function getDetectionGuidance(): string | null {
   return _detectionGuidance;
 }
 
+function getComposeAvailable(): boolean {
+  // null = not yet detected → assume available (avoid false-negative flicker).
+  // Only return false when compose was explicitly confirmed as missing.
+  return _composeAvailable !== false;
+}
+
 /**
  * Reset cached runtime detection. Call when the user clicks "Retry Detection".
  */
@@ -840,6 +850,7 @@ function retryDetection(): void {
   resetDetection();
   detectedRuntimeKind = null;
   _detectionGuidance = null;
+  _composeAvailable = null;
 }
 
 // ─── Image Operations ───────────────────────────────────────────────────────
@@ -1212,6 +1223,17 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     diarizationModel,
     whispercppModel,
   } = options;
+
+  // Guard: bail early with a human-readable message if compose is not available.
+  if (_composeAvailable === false) {
+    throw new Error(
+      'Docker Compose plugin is not installed. ' +
+        'Install it with: sudo apt install docker-compose-v2 (Debian/Ubuntu) ' +
+        'or install Docker Desktop which bundles Compose. ' +
+        'Then click "Retry Detection".',
+    );
+  }
+
   const composeEnv: Record<string, string> = { ...tlsEnv };
   const normalizedHfDecision = normalizeHfTokenDecision(hfTokenDecision);
 
@@ -2416,6 +2438,7 @@ async function getRuntimeKind(): Promise<string | null> {
 export const dockerManager = {
   dockerAvailable,
   getDetectionGuidance,
+  getComposeAvailable,
   retryDetection,
   getRuntimeKind,
   checkGpu,

@@ -909,6 +909,10 @@ ipcMain.handle('docker:getDetectionGuidance', async () => {
   return dockerManager.getDetectionGuidance();
 });
 
+ipcMain.handle('docker:getComposeAvailable', async () => {
+  return dockerManager.getComposeAvailable();
+});
+
 ipcMain.handle('docker:checkGpu', async () => {
   return dockerManager.checkGpu();
 });

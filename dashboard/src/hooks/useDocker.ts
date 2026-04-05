@@ -62,6 +62,8 @@ export interface UseDockerReturn {
   runtimeKind: string | null;
   /** Actionable guidance when detection fails (e.g. Podman socket not active) */
   detectionGuidance: string | null;
+  /** Whether the compose plugin is available for the detected runtime */
+  composeAvailable: boolean;
 
   // Image state
   images: DockerImage[];
@@ -121,6 +123,7 @@ export function useDocker(): UseDockerReturn {
   const [loading, setLoading] = useState(true);
   const [runtimeKind, setRuntimeKind] = useState<string | null>(null);
   const [detectionGuidance, setDetectionGuidance] = useState<string | null>(null);
+  const [composeAvailable, setComposeAvailable] = useState(true);
   const [images, setImages] = useState<DockerImage[]>([]);
   const [container, setContainer] = useState<ContainerStatus>(EMPTY_CONTAINER);
   const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
@@ -142,12 +145,14 @@ export function useDocker(): UseDockerReturn {
 
     (async () => {
       try {
-        const [ok, guidance] = await Promise.all([
+        const [ok, guidance, compose] = await Promise.all([
           docker.available(),
           docker.getDetectionGuidance().catch(() => null),
+          docker.getComposeAvailable().catch(() => true),
         ]);
         setAvailable(ok);
         setDetectionGuidance(guidance);
+        setComposeAvailable(compose);
         if (ok) {
           docker
             .getRuntimeKind()
@@ -225,9 +230,13 @@ export function useDocker(): UseDockerReturn {
     setOperationError(null);
     try {
       const ok = await docker.retryDetection();
-      const guidance = await docker.getDetectionGuidance().catch(() => null);
+      const [guidance, compose] = await Promise.all([
+        docker.getDetectionGuidance().catch(() => null),
+        docker.getComposeAvailable().catch(() => true),
+      ]);
       setAvailable(ok);
       setDetectionGuidance(guidance);
+      setComposeAvailable(compose);
       if (ok) {
         docker
           .getRuntimeKind()
@@ -485,6 +494,7 @@ export function useDocker(): UseDockerReturn {
     loading,
     runtimeKind,
     detectionGuidance,
+    composeAvailable,
     images,
     refreshImages,
     pullImage,

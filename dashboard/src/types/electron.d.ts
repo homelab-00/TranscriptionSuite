@@ -115,6 +115,7 @@ interface ElectronAPI {
     retryDetection: () => Promise<boolean>;
     getRuntimeKind: () => Promise<string | null>;
     getDetectionGuidance: () => Promise<string | null>;
+    getComposeAvailable: () => Promise<boolean>;
     checkGpu: () => Promise<{ gpu: boolean; toolkit: boolean; vulkan: boolean }>;
     listImages: () => Promise<
       Array<{ tag: string; fullName: string; size: string; created: string; id: string }>

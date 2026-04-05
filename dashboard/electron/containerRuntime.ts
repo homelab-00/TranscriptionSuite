@@ -44,6 +44,8 @@ export interface DetectionResult {
   socketDead?: boolean;
   /** Actionable guidance for the user when detection fails */
   guidance?: string;
+  /** Whether `<runtime> compose` is available as a subcommand */
+  composeAvailable?: boolean;
 }
 
 // ─── Socket Paths ────────────────────────────────────────────────────────────
@@ -157,6 +159,33 @@ async function probeSocket(kind: ContainerRuntimeKind): Promise<boolean> {
   });
 }
 
+/**
+ * Check whether `<bin> compose version` succeeds.
+ * Docker requires the compose-v2 CLI plugin; Podman bundles compose natively.
+ */
+async function probeCompose(bin: string): Promise<boolean> {
+  try {
+    await execFileAsync(bin, ['compose', 'version'], {
+      env: buildDetectionEnv(),
+      timeout: 5_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const DOCKER_COMPOSE_MISSING_GUIDANCE =
+  'Docker is running but the Compose plugin is not installed. ' +
+  'Fix: run  sudo apt install docker-compose-v2  (Debian/Ubuntu) ' +
+  'or install Docker Desktop which bundles Compose — ' +
+  'then click "Retry Detection" in the app.';
+
+const PODMAN_COMPOSE_MISSING_GUIDANCE =
+  'Podman is running but the compose plugin was not found. ' +
+  'Fix: install podman-compose (pip install podman-compose) or ' +
+  'docker-compose-v2 — then click "Retry Detection" in the app.';
+
 const PODMAN_SOCKET_GUIDANCE =
   'Podman was detected but its API socket is not active. ' +
   'External compose providers (docker-compose) require the socket to be running. ' +
@@ -201,18 +230,41 @@ export async function detectRuntime(): Promise<DetectionResult> {
         guidance: PODMAN_SOCKET_GUIDANCE,
       };
     }
+    const hasCompose = running ? await probeCompose(override) : undefined;
+    if (running && !hasCompose) {
+      console.warn(`[ContainerRuntime] Override: ${override} compose plugin not found`);
+    }
     return {
       runtime: running ? runtime : null,
       binaryFoundButNotRunning: !running,
       binaryFound: override,
+      composeAvailable: hasCompose ?? undefined,
+      guidance:
+        running && !hasCompose
+          ? override === 'podman'
+            ? PODMAN_COMPOSE_MISSING_GUIDANCE
+            : DOCKER_COMPOSE_MISSING_GUIDANCE
+          : undefined,
     };
   }
 
   // Try Docker first (most common)
   if (await probeRuntime('docker')) {
     const runtime = makeRuntime('docker');
-    console.log('[ContainerRuntime] Docker daemon detected');
-    return { runtime, binaryFoundButNotRunning: false, binaryFound: 'docker' };
+    const hasCompose = await probeCompose('docker');
+    console.log(
+      `[ContainerRuntime] Docker daemon detected (compose: ${hasCompose ? 'yes' : 'no'})`,
+    );
+    if (!hasCompose) {
+      console.warn('[ContainerRuntime] Docker Compose V2 plugin is not installed');
+    }
+    return {
+      runtime,
+      binaryFoundButNotRunning: false,
+      binaryFound: 'docker',
+      composeAvailable: hasCompose,
+      guidance: hasCompose ? undefined : DOCKER_COMPOSE_MISSING_GUIDANCE,
+    };
   }
 
   // Try Podman
@@ -233,8 +285,15 @@ export async function detectRuntime(): Promise<DetectionResult> {
       };
     }
     const runtime = makeRuntime('podman');
-    console.log('[ContainerRuntime] Podman detected');
-    return { runtime, binaryFoundButNotRunning: false, binaryFound: 'podman' };
+    const hasCompose = await probeCompose('podman');
+    console.log(`[ContainerRuntime] Podman detected (compose: ${hasCompose ? 'yes' : 'no'})`);
+    return {
+      runtime,
+      binaryFoundButNotRunning: false,
+      binaryFound: 'podman',
+      composeAvailable: hasCompose,
+      guidance: hasCompose ? undefined : PODMAN_COMPOSE_MISSING_GUIDANCE,
+    };
   }
 
   // Neither daemon is running — check for binary presence for better errors
