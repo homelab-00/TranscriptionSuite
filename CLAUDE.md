@@ -38,6 +38,22 @@ cd server/backend
 
 See `tests/test_job_repository_imports.py` and `tests/test_transcription_durability_routes.py` for canonical examples.
 
+## Project Documentation
+
+`docs/index.md` is the master documentation index for this project. Use it as the entry
+point when planning new features, creating PRDs, or onboarding to an unfamiliar area:
+
+- **Architecture:** `docs/architecture-server.md` (backend), `docs/architecture-dashboard.md` (frontend)
+- **Integration:** `docs/integration-architecture.md` (how server and dashboard communicate)
+- **API surface:** `docs/api-contracts-server.md` (all REST + WebSocket endpoints)
+- **Data layer:** `docs/data-models-server.md` (database schema, durability system)
+- **Source map:** `docs/source-tree-analysis.md` (annotated directory tree, 212 source files)
+- **Dev setup:** `docs/development-guide.md` and `docs/deployment-guide.md`
+- **AI rules:** `docs/project-context.md` (90 rules — read before implementing code)
+
+When creating a brownfield PRD or planning a feature, point the planning workflow to
+`docs/index.md` so it has full project context.
+
 ## Quick Reference
 
 - Never use `pip`, always `uv`.

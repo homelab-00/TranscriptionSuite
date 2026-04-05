@@ -1,0 +1,157 @@
+# TranscriptionSuite — Deployment Guide
+
+> Generated: 2026-04-05
+
+## Deployment Architecture
+
+TranscriptionSuite deploys as two components:
+1. **Dashboard** — Electron desktop app installed on the user's machine
+2. **Server** — Docker container running on the same machine or a remote server
+
+## Docker Compose Variants
+
+The server uses a **layered compose** strategy. The dashboard auto-selects the correct combination:
+
+### Base (always included)
+- `docker-compose.yml` — Service definition, volumes, environment variables
+
+### Platform Overlays (pick one)
+| File | Platform | Networking |
+|------|----------|-----------|
+| `docker-compose.linux-host.yml` | Linux | Host networking (direct localhost access) |
+| `docker-compose.desktop-vm.yml` | macOS / Windows | Bridge + port mapping (9786:9786) |
+
+### GPU Overlays (pick one, optional)
+| File | GPU Type | Mechanism |
+|------|----------|-----------|
+| `docker-compose.gpu.yml` | NVIDIA (legacy) | `deploy.resources.reservations.devices` with nvidia driver |
+| `docker-compose.gpu-cdi.yml` | NVIDIA (CDI) | CDI device passthrough (`nvidia.com/gpu=all`) |
+| `docker-compose.vulkan.yml` | AMD / Intel | whisper.cpp sidecar with `/dev/dri` Vulkan access |
+| `podman-compose.gpu.yml` | NVIDIA (Podman) | Podman-specific GPU passthrough |
+
+### Common Combinations
+```bash
+# Linux + NVIDIA GPU (most common)
+docker compose -f docker-compose.yml \
+  -f docker-compose.linux-host.yml \
+  -f docker-compose.gpu.yml up -d
+
+# macOS / Windows CPU
+docker compose -f docker-compose.yml \
+  -f docker-compose.desktop-vm.yml up -d
+
+# Linux + AMD/Intel GPU (Vulkan)
+docker compose -f docker-compose.yml \
+  -f docker-compose.linux-host.yml \
+  -f docker-compose.vulkan.yml up -d
+```
+
+## Docker Volumes
+
+| Volume Name | Mount Point | Purpose |
+|-------------|------------|---------|
+| `transcriptionsuite-data` | `/data` | Database, audio files, tokens, logs |
+| `transcriptionsuite-models` | `/models` | HuggingFace model cache (~2-30GB) |
+| `transcriptionsuite-runtime` | `/runtime` | Python venv, bootstrap state, uv cache |
+
+**Bind mounts** (optional):
+| Source | Target | Purpose |
+|--------|--------|---------|
+| `USER_CONFIG_DIR` | `/user-config` | Custom config.yaml and logs |
+| `TLS_CERT_PATH` | `/certs/cert.crt` | TLS certificate (read-only) |
+| `TLS_KEY_PATH` | `/certs/cert.key` | TLS private key (read-only) |
+| `STARTUP_EVENTS_DIR` | `/startup-events` | Bootstrap progress for Electron |
+
+## Bootstrap System
+
+On first container start, the server installs Python dependencies into `/runtime/.venv`:
+
+1. **Fingerprint check** — Compare schema version, Python ABI, arch, GPU driver, extras, uv.lock
+2. **Cache hit** — Skip install if fingerprint matches
+3. **Cache miss** — Run `uv sync --frozen` with appropriate extras
+4. **Status file** — Write `bootstrap-status.json` with installed features
+5. **Startup events** — Emit progress to JSONL file for dashboard
+
+**Extras selected by model type:**
+- Whisper model → `--extra whisper`
+- NeMo model → `--extra nemo` (requires `INSTALL_NEMO=true`)
+- VibeVoice model → `--extra vibevoice_asr` (requires `INSTALL_VIBEVOICE_ASR=true`)
+
+**Timeout:** 30 minutes default (`BOOTSTRAP_TIMEOUT_SECONDS=1800`)
+
+## TLS / Remote Access
+
+### Tailscale Setup
+```bash
+# 1. Generate certificates
+tailscale cert your-machine.tailnet-name.ts.net
+
+# 2. Start with TLS
+TLS_ENABLED=true \
+TLS_CERT_PATH=~/.config/Tailscale/your-machine.crt \
+TLS_KEY_PATH=~/.config/Tailscale/your-machine.key \
+docker compose -f docker-compose.yml \
+  -f docker-compose.linux-host.yml \
+  -f docker-compose.gpu.yml up -d
+```
+
+When TLS is enabled:
+- All routes require Bearer token authentication (except `/health`, `/api/auth/login`)
+- Admin token generated on first run (shown in server logs)
+- Dashboard auto-detects token from Docker log output
+
+## GPU Requirements
+
+### NVIDIA CUDA
+- CUDA 12.9+ (explicit PyPI index override for PyTorch)
+- nvidia-container-toolkit or nvidia-container-runtime
+- 6-16GB VRAM depending on model
+- CDI mode available for newer setups
+
+### AMD/Intel Vulkan
+- Vulkan-capable GPU with `/dev/dri` access
+- Uses whisper.cpp sidecar (`ghcr.io/ggml-org/whisper.cpp:main-vulkan`)
+- Quantized GGUF models only (lower VRAM requirement)
+
+### Apple Silicon (Metal)
+- MLX framework (no Docker needed)
+- Setup via `build/setup-macos-metal.sh`
+- Creates self-contained `.app` with bundled Python venv
+
+## Environment Variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SERVER_PORT` | 9786 | HTTP/HTTPS port |
+| `LOG_LEVEL` | INFO | Logging verbosity |
+| `HUGGINGFACE_TOKEN` | (empty) | For gated models (PyAnnote diarization) |
+| `MAIN_TRANSCRIBER_MODEL` | (empty) | Override default STT model |
+| `LIVE_TRANSCRIBER_MODEL` | (empty) | Override live mode model |
+| `INSTALL_WHISPER` | false | Install faster-whisper extras |
+| `INSTALL_NEMO` | false | Install NeMo toolkit |
+| `INSTALL_VIBEVOICE_ASR` | false | Install VibeVoice backend |
+| `TLS_ENABLED` | false | Enable HTTPS + auth |
+| `LM_STUDIO_URL` | http://127.0.0.1:1234 | LM Studio API endpoint |
+
+## Health Monitoring
+
+- **Liveness:** `GET /health` (no auth, always available)
+- **Readiness:** `GET /ready` (200 when models loaded, 503 when loading)
+- **Status:** `GET /api/status` (detailed: GPU, model, features, config)
+- **Docker healthcheck:** curl to `/health` every 30s, 600s start period
+
+## Security
+
+- Non-root container user (`appuser`, UID 10000)
+- Token-based auth with SHA-256 hashing (TLS mode)
+- Origin validation middleware (CORS policy)
+- Stop grace period: 130s (matches 120s drain timeout)
+- GPG-signed release artifacts (optional)
+
+## CI/CD Release Pipeline
+
+Triggered by `v*` tag push:
+1. **build-linux** — AppImage + GPG signature
+2. **build-windows** — NSIS installer + GPG signature (3x retry)
+3. **build-macos** — DMG + ZIP + GPG signatures
+4. **create-release** — Draft GitHub Release with all artifacts
