@@ -512,6 +512,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
     serverConnection.refresh();
   }, [serverConnection]);
 
+  // In Metal GPU mode the server always runs locally, so automatically start
+  // the local client link as soon as the inference server becomes fully ready.
+  // Using a ref to track the previous ready value means we only fire on the
+  // rising edge (false → true), which prevents re-triggering when the user
+  // manually stops the client while the server stays up.
+  const prevServerReadyRef = useRef(false);
+  useEffect(() => {
+    const wasReady = prevServerReadyRef.current;
+    prevServerReadyRef.current = serverConnection.ready;
+    if (isBareMetal && serverConnection.ready && !wasReady && !clientRunning) {
+      void handleStartClientLocal();
+    }
+  }, [isBareMetal, serverConnection.ready, clientRunning, handleStartClientLocal]);
+
   const handleStartClientRemote = useCallback(async () => {
     const remoteProfile =
       (await getConfig<'tailscale' | 'lan'>('connection.remoteProfile')) ?? 'tailscale';
@@ -1363,7 +1377,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         variant="secondary"
                         size="sm"
                         onClick={handleStartClientRemote}
-                        disabled={clientRunning}
+                        disabled={clientRunning || isBareMetal}
+                        title={isBareMetal ? 'Remote client link is not supported in Metal mode' : undefined}
                         className="px-3 text-xs"
                       >
                         Start Remote
