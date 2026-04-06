@@ -56,12 +56,13 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
   - [1.2 Screenshots](#12-screenshots)
   - [1.3 Short Tour](#13-short-tour)
 - [2. Installation](#2-installation)
-  - [2.1 Prerequisites](#21-prerequisites)
-  - [2.2 Download the Dashboard app](#22-download-the-dashboard-app)
-    - [2.2.1 Linux AppImage Prerequisites](#221-linux-appimage-prerequisites)
-    - [2.2.2 Verify Download with Kleopatra (optional)](#222-verify-download-with-kleopatra-optional)
-  - [2.3 Setting Up the Server](#23-setting-up-the-server)
-  - [2.4 AMD / Intel GPU Support (Vulkan)](#24-amd--intel-gpu-support-vulkan)
+  - [2.1 Apple Silicon (Metal/MLX)](#21-apple-silicon-metalmlx)
+  - [2.2 Linux, Windows, and Intel Mac](#22-linux-windows-and-intel-mac)
+  - [2.3 Download the Dashboard app](#23-download-the-dashboard-app)
+    - [2.3.1 Linux AppImage Prerequisites](#231-linux-appimage-prerequisites)
+    - [2.3.2 Verify Download with Kleopatra (optional)](#232-verify-download-with-kleopatra-optional)
+  - [2.4 Setting Up the Server](#24-setting-up-the-server)
+  - [2.5 AMD / Intel GPU Support (Vulkan)](#25-amd--intel-gpu-support-vulkan)
 - [3. Remote Connection](#3-remote-connection)
   - [3.1 Option A: Tailscale (recommended)](#31-option-a-tailscale-recommended)
     - [Server Machine Setup](#server-machine-setup)
@@ -124,9 +125,44 @@ https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
 
 ## 2. Installation
 
-### 2.1 Prerequisites
+There are two separate installation paths — pick the one for your platform:
 
-To begin with, you need to install Docker (or Podman).
+| Platform | Path |
+|---|---|
+| **Apple Silicon Mac (M1+)** | → [§ 2.1](#21-apple-silicon-metalmlx) — one-command setup, no Docker |
+| **Linux / Windows / Intel Mac** | → [§§ 2.2–2.5](#22-linux-windows-and-intel-mac) — Docker/Podman-based |
+
+---
+
+### 2.1 Apple Silicon (Metal/MLX)
+
+On Apple Silicon Macs (M1 and later) the **Metal/MLX runtime** runs the transcription
+engine natively — no Docker required, full hardware acceleration out of the box.
+
+A single setup script handles everything: it installs dependencies (Homebrew, Node.js,
+uv, Python 3.13), builds the Electron dashboard, and bundles the Python/MLX backend
+into a self-contained `TranscriptionSuite.app` you can drag straight to your
+Applications folder:
+
+```bash
+bash build/setup-macos-metal.sh
+# optional flag to install directly to /Applications/:
+bash build/setup-macos-metal.sh --install
+```
+
+> The script will offer to install Homebrew if it is absent, and downloads
+> Node.js, uv, Python 3.13, and ~3–5 GB of ML packages on first run.
+> See [README_DEV.md § 15](README_DEV.md#15-apple-silicon-metalmlx-development)
+> for manual / dev-mode instructions.
+
+Once the app is open: **Settings → Runtime Profile → Metal (Apple Silicon)**,
+then click **Start Metal Server**.
+
+---
+
+### 2.2 Linux, Windows, and Intel Mac
+
+Install Docker (or Podman) before proceeding with §§ 2.3–2.5.
 
 > *Both are supported; the dashboard and shell scripts auto-detect which runtime is available (Docker is checked first, then Podman).*
 
@@ -168,32 +204,11 @@ After installation to make sure it's enabled, run `wsl --list --verbose` - if th
 2. Install NVIDIA GPU driver with WSL support (standard NVIDIA gaming drivers work fine)
     * Not required if using CPU mode
 
-**macOS:**
-1. **Apple Silicon (M1+) — recommended:** Use the **Metal/MLX runtime** for native
-   hardware-accelerated transcription without Docker.
+**macOS (Intel / CPU-only):** Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
+or [Podman Desktop](https://podman-desktop.io/) — GPU acceleration is not available on Intel macOS;
+the server runs in CPU mode automatically.
 
-   Run the one-liner setup script from the repository root — it installs all
-   dependencies, builds the Electron dashboard, and bundles the Python/MLX
-   backend into a self-contained `TranscriptionSuite.app` you can drag straight
-   to your Applications folder:
-   ```bash
-   bash build/setup-macos-metal.sh
-   # optional flag to install directly to /Applications/:
-   bash build/setup-macos-metal.sh --install
-   ```
-   > The script needs Homebrew (will offer to install it if absent), and downloads
-   > Node.js, uv, Python 3.13, and ~3–5 GB of ML packages on first run.
-   > See [README_DEV.md § 15](README_DEV.md#15-apple-silicon-metalmlx-development)
-   > for manual / dev-mode instructions.
-
-   In the dashboard: **Settings → Runtime Profile → Metal (Apple Silicon)**,
-   then click **Start Metal Server**.
-
-2. **Intel Mac / CPU-only:** Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
-   or [Podman Desktop](https://podman-desktop.io/) — GPU acceleration is not
-   available on Intel macOS; the server runs in CPU mode automatically.
-
-### 2.2 Download the Dashboard app
+### 2.3 Download the Dashboard app
 
 Before doing anything else, you need to download the Dashboard app for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page.
 This is just the frontend, no models or packages are downloaded yet.
@@ -201,7 +216,7 @@ This is just the frontend, no models or packages are downloaded yet.
 >* *Linux and Windows builds are x64; macOS is arm64*
 >* *Each release artifact includes an gpg signature by my key (`.asc`)*
 
-##### 2.2.1 Linux AppImage Prerequisites
+##### 2.3.1 Linux AppImage Prerequisites
 
 AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default on distros that ship with GNOME (both Fedora & Arch KDE worked fine out of the box). If you see `dlopen(): error loading libfuse.so.2`, install the appropriate package:
 
@@ -217,7 +232,7 @@ AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default
 > requirements. This is the standard approach for Electron-based AppImages and does
 > not affect application security.
 
-##### 2.2.2 Verify Download with Kleopatra (optional)
+##### 2.3.2 Verify Download with Kleopatra (optional)
 
 1. Download both files from the same release:
    - installer/app (`.AppImage`, `.exe` or `.dmg`)
@@ -228,7 +243,7 @@ AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default
 4. In Kleopatra, use `File` -> `Decrypt/Verify Files...` and select the downloaded `.asc` signature.
 5. If prompted, select the corresponding downloaded app file. Verification should report a valid signature.
 
-### 2.3 Setting Up the Server
+### 2.4 Setting Up the Server
 
 We're now ready to start the server. This process includes two parts: downloading the Docker image and starting a Docker container based off of that image.
 
@@ -252,7 +267,7 @@ Notes:
 *TranscriptionSuite supports both Docker and Podman. The dashboard and CLI scripts auto-detect which runtime is available. For GPU mode with Podman, ensure CDI is configured (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`).*
 *Podman 4.7+ is required for `podman compose` support.*
 
-### 2.4 AMD / Intel GPU Support (Vulkan)
+### 2.5 AMD / Intel GPU Support (Vulkan)
 
 If you have an **AMD or Intel GPU** instead of NVIDIA, you can still get GPU-accelerated transcription using [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with Vulkan.
 
