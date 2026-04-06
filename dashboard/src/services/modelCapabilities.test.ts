@@ -250,6 +250,22 @@ describe('filterLanguagesForModel', () => {
     expect(result).toEqual(['Auto Detect']);
   });
 
+  it('returns only Auto Detect for mlx parakeet (no language-hint API)', () => {
+    const result = filterLanguagesForModel(allLanguages, 'mlx-community/parakeet-tdt-0.6b-v3');
+
+    expect(result).toEqual(['Auto Detect']);
+  });
+
+  it('filters to NeMo languages + Auto Detect for mlx canary', () => {
+    const result = filterLanguagesForModel(allLanguages, 'eelcor/canary-1b-v2-mlx');
+
+    expect(result).toContain('Auto Detect');
+    expect(result).toContain('English');
+    expect(result).toContain('French');
+    expect(result).not.toContain('Japanese');
+    expect(result).not.toContain('Chinese');
+  });
+
   it('returns only English for .en whisper models', () => {
     expect(filterLanguagesForModel(allLanguages, 'Systran/faster-whisper-medium.en')).toEqual([
       'English',
@@ -280,6 +296,15 @@ describe('supportsTranslation', () => {
 
   it('returns false for vibevoice', () => {
     expect(supportsTranslation('microsoft/VibeVoice-ASR')).toBe(false);
+  });
+
+  it('returns false for mlx parakeet (ASR-only, no translation task)', () => {
+    expect(supportsTranslation('mlx-community/parakeet-tdt-0.6b-v3')).toBe(false);
+  });
+
+  it('returns false for mlx canary (ASR-only in MLX port)', () => {
+    expect(supportsTranslation('eelcor/canary-1b-v2-mlx')).toBe(false);
+    expect(supportsTranslation('Mediform/canary-1b-v2-mlx-q8')).toBe(false);
   });
 
   it('returns true for standard whisper model', () => {

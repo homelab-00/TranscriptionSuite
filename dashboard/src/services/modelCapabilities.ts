@@ -110,7 +110,7 @@ export function isMLXModel(modelName: string | null | undefined): boolean {
 
 /**
  * Returns true if the model is an MLX-accelerated Parakeet-TDT model.
- * English-only; no translation; no live mode.
+ * 25 EU languages (auto-detected from audio); no translation task; no live mode.
  */
 export function isMLXParakeetModel(modelName: string | null | undefined): boolean {
   const name = (modelName ?? '').trim();
@@ -188,7 +188,12 @@ export function filterLanguagesForModel(
     return languages.filter((l) => l === 'Auto Detect');
   }
   if (isMLXParakeetModel(modelName)) {
-    return languages.filter((l) => l === 'English');
+    // parakeet-mlx exposes no language-hint API; the model auto-detects language from audio
+    return languages.filter((l) => l === 'Auto Detect');
+  }
+  if (isMLXCanaryModel(modelName)) {
+    // MLX Canary supports the same 25 NeMo languages as nvidia/canary-*
+    return languages.filter((l) => l === 'Auto Detect' || NEMO_LANGUAGES.has(l));
   }
   if (isEnglishOnlyWhisperModel(modelName)) {
     return languages.filter((l) => l === 'English');
@@ -209,10 +214,12 @@ export function supportsTranslation(modelName: string | null | undefined): boole
 
   // Parakeet models are ASR-only (no translation)
   if (isParakeetModel(modelName)) return false;
-  // MLX Parakeet models are English-only (no translation)
+  // MLX Parakeet: ASR-only, no translation task
   if (isMLXParakeetModel(modelName)) return false;
   // Canary models support translation (X↔English)
   if (isCanaryModel(modelName)) return true;
+  // MLX Canary: ASR-only in the MLX port, no translation task
+  if (isMLXCanaryModel(modelName)) return false;
   // VibeVoice-ASR (v1 integration) is ASR+diarization only.
   if (isVibeVoiceASRModel(modelName)) return false;
   if (name.includes('turbo')) return false;

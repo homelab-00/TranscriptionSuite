@@ -1252,14 +1252,15 @@ async def get_supported_languages(request: Request) -> dict[str, Any]:
     except Exception:
         backend_type = "whisper"
 
-    if backend_type in ("parakeet", "canary"):
+    if backend_type in ("parakeet", "canary", "mlx_canary"):
         languages = _NEMO_LANGUAGES
-    elif backend_type == "vibevoice_asr":
+    elif backend_type in ("vibevoice_asr", "mlx_vibevoice", "mlx_parakeet"):
+        # mlx_parakeet: parakeet-mlx has no language-hint API; model auto-detects from audio
         languages = _VIBEVOICE_ASR_LANGUAGES
     else:
         languages = _WHISPER_LANGUAGES
 
-    supports_translation = backend_type in ("whisper", "canary")
+    supports_translation = backend_type in ("whisper", "canary", "mlx_whisper")
 
     return {
         "languages": languages,

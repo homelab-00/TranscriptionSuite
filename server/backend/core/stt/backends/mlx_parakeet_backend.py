@@ -102,7 +102,7 @@ class MLXParakeetBackend(STTBackend):
     """Apple MLX / Metal-accelerated Parakeet-TDT backend.
 
     Wraps ``parakeet-mlx`` for NVIDIA Parakeet-TDT inference on Apple Silicon.
-    English-only; sentence-level timestamps; no translation support.
+    25 EU languages (auto-detected from audio); sentence-level timestamps; no translation.
     Only available on macOS with Apple Silicon.
     """
 
@@ -178,8 +178,9 @@ class MLXParakeetBackend(STTBackend):
         translation_target_language: str | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
-        # Parakeet-TDT is English-only; all the language/task parameters are
-        # accepted for interface compatibility but have no effect.
+        # parakeet-mlx exposes no language-hint API; language/task parameters are
+        # accepted for interface compatibility but have no effect. The model
+        # auto-detects the language from the audio content.
         del (
             language,
             task,

@@ -110,7 +110,7 @@ export interface LanguagesResponse {
   languages: Record<string, string>;
   count: number;
   auto_detect: boolean;
-  backend_type?: 'whisper' | 'parakeet' | 'canary' | 'vibevoice_asr';
+  backend_type?: 'whisper' | 'parakeet' | 'canary' | 'vibevoice_asr' | 'mlx_parakeet' | 'mlx_canary' | 'mlx_whisper' | 'mlx_vibevoice';
   supports_translation?: boolean;
 }
 
