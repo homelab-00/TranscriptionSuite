@@ -63,16 +63,16 @@ When creating a brownfield PRD or planning a feature, point the planning workflo
 - Read `docs/README_DEV.md` for architecture overview.
 - When writing commit messages, use the following style below. Make sure to not break up long lines by splitting them with newlines.
 
-feat/fix/chore/etc(impacted area e.g. tests, stt, dashboard, ui, server, etc): Summary of all changes
+feat/fix/chore/etc(impacted area e.g. tests, stt, dashboard, ui, server, etc): summary of all changes
 
-* feat/fix/chore/etc(impacted area): Change 1
-* Detail 1 (optional, if change if large enough)
-* Detail 2 (optional, if change if large enough)
+* feat/fix/chore/etc(impacted area): change 1
+* detail 1 (optional, if change if large enough)
+* detail 2 (optional, if change if large enough)
 ...
 
-* feat/fix/chore/etc(impacted area): Change 2
-* Detail 1 (optional, if change if large enough)
-* Detail 2 (optional, if change if large enough)
+* feat/fix/chore/etc(impacted area): change 2
+* detail 1 (optional, if change if large enough)
+* detail 2 (optional, if change if large enough)
 ...
 
 ...

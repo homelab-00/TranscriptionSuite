@@ -338,7 +338,7 @@ export function useDocker(): UseDockerReturn {
   const startContainer = useCallback(
     async (
       mode: 'local' | 'remote',
-      runtimeProfile: RuntimeProfile = 'gpu',
+      runtimeProfile: RuntimeProfile = 'cpu',
       tlsEnv?: Record<string, string>,
       imageTag?: string,
       hfToken?: string,

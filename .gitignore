@@ -33,6 +33,7 @@ TranscriptionSuite.app
 
 # AI Stuff
 
+.claude/worktrees/
 .gitnexus/
 _bmad-output/
 .superpowers/

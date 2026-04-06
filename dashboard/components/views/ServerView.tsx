@@ -229,7 +229,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const modelCacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Runtime profile (persisted in electron-store)
-  const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('gpu');
+  const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('cpu');
 
   // Metal (Apple Silicon) detection – derived from server-side feature check
   const mlxFeature = (adminStatus?.models as any)?.features?.mlx as
@@ -984,33 +984,39 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         .then((info: { gpu: boolean; toolkit: boolean; vulkan: boolean }) => {
           cachedGpuInfo = info;
           setGpuInfo(info);
-          // Auto-set runtime profile based on hardware detection (only if not already configured).
+          // Auto-set runtime profile based on hardware detection.
+          // Runs exactly once: on fresh install or upgrade from a version without the flag.
           // Priority: Metal (Apple Silicon) > NVIDIA GPU > Vulkan (AMD/Intel) > CPU
           api.config
-            ?.get('server.runtimeProfile')
-            .then((val: unknown) => {
-              if (!val) {
-                if (metalSupported) {
-                  handleRuntimeProfileChange('metal');
-                  api.config
-                    ?.get('server.mainModelSelection')
-                    .then((modelVal: unknown) => {
-                      const cur = typeof modelVal === 'string' ? modelVal.trim() : '';
-                      if (!cur || cur === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
-                        setMainModelSelection(MLX_DEFAULT_MODEL);
-                        api.config?.set('server.mainModelSelection', MLX_DEFAULT_MODEL);
-                        api.config?.set('server.mainCustomModel', '');
-                      }
-                    })
-                    .catch(() => {});
-                } else if (info.gpu && info.toolkit) {
-                  handleRuntimeProfileChange('gpu');
-                } else if (info.vulkan) {
-                  handleRuntimeProfileChange('vulkan');
-                } else {
-                  handleRuntimeProfileChange('cpu');
-                }
+            ?.get('server.gpuAutoDetectDone')
+            .then((done: unknown) => {
+              if (done === true) return; // already ran — respect user's stored choice
+              // Determine best profile for this hardware
+              let detected: RuntimeProfile = 'cpu';
+              if (metalSupported) {
+                detected = 'metal';
+              } else if (info.gpu && info.toolkit) {
+                detected = 'gpu';
+              } else if (info.vulkan) {
+                detected = 'vulkan';
               }
+              handleRuntimeProfileChange(detected);
+              // If Metal was selected, also set the default MLX model
+              if (detected === 'metal') {
+                api.config
+                  ?.get('server.mainModelSelection')
+                  .then((modelVal: unknown) => {
+                    const cur = typeof modelVal === 'string' ? modelVal.trim() : '';
+                    if (!cur || cur === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
+                      setMainModelSelection(MLX_DEFAULT_MODEL);
+                      api.config?.set('server.mainModelSelection', MLX_DEFAULT_MODEL);
+                      api.config?.set('server.mainCustomModel', '');
+                    }
+                  })
+                  .catch(() => {});
+              }
+              // Mark auto-detection as done so it never re-runs
+              api.config?.set('server.gpuAutoDetectDone', true);
             })
             .catch(() => {});
         })

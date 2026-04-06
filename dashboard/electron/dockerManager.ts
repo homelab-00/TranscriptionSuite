@@ -1240,6 +1240,26 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     );
   }
 
+  // Pre-flight GPU validation: verify NVIDIA hardware + toolkit before Docker
+  // attempts to invoke the NVIDIA container runtime (which crashes otherwise).
+  if (runtimeProfile === 'gpu') {
+    const gpuCheck = await checkGpu();
+    if (!gpuCheck.gpu || !gpuCheck.toolkit) {
+      const hints: string[] = [];
+      if (!gpuCheck.gpu) {
+        hints.push('No NVIDIA GPU was detected (nvidia-smi not found or failed).');
+      } else if (!gpuCheck.toolkit) {
+        hints.push(
+          'An NVIDIA GPU was found, but the NVIDIA Container Toolkit is not installed or configured.',
+        );
+      }
+      hints.push(
+        'Switch the Runtime Profile to "Vulkan" (for AMD/Intel GPUs) or "CPU" and try again.',
+      );
+      throw new Error(hints.join(' '));
+    }
+  }
+
   const composeEnv: Record<string, string> = { ...tlsEnv };
   const normalizedHfDecision = normalizeHfTokenDecision(hfTokenDecision);
 

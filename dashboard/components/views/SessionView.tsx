@@ -101,7 +101,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [monitorVolumePct, setMonitorVolumePct] = useState<number | null>(null);
 
   // Runtime profile (read from persisted config)
-  const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('gpu');
+  const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('cpu');
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (api?.config) {
@@ -1378,7 +1378,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         size="sm"
                         onClick={handleStartClientRemote}
                         disabled={clientRunning || isBareMetal}
-                        title={isBareMetal ? 'Remote client link is not supported in Metal mode' : undefined}
+                        title={
+                          isBareMetal
+                            ? 'Remote client link is not supported in Metal mode'
+                            : undefined
+                        }
                         className="px-3 text-xs"
                       >
                         Start Remote

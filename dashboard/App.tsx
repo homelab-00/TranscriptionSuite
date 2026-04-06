@@ -112,7 +112,7 @@ const AppInner: React.FC = () => {
   }, [serverConnection.reachable, setWatcherServerConnected]);
 
   // Track runtimeProfile at App level so Sidebar can derive correct status for bare-metal mode
-  const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('gpu');
+  const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('cpu');
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (api?.config) {

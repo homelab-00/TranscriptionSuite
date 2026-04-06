@@ -127,7 +127,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     updateChecksEnabled: false,
     updateCheckIntervalMode: '24h',
     updateCheckCustomHours: 24,
-    runtimeProfile: 'gpu' as RuntimeProfile,
+    runtimeProfile: 'cpu' as RuntimeProfile,
     pasteAtCursor: false,
   });
   const [shortcutSettings, setShortcutSettings] = useState<{
