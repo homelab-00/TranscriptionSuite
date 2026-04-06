@@ -138,11 +138,20 @@ export class MLXServerManager {
       (['python3', 'python'] as const).map((n) => path.join(binDir, n)).find(fs.existsSync) ??
       uvicornPath;
 
+    // Project root: two levels above server/backend/
+    // We intentionally do NOT use serverBackendDir as cwd because server/backend/
+    // contains a top-level `logging/` package that shadows the Python stdlib
+    // `logging` module when server/backend/ is added to sys.path via cwd.
+    // The editable install (.pth file in the venv) puts server/backend/ on
+    // sys.path unconditionally, so server.api.main is still fully importable
+    // from the project root.
+    const projectRoot = path.resolve(serverBackendDir, '../..');
+
     const child = spawn(
       pythonBin,
       ['-m', 'uvicorn', 'server.api.main:app', '--host', '0.0.0.0', '--port', String(opts.port)],
       {
-        cwd: serverBackendDir, // server/backend/ is the package root for uvicorn
+        cwd: projectRoot,
         env,
         // Don't inherit parent stdio — capture separately.
         stdio: ['ignore', 'pipe', 'pipe'],
