@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy } from 'lucide-react';
 import { LogTerminal } from '../ui/LogTerminal';
 import { Button } from '../ui/Button';
@@ -6,9 +6,37 @@ import { useDockerContext } from '../../src/hooks/DockerContext';
 import { useClientDebugLogs } from '../../src/hooks/useClientDebugLogs';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 
-export const LogsView: React.FC = () => {
+interface LogsViewProps {
+  runtimeProfile?: string;
+}
+
+export const LogsView: React.FC<LogsViewProps> = ({ runtimeProfile }) => {
+  const isMetal = runtimeProfile === 'metal';
   const docker = useDockerContext();
   const { logs: clientLogs } = useClientDebugLogs();
+
+  // ── Metal mode: subscribe to native MLX server log lines ──────────────────
+  const [mlxLogLines, setMlxLogLines] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!isMetal) {
+      setMlxLogLines([]);
+      return;
+    }
+    const mlx = (window as any).electronAPI?.mlx;
+    if (!mlx) return;
+
+    // Load the existing log buffer from the main process.
+    mlx.getLogs(500).then((lines: string[]) => {
+      setMlxLogLines(lines);
+    }).catch(() => {});
+
+    // Subscribe to real-time lines.
+    const unsub = mlx.onLogLine((line: string) => {
+      setMlxLogLines((prev) => [...prev, line]);
+    });
+    return unsub;
+  }, [isMetal]);
 
   // Build structured log entries from raw Docker output lines.
   const serverLogs = useMemo(() => {
@@ -20,10 +48,10 @@ export const LogsView: React.FC = () => {
     }> = [];
     const now = () => new Date().toLocaleTimeString('en-US', { hour12: false });
 
-    const classifyDockerLine = (line: string): 'info' | 'success' | 'error' | 'warning' => {
+    const classifyLine = (line: string): 'info' | 'success' | 'error' | 'warning' => {
       if (/(^|\b)(error|exception|traceback|fatal)(\b|$)/i.test(line)) return 'error';
       if (/(^|\b)(warn|warning)(\b|$)/i.test(line)) return 'warning';
-      if (/(^|\b)(started|ready|listening|healthy)(\b|$)/i.test(line)) return 'success';
+      if (/(^|\b)(started|ready|listening|healthy|startup complete)(\b|$)/i.test(line)) return 'success';
       return 'info';
     };
 
@@ -37,7 +65,7 @@ export const LogsView: React.FC = () => {
           timestamp: now(),
           source: 'Docker',
           message: trimmed,
-          type: classifyDockerLine(trimmed),
+          type: classifyLine(trimmed),
         };
       }
       const parsedDate = new Date(match[1]);
@@ -48,9 +76,23 @@ export const LogsView: React.FC = () => {
         timestamp: time,
         source: 'Docker',
         message: match[2],
-        type: classifyDockerLine(match[2]),
+        type: classifyLine(match[2]),
       };
     };
+
+    if (isMetal) {
+      // Metal mode: show native MLX server output
+      for (const line of mlxLogLines) {
+        const trimmed = line.trimEnd();
+        logs.push({
+          timestamp: now(),
+          source: 'Metal',
+          message: trimmed,
+          type: classifyLine(trimmed),
+        });
+      }
+      return logs;
+    }
 
     for (const line of docker.logLines) {
       logs.push(parseDockerLine(line));
@@ -75,11 +117,12 @@ export const LogsView: React.FC = () => {
     }
 
     return logs;
-  }, [docker.logLines, docker.container.running, docker.operationError]);
+  }, [isMetal, mlxLogLines, docker.logLines, docker.container.running, docker.operationError]);
 
   // Keep Docker logs streaming so the terminal updates in real time.
+  // Skip when in Metal mode — the MLX useEffect above handles log streaming.
   useEffect(() => {
-    if (!docker.container.exists) {
+    if (isMetal || !docker.container.exists) {
       docker.stopLogStream();
       return;
     }
@@ -88,6 +131,7 @@ export const LogsView: React.FC = () => {
       docker.stopLogStream();
     };
   }, [
+    isMetal,
     docker.container.exists,
     docker.container.running,
     docker.startLogStream,
@@ -119,7 +163,7 @@ export const LogsView: React.FC = () => {
       {/* Dual-panel log view — side by side on large screens */}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-2">
         <LogTerminal
-          title="Server Output (Docker)"
+          title={isMetal ? 'Server Output (Metal)' : 'Server Output (Docker)'}
           logs={serverLogs}
           color="magenta"
           className="h-full"

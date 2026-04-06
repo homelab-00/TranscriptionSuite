@@ -221,6 +221,19 @@ VENV_DIR="$BACKEND_DIR/.venv"
 
 mkdir -p "$BACKEND_DIR"
 
+# Hatchling uses [tool.hatch.build.targets.wheel] packages = ["server"], which
+# means it looks for a directory named "server" inside server/backend/.  That
+# directory is provided by a self-referential symlink (server/backend/server →
+# .) which is gitignored and therefore absent after a fresh clone.  Create it
+# now — before uv sync — so hatchling can discover the package source and bake
+# it into site-packages (--no-editable).  Without this, the wheel is built
+# empty and `import server` fails at runtime.
+BACKEND_SRC="$PROJECT_ROOT/server/backend"
+if [[ ! -L "$BACKEND_SRC/server" ]]; then
+  ln -sf . "$BACKEND_SRC/server"
+  echo "✓  Created server/backend/server symlink for wheel build."
+fi
+
 # Create a Python 3.13 venv managed by uv. uv auto-downloads Python 3.13 if
 # it is not present on this machine.
 uv venv "$VENV_DIR" --python 3.13

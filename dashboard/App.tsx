@@ -649,7 +649,7 @@ const AppInner: React.FC = () => {
       case View.LOGS:
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
-            <LogsView />
+            <LogsView runtimeProfile={runtimeProfile} />
           </ErrorBoundary>
         );
       default:
