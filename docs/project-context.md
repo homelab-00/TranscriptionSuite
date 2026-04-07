@@ -245,10 +245,6 @@ durability:
 - **Feature branches**: Descriptive kebab-case (e.g., `live-transcription-v2`, `logging-improvements`, `dashboard-oxidation`)
 - **No strict naming prefix** — no `feature/`, `fix/` prefixes required
 
-#### Doc Freshness
-- `.doc-freshness.yaml` tracks source-to-doc mappings — when modifying listed source files, check if README sections need updating
-- Run `node build/scripts/check-doc-freshness.mjs` to see stale sections (suggestions only, not blocking)
-
 #### Platform Targets
 - **Primary**: Linux KDE Wayland (GNOME Wayland secondary — document what doesn't work)
 - **Secondary**: Windows 11

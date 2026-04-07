@@ -129,7 +129,6 @@ Automatically run on `git commit`:
 2. **prettier** — TypeScript/CSS/JSON formatting
 3. **codespell** — Spell checking
 4. **UI contract check** — CSS class integrity validation
-5. **doc-freshness** — README drift warning (non-blocking)
 
 ### CI/CD Quality Gates
 - **Dashboard quality:** TypeScript type checking + UI contract validation

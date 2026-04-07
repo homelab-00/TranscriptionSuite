@@ -213,8 +213,6 @@ TranscriptionSuite/
 ├── build/                          # Build tooling (not a deployable part)
 │   ├── pyproject.toml              #   Build venv deps (ruff, pyright, pytest, bandit)
 │   ├── uv.lock                     #   Locked dependencies for build env
-│   ├── scripts/
-│   │   └── check-doc-freshness.mjs #   Doc freshness checker
 │   ├── build-electron-linux.sh     #   Linux AppImage packaging
 │   ├── build-electron-mac.sh       #   macOS DMG + ZIP packaging (unsigned)
 │   ├── docker-build-push.sh        #   Docker image build and GHCR push
@@ -254,7 +252,6 @@ TranscriptionSuite/
 │
 ├── CLAUDE.md                       # AI assistant instructions
 ├── .pre-commit-config.yaml         # Pre-commit hooks (ruff, pyright, prettier, shellcheck)
-├── .doc-freshness.yaml             # Source→doc mapping for freshness checks
 ├── .gitignore                      # Git ignore patterns
 ├── .dockerignore                   # Docker build context exclusions
 └── LICENSE                         # GPL-3.0-or-later

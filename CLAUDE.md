@@ -58,7 +58,6 @@ When creating a brownfield PRD or planning a feature, point the planning workflo
 
 - Never use `pip`, always `uv`.
 - After UI edits touching CSS classes: `npm run ui:contract:check` from `dashboard/`. See `.claude/skills/ui-contract/SKILL.md` for full workflow.
-- When modifying files in `.doc-freshness.yaml`: run `node build/scripts/check-doc-freshness.mjs` (suggestions only).
 - Target platforms: Linux KDE Wayland (primary), Windows 11, macOS. Document what doesn't work.
 - Read `docs/README_DEV.md` for architecture overview.
 - When writing commit messages, use the following style below. Make sure to not break up long lines by splitting them with newlines.
