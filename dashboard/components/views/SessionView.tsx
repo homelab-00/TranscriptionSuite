@@ -631,7 +631,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       }
     },
     onTranscribeFile: (filePath: string) => {
-      // Queue the file with highest priority — preempts any running transcription
+      // Queue the file at the front — runs next after any in-progress job finishes
       useImportQueueStore.getState().addPriorityFiles([filePath], 'notebook-normal');
     },
     onStartLiveMode: () => handleLiveToggle(true),

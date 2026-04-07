@@ -88,7 +88,8 @@ interface ImportQueueState extends WatcherState {
     options?: TranscriptionUploadOptions,
   ) => void;
   /** Prepend files to the front of the queue with highest priority.
-   *  If a job is currently processing, it is cancelled and reset to pending. */
+   *  If a job is currently processing, it finishes normally; the priority
+   *  job becomes the next pending item picked up by processQueue. */
   addPriorityFiles: (
     files: (File | string)[],
     type: ImportJobType,
@@ -151,10 +152,6 @@ let _processing = false;
 let _abort = false;
 /** Per-job processing start timestamps — used for time estimates (4.5) */
 const _jobStartedAt: Record<string, number> = {};
-/** Job IDs preempted by priority files — reset to 'pending' instead of 'error'
- *  when their cancellation propagates. A Set handles rapid double-preemption. */
-const _preemptedJobIds = new Set<string>();
-
 let _jobIdCounter = 0;
 function nextJobId(type: ImportJobType): string {
   const prefix = type.startsWith('session') ? 'session' : 'notebook';
@@ -380,29 +377,16 @@ async function processQueue(): Promise<void> {
           store.setState({ avgProcessingMs: next });
         }
       } catch (err) {
-        // If this job was preempted by a priority file, reset it to pending
-        // so it restarts after the priority job completes.
-        if (_preemptedJobIds.has(jobId)) {
-          _preemptedJobIds.delete(jobId);
-          store.setState((s) => ({
-            jobs: s.jobs.map((j) =>
-              j.id === jobId ? { ...j, status: 'pending' as const, error: undefined } : j,
-            ),
-          }));
-        } else {
-          const errorMsg = err instanceof Error ? err.message : 'Import failed';
-          store.setState((s) => ({
-            jobs: s.jobs.map((j) =>
-              j.id === jobId ? { ...j, status: 'error' as const, error: errorMsg } : j,
-            ),
-          }));
+        const errorMsg = err instanceof Error ? err.message : 'Import failed';
+        store.setState((s) => ({
+          jobs: s.jobs.map((j) =>
+            j.id === jobId ? { ...j, status: 'error' as const, error: errorMsg } : j,
+          ),
+        }));
 
-          if (isSession) {
-            // No callback for session errors — error is visible in the job
-          } else {
-            const { notebookCallbacks } = store.getState();
-            notebookCallbacks.onJobError?.(nextJob, errorMsg);
-          }
+        if (!isSession) {
+          const { notebookCallbacks } = store.getState();
+          notebookCallbacks.onJobError?.(nextJob, errorMsg);
         }
       } finally {
         delete _jobStartedAt[jobId];
@@ -465,15 +449,9 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
       status: 'pending' as const,
     }));
 
-    // If a job is currently processing, preempt it
-    const { jobs } = useImportQueueStore.getState();
-    const processingJob = jobs.find((j) => j.status === 'processing');
-    if (processingJob) {
-      _preemptedJobIds.add(processingJob.id);
-      apiClient.cancelTranscription().catch(() => {});
-    }
-
-    // Prepend priority jobs to the front of the queue
+    // Prepend priority jobs to the front of the queue.
+    // If a job is currently processing it finishes normally; the priority
+    // job becomes the next 'pending' item picked up by processQueue.
     set((s) => ({ jobs: [...newJobs, ...s.jobs] }));
     setTimeout(() => processQueue(), 0);
   },

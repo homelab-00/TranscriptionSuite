@@ -175,7 +175,7 @@ export function useTraySync(deps: TrySyncDeps): void {
       !isLive;
 
     // canTranscribeFile: server healthy, not in mic-recording or live mode.
-    // Allowed during file transcription processing — the running job will be preempted.
+    // Allowed during file transcription processing — queued file runs next after the active job.
     const isMicRecording =
       transcriptionStatus === 'connecting' || transcriptionStatus === 'recording';
     const canTranscribeFile =
