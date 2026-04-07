@@ -63,3 +63,34 @@ export function compareVersionTags(a: string, b: string): number {
 export function sortVersionTagsDesc(tags: readonly string[]): string[] {
   return [...tags].sort(compareVersionTags);
 }
+
+/**
+ * Returns true if tag `a` has a strictly higher major.minor.patch than tag `b`,
+ * ignoring the RC suffix. Used to filter RC tags: only show RCs whose base
+ * version exceeds the latest stable release.
+ */
+export function isNewerVersion(a: string, b: string): boolean {
+  const pa = parseVersionTag(a);
+  const pb = parseVersionTag(b);
+  if (!pa || !pb) return false;
+  return (
+    pa.major > pb.major ||
+    (pa.major === pb.major && pa.minor > pb.minor) ||
+    (pa.major === pb.major && pa.minor === pb.minor && pa.patch > pb.patch)
+  );
+}
+
+/**
+ * Format a date string as DD/MM/YYYY.
+ * Accepts ISO strings, Docker's "YYYY-MM-DD HH:MM:SS" format, or any
+ * string parseable by `new Date()`. Returns null if parsing fails.
+ */
+export function formatDateDMY(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const year = d.getUTCFullYear();
+  return `${day}/${month}/${year}`;
+}

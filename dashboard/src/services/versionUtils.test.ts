@@ -3,6 +3,8 @@ import {
   parseVersionTag,
   compareVersionTags,
   sortVersionTagsDesc,
+  isNewerVersion,
+  formatDateDMY,
   IMAGE_REPO,
 } from './versionUtils';
 
@@ -89,6 +91,62 @@ describe('sortVersionTagsDesc', () => {
 
   it('returns empty array for empty input', () => {
     expect(sortVersionTagsDesc([])).toEqual([]);
+  });
+});
+
+describe('isNewerVersion', () => {
+  it('returns true when a has higher major', () => {
+    expect(isNewerVersion('v2.0.0', 'v1.9.9')).toBe(true);
+  });
+
+  it('returns true when a has higher minor', () => {
+    expect(isNewerVersion('v1.3.0', 'v1.2.9')).toBe(true);
+  });
+
+  it('returns true when a has higher patch', () => {
+    expect(isNewerVersion('v1.2.4', 'v1.2.3')).toBe(true);
+  });
+
+  it('returns false for equal versions', () => {
+    expect(isNewerVersion('v1.2.3', 'v1.2.3')).toBe(false);
+  });
+
+  it('returns false when a is lower', () => {
+    expect(isNewerVersion('v1.2.2', 'v1.2.3')).toBe(false);
+  });
+
+  it('ignores RC suffix for comparison', () => {
+    expect(isNewerVersion('v1.3.1rc', 'v1.3.0')).toBe(true);
+    expect(isNewerVersion('v1.2.9rc', 'v1.3.0')).toBe(false);
+  });
+
+  it('returns false for unparsable tags', () => {
+    expect(isNewerVersion('latest', 'v1.0.0')).toBe(false);
+    expect(isNewerVersion('v1.0.0', 'latest')).toBe(false);
+  });
+});
+
+describe('formatDateDMY', () => {
+  it('formats ISO date string', () => {
+    expect(formatDateDMY('2026-04-06T16:33:56Z')).toBe('06/04/2026');
+  });
+
+  it('formats YYYY-MM-DD date string', () => {
+    expect(formatDateDMY('2026-04-06')).toBe('06/04/2026');
+  });
+
+  it('formats Docker-style date string', () => {
+    expect(formatDateDMY('2026-04-06 16:33:56 UTC')).toBe('06/04/2026');
+  });
+
+  it('returns null for null/undefined/empty input', () => {
+    expect(formatDateDMY(null)).toBeNull();
+    expect(formatDateDMY(undefined)).toBeNull();
+    expect(formatDateDMY('')).toBeNull();
+  });
+
+  it('returns null for invalid date strings', () => {
+    expect(formatDateDMY('not-a-date')).toBeNull();
   });
 });
 

@@ -12,6 +12,11 @@ import type { RuntimeProfile } from '../types/runtime';
 
 // ─── Types (mirrors electron.d.ts shapes) ───────────────────────────────────
 
+export interface RemoteTag {
+  tag: string;
+  created: string | null;
+}
+
 export interface DockerImage {
   tag: string;
   fullName: string;
@@ -74,7 +79,7 @@ export interface UseDockerReturn {
   removeImage: (tag: string) => Promise<void>;
 
   // Remote tags (GHCR registry)
-  remoteTags: string[];
+  remoteTags: RemoteTag[];
   remoteTagsError: boolean;
   refreshRemoteTags: () => Promise<void>;
 
@@ -136,7 +141,7 @@ export function useDocker(): UseDockerReturn {
   const [operationError, setOperationError] = useState<string | null>(null);
   const [pulling, setPulling] = useState(false);
   const [sidecarPulling, setSidecarPulling] = useState(false);
-  const [remoteTags, setRemoteTags] = useState<string[]>([]);
+  const [remoteTags, setRemoteTags] = useState<RemoteTag[]>([]);
   const [remoteTagsError, setRemoteTagsError] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);

@@ -8,7 +8,6 @@ import {
   Download,
   Loader2,
   RefreshCw,
-  Gpu,
   CheckCircle2,
   XCircle,
   AlertTriangle,
@@ -22,7 +21,6 @@ import {
   Users,
   Laptop,
   Radio,
-  Flame,
   Zap,
   MinusCircle,
 } from 'lucide-react';
@@ -30,12 +28,18 @@ import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { CustomSelect } from '../ui/CustomSelect';
+import { ImageTagChips } from '../ui/ImageTagChips';
+import { NvidiaIcon } from '../ui/icons/NvidiaIcon';
+import { AmdIcon } from '../ui/icons/AmdIcon';
+import { IntelIcon } from '../ui/icons/IntelIcon';
+import { AppleIcon } from '../ui/icons/AppleIcon';
 
 import { useActivityStore } from '../../src/stores/activityStore';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
+import { formatDateDMY } from '../../src/services/versionUtils';
 import { isWhisperModel, isMLXModel } from '../../src/services/modelCapabilities';
 import { MODEL_REGISTRY, getModelsByFamily } from '../../src/services/modelRegistry';
 import {
@@ -932,45 +936,32 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   const localTagSet = useMemo(() => new Set(docker.images.map((i) => i.tag)), [docker.images]);
 
+  const localDateMap = useMemo(
+    () => new Map(docker.images.map((i) => [i.tag, i.created])),
+    [docker.images],
+  );
+
   const hasRemoteTags = docker.remoteTags.length > 0;
 
-  const { imageOptions, imageOptionMeta, defaultImageTag } = useMemo(() => {
+  // Build the merged tag list for ImageTagChips
+  const { mergedTags, defaultImageTag } = useMemo(() => {
     if (!hasRemoteTags) {
-      // Fallback: offline or fetch failed — show only local images (AC 7)
-      const opts = docker.images.length > 0 ? docker.images.map((i) => i.tag) : ['latest'];
-      const def = opts.find((t) => !/rc/i.test(t)) ?? opts[0];
-      return {
-        imageOptions: opts,
-        imageOptionMeta: {} as Record<string, OptionMeta>,
-        defaultImageTag: def,
-      };
+      // Fallback: offline — convert local images to RemoteTag shape
+      const tags = docker.images.map((i) => ({ tag: i.tag, created: i.created }));
+      const def = tags.find((rt) => !/rc/i.test(rt.tag))?.tag ?? tags[0]?.tag ?? 'latest';
+      return { mergedTags: tags, defaultImageTag: def };
     }
 
-    // Top 5 remote tags (already sorted descending by semver)
-    const top5 = docker.remoteTags.slice(0, 5);
-    const top5Set = new Set(top5);
+    // Remote tags already sorted descending; append any older local-only tags
+    const remoteTagSet = new Set(docker.remoteTags.map((rt) => rt.tag));
+    const olderLocal = docker.images
+      .filter((i) => !remoteTagSet.has(i.tag))
+      .map((i) => ({ tag: i.tag, created: i.created }));
 
-    // Older local-only tags not in top 5 (AC 6)
-    const olderLocal = docker.images.map((i) => i.tag).filter((t) => !top5Set.has(t));
-
-    const opts = [...top5, ...olderLocal];
-
-    // Build optionMeta for badges and dimming (AC 4, 5)
-    const meta: Record<string, OptionMeta> = {};
-    for (const tag of opts) {
-      const isRC = /rc/i.test(tag);
-      const isLocal = localTagSet.has(tag);
-      const badges = [isRC && 'beta', isLocal && '✓'].filter(Boolean).join(' ');
-      meta[tag] = {
-        dim: isRC,
-        badge: badges || undefined,
-      };
-    }
-
-    // Default = most recent non-RC tag (AC 1)
-    const def = opts.find((t) => !/rc/i.test(t)) ?? opts[0] ?? 'latest';
-    return { imageOptions: opts, imageOptionMeta: meta, defaultImageTag: def };
-  }, [hasRemoteTags, docker.remoteTags, docker.images, localTagSet]);
+    const tags = [...docker.remoteTags, ...olderLocal];
+    const def = tags.find((rt) => !/rc/i.test(rt.tag))?.tag ?? tags[0]?.tag ?? 'latest';
+    return { mergedTags: tags, defaultImageTag: def };
+  }, [hasRemoteTags, docker.remoteTags, docker.images]);
 
   const [selectedImage, setSelectedImage] = useState(defaultImageTag);
 
@@ -979,10 +970,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   useEffect(() => {
     const prev = prevDefaultRef.current;
     prevDefaultRef.current = defaultImageTag;
-    if (prev !== defaultImageTag && !imageOptions.includes(selectedImage)) {
+    const allTags = mergedTags.map((rt) => rt.tag);
+    if (prev !== defaultImageTag && !allTags.includes(selectedImage)) {
       setSelectedImage(defaultImageTag);
     }
-  }, [defaultImageTag, imageOptions, selectedImage]);
+  }, [defaultImageTag, mergedTags, selectedImage]);
 
   // Resolve display tag to the value Docker commands need (just the tag string)
   const selectedTagForActions = selectedImage;
@@ -1409,7 +1401,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       {hasImages && docker.images[0] && (
                         <div className="flex gap-2 transition-opacity duration-300">
                           <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
-                            {docker.images[0].created.split(' ')[0]}
+                            {formatDateDMY(docker.images[0].created) ??
+                              docker.images[0].created.split(' ')[0]}
                           </span>
                           <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
                             {docker.images[0].size}
@@ -1421,28 +1414,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       <label className="mb-1 block text-xs font-medium text-slate-500">
                         Select Image Tag
                       </label>
-                      <CustomSelect
+                      <ImageTagChips
+                        remoteTags={mergedTags}
+                        localTags={localTagSet}
+                        localDates={localDateMap}
                         value={selectedImage}
                         onChange={setSelectedImage}
-                        options={imageOptions}
-                        optionMeta={imageOptionMeta}
-                        className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                       />
                     </div>
                   </div>
                   <div className="flex flex-col justify-end space-y-2">
-                    <Button
-                      variant="secondary"
-                      className="h-10 w-full"
-                      onClick={() => {
-                        docker.refreshImages();
-                        docker.refreshRemoteTags();
-                      }}
-                      disabled={docker.operating}
-                    >
-                      <RefreshCw size={14} className="mr-2" />
-                      Scan Local Images
-                    </Button>
                     <Button
                       variant="secondary"
                       className="h-10 w-full"
@@ -1669,7 +1650,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
                       } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
                     >
-                      <Gpu size={14} />
+                      <NvidiaIcon size={14} />
                       GPU (CUDA)
                     </button>
                     <button
@@ -1681,8 +1662,21 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
                       } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
                     >
-                      <Flame size={14} />
-                      Vulkan
+                      <AmdIcon size={14} />
+                      <IntelIcon size={14} className="-ml-1.5" />
+                      GPU (Vulkan)
+                    </button>
+                    <button
+                      onClick={() => handleRuntimeProfileChange('metal')}
+                      disabled={isRunning}
+                      className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
+                        runtimeProfile === 'metal'
+                          ? 'border-violet-500/40 bg-violet-500/15 text-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.15)]'
+                          : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                      } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                    >
+                      <AppleIcon size={14} />
+                      GPU (Metal)
                     </button>
                     <button
                       onClick={() => handleRuntimeProfileChange('cpu')}
@@ -1695,18 +1689,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     >
                       <Cpu size={14} />
                       CPU Only
-                    </button>
-                    <button
-                      onClick={() => handleRuntimeProfileChange('metal')}
-                      disabled={isRunning}
-                      className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
-                        runtimeProfile === 'metal'
-                          ? 'border-violet-500/40 bg-violet-500/15 text-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.15)]'
-                          : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
-                      } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-                    >
-                      <Zap size={14} />
-                      GPU (Metal)
                     </button>
                   </div>
                   {runtimeProfile === 'vulkan' && !isRunning && (

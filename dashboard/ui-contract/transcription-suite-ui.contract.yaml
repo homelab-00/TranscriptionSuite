@@ -19,6 +19,11 @@ meta:
       - components/ui/CustomSelect.tsx
       - components/ui/ErrorFallback.tsx
       - components/ui/GlassCard.tsx
+      - components/ui/icons/AmdIcon.tsx
+      - components/ui/icons/AppleIcon.tsx
+      - components/ui/icons/IntelIcon.tsx
+      - components/ui/icons/NvidiaIcon.tsx
+      - components/ui/ImageTagChips.tsx
       - components/ui/LogTerminal.tsx
       - components/ui/QueuePausedBanner.tsx
       - components/ui/ShortcutCapture.tsx
@@ -42,7 +47,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-07T09:06:53.346Z
+    generated_at: 2026-04-07T14:19:00.098Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -657,6 +662,7 @@ utility_allowlist:
     - max-h-32
     - max-h-40
     - max-h-60
+    - max-h-72
     - max-w-2xl
     - max-w-3xl
     - max-w-4xl
@@ -951,6 +957,7 @@ utility_allowlist:
     - w-4.5
     - w-44
     - w-48
+    - w-56
     - w-6
     - w-7
     - w-72
@@ -1155,6 +1162,23 @@ component_contracts:
     state_rules:
       - id: option-switches
         rule: Import option toggles remain AppleSwitch-based with current labels and descriptions.
+  AmdIcon:
+    file: components/ui/icons/AmdIcon.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   App:
     file: App.tsx
     required_tokens:
@@ -1179,6 +1203,23 @@ component_contracts:
         rule: Only SESSION, NOTEBOOK, SERVER view states are allowed for top-level routing.
   AppInner:
     file: App.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  AppleIcon:
+    file: components/ui/icons/AppleIcon.tsx
     required_tokens:
       - colors
       - motion
@@ -1555,6 +1596,23 @@ component_contracts:
     state_rules:
       - id: color-role-map
         rule: HudCard color variants map to fixed accent token sets and must not accept ad hoc colors.
+  ImageTagChips:
+    file: components/ui/ImageTagChips.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   ImportTab:
     file: components/views/NotebookView.tsx
     required_tokens:
@@ -1576,6 +1634,23 @@ component_contracts:
     state_rules:
       - id: import-switch-options
         rule: Speaker diarization and word timestamp option switches remain present in fixed order.
+  IntelIcon:
+    file: components/ui/icons/IntelIcon.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   LogsView:
     file: components/views/LogsView.tsx
     required_tokens:
@@ -1713,6 +1788,23 @@ component_contracts:
     state_rules:
       - id: tab-state-closed-set
         rule: Only CALENDAR, SEARCH, IMPORT tab states are allowed for notebook routing.
+  NvidiaIcon:
+    file: components/ui/icons/NvidiaIcon.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   PopOutWindow:
     file: components/PopOutWindow.tsx
     required_tokens:

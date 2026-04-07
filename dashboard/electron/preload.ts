@@ -95,7 +95,7 @@ export interface ElectronAPI {
     listImages: () => Promise<
       Array<{ tag: string; fullName: string; size: string; created: string; id: string }>
     >;
-    listRemoteTags: () => Promise<string[]>;
+    listRemoteTags: () => Promise<Array<{ tag: string; created: string | null }>>;
     pullImage: (tag: string) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;
@@ -331,7 +331,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getComposeAvailable: () => ipcRenderer.invoke('docker:getComposeAvailable') as Promise<boolean>,
     checkGpu: () => ipcRenderer.invoke('docker:checkGpu'),
     listImages: () => ipcRenderer.invoke('docker:listImages'),
-    listRemoteTags: () => ipcRenderer.invoke('docker:listRemoteTags') as Promise<string[]>,
+    listRemoteTags: () =>
+      ipcRenderer.invoke('docker:listRemoteTags') as Promise<
+        Array<{ tag: string; created: string | null }>
+      >,
     pullImage: (tag: string) => ipcRenderer.invoke('docker:pullImage', tag),
     cancelPull: () => ipcRenderer.invoke('docker:cancelPull'),
     isPulling: () => ipcRenderer.invoke('docker:isPulling'),

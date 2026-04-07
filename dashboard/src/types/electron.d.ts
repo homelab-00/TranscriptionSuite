@@ -120,7 +120,7 @@ interface ElectronAPI {
     listImages: () => Promise<
       Array<{ tag: string; fullName: string; size: string; created: string; id: string }>
     >;
-    listRemoteTags: () => Promise<string[]>;
+    listRemoteTags: () => Promise<Array<{ tag: string; created: string | null }>>;
     pullImage: (tag: string) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;

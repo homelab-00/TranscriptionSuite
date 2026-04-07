@@ -2462,7 +2462,62 @@ async function downloadModelToCache(modelId: string): Promise<void> {
 const GHCR_TOKEN_URL =
   'https://ghcr.io/token?scope=repository:homelab-00/transcriptionsuite-server:pull';
 const GHCR_TAGS_URL = 'https://ghcr.io/v2/homelab-00/transcriptionsuite-server/tags/list';
+const GHCR_BLOB_BASE = 'https://ghcr.io/v2/homelab-00/transcriptionsuite-server';
 const TAG_RE = /^v\d+\.\d+\.\d+(rc\d*)?$/;
+
+interface RemoteTag {
+  tag: string;
+  created: string | null;
+}
+
+/** Inline semver comparator (descending) — avoids importing renderer-side utils. */
+function semverDescending(a: string, b: string): number {
+  const pa = a.match(/^v(\d+)\.(\d+)\.(\d+)(rc\d*)?$/);
+  const pb = b.match(/^v(\d+)\.(\d+)\.(\d+)(rc\d*)?$/);
+  if (!pa && !pb) return 0;
+  if (!pa) return 1;
+  if (!pb) return -1;
+  const diff =
+    Number(pb[1]) - Number(pa[1]) || Number(pb[2]) - Number(pa[2]) || Number(pb[3]) - Number(pa[3]);
+  if (diff !== 0) return diff;
+  if (!pa[4] && pb[4]) return -1;
+  if (pa[4] && !pb[4]) return 1;
+  return 0;
+}
+
+/**
+ * Fetch the image creation date for a single tag from its OCI config blob.
+ * Returns ISO timestamp string or null on failure.
+ */
+async function fetchTagDate(
+  tag: string,
+  token: string,
+  signal: AbortSignal,
+): Promise<string | null> {
+  try {
+    const manifestResp = await fetch(`${GHCR_BLOB_BASE}/manifests/${tag}`, {
+      signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.docker.distribution.manifest.v2+json',
+      },
+    });
+    if (!manifestResp.ok) return null;
+    const manifest = (await manifestResp.json()) as { config?: { digest?: string } };
+    const configDigest = manifest.config?.digest;
+    if (!configDigest) return null;
+
+    const blobResp = await fetch(`${GHCR_BLOB_BASE}/blobs/${configDigest}`, {
+      signal,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!blobResp.ok) return null;
+    const config = (await blobResp.json()) as { created?: string };
+    return config.created ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Fetch available image tags from the GitHub Container Registry.
@@ -2470,45 +2525,42 @@ const TAG_RE = /^v\d+\.\d+\.\d+(rc\d*)?$/;
  * GHCR requires a two-step anonymous auth flow even for public packages:
  * 1. GET /token?scope=... → anonymous bearer token
  * 2. GET /v2/.../tags/list with Authorization header
+ * 3. For each tag, fetch manifest + config blob for creation date (parallel)
  *
  * Returns version-matching tags sorted by semver descending, or [] on failure.
  */
-async function listRemoteTags(): Promise<string[]> {
+async function listRemoteTags(): Promise<RemoteTag[]> {
   try {
-    const signal = AbortSignal.timeout(5000);
+    const listSignal = AbortSignal.timeout(5000);
 
     // Step 1: obtain anonymous bearer token
-    const tokenResp = await fetch(GHCR_TOKEN_URL, { signal });
+    const tokenResp = await fetch(GHCR_TOKEN_URL, { signal: listSignal });
     if (!tokenResp.ok) return [];
     const { token } = (await tokenResp.json()) as { token?: string };
     if (!token) return [];
 
     // Step 2: fetch tags with bearer auth
     const resp = await fetch(GHCR_TAGS_URL, {
-      signal,
+      signal: listSignal,
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!resp.ok) return [];
     const data = (await resp.json()) as { tags?: string[] };
     const tags = (data.tags ?? []).filter((t: string) => TAG_RE.test(t));
 
-    // Sort by semver descending — inline comparator avoids importing renderer-side utils
-    tags.sort((a: string, b: string) => {
-      const pa = a.match(/^v(\d+)\.(\d+)\.(\d+)(rc\d*)?$/);
-      const pb = b.match(/^v(\d+)\.(\d+)\.(\d+)(rc\d*)?$/);
-      if (!pa && !pb) return 0;
-      if (!pa) return 1;
-      if (!pb) return -1;
-      const diff =
-        Number(pb[1]) - Number(pa[1]) ||
-        Number(pb[2]) - Number(pa[2]) ||
-        Number(pb[3]) - Number(pa[3]);
-      if (diff !== 0) return diff;
-      if (!pa[4] && pb[4]) return -1;
-      if (pa[4] && !pb[4]) return 1;
-      return 0;
-    });
-    return tags.slice(0, 20);
+    tags.sort(semverDescending);
+    const sorted = tags.slice(0, 20);
+
+    // Step 3: fetch creation dates in parallel (best-effort, separate timeout)
+    const dateSignal = AbortSignal.timeout(8000);
+    const dateResults = await Promise.allSettled(
+      sorted.map((tag) => fetchTagDate(tag, token, dateSignal)),
+    );
+
+    return sorted.map((tag, i) => ({
+      tag,
+      created: dateResults[i].status === 'fulfilled' ? dateResults[i].value : null,
+    }));
   } catch {
     return [];
   }
