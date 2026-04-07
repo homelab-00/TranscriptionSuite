@@ -121,6 +121,7 @@ interface ElectronAPI {
       Array<{ tag: string; fullName: string; size: string; created: string; id: string }>
     >;
     listRemoteTags: () => Promise<Array<{ tag: string; created: string | null }>>;
+    fetchRemoteTagDates: (tags: string[]) => Promise<Record<string, string | null>>;
     pullImage: (tag: string) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;

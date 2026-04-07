@@ -2529,19 +2529,21 @@ async function fetchTagDate(
  *
  * Returns version-matching tags sorted by semver descending, or [] on failure.
  */
+/**
+ * Fetch the tag list only (fast, ~1-2s). Dates are fetched separately
+ * via fetchRemoteTagDates() so the UI isn't blocked.
+ */
 async function listRemoteTags(): Promise<RemoteTag[]> {
   try {
-    const listSignal = AbortSignal.timeout(5000);
+    const signal = AbortSignal.timeout(5000);
 
-    // Step 1: obtain anonymous bearer token
-    const tokenResp = await fetch(GHCR_TOKEN_URL, { signal: listSignal });
+    const tokenResp = await fetch(GHCR_TOKEN_URL, { signal });
     if (!tokenResp.ok) return [];
     const { token } = (await tokenResp.json()) as { token?: string };
     if (!token) return [];
 
-    // Step 2: fetch tags with bearer auth
     const resp = await fetch(GHCR_TAGS_URL, {
-      signal: listSignal,
+      signal,
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!resp.ok) return [];
@@ -2549,21 +2551,41 @@ async function listRemoteTags(): Promise<RemoteTag[]> {
     const tags = (data.tags ?? []).filter((t: string) => TAG_RE.test(t));
 
     tags.sort(semverDescending);
-    const sorted = tags.slice(0, 20);
-
-    // Step 3: fetch creation dates in parallel (best-effort, separate timeout)
-    const dateSignal = AbortSignal.timeout(8000);
-    const dateResults = await Promise.allSettled(
-      sorted.map((tag) => fetchTagDate(tag, token, dateSignal)),
-    );
-
-    return sorted.map((tag, i) => ({
-      tag,
-      created: dateResults[i].status === 'fulfilled' ? dateResults[i].value : null,
-    }));
+    return tags.slice(0, 20).map((tag) => ({ tag, created: null }));
   } catch {
     return [];
   }
+}
+
+/**
+ * Fetch creation dates for the given tags from GHCR OCI manifests.
+ * Called separately from listRemoteTags so the tag list appears instantly.
+ * Returns a map of tag → ISO date string.
+ */
+async function fetchRemoteTagDates(tags: string[]): Promise<Record<string, string | null>> {
+  const result: Record<string, string | null> = {};
+  try {
+    const signal = AbortSignal.timeout(8000);
+
+    const tokenResp = await fetch(GHCR_TOKEN_URL, { signal });
+    if (!tokenResp.ok) return result;
+    const { token } = (await tokenResp.json()) as { token?: string };
+    if (!token) return result;
+
+    // Fetch dates for the first 8 tags only (what's visible in UI)
+    const batch = tags.slice(0, 8);
+    const dateResults = await Promise.allSettled(
+      batch.map((tag) => fetchTagDate(tag, token, signal)),
+    );
+
+    for (let i = 0; i < batch.length; i++) {
+      const r = dateResults[i];
+      result[batch[i]] = r.status === 'fulfilled' ? r.value : null;
+    }
+  } catch {
+    // best-effort
+  }
+  return result;
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -2617,4 +2639,5 @@ export const dockerManager = {
   CONTAINER_NAME,
   IMAGE_REPO,
   listRemoteTags,
+  fetchRemoteTagDates,
 };

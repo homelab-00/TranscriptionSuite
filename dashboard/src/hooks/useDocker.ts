@@ -227,9 +227,28 @@ export function useDocker(): UseDockerReturn {
     const docker = api();
     if (!docker?.listRemoteTags) return;
     try {
+      // Step 1: fetch tag list (fast, ~1-2s) — UI shows chips immediately
       const tags = await docker.listRemoteTags();
       setRemoteTags(tags);
       setRemoteTagsError(false);
+
+      // Step 2: fetch dates in background (slow, ~5-8s) — chips update with dates
+      if (tags.length > 0 && docker.fetchRemoteTagDates) {
+        const tagNames = tags.map((t) => t.tag);
+        docker
+          .fetchRemoteTagDates(tagNames)
+          .then((dates) => {
+            setRemoteTags((prev) =>
+              prev.map((rt) => ({
+                ...rt,
+                created: dates[rt.tag] ?? rt.created,
+              })),
+            );
+          })
+          .catch(() => {
+            /* best-effort */
+          });
+      }
     } catch {
       setRemoteTagsError(true);
     }
