@@ -294,6 +294,24 @@ class AudioToTextRecorder:
         self.device = "cuda" if device == "cuda" and torch.cuda.is_available() else "cpu"
         logger.info(f"Using device: {self.device}")
 
+        # GH-60: Auto-correct compute_type on GPUs that lack native float16 support.
+        # CTranslate2's "default" uses the model's stored precision (float16 for most
+        # faster-whisper models).  Pre-Volta GPUs (compute capability < 7.0) cannot run
+        # float16 kernels, causing a crash.  "auto" lets CTranslate2 pick the best
+        # supported type (typically int8 on Pascal).
+        if self.device == "cuda" and self.compute_type == "default":
+            from server.core.audio_utils import get_cuda_compute_capability
+
+            cc = get_cuda_compute_capability()
+            if cc is not None and cc < (7, 0):
+                logger.warning(
+                    "GPU compute capability %d.%d < 7.0 — overriding compute_type "
+                    '"default" → "auto" to avoid float16 crash (GH-60)',
+                    cc[0],
+                    cc[1],
+                )
+                self.compute_type = "auto"
+
         # Get buffer size from config
         buffer_size = stt_cfg.get("buffer_size", 512)
 

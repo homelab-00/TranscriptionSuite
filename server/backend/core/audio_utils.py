@@ -146,6 +146,34 @@ def check_cuda_available() -> bool:
     return torch.cuda.is_available()
 
 
+# Cached result for get_cuda_compute_capability (None = not yet probed).
+_cuda_compute_capability: tuple[int, int] | None | bool = False  # False = unprobed
+
+
+def get_cuda_compute_capability() -> tuple[int, int] | None:
+    """Return the CUDA compute capability of device 0 as ``(major, minor)``.
+
+    Returns ``None`` when CUDA is unavailable or the query fails.
+    The result is cached — GPU capability cannot change at runtime.
+    """
+    global _cuda_compute_capability
+    if _cuda_compute_capability is not False:
+        return _cuda_compute_capability  # type: ignore[return-value]
+
+    if not check_cuda_available():
+        _cuda_compute_capability = None
+        return None
+
+    try:
+        props = torch.cuda.get_device_properties(0)
+        _cuda_compute_capability = (props.major, props.minor)
+        return _cuda_compute_capability
+    except Exception:
+        logger.debug("Could not query CUDA compute capability", exc_info=True)
+        _cuda_compute_capability = None
+        return None
+
+
 def cuda_health_check() -> dict[str, Any]:
     """Probe CUDA health at startup. Never raises.
 

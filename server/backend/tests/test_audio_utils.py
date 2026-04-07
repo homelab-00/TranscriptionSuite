@@ -302,6 +302,107 @@ class TestCheckCudaAvailable:
             assert au.check_cuda_available() is True
 
 
+# ── get_cuda_compute_capability ───────────────────────────────────────────
+
+
+class TestGetCudaComputeCapability:
+    """Tests for get_cuda_compute_capability() — GH-60."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_cache(self):
+        """Reset the module-level cache before each test."""
+        au._cuda_compute_capability = False  # False = unprobed sentinel
+        yield
+        au._cuda_compute_capability = False
+
+    def test_returns_tuple_when_cuda_available(self):
+        mock_props = MagicMock()
+        mock_props.major = 8
+        mock_props.minor = 6
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.get_device_properties.return_value = mock_props
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            result = au.get_cuda_compute_capability()
+
+        assert result == (8, 6)
+
+    def test_returns_none_when_no_cuda(self):
+        with patch.object(au, "HAS_TORCH", False):
+            result = au.get_cuda_compute_capability()
+
+        assert result is None
+
+    def test_returns_none_when_properties_raises(self):
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.get_device_properties.side_effect = RuntimeError("driver error")
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            result = au.get_cuda_compute_capability()
+
+        assert result is None
+
+    def test_caches_result_on_success(self):
+        mock_props = MagicMock()
+        mock_props.major = 6
+        mock_props.minor = 1
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.get_device_properties.return_value = mock_props
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            first = au.get_cuda_compute_capability()
+            second = au.get_cuda_compute_capability()
+
+        assert first == second == (6, 1)
+        # get_device_properties should be called only once (cached)
+        mock_torch.cuda.get_device_properties.assert_called_once()
+
+    def test_caches_none_on_failure(self):
+        with patch.object(au, "HAS_TORCH", False):
+            first = au.get_cuda_compute_capability()
+            second = au.get_cuda_compute_capability()
+
+        assert first is None
+        assert second is None
+
+    def test_pascal_gpu_returns_sub_70(self):
+        """GTX 1080 (sm_61) should compare less than (7, 0)."""
+        mock_props = MagicMock()
+        mock_props.major = 6
+        mock_props.minor = 1
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.get_device_properties.return_value = mock_props
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            cc = au.get_cuda_compute_capability()
+
+        assert cc is not None
+        assert cc < (7, 0)
+
+    def test_volta_gpu_returns_gte_70(self):
+        """V100 (sm_70) should be >= (7, 0)."""
+        mock_props = MagicMock()
+        mock_props.major = 7
+        mock_props.minor = 0
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.get_device_properties.return_value = mock_props
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            cc = au.get_cuda_compute_capability()
+
+        assert cc is not None
+        assert cc >= (7, 0)
+
+
 # ── get_gpu_memory_info ───────────────────────────────────────────────────
 
 

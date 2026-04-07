@@ -7,6 +7,7 @@ Covers:
 - ``INT16_MAX_ABS_VALUE`` and ``SAMPLE_RATE`` constants
 - ``AudioToTextRecorder.get_status()`` for a bare-minimum recorder
 - ``AudioToTextRecorder`` shutdown idempotency
+- GH-60: ``compute_type`` auto-correction on pre-Volta GPUs
 """
 
 from __future__ import annotations
@@ -370,3 +371,147 @@ class TestGetStatus:
 
         assert status["loaded"] is True
         assert status["backend"] == "whisperx"
+
+
+# ── GH-60: compute_type auto-correction on pre-Volta GPUs ───────────────
+
+
+class TestComputeTypeAutoCorrection:
+    """Verify compute_type="default" is overridden to "auto" on GPUs < sm_70.
+
+    Uses object.__new__() to create a bare recorder, then manually assigns the
+    fields that the auto-correction logic reads (device, compute_type) and
+    replays just the correction branch.
+    """
+
+    @staticmethod
+    def _apply_correction(recorder: AudioToTextRecorder) -> None:
+        """Replay the GH-60 auto-correction block from __init__."""
+        import logging as _logging
+
+        _logger = _logging.getLogger("server.core.stt.engine")
+
+        if recorder.device == "cuda" and recorder.compute_type == "default":
+            from server.core.audio_utils import get_cuda_compute_capability
+
+            cc = get_cuda_compute_capability()
+            if cc is not None and cc < (7, 0):
+                _logger.warning(
+                    "GPU compute capability %d.%d < 7.0 — overriding compute_type "
+                    '"default" → "auto" to avoid float16 crash (GH-60)',
+                    cc[0],
+                    cc[1],
+                )
+                recorder.compute_type = "auto"
+
+    def test_pascal_gpu_overrides_default_to_auto(self, caplog):
+        import logging
+
+        rec = object.__new__(AudioToTextRecorder)
+        rec.device = "cuda"
+        rec.compute_type = "default"
+
+        with (
+            caplog.at_level(logging.WARNING),
+            patch(
+                "server.core.audio_utils.get_cuda_compute_capability",
+                return_value=(6, 1),
+            ),
+        ):
+            self._apply_correction(rec)
+
+        assert rec.compute_type == "auto"
+        assert "GH-60" in caplog.text
+        assert "6.1" in caplog.text
+
+    def test_volta_gpu_preserves_default(self):
+        rec = object.__new__(AudioToTextRecorder)
+        rec.device = "cuda"
+        rec.compute_type = "default"
+
+        with patch(
+            "server.core.audio_utils.get_cuda_compute_capability",
+            return_value=(7, 0),
+        ):
+            self._apply_correction(rec)
+
+        assert rec.compute_type == "default"
+
+    def test_ampere_gpu_preserves_default(self):
+        rec = object.__new__(AudioToTextRecorder)
+        rec.device = "cuda"
+        rec.compute_type = "default"
+
+        with patch(
+            "server.core.audio_utils.get_cuda_compute_capability",
+            return_value=(8, 6),
+        ):
+            self._apply_correction(rec)
+
+        assert rec.compute_type == "default"
+
+    def test_explicit_int8_never_overridden(self):
+        rec = object.__new__(AudioToTextRecorder)
+        rec.device = "cuda"
+        rec.compute_type = "int8"
+
+        with patch(
+            "server.core.audio_utils.get_cuda_compute_capability",
+            return_value=(6, 1),
+        ):
+            self._apply_correction(rec)
+
+        assert rec.compute_type == "int8"
+
+    def test_explicit_float32_never_overridden(self):
+        rec = object.__new__(AudioToTextRecorder)
+        rec.device = "cuda"
+        rec.compute_type = "float32"
+
+        with patch(
+            "server.core.audio_utils.get_cuda_compute_capability",
+            return_value=(6, 1),
+        ):
+            self._apply_correction(rec)
+
+        assert rec.compute_type == "float32"
+
+    def test_cpu_device_skips_check(self):
+        rec = object.__new__(AudioToTextRecorder)
+        rec.device = "cpu"
+        rec.compute_type = "default"
+
+        with patch(
+            "server.core.audio_utils.get_cuda_compute_capability",
+        ) as mock_cc:
+            self._apply_correction(rec)
+
+        assert rec.compute_type == "default"
+        mock_cc.assert_not_called()
+
+    def test_capability_unavailable_preserves_default(self):
+        rec = object.__new__(AudioToTextRecorder)
+        rec.device = "cuda"
+        rec.compute_type = "default"
+
+        with patch(
+            "server.core.audio_utils.get_cuda_compute_capability",
+            return_value=None,
+        ):
+            self._apply_correction(rec)
+
+        assert rec.compute_type == "default"
+
+    def test_maxwell_gpu_overrides_default(self):
+        """Maxwell (GTX 980, sm_52) should also be corrected."""
+        rec = object.__new__(AudioToTextRecorder)
+        rec.device = "cuda"
+        rec.compute_type = "default"
+
+        with patch(
+            "server.core.audio_utils.get_cuda_compute_capability",
+            return_value=(5, 2),
+        ):
+            self._apply_correction(rec)
+
+        assert rec.compute_type == "auto"

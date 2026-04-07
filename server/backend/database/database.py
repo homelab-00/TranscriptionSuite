@@ -1754,7 +1754,7 @@ def get_word_timestamps_from_audio(
             model = faster_whisper.WhisperModel(
                 "large-v3",
                 device="cuda",
-                compute_type="float16",
+                compute_type="auto",
             )
 
         segments, info = model.transcribe(
