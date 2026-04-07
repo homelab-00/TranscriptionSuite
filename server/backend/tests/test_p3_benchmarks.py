@@ -318,7 +318,7 @@ class TestWsBinaryParseThroughput:
             if len(frame) < 4 + metadata_len:
                 continue
             metadata_bytes = frame[4 : 4 + metadata_len]
-            _metadata = json.loads(metadata_bytes.decode("utf-8"))
+            json.loads(metadata_bytes.decode("utf-8"))
             pcm_data = frame[4 + metadata_len :]
             assert len(pcm_data) > 0
             parsed_count += 1

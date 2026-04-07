@@ -369,14 +369,14 @@ class LiveModeSession:
                     try:
                         self._engine.stop()
                     except Exception:
-                        pass
+                        pass  # Best-effort cleanup — engine may already be torn down
                     self._engine = None
                 # asyncio.shield() keeps the restore coroutine running
                 # even if CancelledError fires during the await — the
                 # model reload completes in the background.
                 try:
                     await asyncio.shield(self._restore_or_reload_main_model())
-                except BaseException as _restore_err:
+                except (Exception, asyncio.CancelledError) as _restore_err:
                     logger.error(
                         "Failed to restore main model after live-mode failure: %s",
                         _restore_err,

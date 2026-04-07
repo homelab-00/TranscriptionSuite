@@ -91,7 +91,7 @@ class _FakeHttpx:
 @pytest.fixture(autouse=True)
 def _patch_config(monkeypatch):
     """Default to enabled LLM config."""
-    monkeypatch.setattr(llm, "get_llm_config", lambda: _config())
+    monkeypatch.setattr(llm, "get_llm_config", _config)
 
 
 # ── P2-ROUTE-002: LLM Routes ────────────────────────────────────────────────
