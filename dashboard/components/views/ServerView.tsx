@@ -39,7 +39,7 @@ import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
-import { formatDateDMY } from '../../src/services/versionUtils';
+import { formatDateDMY, compareVersionTags } from '../../src/services/versionUtils';
 import { isWhisperModel, isMLXModel } from '../../src/services/modelCapabilities';
 import { MODEL_REGISTRY, getModelsByFamily } from '../../src/services/modelRegistry';
 import {
@@ -946,8 +946,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Build the merged tag list for ImageTagChips
   const { mergedTags, defaultImageTag } = useMemo(() => {
     if (!hasRemoteTags) {
-      // Fallback: offline — convert local images to RemoteTag shape
-      const tags = docker.images.map((i) => ({ tag: i.tag, created: i.created }));
+      // Fallback: offline — convert local images to RemoteTag shape, sorted by semver
+      const tags = docker.images
+        .map((i) => ({ tag: i.tag, created: i.created }))
+        .sort((a, b) => compareVersionTags(a.tag, b.tag));
       const def = tags.find((rt) => !/rc/i.test(rt.tag))?.tag ?? tags[0]?.tag ?? 'latest';
       return { mergedTags: tags, defaultImageTag: def };
     }
@@ -965,13 +967,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   const [selectedImage, setSelectedImage] = useState(defaultImageTag);
 
-  // When remote tags arrive or images change, update selection if current is stale
+  // Reset selection when default changes OR the selected tag disappears from the list
   const prevDefaultRef = useRef(defaultImageTag);
   useEffect(() => {
     const prev = prevDefaultRef.current;
     prevDefaultRef.current = defaultImageTag;
     const allTags = mergedTags.map((rt) => rt.tag);
-    if (prev !== defaultImageTag && !allTags.includes(selectedImage)) {
+    if (!allTags.includes(selectedImage)) {
+      setSelectedImage(defaultImageTag);
+    } else if (prev !== defaultImageTag && !allTags.includes(selectedImage)) {
       setSelectedImage(defaultImageTag);
     }
   }, [defaultImageTag, mergedTags, selectedImage]);

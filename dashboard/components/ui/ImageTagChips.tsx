@@ -49,13 +49,13 @@ export const ImageTagChips: React.FC<ImageTagChipsProps> = ({
     // Latest stable tag for RC filtering
     const latestStable = chips[0]?.tag;
 
-    // RC tags with version > latest stable
-    const rc = latestStable
-      ? remoteTags.filter((rt) => {
-          const p = parseVersionTag(rt.tag);
-          return p?.isRC && isNewerVersion(rt.tag, latestStable);
-        })
-      : [];
+    // RC tags: when a stable baseline exists, only show RCs with version > latest stable.
+    // When no stable tags exist at all, show all RCs so the user isn't stuck with a blank selector.
+    const rc = remoteTags.filter((rt) => {
+      const p = parseVersionTag(rt.tag);
+      if (!p?.isRC) return false;
+      return !latestStable || isNewerVersion(rt.tag, latestStable);
+    });
 
     return {
       stableChips: chips,
@@ -125,8 +125,8 @@ export const ImageTagChips: React.FC<ImageTagChipsProps> = ({
         <Popover className="relative">
           <PopoverButton
             className={`flex cursor-pointer items-center justify-center rounded-lg border px-3 py-2.5 transition-all ${
-              // Highlight if the selected tag is inside the overflow
-              !stableChips.some((rt) => rt.tag === value)
+              // Highlight if the selected tag is inside the overflow (positive membership check)
+              [...rcTags, ...olderTags].some((rt) => rt.tag === value)
                 ? 'bg-accent-cyan/15 border-accent-cyan/40 text-accent-cyan shadow-[0_0_10px_rgba(34,211,238,0.15)]'
                 : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'
             }`}
