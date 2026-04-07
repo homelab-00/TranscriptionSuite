@@ -954,13 +954,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       return { mergedTags: tags, defaultImageTag: def };
     }
 
-    // Remote tags already sorted descending; append any older local-only tags
+    // Merge remote tags with local-only tags and sort by semver so local dev
+    // builds (e.g. v1.3.1) slot into the correct position in the chip row.
     const remoteTagSet = new Set(docker.remoteTags.map((rt) => rt.tag));
-    const olderLocal = docker.images
+    const localOnly = docker.images
       .filter((i) => !remoteTagSet.has(i.tag))
       .map((i) => ({ tag: i.tag, created: i.created }));
 
-    const tags = [...docker.remoteTags, ...olderLocal];
+    const tags = [...docker.remoteTags, ...localOnly].sort((a, b) =>
+      compareVersionTags(a.tag, b.tag),
+    );
     const def = tags.find((rt) => !/rc/i.test(rt.tag))?.tag ?? tags[0]?.tag ?? 'latest';
     return { mergedTags: tags, defaultImageTag: def };
   }, [hasRemoteTags, docker.remoteTags, docker.images]);
