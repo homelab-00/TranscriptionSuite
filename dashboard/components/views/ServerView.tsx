@@ -928,30 +928,64 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     mainModelSelection !== VULKAN_RECOMMENDED_MODEL &&
     mainModelOptionMeta[mainModelSelection]?.badge === 'Requires CUDA';
 
-  // Image selection state — "Most Recent (auto)" always picks the newest available tag
-  const MOST_RECENT = 'Most Recent (auto)';
-  const imageOptions =
-    docker.images.length > 0
-      ? [MOST_RECENT, ...docker.images.map((i) => i.fullName)]
-      : ['ghcr.io/homelab-00/transcriptionsuite-server:latest'];
-  const [selectedImage, setSelectedImage] = useState(imageOptions[0]);
+  // ─── Image tag selection (merged remote + local) ─────────────────────────
 
-  // When images load from empty (e.g. on first render), reset stale placeholder
-  // selection to MOST_RECENT so selectedTagForStart doesn't resolve to 'latest'.
-  const prevImagesLengthRef = useRef(docker.images.length);
-  useEffect(() => {
-    const prev = prevImagesLengthRef.current;
-    prevImagesLengthRef.current = docker.images.length;
-    if (prev === 0 && docker.images.length > 0) {
-      setSelectedImage(MOST_RECENT);
+  const localTagSet = useMemo(() => new Set(docker.images.map((i) => i.tag)), [docker.images]);
+
+  const hasRemoteTags = docker.remoteTags.length > 0;
+
+  const { imageOptions, imageOptionMeta, defaultImageTag } = useMemo(() => {
+    if (!hasRemoteTags) {
+      // Fallback: offline or fetch failed — show only local images (AC 7)
+      const opts = docker.images.length > 0 ? docker.images.map((i) => i.tag) : ['latest'];
+      const def = opts.find((t) => !/rc/i.test(t)) ?? opts[0];
+      return {
+        imageOptions: opts,
+        imageOptionMeta: {} as Record<string, OptionMeta>,
+        defaultImageTag: def,
+      };
     }
-  }, [docker.images.length]);
 
-  const resolvedImage =
-    selectedImage === MOST_RECENT && docker.images.length > 0
-      ? docker.images[0].fullName
-      : selectedImage;
-  const selectedTagForActions = resolvedImage.split(':').pop() || 'latest';
+    // Top 5 remote tags (already sorted descending by semver)
+    const top5 = docker.remoteTags.slice(0, 5);
+    const top5Set = new Set(top5);
+
+    // Older local-only tags not in top 5 (AC 6)
+    const olderLocal = docker.images.map((i) => i.tag).filter((t) => !top5Set.has(t));
+
+    const opts = [...top5, ...olderLocal];
+
+    // Build optionMeta for badges and dimming (AC 4, 5)
+    const meta: Record<string, OptionMeta> = {};
+    for (const tag of opts) {
+      const isRC = /rc/i.test(tag);
+      const isLocal = localTagSet.has(tag);
+      const badges = [isRC && 'beta', isLocal && '✓'].filter(Boolean).join(' ');
+      meta[tag] = {
+        dim: isRC,
+        badge: badges || undefined,
+      };
+    }
+
+    // Default = most recent non-RC tag (AC 1)
+    const def = opts.find((t) => !/rc/i.test(t)) ?? opts[0] ?? 'latest';
+    return { imageOptions: opts, imageOptionMeta: meta, defaultImageTag: def };
+  }, [hasRemoteTags, docker.remoteTags, docker.images, localTagSet]);
+
+  const [selectedImage, setSelectedImage] = useState(defaultImageTag);
+
+  // When remote tags arrive or images change, update selection if current is stale
+  const prevDefaultRef = useRef(defaultImageTag);
+  useEffect(() => {
+    const prev = prevDefaultRef.current;
+    prevDefaultRef.current = defaultImageTag;
+    if (prev !== defaultImageTag && !imageOptions.includes(selectedImage)) {
+      setSelectedImage(defaultImageTag);
+    }
+  }, [defaultImageTag, imageOptions, selectedImage]);
+
+  // Resolve display tag to the value Docker commands need (just the tag string)
+  const selectedTagForActions = selectedImage;
   const selectedTagForStart = docker.images.length > 0 ? selectedTagForActions : undefined;
 
   // ─── Setup Checklist ────────────────────────────────────────────────────────
@@ -1391,6 +1425,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         value={selectedImage}
                         onChange={setSelectedImage}
                         options={imageOptions}
+                        optionMeta={imageOptionMeta}
                         className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                       />
                     </div>
@@ -1399,7 +1434,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <Button
                       variant="secondary"
                       className="h-10 w-full"
-                      onClick={() => docker.refreshImages()}
+                      onClick={() => {
+                        docker.refreshImages();
+                        docker.refreshRemoteTags();
+                      }}
                       disabled={docker.operating}
                     >
                       <RefreshCw size={14} className="mr-2" />

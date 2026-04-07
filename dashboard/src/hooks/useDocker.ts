@@ -73,6 +73,11 @@ export interface UseDockerReturn {
   pulling: boolean;
   removeImage: (tag: string) => Promise<void>;
 
+  // Remote tags (GHCR registry)
+  remoteTags: string[];
+  remoteTagsError: boolean;
+  refreshRemoteTags: () => Promise<void>;
+
   // Sidecar image state
   hasSidecarImage: () => Promise<boolean>;
   pullSidecarImage: () => Promise<void>;
@@ -131,6 +136,8 @@ export function useDocker(): UseDockerReturn {
   const [operationError, setOperationError] = useState<string | null>(null);
   const [pulling, setPulling] = useState(false);
   const [sidecarPulling, setSidecarPulling] = useState(false);
+  const [remoteTags, setRemoteTags] = useState<string[]>([]);
+  const [remoteTagsError, setRemoteTagsError] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const volumeRefreshedOnHealthyRef = useRef(false);
@@ -210,6 +217,23 @@ export function useDocker(): UseDockerReturn {
     const imgs = await docker.listImages();
     setImages(imgs);
   }, []);
+
+  const refreshRemoteTags = useCallback(async () => {
+    const docker = api();
+    if (!docker?.listRemoteTags) return;
+    try {
+      const tags = await docker.listRemoteTags();
+      setRemoteTags(tags);
+      setRemoteTagsError(false);
+    } catch {
+      setRemoteTagsError(true);
+    }
+  }, []);
+
+  // Fetch remote tags once on mount (tags change rarely — no need to poll)
+  useEffect(() => {
+    refreshRemoteTags();
+  }, [refreshRemoteTags]);
 
   const refreshVolumes = useCallback(async () => {
     const docker = api();
@@ -500,6 +524,9 @@ export function useDocker(): UseDockerReturn {
     pullImage,
     cancelPull,
     pulling,
+    remoteTags,
+    remoteTagsError,
+    refreshRemoteTags,
     hasSidecarImage,
     pullSidecarImage,
     cancelSidecarPull,

@@ -2457,6 +2457,63 @@ async function downloadModelToCache(modelId: string): Promise<void> {
   }
 }
 
+// ─── Remote Tag Listing ─────────────────────────────────────────────────────
+
+const GHCR_TOKEN_URL =
+  'https://ghcr.io/token?scope=repository:homelab-00/transcriptionsuite-server:pull';
+const GHCR_TAGS_URL = 'https://ghcr.io/v2/homelab-00/transcriptionsuite-server/tags/list';
+const TAG_RE = /^v\d+\.\d+\.\d+(rc\d*)?$/;
+
+/**
+ * Fetch available image tags from the GitHub Container Registry.
+ *
+ * GHCR requires a two-step anonymous auth flow even for public packages:
+ * 1. GET /token?scope=... → anonymous bearer token
+ * 2. GET /v2/.../tags/list with Authorization header
+ *
+ * Returns version-matching tags sorted by semver descending, or [] on failure.
+ */
+async function listRemoteTags(): Promise<string[]> {
+  try {
+    const signal = AbortSignal.timeout(5000);
+
+    // Step 1: obtain anonymous bearer token
+    const tokenResp = await fetch(GHCR_TOKEN_URL, { signal });
+    if (!tokenResp.ok) return [];
+    const { token } = (await tokenResp.json()) as { token?: string };
+    if (!token) return [];
+
+    // Step 2: fetch tags with bearer auth
+    const resp = await fetch(GHCR_TAGS_URL, {
+      signal,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) return [];
+    const data = (await resp.json()) as { tags?: string[] };
+    const tags = (data.tags ?? []).filter((t: string) => TAG_RE.test(t));
+
+    // Sort by semver descending — inline comparator avoids importing renderer-side utils
+    tags.sort((a: string, b: string) => {
+      const pa = a.match(/^v(\d+)\.(\d+)\.(\d+)(rc\d*)?$/);
+      const pb = b.match(/^v(\d+)\.(\d+)\.(\d+)(rc\d*)?$/);
+      if (!pa && !pb) return 0;
+      if (!pa) return 1;
+      if (!pb) return -1;
+      const diff =
+        Number(pb[1]) - Number(pa[1]) ||
+        Number(pb[2]) - Number(pa[2]) ||
+        Number(pb[3]) - Number(pa[3]);
+      if (diff !== 0) return diff;
+      if (!pa[4] && pb[4]) return -1;
+      if (pa[4] && !pb[4]) return 1;
+      return 0;
+    });
+    return tags.slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /** Get the detected runtime kind for UI display (e.g. 'Docker' vs 'Podman'). */
@@ -2507,4 +2564,5 @@ export const dockerManager = {
   VOLUME_NAMES,
   CONTAINER_NAME,
   IMAGE_REPO,
+  listRemoteTags,
 };

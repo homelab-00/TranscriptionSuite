@@ -922,6 +922,10 @@ ipcMain.handle('docker:listImages', async () => {
   return dockerManager.listImages();
 });
 
+ipcMain.handle('docker:listRemoteTags', async () => {
+  return dockerManager.listRemoteTags();
+});
+
 ipcMain.handle('docker:pullImage', async (_event, tag: string) => {
   return dockerManager.pullImage(tag);
 });

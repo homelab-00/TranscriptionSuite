@@ -42,7 +42,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-06T17:54:33.796Z
+    generated_at: 2026-04-07T09:06:53.346Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -202,10 +202,8 @@ foundation:
       classes:
         - shadow
         - shadow-[0_0_10px_#22d3ee]
-        - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
-        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
@@ -279,15 +277,12 @@ foundation:
         - h-[85%]
         - h-[85vh]
         - max-h-[80vh]
-        - max-w-[55%]
         - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
-        - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
-        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
@@ -423,7 +418,6 @@ utility_allowlist:
     - bg-black/70
     - bg-black/75
     - bg-blue-400
-    - bg-blue-500
     - bg-blue-500/10
     - bg-glass-100
     - bg-glass-100/30
@@ -436,9 +430,7 @@ utility_allowlist:
     - bg-linear-to-br
     - bg-linear-to-r
     - bg-linear-to-t
-    - bg-orange-500
     - bg-orange-500/10
-    - bg-purple-500
     - bg-purple-500/10
     - bg-red-400/10
     - bg-red-500
@@ -473,7 +465,6 @@ utility_allowlist:
     - border-accent-magenta/20
     - border-accent-magenta/5
     - border-accent-orange/20
-    - border-accent-rose/20
     - border-amber-400/20
     - border-amber-400/30
     - border-amber-500/20
@@ -703,7 +694,6 @@ utility_allowlist:
     - ml-0.5
     - ml-1
     - ml-2
-    - ml-3
     - ml-auto
     - ml-model
     - mr-1
@@ -770,7 +760,6 @@ utility_allowlist:
     - pr-20
     - pr-3
     - pr-4
-    - pr-5
     - pr-6
     - pr-8
     - pt-0
@@ -858,7 +847,6 @@ utility_allowlist:
     - space-y-1
     - space-y-1.5
     - space-y-2
-    - space-y-2.5
     - space-y-3
     - space-y-4
     - space-y-6
@@ -870,7 +858,6 @@ utility_allowlist:
     - text-accent-cyan/80
     - text-accent-magenta
     - text-accent-orange
-    - text-accent-rose
     - text-accent-violet
     - text-amber-200
     - text-amber-300
@@ -907,7 +894,6 @@ utility_allowlist:
     - text-slate-700
     - text-slate-900
     - text-sm
-    - text-violet-400
     - text-white
     - text-white/60
     - text-white/90
@@ -995,16 +981,13 @@ utility_allowlist:
     - h-[85%]
     - h-[85vh]
     - max-h-[80vh]
-    - max-w-[55%]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]
     - min-h-[calc(100vh-30rem)]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
-    - shadow-[0_0_15px_rgba(251,146,60,0.5)]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
-    - shadow-[0_0_15px_rgba(34,211,238,0.5)]
     - shadow-[0_0_18px_rgba(239,68,68,0.35)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
