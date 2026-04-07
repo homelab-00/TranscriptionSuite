@@ -1669,8 +1669,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
                       } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
                     >
-                      <AmdIcon size={14} />
-                      <IntelIcon size={14} className="-ml-1.5" />
+                      <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                        <AmdIcon size={30} />
+                        <IntelIcon size={30} />
+                      </span>
                       GPU (Vulkan)
                     </button>
                     <button
