@@ -47,7 +47,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-07T16:01:50.010Z
+    generated_at: 2026-04-07T16:08:25.746Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -284,6 +284,7 @@ foundation:
         - max-h-[80vh]
         - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
+        - min-w-[5rem]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
@@ -991,6 +992,7 @@ utility_allowlist:
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]
     - min-h-[calc(100vh-30rem)]
+    - min-w-[5rem]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]

@@ -70,7 +70,7 @@ export const ImageTagChips: React.FC<ImageTagChipsProps> = ({
     formatDateDMY(rt.created) ?? formatDateDMY(localDates.get(rt.tag) ?? null);
 
   const chipClass = (tag: string): string =>
-    `flex min-w-0 flex-col items-center justify-center rounded-lg border px-3 py-1.5 text-center transition-all cursor-pointer ${
+    `flex min-w-[5rem] flex-col items-center justify-center rounded-lg border px-3 py-1.5 text-center transition-all cursor-pointer ${
       tag === value
         ? 'bg-accent-cyan/15 border-accent-cyan/40 text-accent-cyan shadow-[0_0_10px_rgba(34,211,238,0.15)]'
         : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
@@ -113,10 +113,9 @@ export const ImageTagChips: React.FC<ImageTagChipsProps> = ({
         return (
           <button key={rt.tag} onClick={() => onChange(rt.tag)} className={chipClass(rt.tag)}>
             <span className="text-sm leading-tight font-semibold">{rt.tag}</span>
-            {date && <span className="text-[10px] leading-tight text-slate-500">{date}</span>}
-            {isLocal && rt.tag !== value && (
-              <span className="text-[9px] leading-tight text-slate-500">local</span>
-            )}
+            <span className="text-[10px] leading-tight text-slate-500">
+              {date ?? (isLocal ? 'local' : '\u00A0')}
+            </span>
           </button>
         );
       })}
