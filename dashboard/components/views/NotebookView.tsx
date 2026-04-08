@@ -1702,7 +1702,7 @@ const ImportTab = ({
                 className="ml-1 text-slate-500 transition-colors hover:text-white"
                 title={isPaused ? 'Resume queue' : 'Pause queue'}
               >
-                {isPaused ? <Play size={12} /> : <Pause size={12} />}
+                {isPaused ? <Play size={18} /> : <Pause size={18} />}
               </button>
               {(completedCount > 0 || errorCount > 0) && (
                 <button
@@ -1710,7 +1710,7 @@ const ImportTab = ({
                   className="ml-1 text-slate-500 transition-colors hover:text-white"
                   title="Clear finished"
                 >
-                  <Trash2 size={12} />
+                  <Trash2 size={18} />
                 </button>
               )}
             </div>
@@ -1725,7 +1725,7 @@ const ImportTab = ({
                 {statusIcon(job)}
                 {(job.type === 'notebook-auto' || job.type === 'session-auto') && (
                   <span title="Auto-watch">
-                    <Eye size={12} className="shrink-0 text-slate-500" />
+                    <Eye size={14} className="shrink-0 text-slate-500" />
                   </span>
                 )}
                 <span className="flex-1 truncate text-sm text-white">
@@ -1738,7 +1738,7 @@ const ImportTab = ({
                     className="hover:text-accent-cyan p-1 text-slate-400 transition-colors"
                     title="Retry"
                   >
-                    <RotateCcw size={12} />
+                    <RotateCcw size={18} />
                   </button>
                 )}
                 {job.status !== 'processing' && (
@@ -1747,7 +1747,7 @@ const ImportTab = ({
                     className="p-1 text-slate-500 transition-colors hover:text-red-400"
                     title="Remove"
                   >
-                    <XCircle size={12} />
+                    <XCircle size={18} />
                   </button>
                 )}
               </div>
