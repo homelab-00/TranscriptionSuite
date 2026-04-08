@@ -154,8 +154,81 @@ jobs:
             dashboard/release/*.asc
           if-no-files-found: error
 
+  build-macos-metal:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "25.7.0"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install npm dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Build renderer and main process
+        working-directory: dashboard
+        run: npm run build:electron
+
+      - name: Package Electron app bundle (arm64 dir)
+        working-directory: dashboard
+        run: npx electron-builder --mac dir --arm64
+
+      - name: Create server package symlink for hatchling
+        run: ln -sf . server/backend/server
+
+      - name: Install Python/MLX backend into app bundle
+        run: |
+          VENV_DIR="dashboard/release/mac-arm64/TranscriptionSuite.app/Contents/Resources/backend/.venv"
+          mkdir -p "$(dirname "$VENV_DIR")"
+          uv venv "$VENV_DIR" --python 3.13
+          UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync \
+            --directory server/backend \
+            --extra mlx \
+            --no-editable
+
+      - name: Create DMG from app bundle
+        run: |
+          mkdir -p dmg-staging
+          cp -a dashboard/release/mac-arm64/TranscriptionSuite.app dmg-staging/
+          ln -sf /Applications dmg-staging/Applications
+          hdiutil create \
+            -volname "TranscriptionSuite" \
+            -srcfolder dmg-staging \
+            -ov -format UDZO \
+            -o dashboard/release/TranscriptionSuite-arm64-metal.dmg
+          rm -rf dmg-staging
+
+      - name: Import GPG key
+        if: ${{ vars.GPG_SIGNING_ENABLED == 'true' }}
+        run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Sign artifacts
+        if: ${{ vars.GPG_SIGNING_ENABLED == 'true' }}
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: bash build/sign-electron-artifacts.sh dashboard/release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-metal
+          path: |
+            dashboard/release/TranscriptionSuite-arm64-metal.dmg
+            dashboard/release/*.asc
+          if-no-files-found: error
+
   create-release:
-    needs: [build-linux, build-windows, build-macos]
+    needs: [build-linux, build-windows, build-macos, build-macos-metal]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
