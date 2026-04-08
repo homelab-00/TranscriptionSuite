@@ -188,17 +188,50 @@ jobs:
 
       - name: Install Python/MLX backend into app bundle
         run: |
-          # Use an absolute path so UV_PROJECT_ENVIRONMENT is unambiguous when
-          # combined with --directory (a relative path could be resolved against
-          # the --directory location by uv, silently landing in the wrong venv).
           APP_BUNDLE="$(pwd)/dashboard/release/mac-arm64/TranscriptionSuite.app"
           VENV_DIR="$APP_BUNDLE/Contents/Resources/backend/.venv"
+          PYTHON_DEST="$APP_BUNDLE/Contents/Resources/python"
+
+          # Download uv-managed CPython 3.13 and copy its entire installation
+          # directory into the app bundle.  The python-build-standalone distribution
+          # is relocatable (uses @executable_path RPATHs), so the copy is fully
+          # self-contained — users need no Python pre-installed on their Mac.
+          uv python install 3.13
+          PYTHON_BIN="$(uv python find 3.13)"
+          # macOS readlink lacks -f; delegate realpath resolution to Python.
+          PYTHON_REAL="$(python3 -c "import os; print(os.path.realpath('$PYTHON_BIN'))")"
+          PYTHON_VER="$(basename "$PYTHON_REAL")"  # e.g. python3.13
+          PYTHON_ROOT="$(python3 -c "import os; print(os.path.dirname(os.path.dirname('$PYTHON_REAL')))") "
+          PYTHON_ROOT="${PYTHON_ROOT%% }"  # trim trailing space from subshell
+          echo "→ Bundling CPython ($PYTHON_VER) from $PYTHON_ROOT"
+          cp -a "$PYTHON_ROOT" "$PYTHON_DEST"
+
+          # Create the venv using the bundled Python. The absolute path is valid
+          # at CI time; relative symlinks are created below to survive relocation.
           mkdir -p "$(dirname "$VENV_DIR")"
-          uv venv "$VENV_DIR" --python 3.13
+          uv venv "$VENV_DIR" --python "$PYTHON_DEST/bin/$PYTHON_VER"
           UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync \
             --directory server/backend \
             --extra mlx \
             --no-editable
+
+          # The venv's python symlinks now embed the CI runner's absolute path
+          # (e.g. /Users/runner/.local/share/uv/python/.../bin/python3.13).
+          # That path doesn't exist on the user's machine, so fs.existsSync(
+          # '.venv/bin/python3') returns false for a dangling symlink, causing
+          # mlxServerManager to fall back to the uvicorn console script (which
+          # has the same broken absolute shebang) and fail with exit code 126.
+          #
+          # Fix: re-create the symlinks as relative paths within the bundle:
+          #   .venv/bin/ is at: Resources/backend/.venv/bin/
+          #   python/bin/ is at: Resources/python/bin/
+          #   Relative: ../../../python/bin/$PYTHON_VER
+          REL="../../../python/bin/$PYTHON_VER"
+          for name in python python3 "$PYTHON_VER"; do
+            [ -e "$VENV_DIR/bin/$name" ] || [ -L "$VENV_DIR/bin/$name" ] || continue
+            ln -sf "$REL" "$VENV_DIR/bin/$name"
+          done
+
           echo "App bundle size after backend install: $(du -sh "$APP_BUNDLE" | cut -f1)"
 
       - name: Re-sign app bundle after backend injection
@@ -214,9 +247,14 @@ jobs:
           APP="$(pwd)/dashboard/release/mac-arm64/TranscriptionSuite.app"
           # Clear any extended attributes on the bundle that could interfere.
           xattr -cr "$APP"
-          # Sign Python extension modules first. These are plain files in the
-          # Resources tree, not inside nested bundles, so --deep won't reach them.
-          find "$APP/Contents/Resources/backend" -type f \( -name "*.so" -o -name "*.dylib" \) \
+          # Sign all Mach-O files in Resources — covers both the Python venv
+          # extension modules (.so/.dylib) and the bundled CPython interpreter
+          # and its own dylibs.  --deep doesn't reach plain files in Resources,
+          # only nested .app/.framework bundles, so we sign them explicitly first.
+          # Pass -perm /111 to also catch the python3.13 executable itself.
+          find "$APP/Contents/Resources" -type f \( -name "*.so" -o -name "*.dylib" \) \
+            -print0 | xargs -0 -P4 codesign --force --sign - 2>/dev/null || true
+          find "$APP/Contents/Resources" -type f -perm /111 \
             -print0 | xargs -0 -P4 codesign --force --sign - 2>/dev/null || true
           # Deep-sign the whole bundle. --deep processes nested frameworks and apps
           # bottom-up, so the Electron Framework (and its constituent dylibs that
