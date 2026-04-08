@@ -11,6 +11,8 @@
 services:
   whisper-server:
     image: ghcr.io/ggml-org/whisper.cpp:main-vulkan
+    command:
+      - "whisper-server --model \"$$WHISPER_MODEL\" --host 0.0.0.0 --port 8080 --convert"
     restart: unless-stopped
     volumes:
       - huggingface-models:/models:ro
