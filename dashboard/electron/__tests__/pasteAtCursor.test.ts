@@ -41,6 +41,10 @@ vi.mock('../shortcutManager.js', () => ({
   isWayland: mockIsWayland,
 }));
 
+vi.mock('../clipboardWayland.js', () => ({
+  reliableWriteText: async (text: string) => mockClipboard.writeText(text),
+}));
+
 // ── Default mock: all commands succeed ─────────────────────────────────────
 
 function setAllCommandsSucceed() {

@@ -11,7 +11,6 @@ import { promisify } from 'util';
 import {
   app,
   BrowserWindow,
-  clipboard,
   desktopCapturer,
   ipcMain,
   Notification,
@@ -36,6 +35,7 @@ import {
   isWaylandPortalActive,
 } from './shortcutManager.js';
 import { pasteAtCursor } from './pasteAtCursor.js';
+import { reliableWriteText, cleanupClipboard } from './clipboardWayland.js';
 import { WatcherManager } from './watcherManager.js';
 
 // When launched via a wrapper (e.g. AppImage through GearLevel), the stdout/stderr
@@ -1190,10 +1190,13 @@ app.on('will-quit', () => {
   }
 });
 
+// Kill any lingering wl-copy child on quit.
+app.on('will-quit', cleanupClipboard);
+
 // ─── Clipboard IPC ──────────────────────────────────────────────────────────
 
-ipcMain.handle('clipboard:writeText', (_event, text: string) => {
-  clipboard.writeText(text);
+ipcMain.handle('clipboard:writeText', async (_event, text: string) => {
+  await reliableWriteText(text);
 });
 
 ipcMain.handle(

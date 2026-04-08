@@ -11,6 +11,7 @@ import { clipboard } from 'electron';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { isWayland } from './shortcutManager.js';
+import { reliableWriteText } from './clipboardWayland.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -325,13 +326,16 @@ function sleep(ms: number): Promise<void> {
 export async function pasteAtCursor(text: string, options?: PasteOptions): Promise<void> {
   const preserve = options?.preserveClipboard ?? true;
   const originalClipboard = preserve ? clipboard.readText() : null;
-  clipboard.writeText(text);
+  await reliableWriteText(text);
   try {
     await sleep(50);
     await simulatePaste();
     await sleep(100);
   } finally {
     if (preserve && originalClipboard !== null) {
+      // Restore uses direct clipboard.writeText — the paste has already been
+      // served, so reliability guarantees are not needed. Using reliableWriteText
+      // here would kill the wl-copy child that may still be serving the paste.
       clipboard.writeText(originalClipboard);
     }
   }
