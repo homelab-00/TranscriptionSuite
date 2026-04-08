@@ -162,7 +162,7 @@ def get_cuda_compute_capability() -> tuple[int, int] | None:
 
     if not check_cuda_available():
         _cuda_compute_capability = None
-        return None
+        return _cuda_compute_capability
 
     try:
         props = torch.cuda.get_device_properties(0)
@@ -171,7 +171,7 @@ def get_cuda_compute_capability() -> tuple[int, int] | None:
     except Exception:
         logger.debug("Could not query CUDA compute capability", exc_info=True)
         _cuda_compute_capability = None
-        return None
+        return _cuda_compute_capability
 
 
 def cuda_health_check() -> dict[str, Any]:
