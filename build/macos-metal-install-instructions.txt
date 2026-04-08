@@ -1,0 +1,44 @@
+TranscriptionSuite — Apple Silicon (Metal) Installation Instructions
+======================================================================
+
+1. Copy TranscriptionSuite.app to your Applications folder
+   • Drag TranscriptionSuite.app from this DMG window into the Applications
+     folder shortcut.
+
+2. Open the app
+   • Double-click TranscriptionSuite in your Applications folder, or launch
+     it from Spotlight / Launchpad / your favourite app launcher.
+
+3. If you see an error when opening the app
+   ─────────────────────────────────────────
+   macOS may show a message such as:
+
+     "TranscriptionSuite" Not Opened. Apple could not verify
+     "TranscriptionSuite" is free of malware that may harm your Mac
+     or compromise your privacy.
+
+   or:
+
+     "TranscriptionSuite" is damaged and can't be opened.
+
+   This happens because the app is not signed with an Apple Developer
+   certificate.  You can allow it using either method below:
+
+   Option A — Terminal (one command)
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   Open Terminal (Applications → Utilities → Terminal) and run:
+
+     xattr -dr com.apple.quarantine /Applications/TranscriptionSuite.app
+
+   Then try opening the app again.
+
+   Option B — System Settings
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   1. Open (System) Settings → Privacy & Security.
+   2. Scroll to the Security section at the bottom.
+   3. Next to the message "'TranscriptionSuite' was blocked to protect
+      your Mac", click "Open Anyway".
+   4. Authenticate with your password or Touch ID when prompted.
+
+======================================================================
+Source code and releases: https://github.com/homelab-00/TranscriptionSuite

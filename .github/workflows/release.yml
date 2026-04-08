@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -154,8 +155,149 @@ jobs:
             dashboard/release/*.asc
           if-no-files-found: error
 
+  build-macos-metal:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "25.7.0"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install npm dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Build renderer and main process
+        working-directory: dashboard
+        run: npm run build:electron
+
+      - name: Package Electron app bundle (arm64 dir)
+        working-directory: dashboard
+        run: npx electron-builder --mac dir --arm64
+
+      - name: Create server package symlink for hatchling
+        run: ln -sf . server/backend/server
+
+      - name: Install Python/MLX backend into app bundle
+        run: |
+          APP_BUNDLE="$(pwd)/dashboard/release/mac-arm64/TranscriptionSuite.app"
+          VENV_DIR="$APP_BUNDLE/Contents/Resources/backend/.venv"
+          PYTHON_DEST="$APP_BUNDLE/Contents/Resources/python"
+
+          # Download uv-managed CPython 3.13 and copy its entire installation
+          # directory into the app bundle.  The python-build-standalone distribution
+          # is relocatable (uses @executable_path RPATHs), so the copy is fully
+          # self-contained — users need no Python pre-installed on their Mac.
+          uv python install 3.13
+          PYTHON_BIN="$(uv python find 3.13)"
+          # macOS readlink lacks -f; delegate realpath resolution to Python.
+          PYTHON_REAL="$(python3 -c "import os; print(os.path.realpath('$PYTHON_BIN'))")"
+          PYTHON_VER="$(basename "$PYTHON_REAL")"  # e.g. python3.13
+          PYTHON_ROOT="$(python3 -c "import os; print(os.path.dirname(os.path.dirname('$PYTHON_REAL')))") "
+          PYTHON_ROOT="${PYTHON_ROOT%% }"  # trim trailing space from subshell
+          echo "→ Bundling CPython ($PYTHON_VER) from $PYTHON_ROOT"
+          cp -a "$PYTHON_ROOT" "$PYTHON_DEST"
+
+          # Create the venv using the bundled Python. The absolute path is valid
+          # at CI time; relative symlinks are created below to survive relocation.
+          mkdir -p "$(dirname "$VENV_DIR")"
+          uv venv "$VENV_DIR" --python "$PYTHON_DEST/bin/$PYTHON_VER"
+          UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync \
+            --directory server/backend \
+            --extra mlx \
+            --no-editable
+
+          # The venv's python symlinks now embed the CI runner's absolute path
+          # (e.g. /Users/runner/.local/share/uv/python/.../bin/python3.13).
+          # That path doesn't exist on the user's machine, so fs.existsSync(
+          # '.venv/bin/python3') returns false for a dangling symlink, causing
+          # mlxServerManager to fall back to the uvicorn console script (which
+          # has the same broken absolute shebang) and fail with exit code 126.
+          #
+          # Fix: re-create the symlinks as relative paths within the bundle:
+          #   .venv/bin/ is at: Resources/backend/.venv/bin/
+          #   python/bin/ is at: Resources/python/bin/
+          #   Relative: ../../../python/bin/$PYTHON_VER
+          REL="../../../python/bin/$PYTHON_VER"
+          for name in python python3 "$PYTHON_VER"; do
+            [ -e "$VENV_DIR/bin/$name" ] || [ -L "$VENV_DIR/bin/$name" ] || continue
+            ln -sf "$REL" "$VENV_DIR/bin/$name"
+          done
+
+          echo "App bundle size after backend install: $(du -sh "$APP_BUNDLE" | cut -f1)"
+
+      - name: Re-sign app bundle after backend injection
+        # electron-builder builds with hardenedRuntime=true, signing the Electron
+        # binaries.  Adding the Python venv (with many unsigned .so files) breaks
+        # that signature, causing Gatekeeper to report "damaged and can't be opened".
+        # Re-sign everything with an ad-hoc identity (-) so the bundle signature is
+        # internally consistent.
+        # NOTE: Even with correct ad-hoc signing, macOS Gatekeeper will block
+        # quarantined downloads. After installing, users must run:
+        #   xattr -dr com.apple.quarantine /Applications/TranscriptionSuite.app
+        run: |
+          APP="$(pwd)/dashboard/release/mac-arm64/TranscriptionSuite.app"
+          # Clear any extended attributes on the bundle that could interfere.
+          xattr -cr "$APP"
+          # Sign all Mach-O files in Resources — covers both the Python venv
+          # extension modules (.so/.dylib) and the bundled CPython interpreter
+          # and its own dylibs.  --deep doesn't reach plain files in Resources,
+          # only nested .app/.framework bundles, so we sign them explicitly first.
+          # Pass -perm /111 to also catch the python3.13 executable itself.
+          find "$APP/Contents/Resources" -type f \( -name "*.so" -o -name "*.dylib" \) \
+            -print0 | xargs -0 -P4 codesign --force --sign - 2>/dev/null || true
+          find "$APP/Contents/Resources" -type f -perm /111 \
+            -print0 | xargs -0 -P4 codesign --force --sign - 2>/dev/null || true
+          # Deep-sign the whole bundle. --deep processes nested frameworks and apps
+          # bottom-up, so the Electron Framework (and its constituent dylibs that
+          # were modified by the individual signing above) gets a fresh consistent
+          # signature before the outer .app is sealed.
+          codesign --force --deep --sign - "$APP"
+
+      - name: Create DMG from app bundle
+        run: |
+          mkdir -p dmg-staging
+          cp -a dashboard/release/mac-arm64/TranscriptionSuite.app dmg-staging/
+          ln -sf /Applications dmg-staging/Applications
+          cp build/macos-metal-install-instructions.txt \
+            "dmg-staging/Installation Instructions.txt"
+          hdiutil create \
+            -volname "TranscriptionSuite" \
+            -srcfolder dmg-staging \
+            -ov -format UDZO \
+            -o dashboard/release/TranscriptionSuite-arm64-metal.dmg
+          rm -rf dmg-staging
+
+      - name: Import GPG key
+        if: ${{ vars.GPG_SIGNING_ENABLED == 'true' }}
+        run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Sign artifacts
+        if: ${{ vars.GPG_SIGNING_ENABLED == 'true' }}
+        env:
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: bash build/sign-electron-artifacts.sh dashboard/release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-metal
+          path: |
+            dashboard/release/TranscriptionSuite-arm64-metal.dmg
+            dashboard/release/*.asc
+          if-no-files-found: error
+
   create-release:
-    needs: [build-linux, build-windows, build-macos]
+    needs: [build-linux, build-windows, build-macos, build-macos-metal]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
