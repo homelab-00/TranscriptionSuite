@@ -91,6 +91,8 @@ parakeet:
 
     # Enable local attention for long sequences. Caps attention memory at O(N)
     # instead of O(N^2). Required for audio >5 min on GPUs with <16GB VRAM.
+    # Also applies to the MLX Parakeet backend on Apple Silicon — prevents
+    # RuntimeError: [metal::malloc] for files >5 minutes.
     use_local_attention: true
     local_attention_window: [128, 128]
 

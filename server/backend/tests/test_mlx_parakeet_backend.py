@@ -234,6 +234,73 @@ class TestMLXParakeetBackendLifecycle:
         mod = _import_parakeet_backend()
         assert mod.MLXParakeetBackend().preferred_input_sample_rate_hz == 16000
 
+    def test_load_applies_local_attention_by_default(self) -> None:
+        """Local attention is enabled by default to prevent OOM on long audio."""
+        mod = _import_parakeet_backend()
+        stub, mock_model = _make_parakeet_stub()
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            with patch.object(mod, "get_config") as mock_get_cfg:
+                # Default config: use_local_attention=True, window=[128, 128]
+                mock_get_cfg.return_value.get.return_value = {
+                    "use_local_attention": True,
+                    "local_attention_window": [128, 128],
+                }
+                backend = mod.MLXParakeetBackend()
+                backend.load("mlx-community/parakeet-tdt-0.6b-v3", device="metal")
+
+        mock_model.encoder.set_attention_model.assert_called_once_with(
+            "rel_pos_local_attn", (128, 128)
+        )
+
+    def test_load_local_attention_uses_config_window(self) -> None:
+        """Local attention window is taken from parakeet config."""
+        mod = _import_parakeet_backend()
+        stub, mock_model = _make_parakeet_stub()
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            with patch.object(mod, "get_config") as mock_get_cfg:
+                mock_get_cfg.return_value.get.return_value = {
+                    "use_local_attention": True,
+                    "local_attention_window": [64, 64],
+                }
+                backend = mod.MLXParakeetBackend()
+                backend.load("mlx-community/parakeet-tdt-0.6b-v3", device="metal")
+
+        mock_model.encoder.set_attention_model.assert_called_once_with(
+            "rel_pos_local_attn", (64, 64)
+        )
+
+    def test_load_skips_local_attention_when_disabled(self) -> None:
+        """When use_local_attention=False in config, set_attention_model is not called."""
+        mod = _import_parakeet_backend()
+        stub, mock_model = _make_parakeet_stub()
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            with patch.object(mod, "get_config") as mock_get_cfg:
+                mock_get_cfg.return_value.get.return_value = {
+                    "use_local_attention": False,
+                }
+                backend = mod.MLXParakeetBackend()
+                backend.load("mlx-community/parakeet-tdt-0.6b-v3", device="metal")
+
+        mock_model.encoder.set_attention_model.assert_not_called()
+
+    def test_load_handles_missing_set_attention_model(self) -> None:
+        """If parakeet-mlx encoder lacks set_attention_model, load still succeeds."""
+        mod = _import_parakeet_backend()
+        stub, mock_model = _make_parakeet_stub()
+        # Make set_attention_model raise AttributeError to simulate older parakeet-mlx
+        mock_model.encoder.set_attention_model.side_effect = AttributeError("no such method")
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            with patch.object(mod, "get_config") as mock_get_cfg:
+                mock_get_cfg.return_value.get.return_value = {
+                    "use_local_attention": True,
+                    "local_attention_window": [256, 256],
+                }
+                backend = mod.MLXParakeetBackend()
+                # Should not raise — graceful degradation
+                backend.load("mlx-community/parakeet-tdt-0.6b-v3", device="metal")
+
+        assert backend.is_loaded()
+
 
 # ---------------------------------------------------------------------------
 # Transcribe — output shape and content

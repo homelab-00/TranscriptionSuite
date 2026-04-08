@@ -29,6 +29,7 @@ from typing import Any
 
 import numpy as np
 import soundfile as sf
+from server.config import get_config
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
@@ -134,6 +135,39 @@ class MLXParakeetBackend(STTBackend):
             self._model_name = model_name
             self._loaded = True
             logger.info(f"MLX Parakeet model loaded: {model_name}")
+
+            # Apply local attention to prevent OOM on long audio files.
+            # Without this, the encoder's global self-attention allocates O(N²) memory
+            # proportional to the full audio length, causing multi-GB allocations for
+            # files >5 minutes on Apple Silicon.
+            #
+            # Reads from the shared ``parakeet`` config section so a single setting
+            # controls both the NeMo and MLX Parakeet backends.
+            cfg = get_config()
+            parakeet_cfg = cfg.get("parakeet", default={}) or {}
+
+            if parakeet_cfg.get("use_local_attention", True):
+                raw_window = parakeet_cfg.get("local_attention_window", [128, 128])
+                try:
+                    left = int(raw_window[0])
+                    right = int(raw_window[1])
+                except (TypeError, IndexError, ValueError):
+                    left, right = 128, 128
+                window = (left, right)
+                try:
+                    self._model.encoder.set_attention_model("rel_pos_local_attn", window)
+                    logger.info(
+                        "MLX Parakeet: enabled local attention with window %s "
+                        "(reduces memory for long audio)",
+                        window,
+                    )
+                except AttributeError:
+                    logger.debug(
+                        "MLX Parakeet: set_attention_model not available in this "
+                        "parakeet-mlx version; high memory use expected for long audio"
+                    )
+                except Exception as exc:
+                    logger.warning("MLX Parakeet: failed to set local attention: %s", exc)
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load MLX Parakeet model '{model_name}': {exc}"
