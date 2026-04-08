@@ -193,12 +193,12 @@ Technical documentation for developing and building TranscriptionSuite.
       - [Setup (one-time, per clone)](#setup-one-time-per-clone)
       - [Running ad-hoc](#running-ad-hoc)
       - [Extending](#extending)
-  - [12.5. AI Agent Instructions](#125-ai-agent-instructions)
-    - [File Overview](#file-overview)
-    - [How it works](#how-it-works-1)
-    - [Updating project-context.md](#updating-project-contextmd)
-    - [Updating GitNexus context](#updating-gitnexus-context)
-    - [Key rules](#key-rules)
+    - [12.5 AI Agent Instructions](#125-ai-agent-instructions)
+      - [File Overview](#file-overview)
+      - [How it works](#how-it-works-1)
+      - [Updating project-context.md](#updating-project-contextmd)
+      - [Updating GitNexus context](#updating-gitnexus-context)
+      - [Key rules](#key-rules)
   - [13. Troubleshooting](#13-troubleshooting)
     - [13.1 Docker GPU Access](#131-docker-gpu-access)
       - [CUDA unknown error after system update](#cuda-unknown-error-after-system-update)
@@ -358,7 +358,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD
 - **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
 - **Multi-backend STT**: Pluggable backend architecture — Whisper, NeMo Parakeet/Canary, WhisperX, VibeVoice-ASR, whisper.cpp (Vulkan), MLX (Apple Silicon: Whisper, Parakeet, Canary, VibeVoice) — auto-detected from the model name
-- **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM; works with all backends
+- **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM; Whisper backends only in v1
 - **LM Studio Integration**: Native v1 REST API support for LM Studio 0.4.0+ with stateful chat sessions and Docker-compatible model management
 
 ### 2.2 Platform Architectures
@@ -703,7 +703,7 @@ Prerequisite: You must have built the image first (see Step 2).
 ### 5.1 Prerequisites
 
 ```bash
-# Dashboard: Node.js 24+ and npm
+# Dashboard: Node.js 25+ and npm
 cd dashboard && npm install
 
 # Server Python tools (linting, testing)
@@ -822,7 +822,7 @@ cd build && ./generate-ico.sh
 
 ### 5.7 End-User Verification Docs
 
-- User-facing verification steps are documented in `README.md` section `3.1 Verify Download (Kleopatra)`.
+- User-facing verification steps are documented in `README.md` section `2.3.2 Verify Download with Kleopatra (optional)`.
 - Keep this key path stable for docs and releases: `docs/assets/homelab-00_0xBFE4CC5D72020691_public.asc`.
 - Kleopatra reference page used in docs: https://apps.kde.org/kleopatra/
 
@@ -1552,7 +1552,7 @@ Detailed server status. Includes version, model state, GPU info, feature availab
 ```json
 {
   "status": "running",
-  "version": "1.1.3",
+  "version": "1.3.1",
   "ready": true,
   "models": {
     "transcription": {"loaded": true, "disabled": false, ...},
@@ -2911,7 +2911,7 @@ Add new hooks directly in `.pre-commit-config.yaml`. Use a `repo:` entry for thi
 
 ---
 
-## 12.5. AI Agent Instructions
+### 12.5 AI Agent Instructions
 
 This project uses multiple AI coding tools (Claude Code, Gemini CLI, Cursor, etc.). Each tool loads instructions differently, so the project maintains a layered instruction system.
 
@@ -3215,7 +3215,7 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 - Optional Whisper family (`[project.optional-dependencies].whisper`): faster-whisper + CTranslate2 + WhisperX
 - NVIDIA NeMo Toolkit (optional extra; Parakeet/Canary ASR backends)
 - VibeVoice-ASR (optional extra, experimental; Microsoft multimodal ASR)
-- PyAnnote Audio 4.0.3+ (speaker diarization)
+- PyAnnote Audio 4.0.4+ (speaker diarization)
 - PyTorch 2.8.0 + TorchAudio 2.8.0
 - SQLite with FTS5
 - NVIDIA GPU with CUDA support
@@ -3223,7 +3223,7 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 ### 14.2 Dashboard
 
 - Node.js 25.7.0 (pinned in `dashboard/.nvmrc` and CI)
-- Electron 40.8.0
+- Electron 40.8.5
 - React 19 + TypeScript 5.9
 - Vite 7 (bundler)
 - Tailwind CSS 4
@@ -3500,7 +3500,7 @@ Start/stop the server from the **Server** view using the native process controls
 2. Open **Server** view → select **Metal (MLX)** runtime profile.
 3. Click **Start Metal Server** — the status light should turn green within ~5 s.
 4. Verify the server log in the dashboard shows uvicorn startup output.
-5. Open the **Transcribe** view and upload an audio file — confirm the transcript appears.
+5. Open the **Session** view and upload an audio file — confirm the transcript appears.
 6. Click **Stop** in the Server view — the status light should go grey.
 7. Quit the app and relaunch — the server should auto-start if Metal is still selected.
 

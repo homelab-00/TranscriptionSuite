@@ -89,7 +89,7 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 - **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [51 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds; either using your mic or the system audio
 - **Session File Import**: Import existing audio files from the Session tab; transcription results are saved directly as `.txt` or `.srt` to a folder of your choice — no Notebook entry created
-- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (available for Whisper on Docker and for MLX Whisper on Apple Silicon; not yet available for whisper.cpp)
+- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (available for Whisper models on all platforms; not available for NeMo, VibeVoice, or whisper.cpp models)
 - **Global Keyboard Shortcuts**: System-wide shortcuts & paste-at-cursor functionality
 - **Remote Access**: Securely access your desktop at home running the model from anywhere (utilizing Tailscale) or share it on your local network via LAN
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view, full-text search, and LM Studio integration (chat with the AI about your notes)
@@ -775,7 +775,7 @@ sudo systemctl enable --now nvidia-persistence.service
 
 ### Advanced Troubleshooting
 
-For more advanced troubleshooting steps, head over to README_DEV's [Troubleshooting section](README_DEVmd#13-troubleshooting).
+For more advanced troubleshooting steps, head over to README_DEV's [Troubleshooting section](README_DEV.md#13-troubleshooting).
 
 ---
 
