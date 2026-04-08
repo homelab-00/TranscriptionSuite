@@ -3,7 +3,7 @@ TranscriptionSuite — Apple Silicon (Metal) Installation Instructions
 
 1. Copy TranscriptionSuite.app to your Applications folder
    • Drag TranscriptionSuite.app from this DMG window into the Applications
-     folder shortcut on the right.
+     folder shortcut.
 
 2. Open the app
    • Double-click TranscriptionSuite in your Applications folder, or launch
@@ -34,7 +34,7 @@ TranscriptionSuite — Apple Silicon (Metal) Installation Instructions
 
    Option B — System Settings
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   1. Open System Settings → Privacy & Security.
+   1. Open (System) Settings → Privacy & Security.
    2. Scroll to the Security section at the bottom.
    3. Next to the message "'TranscriptionSuite' was blocked to protect
       your Mac", click "Open Anyway".
