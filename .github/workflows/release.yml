@@ -188,13 +188,33 @@ jobs:
 
       - name: Install Python/MLX backend into app bundle
         run: |
-          VENV_DIR="dashboard/release/mac-arm64/TranscriptionSuite.app/Contents/Resources/backend/.venv"
+          # Use an absolute path so UV_PROJECT_ENVIRONMENT is unambiguous when
+          # combined with --directory (a relative path could be resolved against
+          # the --directory location by uv, silently landing in the wrong venv).
+          APP_BUNDLE="$(pwd)/dashboard/release/mac-arm64/TranscriptionSuite.app"
+          VENV_DIR="$APP_BUNDLE/Contents/Resources/backend/.venv"
           mkdir -p "$(dirname "$VENV_DIR")"
           uv venv "$VENV_DIR" --python 3.13
           UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync \
             --directory server/backend \
             --extra mlx \
             --no-editable
+          echo "App bundle size after backend install: $(du -sh "$APP_BUNDLE" | cut -f1)"
+
+      - name: Re-sign app bundle after backend injection
+        # electron-builder builds with hardenedRuntime=true, signing the Electron
+        # binaries.  Adding the Python venv (with many unsigned .so files) breaks
+        # that signature, causing Gatekeeper to report "damaged and can't be opened".
+        # Re-sign everything with an ad-hoc identity (-) so the bundle signature is
+        # internally consistent.  Users still need to remove the quarantine attribute
+        # after downloading: xattr -dr com.apple.quarantine TranscriptionSuite.app
+        run: |
+          APP="$(pwd)/dashboard/release/mac-arm64/TranscriptionSuite.app"
+          # Sign all extension modules first so the top-level bundle seals them.
+          find "$APP" -type f \( -name "*.so" -o -name "*.dylib" \) \
+            -print0 | xargs -0 -P4 codesign --force --sign - 2>/dev/null || true
+          # Sign the top-level bundle last, sealing everything inside it.
+          codesign --force --sign - "$APP"
 
       - name: Create DMG from app bundle
         run: |
