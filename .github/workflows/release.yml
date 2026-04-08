@@ -229,11 +229,8 @@ jobs:
           mkdir -p dmg-staging
           cp -a dashboard/release/mac-arm64/TranscriptionSuite.app dmg-staging/
           ln -sf /Applications dmg-staging/Applications
-
-          # Create a double-clickable helper script (.command opens in Terminal.app).
-          cp build/macos-metal-quarantine-helper.command \
-            "dmg-staging/Double-click me after copying to Applications.command"
-
+          cp build/macos-metal-install-instructions.txt \
+            "dmg-staging/Installation Instructions.txt"
           hdiutil create \
             -volname "TranscriptionSuite" \
             -srcfolder dmg-staging \
