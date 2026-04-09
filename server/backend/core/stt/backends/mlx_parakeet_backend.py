@@ -152,6 +152,11 @@ class MLXParakeetBackend(STTBackend):
                     left = int(raw_window[0])
                     right = int(raw_window[1])
                 except (TypeError, IndexError, ValueError):
+                    logger.debug(
+                        "MLX Parakeet: invalid local_attention_window value %r; "
+                        "falling back to default (128, 128)",
+                        raw_window,
+                    )
                     left, right = 128, 128
                 window = (left, right)
                 try:

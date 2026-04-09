@@ -13,9 +13,10 @@ from server.core.parallel_diarize import (
 )
 
 
-def _make_engine(result=None, side_effect=None):
+def _make_engine(result=None, side_effect=None, model_name: str = "Systran/faster-whisper-large-v3"):
     """Create a mock AudioToTextRecorder."""
     engine = MagicMock()
+    engine.model_name = model_name
     if side_effect is not None:
         engine.transcribe_file.side_effect = side_effect
     else:
@@ -54,6 +55,7 @@ def test_both_succeed_and_run_on_different_threads(mock_load_audio):
     diar_segments = [MagicMock()]
 
     engine = MagicMock()
+    engine.model_name = "Systran/faster-whisper-large-v3"  # non-MLX → parallel mode
 
     def fake_transcribe(*args, **kwargs):
         nonlocal transcribe_thread_name
@@ -311,7 +313,121 @@ def test_sequential_passes_parameters(mock_load_audio):
     assert t_kwargs["task"] == "translate"
     assert t_kwargs["translation_target_language"] == "en"
 
+
     # Check diarization params
     mm.diarization_engine.diarize_audio.assert_called_once()
     d_kwargs = mm.diarization_engine.diarize_audio.call_args[1]
     assert d_kwargs["num_speakers"] == 4
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MLX STT backend → sequential fallback (Metal/MPS GPU contention)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000))
+def test_mlx_parakeet_backend_forces_sequential_mode(mock_load_audio):
+    """MLX Parakeet engine triggers sequential mode to prevent Metal/MPS crash."""
+    call_order: list[str] = []
+    transcript_result = MagicMock(words=[], segments=[])
+
+    engine = _make_engine(model_name="mlx-community/parakeet-tdt-0.6b-v3")
+
+    def fake_transcribe(*args, **kwargs):
+        call_order.append("transcribe")
+        return transcript_result
+
+    engine.transcribe_file.side_effect = fake_transcribe
+
+    mm = _make_model_manager()
+
+    def fake_diarize(*args, **kwargs):
+        call_order.append("diarize")
+        return mm.diarization_engine.diarize_audio.return_value
+
+    mm.diarization_engine.diarize_audio.side_effect = fake_diarize
+
+    result, diar = transcribe_and_diarize(
+        engine=engine,
+        model_manager=mm,
+        file_path="/tmp/test.wav",
+    )
+
+    assert result is transcript_result
+    # Transcription must complete before diarization starts.
+    assert call_order == ["transcribe", "diarize"]
+
+
+@patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000))
+def test_mlx_whisper_backend_forces_sequential_mode(mock_load_audio):
+    """MLX Whisper engine triggers sequential mode to prevent Metal/MPS crash."""
+    call_order: list[str] = []
+    transcript_result = MagicMock(words=[], segments=[])
+
+    engine = _make_engine(model_name="mlx-community/whisper-large-v3-asr-fp16")
+
+    def fake_transcribe(*args, **kwargs):
+        call_order.append("transcribe")
+        return transcript_result
+
+    engine.transcribe_file.side_effect = fake_transcribe
+
+    mm = _make_model_manager()
+
+    def fake_diarize(*args, **kwargs):
+        call_order.append("diarize")
+        return mm.diarization_engine.diarize_audio.return_value
+
+    mm.diarization_engine.diarize_audio.side_effect = fake_diarize
+
+    result, diar = transcribe_and_diarize(
+        engine=engine,
+        model_manager=mm,
+        file_path="/tmp/test.wav",
+    )
+
+    assert result is transcript_result
+    assert call_order == ["transcribe", "diarize"]
+
+
+@patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000))
+def test_non_mlx_backend_runs_in_parallel(mock_load_audio):
+    """Non-MLX backends (faster-whisper) still use the parallel executor."""
+    transcribe_thread_name = None
+    diarize_thread_name = None
+    transcript_result = MagicMock(words=[], segments=[])
+
+    # Use a non-MLX model name so the MLX check doesn't trigger.
+    engine = _make_engine(
+        model_name="Systran/faster-whisper-large-v3",
+        result=transcript_result,
+    )
+
+    def fake_transcribe(*args, **kwargs):
+        nonlocal transcribe_thread_name
+        transcribe_thread_name = threading.current_thread().name
+        return transcript_result
+
+    engine.transcribe_file.side_effect = fake_transcribe
+
+    mm = _make_model_manager()
+
+    def fake_diarize(*args, **kwargs):
+        nonlocal diarize_thread_name
+        diarize_thread_name = threading.current_thread().name
+        return mm.diarization_engine.diarize_audio.return_value
+
+    mm.diarization_engine.diarize_audio.side_effect = fake_diarize
+
+    result, diar = transcribe_and_diarize(
+        engine=engine,
+        model_manager=mm,
+        file_path="/tmp/test.wav",
+    )
+
+    assert result is transcript_result
+    # Both should have run on named parallel_diarize worker threads.
+    assert transcribe_thread_name is not None
+    assert diarize_thread_name is not None
+    assert "parallel_diarize" in transcribe_thread_name
+    assert "parallel_diarize" in diarize_thread_name

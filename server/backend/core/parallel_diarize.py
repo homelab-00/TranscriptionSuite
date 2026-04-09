@@ -191,6 +191,32 @@ def transcribe_and_diarize(
             progress_callback=progress_callback,
         )
 
+    # Any MLX STT backend (Parakeet, Canary, Whisper, VibeVoice) uses Apple's
+    # Metal GPU.  PyAnnote diarization uses PyTorch MPS — also Metal.  Running
+    # both concurrently causes Metal command buffer failures:
+    #   [METAL] Command buffer execution failed: Discarded
+    #   (victim of GPU error/recovery) (kIOGPUCommandBufferCallbackErrorInnocentVictim)
+    # Fall back to sequential mode so the two Metal workloads never overlap.
+    from server.core.stt.backends.factory import is_mlx_model
+
+    if is_mlx_model(engine.model_name):
+        logger.info(
+            "MLX STT backend detected — switching to sequential mode "
+            "to prevent Metal/MPS GPU contention during diarization"
+        )
+        return transcribe_then_diarize(
+            engine=engine,
+            model_manager=model_manager,
+            file_path=file_path,
+            language=language,
+            task=task,
+            translation_target_language=translation_target_language,
+            word_timestamps=word_timestamps,
+            expected_speakers=expected_speakers,
+            cancellation_check=cancellation_check,
+            progress_callback=progress_callback,
+        )
+
     # ------------------------------------------------------------------
     # Phase 2 — Parallel execution
     # ------------------------------------------------------------------
