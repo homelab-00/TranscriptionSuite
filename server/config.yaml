@@ -98,6 +98,24 @@ parakeet:
     subsampling_conv_chunking: true
 
 # ----------------------------------------------------------------------------
+# MLX Parakeet Backend Settings (Apple Silicon / Metal only)
+# ----------------------------------------------------------------------------
+mlx_parakeet:
+    # Enable automatic local (sliding-window) attention for long audio.
+    # When true, audio longer than max_chunk_duration_s uses local attention
+    # (O(N) memory) instead of the default global attention (O(N²)), preventing
+    # Metal out-of-memory crashes on long files.  Short files keep global
+    # attention for best quality.  Mirrors the NeMo backend's use_local_attention.
+    use_local_attention: true
+    local_attention_window: [256, 256]
+
+    # Audio duration threshold (seconds) above which local attention is applied.
+    # Files at or below this length use global attention.  Increase if you have
+    # ample unified memory and want global attention on longer files.
+    # Mirrors the NeMo backend's max_chunk_duration_s.  Default: 30.
+    max_chunk_duration_s: 30
+
+# ----------------------------------------------------------------------------
 # VibeVoice-ASR (Experimental, In-Process Backend)
 # ----------------------------------------------------------------------------
 vibevoice_asr:

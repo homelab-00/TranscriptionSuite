@@ -29,6 +29,7 @@ from typing import Any
 
 import numpy as np
 import soundfile as sf
+from server.config import get_config
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
@@ -36,6 +37,16 @@ from server.core.stt.backends.base import (
 )
 
 SAMPLE_RATE = 16000
+
+# Default local-attention context window (frames).  Mirrors the parakeet-mlx
+# streaming default and the NeMo backend's local_attention_window setting.
+DEFAULT_LOCAL_ATTENTION_WINDOW: tuple[int, int] = (256, 256)
+
+# Audio longer than this (seconds) automatically gets local (sliding-window)
+# attention to prevent the O(N²) Metal allocation crash.  Files at or below
+# this threshold keep the default global attention for best quality.
+# Mirrors the NeMo backend's max_chunk_duration_s setting.
+DEFAULT_MAX_CHUNK_DURATION_S: int = 30
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +121,12 @@ class MLXParakeetBackend(STTBackend):
         self._model_name: str | None = None
         self._model: Any | None = None
         self._loaded: bool = False
+        self._use_local_attention: bool = True
+        self._local_attention_window: tuple[int, int] = DEFAULT_LOCAL_ATTENTION_WINDOW
+        self._max_chunk_duration_s: int = DEFAULT_MAX_CHUNK_DURATION_S
+        # Tracks the encoder's current attention mode so we only call
+        # set_attention_model() when a switch is actually needed.
+        self._attention_mode: str = "global"
 
     # ------------------------------------------------------------------
     # STTBackend interface
@@ -133,7 +150,39 @@ class MLXParakeetBackend(STTBackend):
             self._model = from_pretrained(model_name)
             self._model_name = model_name
             self._loaded = True
-            logger.info(f"MLX Parakeet model loaded: {model_name}")
+
+            # Read config from mlx_parakeet section.
+            cfg = get_config()
+            mlx_cfg = cfg.get("mlx_parakeet", default={}) or {}
+
+            self._use_local_attention = bool(mlx_cfg.get("use_local_attention", True))
+
+            raw_window = mlx_cfg.get("local_attention_window", list(DEFAULT_LOCAL_ATTENTION_WINDOW))
+            try:
+                left, right = int(raw_window[0]), int(raw_window[1])
+                self._local_attention_window = (left, right)
+            except (TypeError, ValueError, IndexError):
+                self._local_attention_window = DEFAULT_LOCAL_ATTENTION_WINDOW
+
+            try:
+                self._max_chunk_duration_s = max(
+                    1,
+                    int(mlx_cfg.get("max_chunk_duration_s", DEFAULT_MAX_CHUNK_DURATION_S) or DEFAULT_MAX_CHUNK_DURATION_S),
+                )
+            except (TypeError, ValueError):
+                self._max_chunk_duration_s = DEFAULT_MAX_CHUNK_DURATION_S
+
+            # Attention mode starts as "global" (the model's built-in default);
+            # transcribe() switches per-call based on audio duration.
+            self._attention_mode = "global"
+
+            logger.info(
+                "MLX Parakeet model loaded: %s (use_local_attention=%s, local_attention_window=%s, max_chunk_duration_s=%d)",
+                model_name,
+                self._use_local_attention,
+                self._local_attention_window,
+                self._max_chunk_duration_s,
+            )
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load MLX Parakeet model '{model_name}': {exc}"
@@ -227,6 +276,33 @@ class MLXParakeetBackend(STTBackend):
                     max_duration=30.0,
                 )
             )
+
+            # Switch attention mode based on audio duration, mirroring the
+            # NeMo backend's max_chunk_duration_s logic.
+            # - Short audio (≤ max_chunk_duration_s): global attention gives the
+            #   best quality and fits in Metal memory.
+            # - Long audio (> max_chunk_duration_s): local (sliding-window)
+            #   attention is O(N) in memory and avoids Metal OOM crashes.
+            audio_duration_s = len(audio) / SAMPLE_RATE
+            needs_local = self._use_local_attention and audio_duration_s > self._max_chunk_duration_s
+            target_mode = "local" if needs_local else "global"
+
+            if target_mode != self._attention_mode:
+                if target_mode == "local":
+                    self._model.encoder.set_attention_model(
+                        "rel_pos_local_attn", self._local_attention_window
+                    )
+                else:
+                    self._model.encoder.set_attention_model(
+                        "rel_pos", self._local_attention_window
+                    )
+                self._attention_mode = target_mode
+                logger.info(
+                    "MLX Parakeet: switched to %s attention for %.0fs audio",
+                    target_mode,
+                    audio_duration_s,
+                )
+
             result = self._model.transcribe(tmp_path, decoding_config=decoding_config)
         finally:
             Path(tmp_path).unlink(missing_ok=True)
