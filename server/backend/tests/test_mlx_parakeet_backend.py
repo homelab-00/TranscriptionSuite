@@ -234,6 +234,40 @@ class TestMLXParakeetBackendLifecycle:
         mod = _import_parakeet_backend()
         assert mod.MLXParakeetBackend().preferred_input_sample_rate_hz == 16000
 
+    def test_default_max_chunk_duration(self) -> None:
+        mod = _import_parakeet_backend()
+        backend = mod.MLXParakeetBackend()
+        assert backend._max_chunk_duration_s == mod.DEFAULT_MAX_CHUNK_DURATION_S
+
+    def test_load_reads_max_chunk_duration_from_config(self) -> None:
+        mod = _import_parakeet_backend()
+        stub, _ = _make_parakeet_stub()
+
+        fake_cfg = MagicMock()
+        fake_cfg.get.return_value = {"max_chunk_duration_s": 120}
+
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            with patch(f"{mod.__name__}.get_config", return_value=fake_cfg):
+                backend = mod.MLXParakeetBackend()
+                backend.load("mlx-community/parakeet-tdt-0.6b-v3", device="metal")
+
+        assert backend._max_chunk_duration_s == 120
+
+    def test_load_clamps_max_chunk_duration_to_minimum_60(self) -> None:
+        """Values below 60 s are clamped to 60."""
+        mod = _import_parakeet_backend()
+        stub, _ = _make_parakeet_stub()
+
+        fake_cfg = MagicMock()
+        fake_cfg.get.return_value = {"max_chunk_duration_s": 10}
+
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            with patch(f"{mod.__name__}.get_config", return_value=fake_cfg):
+                backend = mod.MLXParakeetBackend()
+                backend.load("mlx-community/parakeet-tdt-0.6b-v3", device="metal")
+
+        assert backend._max_chunk_duration_s == 60
+
 
 # ---------------------------------------------------------------------------
 # Transcribe — output shape and content
@@ -516,3 +550,187 @@ class TestMLXParakeetResampling:
             segments, _ = backend.transcribe(audio_int16)
 
         assert isinstance(segments, list)
+
+
+# ---------------------------------------------------------------------------
+# Chunking — _transcribe_long / _transcribe_chunk
+# ---------------------------------------------------------------------------
+
+
+class TestMLXParakeetChunking:
+    """Verify that long audio is split into chunks and timestamps are offset."""
+
+    def _make_chunk_result(self, text: str, start: float, end: float) -> _MockTranscriptionResult:
+        """Return a single-sentence result spanning [start, end]."""
+        return _MockTranscriptionResult(
+            sentences=[
+                _MockSentence(
+                    text=text,
+                    start=start,
+                    end=end,
+                    tokens=[_MockToken(text=f" {text}", start=start, end=end)],
+                )
+            ]
+        )
+
+    def test_short_audio_does_not_chunk(self) -> None:
+        """Audio shorter than max_chunk_duration_s is transcribed in one call."""
+        result = _default_result()
+        backend, mod, mock_model = _loaded_backend(result)
+        stub, _ = _make_parakeet_stub(result)
+
+        # 1 second of audio, 300 s chunk limit → single call.
+        audio = np.zeros(16000, dtype=np.float32)
+        backend._max_chunk_duration_s = 300
+
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            backend._model = mock_model
+            segments, info = backend.transcribe(audio)
+
+        assert mock_model.transcribe.call_count == 1
+        assert len(segments) == 1
+        assert info.language == "en"
+
+    def test_long_audio_splits_into_multiple_calls(self) -> None:
+        """Audio longer than max_chunk_duration_s triggers chunked processing."""
+        # Use a very short chunk limit (1 s = 16000 samples) so we can test
+        # with a small synthetic array.
+        chunk_s = 1
+        sample_rate = 16000
+        # 2.5 seconds of audio → ceil(2.5 / 1) = 3 chunks.
+        num_audio_samples = int(2.5 * sample_rate)
+        audio = np.zeros(num_audio_samples, dtype=np.float32)
+
+        result = _default_result()
+        backend, mod, mock_model = _loaded_backend(result)
+        stub, _ = _make_parakeet_stub(result)
+        backend._max_chunk_duration_s = chunk_s
+
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            backend._model = mock_model
+            segments, _ = backend.transcribe(audio)
+
+        # Should have been called once per chunk.
+        assert mock_model.transcribe.call_count == 3
+
+    def test_timestamps_offset_per_chunk(self) -> None:
+        """Segment timestamps must be shifted by the chunk's time offset."""
+        chunk_s = 1
+        sample_rate = 16000
+
+        # Build a mock that returns a result with a sentence at [0.0, 0.5]
+        # for *every* chunk call.  After offsetting, the second chunk's segment
+        # should start at 1.0 (chunk offset) + 0.0 = 1.0.
+        call_count = 0
+
+        def _side_effect(path: str, decoding_config: Any = None) -> _MockTranscriptionResult:
+            nonlocal call_count
+            call_count += 1
+            return _MockTranscriptionResult(
+                sentences=[
+                    _MockSentence(
+                        text=f"Chunk {call_count}.",
+                        start=0.0,
+                        end=0.5,
+                        tokens=[
+                            _MockToken(text=f" Chunk{call_count}.", start=0.0, end=0.5)
+                        ],
+                    )
+                ]
+            )
+
+        backend, mod, _ = _loaded_backend()
+        stub, mock_model = _make_parakeet_stub()
+        mock_model.transcribe = MagicMock(side_effect=_side_effect)
+        backend._model = mock_model
+        backend._max_chunk_duration_s = chunk_s
+
+        # 2 seconds → 2 chunks of 1 s each.
+        audio = np.zeros(2 * sample_rate, dtype=np.float32)
+
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            segments, _ = backend.transcribe(audio)
+
+        assert len(segments) == 2
+        # First chunk: offset 0 → start stays at 0.0.
+        assert segments[0].start == pytest.approx(0.0)
+        assert segments[0].end == pytest.approx(0.5)
+        # Second chunk: offset 1 s → start = 0.0 + 1.0 = 1.0.
+        assert segments[1].start == pytest.approx(1.0)
+        assert segments[1].end == pytest.approx(1.5)
+
+    def test_word_timestamps_offset_per_chunk(self) -> None:
+        """Word-level timestamps must also be shifted by the chunk offset."""
+        chunk_s = 1
+        sample_rate = 16000
+
+        call_count = 0
+
+        def _side_effect(path: str, decoding_config: Any = None) -> _MockTranscriptionResult:
+            nonlocal call_count
+            call_count += 1
+            return _MockTranscriptionResult(
+                sentences=[
+                    _MockSentence(
+                        text="Hi.",
+                        start=0.0,
+                        end=0.4,
+                        tokens=[_MockToken(text=" Hi.", start=0.1, end=0.4, confidence=0.9)],
+                    )
+                ]
+            )
+
+        backend, mod, _ = _loaded_backend()
+        stub, mock_model = _make_parakeet_stub()
+        mock_model.transcribe = MagicMock(side_effect=_side_effect)
+        backend._model = mock_model
+        backend._max_chunk_duration_s = chunk_s
+
+        audio = np.zeros(2 * sample_rate, dtype=np.float32)
+
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            segments, _ = backend.transcribe(audio)
+
+        # Chunk 1 word: offset 0 → start 0.1, end 0.4
+        assert segments[0].words[0]["start"] == pytest.approx(0.1)
+        assert segments[0].words[0]["end"] == pytest.approx(0.4)
+        # Chunk 2 word: offset 1 → start 1.1, end 1.4
+        assert segments[1].words[0]["start"] == pytest.approx(1.1)
+        assert segments[1].words[0]["end"] == pytest.approx(1.4)
+
+    def test_progress_callback_called_per_chunk(self) -> None:
+        """progress_callback(current, total) must be called once per chunk."""
+        chunk_s = 1
+        sample_rate = 16000
+
+        backend, mod, mock_model = _loaded_backend()
+        stub, _ = _make_parakeet_stub()
+        backend._model = mock_model
+        backend._max_chunk_duration_s = chunk_s
+
+        calls: list[tuple[int, int]] = []
+        audio = np.zeros(3 * sample_rate, dtype=np.float32)
+
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            backend.transcribe(audio, progress_callback=lambda c, t: calls.append((c, t)))
+
+        assert calls == [(1, 3), (2, 3), (3, 3)]
+
+    def test_empty_chunk_result_is_handled(self) -> None:
+        """A chunk that returns no sentences should not crash; its result is empty."""
+        chunk_s = 1
+        sample_rate = 16000
+
+        empty_result = _MockTranscriptionResult(sentences=[], text="")
+        backend, mod, mock_model = _loaded_backend(empty_result)
+        stub, _ = _make_parakeet_stub(empty_result)
+        backend._model = mock_model
+        backend._max_chunk_duration_s = chunk_s
+
+        audio = np.zeros(2 * sample_rate, dtype=np.float32)
+
+        with patch.dict(sys.modules, {"parakeet_mlx": stub}):
+            segments, info = backend.transcribe(audio)
+
+        assert segments == []
+        assert info.language == "en"

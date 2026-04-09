@@ -22,6 +22,7 @@ The model is downloaded and cached by ``parakeet-mlx`` on first load.
 from __future__ import annotations
 
 import logging
+import math
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -29,6 +30,7 @@ from typing import Any
 
 import numpy as np
 import soundfile as sf
+from server.config import get_config
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
@@ -36,6 +38,15 @@ from server.core.stt.backends.base import (
 )
 
 SAMPLE_RATE = 16000
+
+# Default maximum audio duration (seconds) to pass to parakeet-mlx in a single
+# call.  Longer files are split into chunks to avoid Metal buffer OOM errors on
+# Apple Silicon (the MLX framework allocates all processing buffers up-front,
+# so very long audio can trigger "Attempting to allocate X bytes which is
+# greater than the maximum allowed buffer size" failures).
+# Overridden at load-time by the ``parakeet.max_chunk_duration_s`` config key
+# (the same key used by the NeMo Parakeet backend).
+DEFAULT_MAX_CHUNK_DURATION_S = 300  # 5 minutes
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +121,7 @@ class MLXParakeetBackend(STTBackend):
         self._model_name: str | None = None
         self._model: Any | None = None
         self._loaded: bool = False
+        self._max_chunk_duration_s: int = DEFAULT_MAX_CHUNK_DURATION_S
 
     # ------------------------------------------------------------------
     # STTBackend interface
@@ -133,11 +145,27 @@ class MLXParakeetBackend(STTBackend):
             self._model = from_pretrained(model_name)
             self._model_name = model_name
             self._loaded = True
-            logger.info(f"MLX Parakeet model loaded: {model_name}")
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load MLX Parakeet model '{model_name}': {exc}"
             ) from exc
+
+        # Configurable chunk duration — shared config key with the NeMo backend.
+        cfg = get_config()
+        parakeet_cfg = cfg.get("parakeet", default={}) or {}
+        try:
+            self._max_chunk_duration_s = max(
+                60,
+                int(parakeet_cfg.get("max_chunk_duration_s", DEFAULT_MAX_CHUNK_DURATION_S) or DEFAULT_MAX_CHUNK_DURATION_S),
+            )
+        except (TypeError, ValueError):
+            self._max_chunk_duration_s = DEFAULT_MAX_CHUNK_DURATION_S
+
+        logger.info(
+            "MLX Parakeet model loaded: %s (max_chunk_duration_s=%d)",
+            model_name,
+            self._max_chunk_duration_s,
+        )
 
     def unload(self) -> None:
         self._model = None
@@ -190,7 +218,6 @@ class MLXParakeetBackend(STTBackend):
             vad_filter,
             word_timestamps,
             translation_target_language,
-            progress_callback,
         )
 
         if not self._loaded or self._model is None:
@@ -209,6 +236,23 @@ class MLXParakeetBackend(STTBackend):
             else:
                 audio = audio.astype(np.float32)
 
+        total_duration = len(audio) / SAMPLE_RATE
+        if total_duration > self._max_chunk_duration_s:
+            return self._transcribe_long(audio, progress_callback=progress_callback)
+
+        segments = self._transcribe_chunk(audio)
+        info = BackendTranscriptionInfo(
+            language="en",
+            language_probability=1.0,
+        )
+        return segments, info
+
+    def _transcribe_chunk(self, audio: np.ndarray) -> list[BackendSegment]:
+        """Write *audio* to a temp WAV and transcribe it as a single chunk.
+
+        Returns the raw ``BackendSegment`` list with timestamps relative to the
+        start of *audio* (i.e. not yet offset for multi-chunk processing).
+        """
         # parakeet-mlx expects a file path, write audio to a temp WAV.
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             sf.write(tmp.name, audio, SAMPLE_RATE)
@@ -275,11 +319,61 @@ class MLXParakeetBackend(STTBackend):
                 )
             )
 
+        return segments
+
+    def _transcribe_long(
+        self,
+        audio: np.ndarray,
+        *,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
+        """Split *audio* into chunks and transcribe each one sequentially.
+
+        Timestamps in each chunk's segments are adjusted by the chunk's time
+        offset so that the returned segments have correct absolute timestamps
+        relative to the start of the full audio.
+        """
+        chunk_samples = int(self._max_chunk_duration_s * SAMPLE_RATE)
+        total_samples = len(audio)
+        num_chunks = math.ceil(total_samples / chunk_samples)
+
+        all_segments: list[BackendSegment] = []
+        time_offset = 0.0
+
+        for i in range(num_chunks):
+            start = i * chunk_samples
+            end = min(start + chunk_samples, total_samples)
+            chunk = audio[start:end]
+            chunk_duration = len(chunk) / SAMPLE_RATE
+
+            logger.info(
+                "MLX Parakeet: transcribing chunk %d/%d (%.0fs – %.0fs)",
+                i + 1,
+                num_chunks,
+                time_offset,
+                time_offset + chunk_duration,
+            )
+            if progress_callback is not None:
+                progress_callback(i + 1, num_chunks)
+
+            chunk_segments = self._transcribe_chunk(chunk)
+
+            # Shift timestamps so they are relative to the full audio start.
+            for seg in chunk_segments:
+                seg.start += time_offset
+                seg.end += time_offset
+                for w in seg.words:
+                    w["start"] = w["start"] + time_offset
+                    w["end"] = w["end"] + time_offset
+
+            all_segments.extend(chunk_segments)
+            time_offset += chunk_duration
+
         info = BackendTranscriptionInfo(
             language="en",
             language_probability=1.0,
         )
-        return segments, info
+        return all_segments, info
 
     def supports_translation(self) -> bool:
         return False
