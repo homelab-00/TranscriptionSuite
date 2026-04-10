@@ -219,7 +219,16 @@ class WhisperCppBackend(STTBackend):
                 f"{exc.response.status_code} for /inference"
             ) from exc
 
-        result = resp.json()
+        try:
+            result = resp.json()
+        except ValueError as exc:
+            # Sidecar returned non-JSON (e.g. plain-text error page).
+            body_preview = resp.content[:200].decode("utf-8", errors="replace") or "(empty)"
+            raise RuntimeError(
+                f"whisper.cpp sidecar at {self._server_url} returned non-JSON "
+                f"response from /inference: {body_preview}"
+            ) from exc
+
         return self._parse_response(result)
 
     def supports_translation(self) -> bool:
