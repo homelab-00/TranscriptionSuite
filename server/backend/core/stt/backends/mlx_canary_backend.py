@@ -31,6 +31,7 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 from server.core.stt.backends.base import (
+    BackendDependencyError,
     BackendSegment,
     BackendTranscriptionInfo,
     STTBackend,
@@ -281,9 +282,11 @@ class MLXCanaryBackend(STTBackend):
         try:
             import canary_mlx  # noqa: F401
         except ImportError as exc:
-            raise RuntimeError(
+            raise BackendDependencyError(
                 "canary-mlx is not installed. "
-                "Run: uv sync --extra mlx  (requires macOS + Apple Silicon)"
+                "Run: uv sync --extra mlx  (requires macOS + Apple Silicon)",
+                backend_type="mlx_canary",
+                remedy="Run: uv sync --extra mlx  (requires macOS + Apple Silicon)",
             ) from exc
 
         logger.info(f"Loading MLX Canary model: {model_name}")

@@ -459,13 +459,6 @@ class ModelManager:
             "reason": self._diarization_feature_reason,
         }
 
-    def get_nemo_feature_status(self) -> dict[str, Any]:
-        """Return NeMo toolkit capability metadata for API clients."""
-        return {
-            "available": self._nemo_feature_available,
-            "reason": self._nemo_feature_reason,
-        }
-
     def get_vibevoice_asr_feature_status(self) -> dict[str, Any]:
         """Return VibeVoice-ASR capability metadata for API clients."""
         status: dict[str, Any] = {

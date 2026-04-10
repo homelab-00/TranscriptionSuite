@@ -147,7 +147,9 @@ def test_vibevoice_import_error_includes_layout_drift_diagnostics(monkeypatch) -
 
     monkeypatch.setattr(module.importlib, "import_module", fake_import_module)
 
-    with pytest.raises(ImportError) as exc_info:
+    from server.core.stt.backends.base import BackendDependencyError
+
+    with pytest.raises(BackendDependencyError) as exc_info:
         module._import_vibevoice_asr_classes()
 
     message = str(exc_info.value)
@@ -155,6 +157,8 @@ def test_vibevoice_import_error_includes_layout_drift_diagnostics(monkeypatch) -
     assert "VIBEVOICE_ASR_PACKAGE_SPEC" in message
     assert "vibevoice.modeling_vibevoice_asr" in message
     assert "vibevoice.modular.modeling_vibevoice_asr" in message
+    assert exc_info.value.backend_type == "vibevoice_asr"
+    assert "INSTALL_VIBEVOICE_ASR" in exc_info.value.remedy
 
 
 def test_call_vibevoice_processor_prefers_raw_array_format() -> None:

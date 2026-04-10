@@ -22,6 +22,7 @@ import torch
 from server.config import get_config
 from server.core.audio_utils import clear_gpu_cache
 from server.core.stt.backends.base import (
+    BackendDependencyError,
     BackendSegment,
     BackendTranscriptionInfo,
     DiarizedTranscriptionResult,
@@ -135,9 +136,14 @@ def _import_vibevoice_asr_classes() -> tuple[type[Any], type[Any]]:
             f"Import errors: {details}"
         )
 
+    dep_err = BackendDependencyError(
+        message,
+        backend_type="vibevoice_asr",
+        remedy="Set INSTALL_VIBEVOICE_ASR=true in your Docker environment and restart.",
+    )
     if last_error is not None:
-        raise ImportError(message) from last_error
-    raise ImportError(message)
+        raise dep_err from last_error
+    raise dep_err
 
 
 class _MaxTimeStoppingCriteria:

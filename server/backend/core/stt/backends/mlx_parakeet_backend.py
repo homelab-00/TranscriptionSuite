@@ -30,6 +30,7 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 from server.core.stt.backends.base import (
+    BackendDependencyError,
     BackendSegment,
     BackendTranscriptionInfo,
     STTBackend,
@@ -121,9 +122,11 @@ class MLXParakeetBackend(STTBackend):
         try:
             from parakeet_mlx import from_pretrained  # noqa: F401
         except ImportError as exc:
-            raise RuntimeError(
+            raise BackendDependencyError(
                 "parakeet-mlx is not installed. "
-                "Run: uv sync --extra mlx  (requires macOS + Apple Silicon)"
+                "Run: uv sync --extra mlx  (requires macOS + Apple Silicon)",
+                backend_type="mlx_parakeet",
+                remedy="Run: uv sync --extra mlx  (requires macOS + Apple Silicon)",
             ) from exc
 
         logger.info(f"Loading MLX Parakeet model: {model_name}")

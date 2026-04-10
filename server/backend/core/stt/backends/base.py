@@ -10,6 +10,20 @@ from typing import Any
 import numpy as np
 
 
+class BackendDependencyError(RuntimeError):
+    """Raised when an STT backend's optional dependency is missing or broken.
+
+    Attributes:
+        backend_type: The backend identifier (e.g. "nemo", "vibevoice_asr", "mlx_parakeet").
+        remedy: Actionable instruction for the user (e.g. "Set INSTALL_NEMO=true").
+    """
+
+    def __init__(self, message: str, *, backend_type: str, remedy: str) -> None:
+        super().__init__(message)
+        self.backend_type = backend_type
+        self.remedy = remedy
+
+
 @dataclass
 class BackendSegment:
     """Normalized transcription segment returned by any backend."""

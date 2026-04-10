@@ -18,6 +18,7 @@ import numpy as np
 from server.config import get_config
 from server.core.audio_utils import clear_gpu_cache
 from server.core.stt.backends.base import (
+    BackendDependencyError,
     BackendSegment,
     BackendTranscriptionInfo,
     STTBackend,
@@ -64,9 +65,11 @@ def _import_nemo_asr() -> Any:
         _patch_sampler_for_python313()
         return nemo_asr
     except ImportError as exc:
-        raise ImportError(
+        raise BackendDependencyError(
             "NeMo toolkit is required for NVIDIA Parakeet models but is not installed. "
-            "Set INSTALL_NEMO=true in your Docker environment to enable it."
+            "Set INSTALL_NEMO=true in your Docker environment to enable it.",
+            backend_type="nemo",
+            remedy="Set INSTALL_NEMO=true in your Docker environment and restart.",
         ) from exc
 
 

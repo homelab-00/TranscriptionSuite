@@ -390,7 +390,19 @@ class LiveModeSession:
             await asyncio.to_thread(model_manager.load_transcription_model)
             logger.info("Reloaded main transcription model after Live Mode")
         except Exception as e:
-            logger.error(f"Failed to reload main transcription model: {e}")
+            from server.core.stt.backends.base import BackendDependencyError
+
+            if isinstance(e, BackendDependencyError) or (
+                e.__cause__ and isinstance(e.__cause__, BackendDependencyError)
+            ):
+                dep = e if isinstance(e, BackendDependencyError) else e.__cause__
+                logger.warning(
+                    "Skipped main model reload after Live Mode — missing dependency: %s. %s",
+                    dep,
+                    getattr(dep, "remedy", ""),
+                )
+            else:
+                logger.error(f"Failed to reload main transcription model: {e}")
 
     async def _restore_or_reload_main_model(self) -> None:
         """Return the shared backend to the main engine, or reload from scratch."""

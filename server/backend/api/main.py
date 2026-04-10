@@ -137,7 +137,9 @@ async def periodic_orphan_sweep(
 
     interval_seconds = interval_minutes * 60
     logger.info(
-        "Periodic orphan sweep armed (every %dm, timeout=%dm)", interval_minutes, timeout_minutes
+        "Periodic orphan sweep armed (every %dm, timeout=%dm)",
+        interval_minutes,
+        timeout_minutes,
     )
 
     while True:
@@ -195,20 +197,12 @@ PUBLIC_PREFIXES = (
 
 NOTEBOOK_QUERY_TOKEN_ROUTES = re.compile(r"^/api/notebook/recordings/\d+/(audio|export)$")
 
-_VIBEVOICE_RECOVERABLE_PRELOAD_ERROR_TEXTS = (
-    "VibeVoice-ASR backend selected but VibeVoice is not installed.",
-    "VibeVoice-ASR backend selected but compatible VibeVoice-ASR modules could not be imported",
-)
 
-_NEMO_RECOVERABLE_PRELOAD_ERROR_TEXTS = (
-    "NeMo toolkit is required for NVIDIA Parakeet models but is not installed",
-    "NeMo toolkit is required for NVIDIA Canary models but is not installed",
-)
+def _find_backend_dependency_error(exc: BaseException) -> object | None:
+    """Walk the exception chain and return the first ``BackendDependencyError``, or None."""
+    from server.core.stt.backends.base import BackendDependencyError
 
-
-def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
-    chain: list[BaseException] = []
-    stack = [exc]
+    stack: list[BaseException] = [exc]
     seen: set[int] = set()
     while stack:
         current = stack.pop()
@@ -216,135 +210,35 @@ def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
         if obj_id in seen:
             continue
         seen.add(obj_id)
-        chain.append(current)
+        if isinstance(current, BackendDependencyError):
+            return current
         cause = getattr(current, "__cause__", None)
         context = getattr(current, "__context__", None)
         if cause is not None:
             stack.append(cause)
         if context is not None:
             stack.append(context)
-    return chain
+    return None
 
 
-def _is_recoverable_vibevoice_preload_error(model_name: str, exc: BaseException) -> bool:
-    """Return True only for the known optional VibeVoice missing-package preload failure."""
-    try:
-        from server.core.stt.backends.factory import detect_backend_type
-    except Exception:
-        return False
-
-    if detect_backend_type(model_name) != "vibevoice_asr":
-        return False
-
-    for current in _iter_exception_chain(exc):
-        if isinstance(current, ImportError) and any(
-            text in str(current) for text in _VIBEVOICE_RECOVERABLE_PRELOAD_ERROR_TEXTS
-        ):
-            return True
-    return False
-
-
-def _build_vibevoice_preload_skip_warning(
+def _build_preload_skip_warning(
     model_name: str,
-    feature_status: dict[str, object] | None,
+    dep_error: object,
 ) -> tuple[str, str]:
-    """Return (message, timing_label) for recoverable VibeVoice preload failures."""
-    feature_status = feature_status or {}
-    reason = str(feature_status.get("reason", "unknown") or "unknown")
-    error = str(feature_status.get("error", "") or "").strip()
+    """Return (message, timing_label) for a recoverable backend dependency failure.
 
-    if reason == "import_failed":
-        return (
-            (
-                "Transcription preload skipped for optional VibeVoice-ASR backend "
-                f"(model={model_name}). INSTALL_VIBEVOICE_ASR was enabled, but the bootstrap "
-                f"VibeVoice import probe failed (reason={reason}, error={error or 'n/a'}). "
-                "Continuing startup without a loaded transcription model. The installed "
-                "VibeVoice package may be incompatible with this integration; set "
-                "VIBEVOICE_ASR_PACKAGE_SPEC to a known-good revision/commit if needed."
-            ),
-            "model preload skipped (VibeVoice-ASR import probe failed)",
-        )
-
-    if reason.startswith("install_failed"):
-        return (
-            (
-                "Transcription preload skipped for optional VibeVoice-ASR backend "
-                f"(model={model_name}). VibeVoice optional dependency installation failed during "
-                f"bootstrap (reason={reason}, error={error or 'n/a'}). Continuing startup "
-                "without a loaded transcription model."
-            ),
-            "model preload skipped (VibeVoice-ASR optional dependency install failed)",
-        )
-
+    ``dep_error`` is a ``BackendDependencyError`` instance with ``backend_type``
+    and ``remedy`` attributes.
+    """
+    backend_type = getattr(dep_error, "backend_type", "unknown")
+    remedy = getattr(dep_error, "remedy", str(dep_error))
     return (
         (
-            "Transcription preload skipped for optional VibeVoice-ASR backend "
-            f"(model={model_name}). Enable INSTALL_VIBEVOICE_ASR=true and restart to load "
-            "the model. Continuing startup without a loaded transcription model."
-        ),
-        "model preload skipped (VibeVoice-ASR optional dependency missing)",
-    )
-
-
-def _is_recoverable_nemo_preload_error(model_name: str, exc: BaseException) -> bool:
-    """Return True only for the known optional NeMo missing-package preload failure."""
-    try:
-        from server.core.stt.backends.factory import detect_backend_type
-    except Exception:
-        return False
-
-    backend_type = detect_backend_type(model_name)
-    if backend_type not in ("parakeet", "canary"):
-        return False
-
-    for current in _iter_exception_chain(exc):
-        if isinstance(current, ImportError) and any(
-            text in str(current) for text in _NEMO_RECOVERABLE_PRELOAD_ERROR_TEXTS
-        ):
-            return True
-    return False
-
-
-def _build_nemo_preload_skip_warning(
-    model_name: str,
-    feature_status: dict[str, object] | None,
-) -> tuple[str, str]:
-    """Return (message, timing_label) for recoverable NeMo preload failures."""
-    feature_status = feature_status or {}
-    reason = str(feature_status.get("reason", "unknown") or "unknown")
-
-    if reason == "import_failed":
-        return (
-            (
-                "Transcription preload skipped for NeMo backend "
-                f"(model={model_name}). INSTALL_NEMO was enabled, but the bootstrap "
-                f"NeMo import probe failed (reason={reason}). "
-                "Continuing startup without a loaded transcription model. The installed "
-                "NeMo toolkit may be incompatible; check container logs for details."
-            ),
-            "model preload skipped (NeMo import probe failed)",
-        )
-
-    if reason.startswith("install_failed"):
-        return (
-            (
-                "Transcription preload skipped for NeMo backend "
-                f"(model={model_name}). NeMo optional dependency installation failed during "
-                f"bootstrap (reason={reason}). Continuing startup "
-                "without a loaded transcription model."
-            ),
-            "model preload skipped (NeMo optional dependency install failed)",
-        )
-
-    return (
-        (
-            "Transcription preload skipped for NeMo backend "
-            f"(model={model_name}). Set INSTALL_NEMO=true in your Docker environment "
-            "and restart to enable NeMo-based models (Parakeet, Canary). "
+            f"Transcription preload skipped for {backend_type} backend "
+            f"(model={model_name}). {remedy} "
             "Continuing startup without a loaded transcription model."
         ),
-        "model preload skipped (NeMo optional dependency missing)",
+        f"model preload skipped ({backend_type} optional dependency missing)",
     )
 
 
@@ -642,37 +536,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         try:
             manager.load_transcription_model()
         except Exception as e:
-            if _is_recoverable_nemo_preload_error(selected_main_model, e):
-                nemo_feature_status = None
-                try:
-                    nemo_feature_status = manager.get_nemo_feature_status()
-                except Exception:
-                    nemo_feature_status = None
-
-                warning_message, timing_label = _build_nemo_preload_skip_warning(
+            dep_error = _find_backend_dependency_error(e)
+            if dep_error is not None:
+                warning_message, timing_label = _build_preload_skip_warning(
                     selected_main_model,
-                    nemo_feature_status,
+                    dep_error,
                 )
-                logger.warning(
-                    warning_message,
-                    exc_info=True,
-                )
-                _log_time(timing_label)
-            elif _is_recoverable_vibevoice_preload_error(selected_main_model, e):
-                vibevoice_feature_status = None
-                try:
-                    vibevoice_feature_status = manager.get_vibevoice_asr_feature_status()
-                except Exception:
-                    vibevoice_feature_status = None
-
-                warning_message, timing_label = _build_vibevoice_preload_skip_warning(
-                    selected_main_model,
-                    vibevoice_feature_status,
-                )
-                logger.warning(
-                    warning_message,
-                    exc_info=True,
-                )
+                logger.warning(warning_message, exc_info=True)
                 _log_time(timing_label)
             else:
                 logger.error("Model preload failed")

@@ -220,6 +220,17 @@ async def load_models(request: Request) -> dict[str, str]:
         model_manager.load_transcription_model()
         return {"status": "loaded"}
     except Exception as e:
+        from server.core.stt.backends.base import BackendDependencyError
+
+        if isinstance(e, BackendDependencyError) or (
+            e.__cause__ and isinstance(e.__cause__, BackendDependencyError)
+        ):
+            dep = e if isinstance(e, BackendDependencyError) else e.__cause__
+            logger.warning(f"Model load failed — missing dependency: {dep}")
+            raise HTTPException(
+                status_code=503,
+                detail=f"Backend dependency missing: {dep}. {getattr(dep, 'remedy', '')}",
+            ) from e
         logger.error(f"Failed to load models: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -299,8 +310,22 @@ async def load_models_stream(websocket: WebSocket) -> None:
             logger.info("Model loading completed successfully via WebSocket")
 
         except Exception as e:
-            logger.error(f"Model loading failed: {e}")
-            await websocket.send_json({"type": "error", "message": str(e)})
+            from server.core.stt.backends.base import BackendDependencyError
+
+            if isinstance(e, BackendDependencyError) or (
+                e.__cause__ and isinstance(e.__cause__, BackendDependencyError)
+            ):
+                dep = e if isinstance(e, BackendDependencyError) else e.__cause__
+                logger.warning(f"Model load failed — missing dependency: {dep}")
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Backend dependency missing: {dep}. {getattr(dep, 'remedy', '')}",
+                    }
+                )
+            else:
+                logger.error(f"Model loading failed: {e}")
+                await websocket.send_json({"type": "error", "message": str(e)})
 
         # Stop the sender task
         await message_queue.put({"type": "_done"})
