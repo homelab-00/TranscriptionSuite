@@ -162,15 +162,14 @@ export function resolveTranscriptionOutput(
     return { outputFilename: `${stem}.txt`, content: renderTxt(transcription) };
   }
 
-  const outputFilename = options.diarizationPerformed
-    ? `${stem}.${options.diarizedFormat}`
-    : `${stem}.txt`;
+  const hasSegments = transcription.segments && transcription.segments.length > 0;
 
-  const content = options.diarizationPerformed
-    ? options.diarizedFormat === 'ass'
-      ? renderAss(transcription, stem)
-      : renderSrt(transcription)
-    : renderTxt(transcription);
+  if (hasSegments) {
+    const outputFilename = `${stem}.${options.diarizedFormat}`;
+    const content =
+      options.diarizedFormat === 'ass' ? renderAss(transcription, stem) : renderSrt(transcription);
+    return { outputFilename, content };
+  }
 
-  return { outputFilename, content };
+  return { outputFilename: `${stem}.txt`, content: renderTxt(transcription) };
 }
