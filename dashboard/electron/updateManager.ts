@@ -57,7 +57,7 @@ interface SemVer {
 
 /**
  * Parse a "vX.Y.Z" or "X.Y.Z" string into a numeric triple.
- * Returns null for pre-releases, "latest", or anything unparseable.
+ * Returns null for pre-releases, "latest", or anything unparsable.
  */
 function parseSemVer(raw: string): SemVer | null {
   const cleaned = raw.replace(/^v/, '');

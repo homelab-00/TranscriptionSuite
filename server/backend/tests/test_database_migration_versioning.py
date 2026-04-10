@@ -6,7 +6,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 import server.database.database as db
 
 pytest.importorskip("alembic")

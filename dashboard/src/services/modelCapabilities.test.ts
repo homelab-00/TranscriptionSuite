@@ -173,8 +173,7 @@ describe('isVibeVoiceASRModel', () => {
     expect(isVibeVoiceASRModel('mlx-community/VibeVoice-ASR-bf16')).toBe(true);
   });
 
-  it('returns false for null/undefined/empty', () => {
-  });
+  it('returns false for null/undefined/empty', () => {});
 });
 
 // ---------------------------------------------------------------------------

@@ -135,9 +135,7 @@ class MLXParakeetBackend(STTBackend):
             self._loaded = True
             logger.info(f"MLX Parakeet model loaded: {model_name}")
         except Exception as exc:
-            raise RuntimeError(
-                f"Failed to load MLX Parakeet model '{model_name}': {exc}"
-            ) from exc
+            raise RuntimeError(f"Failed to load MLX Parakeet model '{model_name}': {exc}") from exc
 
     def unload(self) -> None:
         self._model = None

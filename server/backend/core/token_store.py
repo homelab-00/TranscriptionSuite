@@ -16,9 +16,8 @@ import logging
 import os
 import secrets
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 from filelock import FileLock
 
@@ -52,16 +51,16 @@ class StoredToken:
     created_at: str  # ISO format
     is_admin: bool
     is_revoked: bool
-    expires_at: Optional[str] = None  # ISO format, None = never expires (for admin)
-    token_id: Optional[str] = None  # Short ID for UI operations (non-secret)
+    expires_at: str | None = None  # ISO format, None = never expires (for admin)
+    token_id: str | None = None  # Short ID for UI operations (non-secret)
 
     @classmethod
     def create(
         cls,
         client_name: str,
         is_admin: bool = False,
-        expiry_days: Optional[int] = None,
-    ) -> Tuple["StoredToken", str]:
+        expiry_days: int | None = None,
+    ) -> tuple["StoredToken", str]:
         """Create a new token.
 
         Args:
@@ -73,16 +72,14 @@ class StoredToken:
         Returns:
             Tuple of (StoredToken with hashed token, plaintext token for user)
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Admin tokens don't expire by default, regular tokens expire in 30 days
         if expiry_days is None:
             if is_admin:
                 expires_at = None  # Admin tokens never expire
             else:
-                expires_at = (
-                    now + timedelta(days=DEFAULT_TOKEN_EXPIRY_DAYS)
-                ).isoformat()
+                expires_at = (now + timedelta(days=DEFAULT_TOKEN_EXPIRY_DAYS)).isoformat()
         elif expiry_days <= 0:
             expires_at = None  # Explicit no expiry
         else:
@@ -117,7 +114,7 @@ class StoredToken:
             return False
         try:
             expiry = datetime.fromisoformat(self.expires_at)
-            return datetime.now(timezone.utc) > expiry
+            return datetime.now(UTC) > expiry
         except (ValueError, TypeError):
             return False
 
@@ -150,7 +147,7 @@ class TokenStore:
     - Thread-safe file operations with file locking
     """
 
-    def __init__(self, store_path: Optional[Path] = None):
+    def __init__(self, store_path: Path | None = None):
         """
         Initialize the token store.
 
@@ -183,9 +180,7 @@ class TokenStore:
         logger.warning("=" * 70)
 
         if store_version < 2:
-            logger.warning(
-                "Migrating to v2 (hashed tokens). ALL EXISTING TOKENS ARE NOW INVALID!"
-            )
+            logger.warning("Migrating to v2 (hashed tokens). ALL EXISTING TOKENS ARE NOW INVALID!")
 
             old_token_count = len(data.get("tokens", []))
             data["tokens"] = []
@@ -232,7 +227,7 @@ class TokenStore:
     def _read_store(self) -> dict:
         """Read the token store file with locking."""
         with FileLock(self.lock_path):
-            with open(self.store_path, "r") as f:
+            with open(self.store_path) as f:
                 return json.load(f)
 
     def _write_store(self, data: dict) -> None:
@@ -243,7 +238,7 @@ class TokenStore:
                 json.dump(data, f, indent=2)
             temp_path.rename(self.store_path)
 
-    def validate_token(self, token: str) -> Optional[StoredToken]:
+    def validate_token(self, token: str) -> StoredToken | None:
         """
         Validate a token string.
 
@@ -263,9 +258,7 @@ class TokenStore:
                     logger.warning(f"Token for '{stored_token.client_name}' is revoked")
                     return None
                 if stored_token.is_expired():
-                    logger.warning(
-                        f"Token for '{stored_token.client_name}' has expired"
-                    )
+                    logger.warning(f"Token for '{stored_token.client_name}' has expired")
                     return None
                 logger.debug(f"Token validated for client: {stored_token.client_name}")
                 return stored_token
@@ -282,8 +275,8 @@ class TokenStore:
         self,
         client_name: str,
         is_admin: bool = False,
-        expiry_days: Optional[int] = None,
-    ) -> Tuple[StoredToken, str]:
+        expiry_days: int | None = None,
+    ) -> tuple[StoredToken, str]:
         """
         Generate a new token.
 
@@ -297,16 +290,12 @@ class TokenStore:
         """
         data = self._read_store()
 
-        new_token, plaintext_token = StoredToken.create(
-            client_name, is_admin, expiry_days
-        )
+        new_token, plaintext_token = StoredToken.create(client_name, is_admin, expiry_days)
         data["tokens"].append(new_token.to_dict())
 
         self._write_store(data)
         expiry_info = (
-            f", expires_at={new_token.expires_at}"
-            if new_token.expires_at
-            else ", never expires"
+            f", expires_at={new_token.expires_at}" if new_token.expires_at else ", never expires"
         )
         logger.info(
             f"Generated new token for client: {client_name} (admin={is_admin}{expiry_info})"
@@ -330,15 +319,13 @@ class TokenStore:
             if token_data.get("token_id") == token_id:
                 token_data["is_revoked"] = True
                 self._write_store(data)
-                logger.info(
-                    f"Token revoked by ID for client: {token_data['client_name']}"
-                )
+                logger.info(f"Token revoked by ID for client: {token_data['client_name']}")
                 return True
 
         logger.warning(f"Cannot revoke token: ID {token_id} not found")
         return False
 
-    def list_tokens(self) -> List[StoredToken]:
+    def list_tokens(self) -> list[StoredToken]:
         """
         List all tokens.
 
@@ -350,10 +337,10 @@ class TokenStore:
 
 
 # Singleton instance
-_token_store: Optional[TokenStore] = None
+_token_store: TokenStore | None = None
 
 
-def get_token_store(store_path: Optional[Path] = None) -> TokenStore:
+def get_token_store(store_path: Path | None = None) -> TokenStore:
     """Get or create the global token store instance."""
     global _token_store
     if _token_store is None:

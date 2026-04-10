@@ -27,9 +27,12 @@ export const LogsView: React.FC<LogsViewProps> = ({ runtimeProfile }) => {
     if (!mlx) return;
 
     // Load the existing log buffer from the main process.
-    mlx.getLogs(500).then((lines: string[]) => {
-      setMlxLogLines(lines);
-    }).catch(() => {});
+    mlx
+      .getLogs(500)
+      .then((lines: string[]) => {
+        setMlxLogLines(lines);
+      })
+      .catch(() => {});
 
     // Subscribe to real-time lines.
     const unsub = mlx.onLogLine((line: string) => {
@@ -51,7 +54,8 @@ export const LogsView: React.FC<LogsViewProps> = ({ runtimeProfile }) => {
     const classifyLine = (line: string): 'info' | 'success' | 'error' | 'warning' => {
       if (/(^|\b)(error|exception|traceback|fatal)(\b|$)/i.test(line)) return 'error';
       if (/(^|\b)(warn|warning)(\b|$)/i.test(line)) return 'warning';
-      if (/(^|\b)(started|ready|listening|healthy|startup complete)(\b|$)/i.test(line)) return 'success';
+      if (/(^|\b)(started|ready|listening|healthy|startup complete)(\b|$)/i.test(line))
+        return 'success';
       return 'info';
     };
 

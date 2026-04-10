@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from server.core.diarization_engine import DiarizationResult, DiarizationSegment
 
 logger = logging.getLogger(__name__)

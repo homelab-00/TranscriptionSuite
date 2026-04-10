@@ -50,18 +50,18 @@ export const ModelManagerView: React.FC = () => {
     ])
       .then(
         ([main, mainCustom, live, liveCustom, diarization, diarizationCustom, rt]: unknown[]) => {
-        if (!active) return;
-        if (typeof main === 'string' && main.trim()) setMainModelSelection(main.trim());
-        if (typeof mainCustom === 'string') setMainCustomModel(mainCustom.trim());
-        if (typeof live === 'string' && live.trim()) setLiveModelSelection(live.trim());
-        if (typeof liveCustom === 'string') setLiveCustomModel(liveCustom.trim());
-        if (typeof diarization === 'string' && diarization.trim())
-          setDiarizationModelSelection(diarization.trim());
-        if (typeof diarizationCustom === 'string')
-          setDiarizationCustomModel(diarizationCustom.trim());
-        if (typeof rt === 'string' && rt.trim()) setRuntimeProfile(rt.trim());
-      },
-    )
+          if (!active) return;
+          if (typeof main === 'string' && main.trim()) setMainModelSelection(main.trim());
+          if (typeof mainCustom === 'string') setMainCustomModel(mainCustom.trim());
+          if (typeof live === 'string' && live.trim()) setLiveModelSelection(live.trim());
+          if (typeof liveCustom === 'string') setLiveCustomModel(liveCustom.trim());
+          if (typeof diarization === 'string' && diarization.trim())
+            setDiarizationModelSelection(diarization.trim());
+          if (typeof diarizationCustom === 'string')
+            setDiarizationCustomModel(diarizationCustom.trim());
+          if (typeof rt === 'string' && rt.trim()) setRuntimeProfile(rt.trim());
+        },
+      )
       .catch(() => {})
       .finally(() => {
         if (active) setHydrated(true);

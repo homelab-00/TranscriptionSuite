@@ -72,7 +72,6 @@ def _isolate_user_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(config_mod, "get_user_config_dir", lambda: tmp_path)
 
 
-
 # ML modules but never actually run GPU code.
 # ---------------------------------------------------------------------------
 

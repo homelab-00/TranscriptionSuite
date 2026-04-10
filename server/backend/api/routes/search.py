@@ -5,10 +5,9 @@ Provides full-text search across transcriptions using SQLite FTS5.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-
 from server.database.database import (
     search_recording_metadata,
     search_recordings,
@@ -25,7 +24,7 @@ router = APIRouter()
 async def search_in_words(
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(100, ge=1, le=500, description="Maximum results"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Search for words across all transcriptions.
 
@@ -46,14 +45,14 @@ async def search_in_words(
 
     except Exception as e:
         logger.error(f"Word search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/recordings")
 async def search_in_recordings(
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Search for recordings containing specific words.
 
@@ -71,17 +70,17 @@ async def search_in_recordings(
 
     except Exception as e:
         logger.error(f"Recording search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/")
 async def unified_search(
     q: str = Query(..., min_length=1, description="Search query"),
     fuzzy: bool = Query(False, description="Enable fuzzy search (currently ignored)"),
-    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    start_date: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: str | None = Query(None, description="End date (YYYY-MM-DD)"),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Unified search endpoint.
 
@@ -90,7 +89,7 @@ async def unified_search(
     try:
         clean_query = q.strip()
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         # 1) Word matches (FTS)
         word_rows = search_words_by_date_range(
@@ -160,4 +159,4 @@ async def unified_search(
 
     except Exception as e:
         logger.error(f"Unified search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

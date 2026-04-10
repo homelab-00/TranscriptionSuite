@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Mock objects that stand in for parakeet-mlx's typed result objects
 # ---------------------------------------------------------------------------

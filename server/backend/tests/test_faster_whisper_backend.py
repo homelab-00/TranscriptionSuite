@@ -14,7 +14,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Stub helpers
 # ---------------------------------------------------------------------------
@@ -43,10 +42,14 @@ class _FakeSegment:
         self.text = text
         self.start = start
         self.end = end
-        self.words = words if words is not None else [
-            _FakeWord(" Hello", 0.0, 1.0),
-            _FakeWord(" world.", 1.0, 2.5),
-        ]
+        self.words = (
+            words
+            if words is not None
+            else [
+                _FakeWord(" Hello", 0.0, 1.0),
+                _FakeWord(" world.", 1.0, 2.5),
+            ]
+        )
 
 
 class _FakeInfo:

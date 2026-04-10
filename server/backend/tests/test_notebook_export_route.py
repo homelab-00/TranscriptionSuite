@@ -2,7 +2,6 @@
 
 import pytest
 from fastapi import HTTPException
-
 from server.api.routes import notebook
 
 
@@ -59,9 +58,7 @@ async def test_pure_note_subtitle_export_rejected(monkeypatch, fmt: str) -> None
         "word_count": 8,
         "has_diarization": 0,
     }
-    segments = [
-        {"segment_index": 0, "text": "plain", "start_time": 0.0, "end_time": 1.0}
-    ]
+    segments = [{"segment_index": 0, "text": "plain", "start_time": 0.0, "end_time": 1.0}]
     _patch_notebook_data(monkeypatch, recording, segments, words=[])
 
     with pytest.raises(HTTPException) as exc:

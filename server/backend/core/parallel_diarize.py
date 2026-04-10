@@ -175,8 +175,7 @@ def transcribe_and_diarize(
 
     if isinstance(diar_engine, SortformerEngine):
         logger.info(
-            "Sortformer + MLX detected — switching to sequential mode "
-            "to avoid Metal deadlock"
+            "Sortformer + MLX detected — switching to sequential mode to avoid Metal deadlock"
         )
         return transcribe_then_diarize(
             engine=engine,

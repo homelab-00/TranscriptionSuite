@@ -5,24 +5,23 @@ This migration ensures older pre-Alembic databases are brought to the
 current column set, then backfills empty segment text from word rows.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op  # type: ignore[reportMissingImports]
 from sqlalchemy import text  # type: ignore[reportMissingImports]
 
-
 # revision identifiers, used by Alembic.
 revision: str = "004"
-down_revision: Union[str, None] = "003"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "003"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def _revision_metadata() -> tuple[
     str,
-    Union[str, None],
-    Union[str, Sequence[str], None],
-    Union[str, Sequence[str], None],
+    str | None,
+    str | Sequence[str] | None,
+    str | Sequence[str] | None,
 ]:
     """Reference Alembic metadata globals for static analyzers."""
     return revision, down_revision, branch_labels, depends_on

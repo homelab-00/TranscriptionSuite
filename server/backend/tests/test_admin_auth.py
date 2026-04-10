@@ -69,9 +69,7 @@ def test_admin_token_routes_removed(test_client_tls, admin_token):
     response = test_client_tls.get("/api/admin/tokens", headers=headers)
     assert response.status_code == 404
 
-    response = test_client_tls.post(
-        "/api/admin/tokens", headers=headers, json={"client_name": "x"}
-    )
+    response = test_client_tls.post("/api/admin/tokens", headers=headers, json={"client_name": "x"})
     assert response.status_code == 404
 
     response = test_client_tls.delete("/api/admin/tokens/some-id", headers=headers)
@@ -91,42 +89,30 @@ def test_auth_token_routes_require_admin(test_client_tls, admin_token, user_toke
     assert "admin" in response.json()["detail"].lower()
 
 
-def test_auth_token_create_and_revoke_admin_only(
-    test_client_tls, admin_token, user_token
-):
+def test_auth_token_create_and_revoke_admin_only(test_client_tls, admin_token, user_token):
     """Create/revoke token endpoints should enforce admin role."""
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
     user_headers = {"Authorization": f"Bearer {user_token}"}
 
     create_payload = {"client_name": "pytest-user", "is_admin": False}
 
-    response = test_client_tls.post(
-        "/api/auth/tokens", headers=user_headers, json=create_payload
-    )
+    response = test_client_tls.post("/api/auth/tokens", headers=user_headers, json=create_payload)
     assert response.status_code == 403
     assert "admin" in response.json()["detail"].lower()
 
-    response = test_client_tls.post(
-        "/api/auth/tokens", headers=admin_headers, json=create_payload
-    )
+    response = test_client_tls.post("/api/auth/tokens", headers=admin_headers, json=create_payload)
     assert response.status_code == 200
     token_id = response.json()["token"]["token_id"]
 
-    response = test_client_tls.delete(
-        f"/api/auth/tokens/{token_id}", headers=user_headers
-    )
+    response = test_client_tls.delete(f"/api/auth/tokens/{token_id}", headers=user_headers)
     assert response.status_code == 403
     assert "admin" in response.json()["detail"].lower()
 
-    response = test_client_tls.delete(
-        f"/api/auth/tokens/{token_id}", headers=admin_headers
-    )
+    response = test_client_tls.delete(f"/api/auth/tokens/{token_id}", headers=admin_headers)
     assert response.status_code == 200
 
 
-def test_models_load_stream_requires_admin_websocket(
-    test_client_tls, admin_token, user_token
-):
+def test_models_load_stream_requires_admin_websocket(test_client_tls, admin_token, user_token):
     """Model-load progress websocket should reject unauthenticated/non-admin clients."""
     # No auth header
     with test_client_tls.websocket_connect("/api/admin/models/load/stream") as ws:

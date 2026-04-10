@@ -74,13 +74,13 @@ export class MLXServerManager {
     // included.  Prepend the most common Homebrew prefix locations so that
     // system tools like ffmpeg that the Python backend shells out to are found.
     const homebrewBins = ['/opt/homebrew/bin', '/usr/local/bin'].join(':');
-    const inheritedPath = (process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin');
+    const inheritedPath = process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin';
     const augmentedPath = inheritedPath.includes('/opt/homebrew')
       ? inheritedPath
       : `${homebrewBins}:${inheritedPath}`;
 
     const env: Record<string, string> = {
-      ...process.env as Record<string, string>,
+      ...(process.env as Record<string, string>),
       DATA_DIR: dataDir,
       HF_HOME: hfHome,
       LOG_DIR: path.join(dataDir, 'logs'),

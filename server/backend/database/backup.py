@@ -15,7 +15,6 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +52,7 @@ class DatabaseBackupManager:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         return self.backup_dir
 
-    def get_latest_backup(self) -> Optional[Path]:
+    def get_latest_backup(self) -> Path | None:
         """Get the most recent backup file, or None if no backups exist."""
         backup_dir = self._ensure_backup_dir()
         backups = sorted(
@@ -101,7 +100,7 @@ class DatabaseBackupManager:
             except Exception as e:
                 logger.warning(f"Failed to remove old backup {old_backup}: {e}")
 
-    def create_backup(self) -> Optional[Path]:
+    def create_backup(self) -> Path | None:
         """
         Create a backup using SQLite's backup API.
 
@@ -154,9 +153,7 @@ class DatabaseBackupManager:
                 try:
                     backup_path.unlink()
                 except Exception:
-                    logger.debug(
-                        f"Failed to cleanup partial backup file: {backup_path}"
-                    )
+                    logger.debug(f"Failed to cleanup partial backup file: {backup_path}")
 
             return None
 
@@ -225,9 +222,7 @@ class DatabaseBackupManager:
             if self.db_path.exists():
                 safety_backup = self.create_backup()
                 if safety_backup:
-                    logger.info(
-                        f"Created safety backup before restore: {safety_backup}"
-                    )
+                    logger.info(f"Created safety backup before restore: {safety_backup}")
                 else:
                     logger.warning("Could not create safety backup - proceeding anyway")
 
@@ -296,7 +291,7 @@ async def run_backup_if_needed(
     backup_dir: Path,
     max_age_hours: int = DEFAULT_BACKUP_MAX_AGE_HOURS,
     max_backups: int = DEFAULT_MAX_BACKUPS,
-) -> Optional[Path]:
+) -> Path | None:
     """
     Run backup in background if needed (async, non-blocking).
 

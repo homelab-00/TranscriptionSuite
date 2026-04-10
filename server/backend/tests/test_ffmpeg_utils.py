@@ -13,7 +13,6 @@ import time
 import numpy as np
 import pytest
 from scipy import signal as scipy_signal
-
 from server.core import ffmpeg_utils
 
 
@@ -135,9 +134,7 @@ class TestNormalization:
         audio = np.random.randn(16000).astype(np.float32) * 0.1
 
         # Normalize using peak method
-        normalized = ffmpeg_utils.normalize_audio_ffmpeg(
-            audio, sample_rate=16000, method="peak"
-        )
+        normalized = ffmpeg_utils.normalize_audio_ffmpeg(audio, sample_rate=16000, method="peak")
 
         # Verify output
         assert isinstance(normalized, np.ndarray)
@@ -202,9 +199,7 @@ class TestNormalization:
         """Normalize silent audio should return silent audio."""
         audio = np.zeros(16000, dtype=np.float32)
 
-        normalized = ffmpeg_utils.normalize_audio_ffmpeg(
-            audio, sample_rate=16000, method="peak"
-        )
+        normalized = ffmpeg_utils.normalize_audio_ffmpeg(audio, sample_rate=16000, method="peak")
 
         # Should return zeros (nothing to normalize)
         assert len(normalized) == len(audio)
@@ -215,9 +210,7 @@ class TestNormalization:
         audio = np.random.randn(1000).astype(np.float32)
 
         with pytest.raises(ValueError, match="Unsupported normalization method"):
-            ffmpeg_utils.normalize_audio_ffmpeg(
-                audio, sample_rate=16000, method="invalid"
-            )
+            ffmpeg_utils.normalize_audio_ffmpeg(audio, sample_rate=16000, method="invalid")
 
 
 class TestResampling:
@@ -231,9 +224,7 @@ class TestResampling:
         duration = 1.0
 
         # Create a 440 Hz sine wave
-        t = np.linspace(
-            0, duration, int(source_rate * duration), endpoint=False, dtype=np.float32
-        )
+        t = np.linspace(0, duration, int(source_rate * duration), endpoint=False, dtype=np.float32)
         audio = np.sin(2 * np.pi * 440.0 * t).astype(np.float32)
 
         # Resample using soxr
@@ -311,9 +302,7 @@ class TestQualityComparison:
         duration = 1.0
         frequency = 440.0
 
-        t = np.linspace(
-            0, duration, int(source_rate * duration), endpoint=False, dtype=np.float32
-        )
+        t = np.linspace(0, duration, int(source_rate * duration), endpoint=False, dtype=np.float32)
         audio = np.sin(2 * np.pi * frequency * t).astype(np.float32)
 
         # Resample with FFmpeg
@@ -353,9 +342,7 @@ class TestPerformance:
 
         # Measure FFmpeg loading time
         start = time.time()
-        loaded_audio, _ = ffmpeg_utils.load_audio_ffmpeg(
-            str(wav_path), target_sample_rate=16000
-        )
+        loaded_audio, _ = ffmpeg_utils.load_audio_ffmpeg(str(wav_path), target_sample_rate=16000)
         ffmpeg_time = time.time() - start
 
         print(f"\nFFmpeg load + resample time (1 min audio): {ffmpeg_time:.3f}s")
@@ -371,9 +358,7 @@ class TestPerformance:
 
         # Measure dynaudnorm time
         start = time.time()
-        _ = ffmpeg_utils.normalize_audio_ffmpeg(
-            audio, sample_rate=16000, method="dynaudnorm"
-        )
+        _ = ffmpeg_utils.normalize_audio_ffmpeg(audio, sample_rate=16000, method="dynaudnorm")
         dynaudnorm_time = time.time() - start
 
         print(f"\nDynaudnorm time (1 min audio): {dynaudnorm_time:.3f}s")

@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -158,7 +157,9 @@ class TestMLXWhisperBackendLifecycle:
         mod = _import_mlx_backend()
         backend = mod.MLXWhisperBackend()
 
-        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__  # type: ignore[union-attr]
+        original_import = (
+            __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+        )  # type: ignore[union-attr]
 
         def _blocking_import(name, *args, **kwargs):
             if "mlx_audio" in name:

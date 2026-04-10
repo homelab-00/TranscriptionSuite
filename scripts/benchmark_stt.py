@@ -60,6 +60,7 @@ import numpy as np
 # a pip-install.  Mirrors the pattern in server/backend/tests/conftest.py.
 # ---------------------------------------------------------------------------
 
+
 def _bootstrap_server_package() -> None:
     if "server" in sys.modules:
         return
@@ -161,16 +162,17 @@ MODEL_GROUPS: dict[str, list[str]] = {
 # Result dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ModelResult:
     model: str
     backend_type: str
     device: str
     audio_file: str
-    audio_duration: float        # seconds
-    setup_time: float            # backend.load() + backend.warmup()
-    transcribe_time: float       # backend.transcribe() only
-    rtf: float                   # transcribe_time / audio_duration
+    audio_duration: float  # seconds
+    setup_time: float  # backend.load() + backend.warmup()
+    transcribe_time: float  # backend.transcribe() only
+    rtf: float  # transcribe_time / audio_duration
     text: str
     segments: list[dict[str, Any]] = field(default_factory=list)
     word_count: int = 0
@@ -181,15 +183,18 @@ class ModelResult:
 # Audio loading
 # ---------------------------------------------------------------------------
 
+
 def load_audio_file(path: str, target_rate: int = 16000) -> tuple[np.ndarray, int]:
     """Load audio via the server's audio pipeline (handles WAV/MP3/M4A/FLAC)."""
     from server.core.audio_utils import load_audio
+
     return load_audio(str(path), target_sample_rate=target_rate)
 
 
 # ---------------------------------------------------------------------------
 # Model runner: load → warmup → transcribe → unload
 # ---------------------------------------------------------------------------
+
 
 def _warmup_backend(backend: Any, backend_type: str) -> None:
     """Call warmup() with the right signature, suppressing all errors."""
@@ -269,7 +274,9 @@ def run_model(
 
     text = " ".join(s.text.strip() for s in segments if s.text.strip())
     rtf = transcribe_time / audio_duration if audio_duration > 0 else 0.0
-    seg_dicts = [{"text": s.text, "start": round(s.start, 3), "end": round(s.end, 3)} for s in segments]
+    seg_dicts = [
+        {"text": s.text, "start": round(s.start, 3), "end": round(s.end, 3)} for s in segments
+    ]
 
     return ModelResult(
         model=model_name,
@@ -290,6 +297,7 @@ def run_model(
 # Reporting helpers
 # ---------------------------------------------------------------------------
 
+
 def _fmt_s(seconds: float) -> str:
     if seconds >= 60:
         return f"{seconds / 60:.1f}m"
@@ -300,29 +308,43 @@ def _fmt_s(seconds: float) -> str:
 
 def print_table(results: list[ModelResult]) -> None:
     """ASCII benchmark table."""
-    COLS = ["Model", "Backend", "Device", "File", "Audio", "Setup", "Transcribe", "RTF", "Words", "Status"]
+    COLS = [
+        "Model",
+        "Backend",
+        "Device",
+        "File",
+        "Audio",
+        "Setup",
+        "Transcribe",
+        "RTF",
+        "Words",
+        "Status",
+    ]
     rows: list[list[str]] = []
     for r in results:
         status = "OK" if r.error is None else f"ERR: {r.error[:38]}"
-        rows.append([
-            r.model,
-            r.backend_type,
-            r.device,
-            Path(r.audio_file).name[:28],
-            f"{r.audio_duration:.0f}s",
-            _fmt_s(r.setup_time),
-            _fmt_s(r.transcribe_time),
-            f"{r.rtf:.3f}x",
-            str(r.word_count),
-            status,
-        ])
+        rows.append(
+            [
+                r.model,
+                r.backend_type,
+                r.device,
+                Path(r.audio_file).name[:28],
+                f"{r.audio_duration:.0f}s",
+                _fmt_s(r.setup_time),
+                _fmt_s(r.transcribe_time),
+                f"{r.rtf:.3f}x",
+                str(r.word_count),
+                status,
+            ]
+        )
     widths = [
-        max(len(h), max((len(row[i]) for row in rows), default=0))
-        for i, h in enumerate(COLS)
+        max(len(h), max((len(row[i]) for row in rows), default=0)) for i, h in enumerate(COLS)
     ]
     sep = "+" + "+".join("-" * (w + 2) for w in widths) + "+"
+
     def row_line(row: list[str]) -> str:
-        return "|" + "|".join(f" {c:<{w}} " for c, w in zip(row, widths)) + "|"
+        return "|" + "|".join(f" {c:<{w}} " for c, w in zip(row, widths, strict=False)) + "|"
+
     print("\n" + sep)
     print(row_line(COLS))
     print(sep)
@@ -428,7 +450,7 @@ def print_diff(results: list[ModelResult]) -> None:
     print("=" * width)
     print(f"TRANSCRIPTION DIFF  (Reference: {best_ref.model} @ {best_ref.device})")
     print("=" * width)
-    
+
     for r in successful:
         if r is best_ref:
             continue
@@ -448,6 +470,7 @@ def print_diff(results: list[ModelResult]) -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def _collect_audio_files(args: argparse.Namespace) -> list[str]:
     files: list[str] = list(args.input or [])
@@ -471,14 +494,16 @@ def _collect_models(args: argparse.Namespace) -> list[tuple[str, str]]:
     else:
         # Default behavior: test all registered models across available hardware
         import platform
+
         try:
             import torch
+
             has_cuda = torch.cuda.is_available()
         except ImportError:
             has_cuda = False
-        
+
         is_apple_silicon = sys.platform == "darwin" and platform.machine() == "arm64"
-        
+
         # 1. Add MLX models if running on Apple Silicon
         if is_apple_silicon:
             for m in MODEL_GROUPS["mlx-whisper"] + MODEL_GROUPS["mlx-asr"]:
@@ -498,7 +523,7 @@ def _collect_models(args: argparse.Namespace) -> list[tuple[str, str]]:
         if has_cuda:
             for m in MODEL_GROUPS["nemo"]:
                 raw_models.append(f"{m}@cpu")
-        
+
     parsed = []
     for m in raw_models:
         if "@" in m:
@@ -509,7 +534,12 @@ def _collect_models(args: argparse.Namespace) -> list[tuple[str, str]]:
     return parsed
 
 
-def _build_json_output(results: list[ModelResult], args: argparse.Namespace, models: list[tuple[str, str]], audio_files: list[str]) -> dict[str, Any]:
+def _build_json_output(
+    results: list[ModelResult],
+    args: argparse.Namespace,
+    models: list[tuple[str, str]],
+    audio_files: list[str],
+) -> dict[str, Any]:
     return {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "default_device": args.device,
@@ -543,24 +573,45 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--input", "-i", metavar="FILE", action="append",
-                        help="Audio input file (repeat for multiple files)")
-    parser.add_argument("--dir", "-d", metavar="DIR",
-                        help="Directory of audio files (WAV/MP3/M4A/FLAC)")
-    parser.add_argument("--models", "-m", metavar="MODEL", nargs="+",
-                        help="Explicit model HuggingFace repo IDs to test")
-    parser.add_argument("--group", "-g", metavar="GROUP",
-                        help=f"Predefined model group: {', '.join(MODEL_GROUPS)}")
-    parser.add_argument("--device", default="cpu",
-                        help="Device for non-MLX backends: cpu/cuda/metal (default: cpu)")
-    parser.add_argument("--output-dir", "-o", metavar="DIR", default=".",
-                        help="Directory for the JSON results file (default: .)")
-    parser.add_argument("--no-warmup", action="store_true",
-                        help="Skip warmup pass (first-inference JIT appears in transcribe_time)")
-    parser.add_argument("--no-diff", action="store_true",
-                        help="Skip the word-diff section")
-    parser.add_argument("--list-groups", action="store_true",
-                        help="Print available model groups and exit")
+    parser.add_argument(
+        "--input",
+        "-i",
+        metavar="FILE",
+        action="append",
+        help="Audio input file (repeat for multiple files)",
+    )
+    parser.add_argument(
+        "--dir", "-d", metavar="DIR", help="Directory of audio files (WAV/MP3/M4A/FLAC)"
+    )
+    parser.add_argument(
+        "--models",
+        "-m",
+        metavar="MODEL",
+        nargs="+",
+        help="Explicit model HuggingFace repo IDs to test",
+    )
+    parser.add_argument(
+        "--group", "-g", metavar="GROUP", help=f"Predefined model group: {', '.join(MODEL_GROUPS)}"
+    )
+    parser.add_argument(
+        "--device", default="cpu", help="Device for non-MLX backends: cpu/cuda/metal (default: cpu)"
+    )
+    parser.add_argument(
+        "--output-dir",
+        "-o",
+        metavar="DIR",
+        default=".",
+        help="Directory for the JSON results file (default: .)",
+    )
+    parser.add_argument(
+        "--no-warmup",
+        action="store_true",
+        help="Skip warmup pass (first-inference JIT appears in transcribe_time)",
+    )
+    parser.add_argument("--no-diff", action="store_true", help="Skip the word-diff section")
+    parser.add_argument(
+        "--list-groups", action="store_true", help="Print available model groups and exit"
+    )
 
     args = parser.parse_args()
 
@@ -578,9 +629,9 @@ def main() -> None:
     models = _collect_models(args)
     do_warmup = not args.no_warmup
 
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print("STT Benchmark")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
     print(f"Models ({len(models)}):")
     for m, d in models:
         print(f"  {m} @ {d}")
@@ -589,14 +640,14 @@ def main() -> None:
         print(f"  {f}")
     print(f"\nDevice : {args.device}")
     print(f"Warmup : {'yes' if do_warmup else 'no (--no-warmup)'}")
-    print(f"{'='*70}\n")
+    print(f"{'=' * 70}\n")
 
     all_results: list[ModelResult] = []
 
     for audio_file in audio_files:
-        print(f"\n{'─'*70}")
+        print(f"\n{'─' * 70}")
         print(f"Audio: {Path(audio_file).name}")
-        print(f"{'─'*70}")
+        print(f"{'─' * 70}")
         try:
             audio, sample_rate = load_audio_file(audio_file)
             dur = len(audio) / sample_rate
@@ -608,7 +659,11 @@ def main() -> None:
         file_results: list[ModelResult] = []
         for idx, (model_name, device) in enumerate(models, 1):
             warmup_tag = "" if do_warmup else " [no-warmup]"
-            print(f"[{idx}/{len(models)}] {model_name} @ {device}{warmup_tag}", end=" ... ", flush=True)
+            print(
+                f"[{idx}/{len(models)}] {model_name} @ {device}{warmup_tag}",
+                end=" ... ",
+                flush=True,
+            )
             result = run_model(model_name, audio, sample_rate, audio_file, device, do_warmup)
             file_results.append(result)
             all_results.append(result)
@@ -640,8 +695,17 @@ def main() -> None:
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         headers = [
-            "model", "backend_type", "device", "audio_file", "audio_duration_s",
-            "setup_time_s", "transcribe_time_s", "rtf", "word_count", "error", "text"
+            "model",
+            "backend_type",
+            "device",
+            "audio_file",
+            "audio_duration_s",
+            "setup_time_s",
+            "transcribe_time_s",
+            "rtf",
+            "word_count",
+            "error",
+            "text",
         ]
         writer.writerow(headers)
         for r in payload["results"]:
@@ -649,9 +713,9 @@ def main() -> None:
 
     # Final summary across all files
     if len(audio_files) > 1:
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("COMBINED SUMMARY")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
         print_table(all_results)
 
     print(f"\nFull results written to:\n  - {json_path}\n  - {csv_path}\n")

@@ -15,7 +15,6 @@ Voice is considered active only when BOTH detectors agree.
 import logging
 import threading
 import warnings
-from typing import Optional, Union
 
 import numpy as np
 import torch
@@ -26,9 +25,8 @@ with warnings.catch_warnings():
     import webrtcvad
 
 from scipy import signal as scipy_signal
-from silero_vad import load_silero_vad
-
 from server.config import get_config
+from silero_vad import load_silero_vad
 
 # Mathematical constant for 16-bit audio normalization
 INT16_MAX_ABS_VALUE = 32768.0
@@ -52,8 +50,8 @@ class VoiceActivityDetector:
 
     def __init__(
         self,
-        silero_sensitivity: Optional[float] = None,
-        webrtc_sensitivity: Optional[int] = None,
+        silero_sensitivity: float | None = None,
+        webrtc_sensitivity: int | None = None,
         silero_use_onnx: bool = False,
         use_silero_deactivity: bool = False,
     ):
@@ -102,9 +100,7 @@ class VoiceActivityDetector:
         try:
             self.webrtc_vad_model = webrtcvad.Vad()
             self.webrtc_vad_model.set_mode(self.webrtc_sensitivity)
-            logger.debug(
-                f"WebRTC VAD initialized with sensitivity {self.webrtc_sensitivity}"
-            )
+            logger.debug(f"WebRTC VAD initialized with sensitivity {self.webrtc_sensitivity}")
         except Exception as e:
             logger.exception(f"Error initializing WebRTC VAD: {e}")
             raise
@@ -128,7 +124,7 @@ class VoiceActivityDetector:
 
     def is_speech_webrtc(
         self,
-        chunk: Union[bytes, bytearray],
+        chunk: bytes | bytearray,
         sample_rate: int = SAMPLE_RATE,
         all_frames_must_be_true: bool = False,
     ) -> bool:
@@ -178,7 +174,7 @@ class VoiceActivityDetector:
 
     def is_speech_silero(
         self,
-        chunk: Union[bytes, bytearray],
+        chunk: bytes | bytearray,
         sample_rate: int = SAMPLE_RATE,
     ) -> bool:
         """
@@ -208,9 +204,7 @@ class VoiceActivityDetector:
                 audio_chunk = audio_chunk.astype(np.float32) / INT16_MAX_ABS_VALUE
 
                 # Get VAD probability
-                vad_prob = self.silero_vad_model(
-                    torch.from_numpy(audio_chunk), SAMPLE_RATE
-                ).item()
+                vad_prob = self.silero_vad_model(torch.from_numpy(audio_chunk), SAMPLE_RATE).item()
 
                 # Compare against sensitivity threshold
                 is_speech = vad_prob > (1 - self.silero_sensitivity)
@@ -221,7 +215,7 @@ class VoiceActivityDetector:
 
     def check_voice_activity(
         self,
-        chunk: Union[bytes, bytearray],
+        chunk: bytes | bytearray,
         sample_rate: int = SAMPLE_RATE,
     ) -> None:
         """
@@ -256,7 +250,7 @@ class VoiceActivityDetector:
 
     def check_deactivation(
         self,
-        chunk: Union[bytes, bytearray],
+        chunk: bytes | bytearray,
         sample_rate: int = SAMPLE_RATE,
     ) -> bool:
         """
@@ -275,14 +269,12 @@ class VoiceActivityDetector:
         if self.use_silero_deactivity:
             return self.is_speech_silero(chunk, sample_rate)
         else:
-            return self.is_speech_webrtc(
-                chunk, sample_rate, all_frames_must_be_true=True
-            )
+            return self.is_speech_webrtc(chunk, sample_rate, all_frames_must_be_true=True)
 
 
 def create_vad(
-    silero_sensitivity: Optional[float] = None,
-    webrtc_sensitivity: Optional[int] = None,
+    silero_sensitivity: float | None = None,
+    webrtc_sensitivity: int | None = None,
     silero_use_onnx: bool = False,
     use_silero_deactivity: bool = False,
 ) -> VoiceActivityDetector:

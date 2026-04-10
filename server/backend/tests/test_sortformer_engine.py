@@ -12,7 +12,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -31,11 +30,15 @@ class _FakeDiarResult:
     """Fake diarization result produced by Sortformer model.generate()."""
 
     def __init__(self, segments: list[_FakeDiarSegment] | None = None):
-        self.segments = segments if segments is not None else [
-            _FakeDiarSegment("SPEAKER_00", 0.0, 2.0),
-            _FakeDiarSegment("SPEAKER_01", 2.5, 5.0),
-            _FakeDiarSegment("SPEAKER_00", 5.5, 8.0),
-        ]
+        self.segments = (
+            segments
+            if segments is not None
+            else [
+                _FakeDiarSegment("SPEAKER_00", 0.0, 2.0),
+                _FakeDiarSegment("SPEAKER_01", 2.5, 5.0),
+                _FakeDiarSegment("SPEAKER_00", 5.5, 8.0),
+            ]
+        )
 
 
 class _FakeSortformerModel:
@@ -82,8 +85,10 @@ class TestSortformerEngineInitGuard:
     def test_init_succeeds_when_mlx_audio_present(self) -> None:
         mod = _engine_mod()
         fake_load = MagicMock(return_value=_FakeSortformerModel())
-        with patch.object(mod, "HAS_MLX_AUDIO", True), \
-             patch.object(mod, "_load_sortformer", fake_load):
+        with (
+            patch.object(mod, "HAS_MLX_AUDIO", True),
+            patch.object(mod, "_load_sortformer", fake_load),
+        ):
             engine = mod.SortformerEngine()
             assert engine is not None
             assert not engine.is_loaded()
@@ -91,16 +96,20 @@ class TestSortformerEngineInitGuard:
     def test_default_model_name(self) -> None:
         mod = _engine_mod()
         fake_load = MagicMock(return_value=_FakeSortformerModel())
-        with patch.object(mod, "HAS_MLX_AUDIO", True), \
-             patch.object(mod, "_load_sortformer", fake_load):
+        with (
+            patch.object(mod, "HAS_MLX_AUDIO", True),
+            patch.object(mod, "_load_sortformer", fake_load),
+        ):
             engine = mod.SortformerEngine()
             assert "sortformer" in engine.model_name.lower()
 
     def test_custom_threshold(self) -> None:
         mod = _engine_mod()
         fake_load = MagicMock(return_value=_FakeSortformerModel())
-        with patch.object(mod, "HAS_MLX_AUDIO", True), \
-             patch.object(mod, "_load_sortformer", fake_load):
+        with (
+            patch.object(mod, "HAS_MLX_AUDIO", True),
+            patch.object(mod, "_load_sortformer", fake_load),
+        ):
             engine = mod.SortformerEngine(threshold=0.7)
             assert engine.threshold == 0.7
 
@@ -114,8 +123,10 @@ class TestSortformerEngineLifecycle:
     def test_not_loaded_initially(self) -> None:
         mod = _engine_mod()
         fake_load = MagicMock(return_value=_FakeSortformerModel())
-        with patch.object(mod, "HAS_MLX_AUDIO", True), \
-             patch.object(mod, "_load_sortformer", fake_load):
+        with (
+            patch.object(mod, "HAS_MLX_AUDIO", True),
+            patch.object(mod, "_load_sortformer", fake_load),
+        ):
             engine = mod.SortformerEngine()
             assert not engine.is_loaded()
 
@@ -123,8 +134,10 @@ class TestSortformerEngineLifecycle:
         mod = _engine_mod()
         fake_model = _FakeSortformerModel()
         fake_load = MagicMock(return_value=fake_model)
-        with patch.object(mod, "HAS_MLX_AUDIO", True), \
-             patch.object(mod, "_load_sortformer", fake_load):
+        with (
+            patch.object(mod, "HAS_MLX_AUDIO", True),
+            patch.object(mod, "_load_sortformer", fake_load),
+        ):
             engine = mod.SortformerEngine()
             engine.load()
             assert engine.is_loaded()
@@ -134,8 +147,10 @@ class TestSortformerEngineLifecycle:
         """Calling load() a second time must be a no-op."""
         mod = _engine_mod()
         fake_load = MagicMock(return_value=_FakeSortformerModel())
-        with patch.object(mod, "HAS_MLX_AUDIO", True), \
-             patch.object(mod, "_load_sortformer", fake_load):
+        with (
+            patch.object(mod, "HAS_MLX_AUDIO", True),
+            patch.object(mod, "_load_sortformer", fake_load),
+        ):
             engine = mod.SortformerEngine()
             engine.load()
             engine.load()
@@ -144,8 +159,10 @@ class TestSortformerEngineLifecycle:
     def test_unload_clears_state(self) -> None:
         mod = _engine_mod()
         fake_load = MagicMock(return_value=_FakeSortformerModel())
-        with patch.object(mod, "HAS_MLX_AUDIO", True), \
-             patch.object(mod, "_load_sortformer", fake_load):
+        with (
+            patch.object(mod, "HAS_MLX_AUDIO", True),
+            patch.object(mod, "_load_sortformer", fake_load),
+        ):
             engine = mod.SortformerEngine()
             engine.load()
             engine.unload()
@@ -155,8 +172,10 @@ class TestSortformerEngineLifecycle:
     def test_unload_when_not_loaded_is_safe(self) -> None:
         mod = _engine_mod()
         fake_load = MagicMock(return_value=_FakeSortformerModel())
-        with patch.object(mod, "HAS_MLX_AUDIO", True), \
-             patch.object(mod, "_load_sortformer", fake_load):
+        with (
+            patch.object(mod, "HAS_MLX_AUDIO", True),
+            patch.object(mod, "_load_sortformer", fake_load),
+        ):
             engine = mod.SortformerEngine()
             engine.unload()  # must not raise
 
@@ -237,8 +256,10 @@ class TestSortformerEngineDiarize:
         mod = _engine_mod()
         fake_model = _FakeSortformerModel()
         fake_load = MagicMock(return_value=fake_model)
-        with patch.object(mod, "HAS_MLX_AUDIO", True), \
-             patch.object(mod, "_load_sortformer", fake_load):
+        with (
+            patch.object(mod, "HAS_MLX_AUDIO", True),
+            patch.object(mod, "_load_sortformer", fake_load),
+        ):
             engine = mod.SortformerEngine()
             assert not engine.is_loaded()
             audio = np.zeros(16000, dtype=np.float32)
@@ -252,8 +273,10 @@ class TestSortformerEngineDiarize:
         mod = _engine_mod()
         fake_model = _FakeSortformerModel()
         fake_load = MagicMock(return_value=fake_model)
-        with patch.object(mod, "HAS_MLX_AUDIO", True), \
-             patch.object(mod, "_load_sortformer", fake_load):
+        with (
+            patch.object(mod, "HAS_MLX_AUDIO", True),
+            patch.object(mod, "_load_sortformer", fake_load),
+        ):
             engine = mod.SortformerEngine(threshold=0.75)
             engine.load()
             audio = np.zeros(16000, dtype=np.float32)

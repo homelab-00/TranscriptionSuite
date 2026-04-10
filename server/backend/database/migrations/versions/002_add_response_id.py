@@ -4,24 +4,23 @@ Add response_id field to conversations for LM Studio stateful chat support.
 This migration adds the response_id column to track LM Studio v1 API chat sessions.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 from sqlalchemy import text
 
-
 # revision identifiers, used by Alembic.
 revision: str = "002"
-down_revision: Union[str, None] = "001"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "001"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def _revision_metadata() -> tuple[
     str,
-    Union[str, None],
-    Union[str, Sequence[str], None],
-    Union[str, Sequence[str], None],
+    str | None,
+    str | Sequence[str] | None,
+    str | Sequence[str] | None,
 ]:
     """Reference Alembic metadata globals for static analyzers."""
     return revision, down_revision, branch_labels, depends_on
@@ -37,7 +36,7 @@ def upgrade() -> None:
         return
     conn.execute(
         text("""
-        ALTER TABLE conversations 
+        ALTER TABLE conversations
         ADD COLUMN response_id TEXT DEFAULT NULL
         """)
     )
@@ -49,8 +48,8 @@ def downgrade() -> None:
     # SQLite doesn't support DROP COLUMN directly, need to recreate table
     conn.execute(
         text("""
-        CREATE TABLE conversations_backup AS 
-        SELECT id, recording_id, title, created_at, updated_at 
+        CREATE TABLE conversations_backup AS
+        SELECT id, recording_id, title, created_at, updated_at
         FROM conversations
         """)
     )
@@ -70,7 +69,7 @@ def downgrade() -> None:
     conn.execute(
         text("""
         INSERT INTO conversations (id, recording_id, title, created_at, updated_at)
-        SELECT id, recording_id, title, created_at, updated_at 
+        SELECT id, recording_id, title, created_at, updated_at
         FROM conversations_backup
         """)
     )

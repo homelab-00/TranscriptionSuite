@@ -5,8 +5,9 @@ Subtitle export helpers for Audio Notebook transcription exports.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 MAX_CUE_DURATION = 5.0
 MIN_CUE_DURATION = 0.7
@@ -107,9 +108,7 @@ def render_srt(cues: list[SubtitleCue]) -> str:
     lines: list[str] = []
     for index, cue in enumerate(cues, start=1):
         lines.append(str(index))
-        lines.append(
-            f"{_format_srt_timestamp(cue.start)} --> {_format_srt_timestamp(cue.end)}"
-        )
+        lines.append(f"{_format_srt_timestamp(cue.start)} --> {_format_srt_timestamp(cue.end)}")
         lines.append(cue.text)
         lines.append("")
     return "\n".join(lines)
@@ -219,9 +218,7 @@ def _build_word_cues(
                 should_split = True
             elif gap > WORD_GAP_SPLIT and current_duration >= MIN_CUE_DURATION:
                 should_split = True
-            elif (
-                projected_chars > MAX_CUE_CHARS and current_duration >= MIN_CUE_DURATION
-            ):
+            elif projected_chars > MAX_CUE_CHARS and current_duration >= MIN_CUE_DURATION:
                 should_split = True
             elif end - current_start > MAX_CUE_DURATION:
                 should_split = True

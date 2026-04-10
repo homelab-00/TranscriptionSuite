@@ -195,11 +195,10 @@ def _load_canary_model(model_name: str) -> Any:
 
     import mlx.core as mx
     import mlx.nn as nn
+    from canary_mlx.model import Canary, CanaryConfig
     from dacite import from_dict
     from huggingface_hub import snapshot_download
     from mlx.utils import tree_flatten, tree_unflatten
-
-    from canary_mlx.model import Canary, CanaryConfig
 
     # --- Step 1: locate / download the model ---
     path = Path(model_name)
@@ -220,11 +219,7 @@ def _load_canary_model(model_name: str) -> Any:
     # --- Step 2: extract embedded tokenizer if needed ---
     tok = config.get("tokenizer", {})
     tokenizer_path = model_dir / "tokenizer.model"
-    if (
-        isinstance(tok, dict)
-        and "model_base64" in tok
-        and not tokenizer_path.exists()
-    ):
+    if isinstance(tok, dict) and "model_base64" in tok and not tokenizer_path.exists():
         logger.info(f"Extracting embedded tokenizer from config.json ({model_name})")
         tokenizer_bytes = base64.b64decode(tok["model_base64"])
         tokenizer_path.write_bytes(tokenizer_bytes)
@@ -298,9 +293,7 @@ class MLXCanaryBackend(STTBackend):
             self._loaded = True
             logger.info(f"MLX Canary model loaded: {model_name}")
         except Exception as exc:
-            raise RuntimeError(
-                f"Failed to load MLX Canary model '{model_name}': {exc}"
-            ) from exc
+            raise RuntimeError(f"Failed to load MLX Canary model '{model_name}': {exc}") from exc
 
     def unload(self) -> None:
         self._model = None

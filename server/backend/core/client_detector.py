@@ -15,7 +15,6 @@ Detection methods (in priority order):
 import logging
 import re
 from enum import Enum
-from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +50,7 @@ class ClientCapabilities:
             return "json"
         return "json"  # Both use JSON for now
 
-    def to_dict(self) -> Dict[str, bool]:
+    def to_dict(self) -> dict[str, bool]:
         """Convert capabilities to dict for API responses."""
         return {
             "client_type": self.client_type.value,
@@ -89,8 +88,8 @@ class ClientDetector:
     @classmethod
     def detect(
         cls,
-        headers: Dict[str, str],
-        query_params: Optional[Dict[str, str]] = None,
+        headers: dict[str, str],
+        query_params: dict[str, str] | None = None,
     ) -> ClientType:
         """
         Detect client type from request headers and parameters.
@@ -145,8 +144,8 @@ class ClientDetector:
     @classmethod
     def get_capabilities(
         cls,
-        headers: Dict[str, str],
-        query_params: Optional[Dict[str, str]] = None,
+        headers: dict[str, str],
+        query_params: dict[str, str] | None = None,
     ) -> ClientCapabilities:
         """
         Detect client type and return its capabilities.
@@ -164,8 +163,8 @@ class ClientDetector:
     @classmethod
     def is_standalone(
         cls,
-        headers: Dict[str, str],
-        query_params: Optional[Dict[str, str]] = None,
+        headers: dict[str, str],
+        query_params: dict[str, str] | None = None,
     ) -> bool:
         """
         Quick check if client is the standalone app.
@@ -182,8 +181,8 @@ class ClientDetector:
     @classmethod
     def is_web(
         cls,
-        headers: Dict[str, str],
-        query_params: Optional[Dict[str, str]] = None,
+        headers: dict[str, str],
+        query_params: dict[str, str] | None = None,
     ) -> bool:
         """
         Quick check if client is a web browser.
@@ -200,8 +199,8 @@ class ClientDetector:
 
 
 def detect_client_type(
-    headers: Dict[str, str],
-    query_params: Optional[Dict[str, str]] = None,
+    headers: dict[str, str],
+    query_params: dict[str, str] | None = None,
 ) -> ClientType:
     """
     Convenience function to detect client type.
@@ -217,8 +216,8 @@ def detect_client_type(
 
 
 def get_client_capabilities(
-    headers: Dict[str, str],
-    query_params: Optional[Dict[str, str]] = None,
+    headers: dict[str, str],
+    query_params: dict[str, str] | None = None,
 ) -> ClientCapabilities:
     """
     Convenience function to get client capabilities.

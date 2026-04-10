@@ -7,6 +7,9 @@
 #
 # Docs:    https://pre-commit.com
 
+# BMad third-party files — excluded globally from all hooks
+exclude: "^(_bmad/|\\.claude/skills/bmad-)"
+
 repos:
 
   # ── Generic file checks ──────────────────────────────────────────────────

@@ -1,4 +1,9 @@
-import { isMLXModel, isNemoModel, isVibeVoiceASRModel, isWhisperCppModel } from './modelCapabilities';
+import {
+  isMLXModel,
+  isNemoModel,
+  isVibeVoiceASRModel,
+  isWhisperCppModel,
+} from './modelCapabilities';
 import { MODEL_REGISTRY } from './modelRegistry';
 import type { ModelFamily, ModelRole } from './modelRegistry';
 

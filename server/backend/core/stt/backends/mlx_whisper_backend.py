@@ -66,9 +66,7 @@ class MLXWhisperBackend(STTBackend):
 
         # Monkey-patch: mlx-audio v0.4.x bug — set_alignment_heads() stores
         # data as _alignment_heads but timing.py reads alignment_heads.
-        if hasattr(self._model, "_alignment_heads") and not hasattr(
-            self._model, "alignment_heads"
-        ):
+        if hasattr(self._model, "_alignment_heads") and not hasattr(self._model, "alignment_heads"):
             self._model.alignment_heads = self._model._alignment_heads
             logger.debug("Applied alignment_heads monkey-patch for word timestamps")
 
@@ -134,15 +132,12 @@ class MLXWhisperBackend(STTBackend):
         effective_task = task
         if translation_target_language and translation_target_language != "en":
             logger.warning(
-                "MLX Whisper only supports translation to English; "
-                "ignoring target language '%s'",
+                "MLX Whisper only supports translation to English; ignoring target language '%s'",
                 translation_target_language,
             )
 
         # Check if alignment_heads are available for word timestamps.
-        use_word_timestamps = word_timestamps and hasattr(
-            self._model, "alignment_heads"
-        )
+        use_word_timestamps = word_timestamps and hasattr(self._model, "alignment_heads")
         if word_timestamps and not use_word_timestamps:
             logger.debug(
                 "Word timestamps requested but alignment_heads not available; "
