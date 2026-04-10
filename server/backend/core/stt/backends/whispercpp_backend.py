@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 import numpy as np
-from httpx import ConnectError as HttpxConnectError
+from httpx import HTTPStatusError as HttpxHTTPStatusError
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
@@ -30,6 +30,19 @@ _SIDECAR_UNREACHABLE_MSG = (
     "sidecar container failed to start. GGML models (whisper.cpp) require "
     'the Vulkan runtime profile — switch to "Vulkan" in Settings and restart '
     "the container, or choose a non-GGML model for CPU mode."
+)
+
+_SIDECAR_LOAD_TIMEOUT_MSG = (
+    "whisper.cpp sidecar at {url} is reachable but the model load timed out "
+    "after {timeout}s. The sidecar may still be downloading or initialising "
+    "the model. Wait a moment and retry, or check the sidecar container logs."
+)
+
+_SIDECAR_INFERENCE_TIMEOUT_MSG = (
+    "whisper.cpp sidecar at {url} accepted the request but transcription "
+    "timed out after {timeout}s. This usually means the audio is too long for "
+    "the current timeout, or the Vulkan device is under heavy load. Try "
+    "shorter audio or check the sidecar container logs."
 )
 
 
@@ -113,12 +126,16 @@ class WhisperCppBackend(STTBackend):
                 timeout=_LOAD_TIMEOUT,
             )
             resp.raise_for_status()
-        except (HttpxConnectError, OSError) as exc:
+        except (httpx.NetworkError, OSError) as exc:
             raise RuntimeError(_SIDECAR_UNREACHABLE_MSG.format(url=self._server_url)) from exc
-        except Exception:
+        except httpx.TimeoutException as exc:
+            raise RuntimeError(
+                _SIDECAR_LOAD_TIMEOUT_MSG.format(url=self._server_url, timeout=_LOAD_TIMEOUT)
+            ) from exc
+        except HttpxHTTPStatusError:
             logger.warning(
-                "WhisperCppBackend: /load call failed (server may pre-load model); "
-                "continuing anyway",
+                "WhisperCppBackend: /load returned an error status (server may "
+                "pre-load the model); continuing anyway",
             )
 
         self._loaded = True
@@ -188,8 +205,19 @@ class WhisperCppBackend(STTBackend):
                 timeout=_INFERENCE_TIMEOUT,
             )
             resp.raise_for_status()
-        except (HttpxConnectError, OSError) as exc:
+        except (httpx.NetworkError, OSError) as exc:
             raise RuntimeError(_SIDECAR_UNREACHABLE_MSG.format(url=self._server_url)) from exc
+        except httpx.TimeoutException as exc:
+            raise RuntimeError(
+                _SIDECAR_INFERENCE_TIMEOUT_MSG.format(
+                    url=self._server_url, timeout=_INFERENCE_TIMEOUT
+                )
+            ) from exc
+        except HttpxHTTPStatusError as exc:
+            raise RuntimeError(
+                f"whisper.cpp sidecar at {self._server_url} returned HTTP "
+                f"{exc.response.status_code} for /inference"
+            ) from exc
 
         result = resp.json()
         return self._parse_response(result)
