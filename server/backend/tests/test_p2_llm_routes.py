@@ -1,6 +1,7 @@
-"""Tests for LLM integration routes (LM Studio proxy).
+"""Tests for LLM integration routes (OpenAI-compatible endpoint support).
 
 [P2] Covers P2-ROUTE-002: status, process, list models, load model.
+Also covers GH-68 edge cases: API key auth, model discovery, 401 handling.
 
 Follows the direct-call pattern: monkeypatch _get_httpx() and get_llm_config()
 in the llm route module, call handlers directly via asyncio.run().
@@ -22,6 +23,7 @@ def _config(*, enabled: bool = True, base_url: str = "http://localhost:1234", **
     defaults = {
         "enabled": enabled,
         "base_url": base_url,
+        "api_key": kw.get("api_key", ""),
         "model": kw.get("model", ""),
         "gpu_offload": 1.0,
         "context_length": None,
@@ -56,11 +58,17 @@ class _FakeAsyncClient:
     ):
         self._get_response = get_response or _FakeResponse()
         self._post_response = post_response or _FakeResponse()
+        self.last_headers: dict = {}
+        self.last_url: str = ""
 
     async def get(self, url, **kwargs):
+        self.last_url = url
+        self.last_headers = kwargs.get("headers", {})
         return self._get_response
 
     async def post(self, url, **kwargs):
+        self.last_url = url
+        self.last_headers = kwargs.get("headers", {})
         return self._post_response
 
     async def __aenter__(self):
@@ -222,3 +230,100 @@ class TestP2Route002LoadModel:
         assert result.success is True
         assert "test-model-inst" in result.message
         assert "2.5" in result.message
+
+
+# ── GH-68: OpenAI-compatible endpoint edge cases ──────────────────────────
+
+
+class TestGH68AuthHeaders:
+    """API key is sent as Authorization: Bearer header when configured."""
+
+    def test_get_headers_includes_bearer_when_key_set(self):
+        """_get_headers returns Authorization header when api_key is present."""
+        headers = llm._get_headers({"api_key": "sk-test-key"})
+        assert headers["Authorization"] == "Bearer sk-test-key"
+
+    def test_get_headers_omits_auth_when_key_empty(self):
+        """_get_headers omits Authorization when api_key is empty."""
+        headers = llm._get_headers({"api_key": ""})
+        assert "Authorization" not in headers
+
+    def test_get_headers_omits_auth_when_key_missing(self):
+        """_get_headers omits Authorization when api_key key is absent."""
+        headers = llm._get_headers({})
+        assert "Authorization" not in headers
+
+
+class TestGH68StatusWithExplicitModel:
+    """Status endpoint with explicit model configured (skips auto-detect)."""
+
+    def test_status_with_explicit_model_returns_available(self, monkeypatch):
+        """When model is configured, status checks connectivity and returns it."""
+        monkeypatch.setattr(
+            llm, "get_llm_config", lambda: _config(model="gpt-4o", api_key="sk-key")
+        )
+        resp = _FakeResponse(200, {"data": []})
+        fake_httpx = _FakeHttpx(_FakeAsyncClient(get_response=resp))
+        monkeypatch.setattr(llm, "_get_httpx", lambda: fake_httpx)
+
+        result = asyncio.run(llm.get_llm_status())
+
+        assert result.available is True
+        assert result.model == "gpt-4o"
+
+    def test_status_401_returns_invalid_key_error(self, monkeypatch):
+        """401 from provider returns a clear invalid API key message."""
+        monkeypatch.setattr(
+            llm, "get_llm_config", lambda: _config(model="gpt-4o", api_key="bad-key")
+        )
+        resp = _FakeResponse(401)
+        fake_httpx = _FakeHttpx(_FakeAsyncClient(get_response=resp))
+        monkeypatch.setattr(llm, "_get_httpx", lambda: fake_httpx)
+
+        result = asyncio.run(llm.get_llm_status())
+
+        assert result.available is False
+        assert "API key" in (result.error or "")
+
+
+class TestGH68ProviderModels:
+    """GET /api/llm/models — model discovery from the provider."""
+
+    def test_models_returns_list_from_v1_models(self, monkeypatch):
+        """Standard /v1/models response is parsed into simplified list."""
+        resp = _FakeResponse(
+            200,
+            {
+                "data": [
+                    {"id": "gpt-4o", "owned_by": "openai"},
+                    {"id": "gpt-4o-mini", "owned_by": "openai"},
+                ]
+            },
+        )
+        fake_httpx = _FakeHttpx(_FakeAsyncClient(get_response=resp))
+        monkeypatch.setattr(llm, "_get_httpx", lambda: fake_httpx)
+
+        result = asyncio.run(llm.list_provider_models())
+
+        assert len(result["models"]) == 2
+        assert result["models"][0]["id"] == "gpt-4o"
+        assert result["models"][1]["owned_by"] == "openai"
+
+    def test_models_401_raises_http_exception(self, monkeypatch):
+        """401 from provider raises HTTPException with clear message."""
+        resp = _FakeResponse(401)
+        fake_httpx = _FakeHttpx(_FakeAsyncClient(get_response=resp))
+        monkeypatch.setattr(llm, "_get_httpx", lambda: fake_httpx)
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(llm.list_provider_models())
+        assert exc.value.status_code == 401
+        assert "API key" in exc.value.detail
+
+    def test_models_503_when_disabled(self, monkeypatch):
+        """Returns 503 when LLM integration is disabled."""
+        monkeypatch.setattr(llm, "get_llm_config", lambda: _config(enabled=False))
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(llm.list_provider_models())
+        assert exc.value.status_code == 503

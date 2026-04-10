@@ -1504,7 +1504,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                     <Bot size={18} />
                   </div>
                   <div>
-                    <div className="text-sm font-semibold text-white">LM Studio</div>
+                    <div className="text-sm font-semibold text-white">AI Assistant</div>
                     <div className="flex items-center gap-1.5">
                       <StatusLight
                         status={llmStatus}

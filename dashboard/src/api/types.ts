@@ -110,7 +110,15 @@ export interface LanguagesResponse {
   languages: Record<string, string>;
   count: number;
   auto_detect: boolean;
-  backend_type?: 'whisper' | 'parakeet' | 'canary' | 'vibevoice_asr' | 'mlx_parakeet' | 'mlx_canary' | 'mlx_whisper' | 'mlx_vibevoice';
+  backend_type?:
+    | 'whisper'
+    | 'parakeet'
+    | 'canary'
+    | 'vibevoice_asr'
+    | 'mlx_parakeet'
+    | 'mlx_canary'
+    | 'mlx_whisper'
+    | 'mlx_vibevoice';
   supports_translation?: boolean;
 }
 
@@ -362,6 +370,7 @@ export interface LLMStatus {
   model: string | null;
   model_state: string | null;
   error: string | null;
+  has_api_key: boolean;
 }
 
 export interface LLMResponse {
@@ -386,17 +395,16 @@ export interface ServerControlResponse {
 
 export interface LLMModel {
   id: string;
-  type: string;
-  state: string;
-  quantization?: string;
-  max_context_length?: number;
-  arch?: string;
+  owned_by?: string;
+  state?: string;
 }
 
 export interface LLMModelsResponse {
   models: LLMModel[];
-  total: number;
-  loaded: number;
+  /** Present in LM Studio-specific /models/available responses */
+  total?: number;
+  /** Present in LM Studio-specific /models/available responses */
+  loaded?: number;
 }
 
 export interface ChatRequest {

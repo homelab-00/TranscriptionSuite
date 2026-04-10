@@ -112,13 +112,13 @@ Technical documentation for developing and building TranscriptionSuite.
         - [`GET /api/search`](#get-apisearch)
         - [`GET /api/search/words`](#get-apisearchwords)
         - [`GET /api/search/recordings`](#get-apisearchrecordings)
-      - [LLM Integration](#llm-integration)
+      - [LLM Integration (OpenAI-compatible)](#llm-integration-openai-compatible)
         - [`GET /api/llm/status`](#get-apillmstatus)
+        - [`GET /api/llm/models`](#get-apillmmodels)
         - [`POST /api/llm/process` / `POST /api/llm/process/stream`](#post-apillmprocess--post-apillmprocessstream)
         - [`POST /api/llm/summarize/{id}` / `POST /api/llm/summarize/{id}/stream`](#post-apillmsummarizeid--post-apillmsummarizeidstream)
-        - [`GET /api/llm/models/available`](#get-apillmmodelsavailable)
-        - [`POST /api/llm/model/load` / `POST /api/llm/model/unload`](#post-apillmmodelload--post-apillmmodelunload)
-        - [`POST /api/llm/server/start` / `POST /api/llm/server/stop`](#post-apillmserverstart--post-apillmserverstop)
+        - [`POST /api/llm/chat`](#post-apillmchat)
+        - [LM Studio-specific endpoints](#lm-studio-specific-endpoints)
       - [Admin](#admin)
         - [`GET /api/admin/status`](#get-apiadminstatus)
         - [`GET /api/admin/config/full`](#get-apiadminconfigfull)
@@ -359,7 +359,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
 - **Multi-backend STT**: Pluggable backend architecture — Whisper, NeMo Parakeet/Canary, WhisperX, VibeVoice-ASR, whisper.cpp (Vulkan), MLX (Apple Silicon: Whisper, Parakeet, Canary, VibeVoice) — auto-detected from the model name
 - **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM; Whisper backends only in v1
-- **LM Studio Integration**: Native v1 REST API support for LM Studio 0.4.0+ with stateful chat sessions and Docker-compatible model management
+- **AI Assistant (OpenAI-compatible)**: Supports any OpenAI-compatible endpoint — LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others. Configurable via Settings → AI tab with API key support, model selection, and endpoint URL. Uses standard `/v1/chat/completions` with full conversation history
 
 ### 2.2 Platform Architectures
 
@@ -1496,14 +1496,16 @@ whisper.cpp models have different capabilities compared to the default faster-wh
 | `/api/search` | GET | User | Full-text search across recordings |
 | `/api/search/words` | GET | User | Full-text search in word table |
 | `/api/search/recordings` | GET | User | Full-text search in recording metadata |
-| `/api/llm/status` | GET | User | LM Studio connection status |
+| `/api/llm/status` | GET | User | AI provider connection status and model info |
+| `/api/llm/models` | GET | User | List models from the configured AI provider |
 | `/api/llm/process` | POST | User | Run LLM prompt (blocking) |
 | `/api/llm/process/stream` | POST | User | Run LLM prompt (streaming SSE) |
 | `/api/llm/summarize/{id}` | POST | User | Summarize a recording (blocking) |
 | `/api/llm/summarize/{id}/stream` | POST | User | Summarize a recording (streaming SSE) |
-| `/api/llm/models/available` | GET | User | List models available in LM Studio |
-| `/api/llm/server/start` | POST | User | Start LM Studio server |
-| `/api/llm/server/stop` | POST | User | Stop LM Studio server |
+| `/api/llm/chat` | POST | User | Multi-turn chat (streaming SSE) |
+| `/api/llm/models/available` | GET | User | List models (LM Studio-specific, legacy) |
+| `/api/llm/server/start` | POST | User | Start LM Studio server (local installs only) |
+| `/api/llm/server/stop` | POST | User | Stop LM Studio server (local installs only) |
 | `/api/llm/model/load` | POST | User | Load a model in LM Studio |
 | `/api/llm/model/unload` | POST | User | Unload the active LM Studio model |
 | `/api/admin/status` | GET | Admin | Detailed server + model + config status |
@@ -1800,31 +1802,40 @@ Full-text search in recording metadata only (title, summary).
 
 ---
 
-#### LLM Integration
+#### LLM Integration (OpenAI-compatible)
 
-LLM endpoints proxy requests to a local [LM Studio](https://lmstudio.ai/) instance. The LM Studio base URL is configurable in `config.yaml`.
+LLM endpoints work with any OpenAI-compatible provider: [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/), OpenAI, Groq, OpenRouter, and others. Configure the endpoint URL, API key, and model in **Settings → AI** or via `config.yaml` (`local_llm` section). For Docker deployments, use the `LLM_API_KEY` and `LM_STUDIO_URL` environment variables.
+
+All requests use the standard `/v1/chat/completions` API. When an API key is configured, requests include an `Authorization: Bearer` header.
 
 > **Chat context injection:** When summarizing or chatting about a recording, the server prepends the **pure transcript** (no timestamps) as system context. Speaker tags are included only when diarization data exists.
 
 ##### `GET /api/llm/status`
-Check whether LM Studio is reachable and which model is loaded.
+Check whether the AI provider is reachable, which model is available, and whether an API key is configured (`has_api_key`).
+
+##### `GET /api/llm/models`
+List models from the configured provider. Queries `/v1/models` and falls back to LM Studio's `/api/v0/models` for backward compatibility.
 
 ##### `POST /api/llm/process` / `POST /api/llm/process/stream`
-Send a free-form prompt to LM Studio. The `/stream` variant returns a Server-Sent Events stream.
+Send a free-form prompt to the AI provider. The `/stream` variant returns a Server-Sent Events stream.
 
-**Request body (JSON):** `{"prompt": "...", "model": "...", "system_prompt": "...", "recording_id": null}`
+**Request body (JSON):** `{"transcription_text": "...", "system_prompt": "...", "user_prompt": "...", "max_tokens": 2048, "temperature": 0.7}`
 
 ##### `POST /api/llm/summarize/{id}` / `POST /api/llm/summarize/{id}/stream`
 Summarize a recording. The transcript is injected automatically. The `/stream` variant streams the response via SSE. The result is persisted to the recording's `summary` field on completion.
 
-##### `GET /api/llm/models/available`
-List models available in the connected LM Studio instance.
+##### `POST /api/llm/chat`
+Multi-turn chat within a conversation. Sends the full message history from the database to `/v1/chat/completions` with streaming. On the first message, transcription context is optionally prepended. The assistant response is saved to the database.
 
-##### `POST /api/llm/model/load` / `POST /api/llm/model/unload`
-Load or unload a model in LM Studio. **Load body (JSON):** `{"model_id": "..."}` 
+**Request body (JSON):** `{"conversation_id": 123, "user_message": "...", "include_transcription": true}`
 
-##### `POST /api/llm/server/start` / `POST /api/llm/server/stop`
-Start or stop the LM Studio server process (only works when LM Studio is installed on the same machine).
+##### LM Studio-specific endpoints
+
+These endpoints use LM Studio's proprietary APIs and are only relevant for local LM Studio installs:
+
+- `GET /api/llm/models/available` — List models via LM Studio's v0 API
+- `POST /api/llm/model/load` / `POST /api/llm/model/unload` — Load or unload a model. **Load body:** `{"model_id": "..."}`
+- `POST /api/llm/server/start` / `POST /api/llm/server/stop` — Start or stop the LM Studio server process (local installs only)
 
 ---
 
@@ -2360,9 +2371,9 @@ npm run dev:electron
 | `ModelManagerTab.tsx` | Model Manager: browse by family, view capabilities, download/delete, cache status; treats `None (Disabled)` slot selections as intentionally empty |
 | `NotebookView.tsx` | Audio notebook: Calendar, Search, Import tabs with context menus |
 | `ServerView.tsx` | Docker server management: image selection, container control, persisted main/live model selection including `None (Disabled)` |
-| `SettingsModal.tsx` | 4-tab settings: App (autoCopy, notifications, server auto-stop, etc.), Client (connection/audio/diarization), Server (template-based config editor with local YAML persistence, no server dependency), Notebook |
+| `SettingsModal.tsx` | 5-tab settings: App, Client, Server (template-based config editor), AI (endpoint URL, API key, model selection for OpenAI-compatible providers), Notebook |
 | `AboutModal.tsx` | Profile card, version, links |
-| `AudioNoteModal.tsx` | Recording detail: audio player, transcript, LLM chat sidebar |
+| `AudioNoteModal.tsx` | Recording detail: audio player, transcript, AI Assistant chat sidebar |
 | `AddNoteModal.tsx` | Create new recording from calendar time slot |
 | `LogsView.tsx` | Processing logs and client debug output viewer |
 | `FullscreenVisualizer.tsx` | Fullscreen audio visualizer overlay |
@@ -2648,7 +2659,7 @@ Config file: `~/.config/TranscriptionSuite/config.yaml` (Linux) or `$env:USERPRO
 - `diarization` - PyAnnote model and speaker detection (embedding batch size configurable for VRAM)
 - `remote_server` - Host, port, TLS settings
 - `storage` - Database path, audio storage
-- `local_llm` - LM Studio integration (supports v1 REST API for LM Studio 0.4.0+)
+- `local_llm` - AI assistant integration (any OpenAI-compatible endpoint: LM Studio, Ollama, OpenAI, Groq, etc.). Key fields: `base_url`, `api_key`, `model`, `enabled`
 - `webhook` - Outgoing webhook (enable/disable, target URL, optional Bearer secret)
 - `backup` - Automatic database backup settings
 - `durability` - Transcription data durability settings (recordings_dir, audio_retention_days, orphan_job_timeout_minutes)
@@ -3144,7 +3155,7 @@ ELECTRON_OZONE_PLATFORM_HINT=auto ./TranscriptionSuite-*-x86_64.AppImage
 **Solution**: The layered compose system handles this automatically:
 - **Linux**: Uses `docker-compose.linux-host.yml` (`network_mode: "host"`) for direct access
 - **Windows/macOS**: Uses `docker-compose.desktop-vm.yml` (bridge networking with explicit port mapping `9786:9786`)
-- **LM Studio URL**: Windows/macOS uses `host.docker.internal:1234` to reach host services
+- **AI Provider URL**: Windows/macOS uses `host.docker.internal:1234` to reach host LLM services (LM Studio, Ollama, etc.). Override via `LM_STUDIO_URL` env var. API keys can be set via `LLM_API_KEY` env var
 
 The Electron dashboard selects the correct overlay automatically based on `process.platform`.
 

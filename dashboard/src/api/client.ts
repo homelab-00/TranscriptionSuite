@@ -743,7 +743,12 @@ export class APIClient {
     return this.post('/api/llm/server/stop');
   }
 
-  /** GET /api/llm/models/available */
+  /** GET /api/llm/models — list models from the configured AI provider */
+  async getAvailableModels(): Promise<LLMModelsResponse> {
+    return this.get('/api/llm/models');
+  }
+
+  /** GET /api/llm/models/available (LM Studio-specific) */
   async listLLMModels(): Promise<LLMModelsResponse> {
     return this.get('/api/llm/models/available');
   }

@@ -124,8 +124,8 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
           {/* Description */}
           <p className="mb-6 px-2 text-center text-sm leading-relaxed text-slate-300">
             A fully local and private Speech-To-Text app with cross-platform support, speaker
-            diarization, Audio Notebook mode, LM Studio integration, and both longform and live
-            transcription.
+            diarization, Audio Notebook mode, AI assistant (OpenAI-compatible), and both longform
+            and live transcription.
           </p>
 
           {/* Links */}

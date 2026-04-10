@@ -349,21 +349,31 @@ processing:
     sample_rate: 16000
 
 # ----------------------------------------------------------------------------
-# Local LLM Integration (LM Studio)
+# LLM Integration (OpenAI-compatible endpoint)
 # ----------------------------------------------------------------------------
+# Works with any OpenAI-compatible API: LM Studio, Ollama, OpenAI, Groq,
+# OpenRouter, and others. Set base_url to the provider's endpoint and
+# api_key if required.
 local_llm:
     # Enable/disable LLM features in the viewer app
     enabled: true
 
-    # LM Studio server URL (default local)
+    # OpenAI-compatible API endpoint URL
     base_url: "http://127.0.0.1:1234"
+
+    # API key for authenticated providers (leave empty for local servers)
+    api_key: ""
+
+    # Model ID to use (e.g. "gpt-4o", "llama-3.1-8b-instruct").
+    # If empty, auto-detected from the provider's loaded models.
+    # model: ""
 
     # Default system prompt for summarization
     default_system_prompt: |
-        You are a helpful assistant that analyzes transcriptions. 
-        When given a transcription, provide a clear and concise summary 
-        highlighting the main points, key topics discussed, and any 
-        action items if applicable. Respond in the same language as 
+        You are a helpful assistant that analyzes transcriptions.
+        When given a transcription, provide a clear and concise summary
+        highlighting the main points, key topics discussed, and any
+        action items if applicable. Respond in the same language as
         the transcription.
 
 # ----------------------------------------------------------------------------

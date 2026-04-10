@@ -22,6 +22,7 @@ import {
   Send,
   Flame,
   Zap,
+  Bot,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
@@ -36,7 +37,7 @@ import { useConfirm } from '../../src/hooks/useConfirm';
 import { isMLXModel, isVibeVoiceASRModel } from '../../src/services/modelCapabilities';
 import { buildSparseYaml } from '../../src/utils/configTree';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
-import type { AuthToken } from '../../src/api/types';
+import type { AuthToken, LLMModel } from '../../src/api/types';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { ServerConfigEditor } from './ServerConfigEditor';
 import type { RuntimeProfile } from '../../src/types/runtime';
@@ -46,7 +47,7 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-const tabs = ['App', 'Client', 'Server', 'Notebook'];
+const tabs = ['App', 'Client', 'Server', 'AI', 'Notebook'];
 const DEFAULT_SHORTCUTS = {
   startRecording: 'Alt+Ctrl+Z',
   stopTranscribe: 'Alt+Ctrl+X',
@@ -118,6 +119,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [, setDiarizationParallel] = useState<boolean | null>(null);
   const [serverConfigUpdates, setServerConfigUpdates] = useState<Record<string, unknown>>({});
 
+  // AI tab state
+  const [aiBaseUrl, setAiBaseUrl] = useState('http://127.0.0.1:1234');
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiModel, setAiModel] = useState('');
+  const [aiEnabled, setAiEnabled] = useState(true);
+  const [aiModels, setAiModels] = useState<LLMModel[]>([]);
+  const [aiModelsLoading, setAiModelsLoading] = useState(false);
+  const [showAiApiKey, setShowAiApiKey] = useState(false);
+  const [aiStatusText, setAiStatusText] = useState<string>('');
+  const [aiKeyConfigured, setAiKeyConfigured] = useState(false);
+
   // Settings state
   const [appSettings, setAppSettings] = useState({
     autoCopy: true,
@@ -184,6 +196,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     if (cached) syncToken(cached);
     return unsubscribe;
   }, [queryClient]);
+
+  // Load AI tab data when active
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'AI') return;
+    let cancelled = false;
+    apiClient
+      .getLLMStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setAiBaseUrl(status.base_url || 'http://127.0.0.1:1234');
+        setAiModel(status.model || '');
+        // enabled=false only when the server explicitly reports it as disabled
+        const isExplicitlyDisabled =
+          !status.available && status.error === 'LLM integration is disabled in config';
+        setAiEnabled(!isExplicitlyDisabled);
+        setAiStatusText(status.available ? 'Online' : status.error || 'Offline');
+        setAiKeyConfigured(status.has_api_key ?? false);
+      })
+      .catch(() => {
+        if (!cancelled) setAiStatusText('Could not reach server');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, activeTab]);
+
+  const [aiModelsFetchError, setAiModelsFetchError] = useState('');
+  const loadAiModels = useCallback(async () => {
+    setAiModelsLoading(true);
+    setAiModelsFetchError('');
+    try {
+      const response = await apiClient.getAvailableModels();
+      const models = response.models || [];
+      setAiModels(models);
+      if (models.length === 0) {
+        setAiModelsFetchError('No models found — type a model ID manually.');
+      }
+    } catch {
+      setAiModels([]);
+      setAiModelsFetchError('Could not fetch models — type a model ID manually.');
+    } finally {
+      setAiModelsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isOpen || activeTab !== 'Server') return;
@@ -1477,6 +1533,134 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     );
   };
 
+  const renderAITab = () => {
+    const handleAiFieldChange = (key: string, value: unknown) => {
+      handleServerConfigFieldChange(`local_llm.${key}`, value);
+    };
+
+    return (
+      <div className="space-y-6">
+        <Section title="AI Provider">
+          <p className="mb-4 text-xs text-slate-400">
+            Connect to any OpenAI-compatible endpoint: LM Studio, Ollama, OpenAI, Groq, OpenRouter,
+            and others.
+          </p>
+
+          {/* Status indicator */}
+          <div className="mb-4 flex items-center gap-2">
+            <div
+              className={`h-2 w-2 rounded-full ${
+                aiStatusText === 'Online' ? 'bg-green-500' : 'bg-red-400'
+              }`}
+            />
+            <span className="text-xs text-slate-400">{aiStatusText || 'Checking...'}</span>
+          </div>
+
+          <AppleSwitch
+            checked={aiEnabled}
+            onChange={(v) => {
+              setAiEnabled(v);
+              handleAiFieldChange('enabled', v);
+            }}
+            label="Enable AI features"
+          />
+        </Section>
+
+        <Section title="Endpoint URL">
+          <input
+            type="text"
+            value={aiBaseUrl}
+            onChange={(e) => {
+              setAiBaseUrl(e.target.value);
+              handleAiFieldChange('base_url', e.target.value);
+            }}
+            placeholder="http://127.0.0.1:1234"
+            className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
+          />
+        </Section>
+
+        <Section title="API Key">
+          <p className="mb-3 text-xs text-slate-400">
+            Required for commercial providers (OpenAI, Groq, OpenRouter). Leave empty for local
+            servers.
+          </p>
+          <div className="relative">
+            <input
+              type={showAiApiKey ? 'text' : 'password'}
+              value={aiApiKey}
+              onChange={(e) => {
+                setAiApiKey(e.target.value);
+                handleAiFieldChange('api_key', e.target.value);
+              }}
+              placeholder={
+                aiKeyConfigured && !aiApiKey ? '••••••••  (key configured on server)' : 'sk-...'
+              }
+              className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 pr-10 font-mono text-sm text-white focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => setShowAiApiKey(!showAiApiKey)}
+              className="absolute top-1/2 right-2 -translate-y-1/2 text-slate-400 transition-colors hover:text-white"
+            >
+              {showAiApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </Section>
+
+        <Section title="Model">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={aiModel}
+              onChange={(e) => {
+                setAiModel(e.target.value);
+                handleAiFieldChange('model', e.target.value);
+              }}
+              placeholder="Auto-detect from provider"
+              list="ai-model-list"
+              className="focus:border-accent-cyan/50 flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
+            />
+            <button
+              onClick={loadAiModels}
+              disabled={aiModelsLoading}
+              className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-slate-400 transition-colors hover:text-white disabled:opacity-50"
+              title="Fetch models from provider"
+            >
+              {aiModelsLoading ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <RefreshCw size={16} />
+              )}
+            </button>
+          </div>
+          <datalist id="ai-model-list">
+            {aiModels.map((m) => (
+              <option key={m.id} value={m.id} />
+            ))}
+          </datalist>
+          {aiModels.length > 0 && (
+            <p className="mt-1.5 text-xs text-slate-500">
+              {aiModels.length} model{aiModels.length !== 1 ? 's' : ''} available from provider
+            </p>
+          )}
+          {aiModelsFetchError && (
+            <p className="mt-1.5 text-xs text-amber-400/80">{aiModelsFetchError}</p>
+          )}
+        </Section>
+
+        <Section title="Notes">
+          <ul className="list-inside list-disc space-y-1 text-xs text-slate-400">
+            <li>Changes take effect after server restart.</li>
+            <li>
+              For Docker: use <code className="text-slate-300">LLM_API_KEY</code> and{' '}
+              <code className="text-slate-300">LM_STUDIO_URL</code> environment variables instead.
+            </li>
+          </ul>
+        </Section>
+      </div>
+    );
+  };
+
   const renderNotebookTab = () => (
     <div className="space-y-6">
       <Section title="Database Backup">
@@ -1580,6 +1764,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         return <Server size={16} />;
       case 'Notebook':
         return <Database size={16} />;
+      case 'AI':
+        return <Bot size={16} />;
       default:
         return null;
     }
@@ -1634,6 +1820,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               {activeTab === 'App' && renderAppTab()}
               {activeTab === 'Client' && renderClientTab()}
               {activeTab === 'Server' && renderServerTab()}
+              {activeTab === 'AI' && renderAITab()}
               {activeTab === 'Notebook' && renderNotebookTab()}
             </div>
           </div>

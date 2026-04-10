@@ -1,8 +1,11 @@
 """
-LLM Integration router - sends transcriptions to local LLM (LM Studio)
+LLM Integration router — OpenAI-compatible endpoint support.
 
-Supports both regular and streaming responses from OpenAI-compatible APIs.
-Also provides endpoints for controlling LM Studio server and model loading.
+Supports any provider that speaks the OpenAI Chat Completions API:
+LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others.
+
+Provides both regular and streaming responses, model discovery,
+and multi-turn chat with persistent conversation history.
 """
 
 import asyncio
@@ -11,12 +14,11 @@ import logging
 import os
 import shutil
 import subprocess
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-
 from server.api.routes.utils import sanitize_for_log
 from server.config import get_config
 
@@ -38,10 +40,10 @@ class LLMRequest(BaseModel):
     """Request to process transcription with LLM"""
 
     transcription_text: str
-    system_prompt: Optional[str] = None
-    user_prompt: Optional[str] = None
-    max_tokens: Optional[int] = None
-    temperature: Optional[float] = None
+    system_prompt: str | None = None
+    user_prompt: str | None = None
+    max_tokens: int | None = None
+    temperature: float | None = None
 
 
 class LLMResponse(BaseModel):
@@ -49,7 +51,7 @@ class LLMResponse(BaseModel):
 
     response: str
     model: str
-    tokens_used: Optional[int] = None
+    tokens_used: int | None = None
 
 
 class LLMStatus(BaseModel):
@@ -57,28 +59,43 @@ class LLMStatus(BaseModel):
 
     available: bool
     base_url: str
-    model: Optional[str] = None
-    model_state: Optional[str] = None  # "loaded", "not-loaded", etc.
-    error: Optional[str] = None
+    model: str | None = None
+    model_state: str | None = None  # "loaded", "not-loaded", etc.
+    error: str | None = None
+    has_api_key: bool = False
 
 
-async def _get_loaded_model_id(base_url: str) -> Optional[str]:
-    """Get the first loaded LLM/VLM model ID from LM Studio."""
+async def _get_loaded_model_id(base_url: str, headers: dict[str, str] | None = None) -> str | None:
+    """Get the first available model ID from the provider.
+
+    Tries the standard OpenAI ``/v1/models`` endpoint first, then falls back
+    to the LM Studio-specific ``/api/v0/models`` endpoint for backward compat.
+    """
     httpx = _get_httpx()
+    req_headers = headers or {}
+
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(f"{base_url}/api/v0/models")
-            if response.status_code != 200:
-                return None
-            data = response.json()
-            models = data.get("data", [])
-            loaded_models = [
-                m
-                for m in models
-                if m.get("type") in ("llm", "vlm") and m.get("state") == "loaded"
-            ]
-            if loaded_models:
-                return loaded_models[0].get("id")
+            # Try standard OpenAI /v1/models first
+            response = await client.get(f"{base_url}/v1/models", headers=req_headers)
+            if response.status_code == 200:
+                data = response.json()
+                models = data.get("data", [])
+                if models:
+                    return models[0].get("id")
+
+            # Fallback: LM Studio /api/v0/models (supports loaded-state filtering)
+            response = await client.get(f"{base_url}/api/v0/models", headers=req_headers)
+            if response.status_code == 200:
+                data = response.json()
+                models = data.get("data", [])
+                loaded_models = [
+                    m
+                    for m in models
+                    if m.get("type") in ("llm", "vlm") and m.get("state") == "loaded"
+                ]
+                if loaded_models:
+                    return loaded_models[0].get("id")
     except Exception as e:
         logger.debug(f"Failed to get loaded model id: {e}")
     return None
@@ -89,15 +106,15 @@ class ServerControlResponse(BaseModel):
 
     success: bool
     message: str
-    detail: Optional[str] = None
+    detail: str | None = None
 
 
 class ModelLoadRequest(BaseModel):
     """Request to load a specific model"""
 
-    model_id: Optional[str] = None  # If None, uses config model or first available
-    gpu_offload: Optional[float] = 1.0  # 0.0-1.0, default max GPU
-    context_length: Optional[int] = None
+    model_id: str | None = None  # If None, uses config model or first available
+    gpu_offload: float | None = 1.0  # 0.0-1.0, default max GPU
+    context_length: int | None = None
 
 
 # --- Configuration ---
@@ -105,18 +122,18 @@ class ModelLoadRequest(BaseModel):
 
 def get_llm_config() -> dict:
     """Load LLM configuration from centralized config and environment variables."""
-    # Get LM Studio URL from environment (Docker sets this to host.docker.internal)
-    # Fall back to localhost for non-Docker environments
+    # Environment overrides (Docker sets LM_STUDIO_URL to host.docker.internal)
     default_base_url = os.environ.get("LM_STUDIO_URL", "http://127.0.0.1:1234")
+    env_api_key = os.environ.get("LLM_API_KEY", "")
 
     try:
-        # Use centralized config system
         cfg = get_config()
         llm_config = cfg.config.get("local_llm", {})
 
         return {
             "enabled": llm_config.get("enabled", True),
             "base_url": llm_config.get("base_url", default_base_url),
+            "api_key": env_api_key or llm_config.get("api_key", ""),
             "model": llm_config.get("model", ""),
             "gpu_offload": llm_config.get("gpu_offload", 1.0),
             "context_length": llm_config.get("context_length"),
@@ -129,10 +146,10 @@ def get_llm_config() -> dict:
     except Exception as e:
         logger.warning(f"Could not load LLM config: {e}")
 
-    # Fallback defaults - use environment variable for base_url
     return {
         "enabled": True,
         "base_url": default_base_url,
+        "api_key": env_api_key,
         "model": "",
         "gpu_offload": 1.0,
         "context_length": None,
@@ -142,74 +159,179 @@ def get_llm_config() -> dict:
     }
 
 
+def _get_headers(config: dict) -> dict[str, str]:
+    """Build HTTP headers for the LLM provider. Adds Bearer auth when api_key is set."""
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    api_key = config.get("api_key", "")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
 # --- Endpoints ---
 
 
 @router.get("/status", response_model=LLMStatus)
 async def get_llm_status():
-    """Check if LM Studio server is available and what model is loaded"""
+    """Check if the AI provider is reachable and which model is available."""
     httpx = _get_httpx()
     config = get_llm_config()
     base_url = config["base_url"]
+    headers = _get_headers(config)
+    api_key_set = bool(config.get("api_key", ""))
+
+    def _status(**kwargs: object) -> LLMStatus:
+        return LLMStatus(base_url=base_url, has_api_key=api_key_set, **kwargs)  # type: ignore[arg-type]
 
     if not config["enabled"]:
-        return LLMStatus(
+        return _status(
             available=False,
-            base_url=base_url,
             error="LLM integration is disabled in config",
         )
 
+    # If a model is explicitly configured, just check connectivity
+    if config["model"]:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{base_url}/v1/models", headers=headers)
+                if response.status_code == 200:
+                    return _status(
+                        available=True,
+                        model=config["model"],
+                        model_state="loaded",
+                    )
+                elif response.status_code == 401:
+                    return _status(
+                        available=False,
+                        error="Invalid API key. Check your key in Settings → AI.",
+                    )
+                else:
+                    return _status(
+                        available=False,
+                        error=f"Server returned {response.status_code}",
+                    )
+        except httpx.ConnectError:
+            return _status(
+                available=False,
+                error="Cannot connect to the AI provider. Is it running?",
+            )
+        except Exception as e:
+            return _status(available=False, error=str(e))
+
+    # No explicit model — auto-detect
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            # Use the v0 API to get accurate model state
-            response = await client.get(f"{base_url}/api/v0/models")
-
+            # Try standard /v1/models first
+            response = await client.get(f"{base_url}/v1/models", headers=headers)
             if response.status_code == 200:
                 data = response.json()
                 models = data.get("data", [])
+                if models:
+                    return _status(
+                        available=True,
+                        model=models[0].get("id"),
+                        model_state="loaded",
+                    )
 
-                # Find loaded LLM/VLM models (VLMs can also do text chat)
+            # Fallback: LM Studio /api/v0/models (supports loaded-state filtering)
+            response = await client.get(f"{base_url}/api/v0/models", headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                models = data.get("data", [])
                 loaded_models = [
                     m
                     for m in models
                     if m.get("type") in ("llm", "vlm") and m.get("state") == "loaded"
                 ]
-
                 if loaded_models:
-                    model = loaded_models[0]
-                    return LLMStatus(
+                    return _status(
                         available=True,
-                        base_url=base_url,
-                        model=model.get("id"),
+                        model=loaded_models[0].get("id"),
                         model_state="loaded",
                     )
-                else:
-                    # Server is running but no model loaded
-                    return LLMStatus(
-                        available=False,
-                        base_url=base_url,
-                        model=None,
-                        model_state="not-loaded",
-                        error="No model loaded. Click 'Start LLM' to load a model.",
-                    )
-            else:
-                return LLMStatus(
-                    available=False,
-                    base_url=base_url,
-                    error=f"Server returned {response.status_code}",
-                )
+
+            # Server is reachable but no model found
+            return _status(
+                available=False,
+                model=None,
+                model_state="not-loaded",
+                error="No model available. Select a model in Settings → AI.",
+            )
     except httpx.ConnectError:
-        return LLMStatus(
+        return _status(
             available=False,
-            base_url=base_url,
-            error="Cannot connect to LM Studio. Is it running?",
+            error="Cannot connect to the AI provider. Is it running?",
         )
     except Exception as e:
-        return LLMStatus(
-            available=False,
-            base_url=base_url,
-            error=str(e),
-        )
+        return _status(available=False, error=str(e))
+
+
+@router.get("/models")
+async def list_provider_models():
+    """List models available from the configured AI provider.
+
+    Queries the provider's ``/v1/models`` endpoint and returns a simplified
+    list.  Falls back to LM Studio's ``/api/v0/models`` when the standard
+    endpoint is unavailable.
+    """
+    httpx = _get_httpx()
+    config = get_llm_config()
+    base_url = config["base_url"]
+    headers = _get_headers(config)
+
+    if not config["enabled"]:
+        raise HTTPException(status_code=503, detail="LLM integration is disabled")
+
+    models: list[dict] = []
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # Standard OpenAI /v1/models
+            response = await client.get(f"{base_url}/v1/models", headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                for m in data.get("data", []):
+                    models.append(
+                        {
+                            "id": m.get("id", ""),
+                            "owned_by": m.get("owned_by", ""),
+                        }
+                    )
+                return {"models": models}
+
+            if response.status_code == 401:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid API key. Check your key in Settings → AI.",
+                )
+
+            # Fallback: LM Studio /api/v0/models
+            response = await client.get(f"{base_url}/api/v0/models", headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                for m in data.get("data", []):
+                    if m.get("type") in ("llm", "vlm"):
+                        models.append(
+                            {
+                                "id": m.get("id", ""),
+                                "owned_by": m.get("publisher", ""),
+                                "state": m.get("state", "unknown"),
+                            }
+                        )
+                return {"models": models}
+
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Cannot connect to the AI provider. Check the endpoint URL.",
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list models: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    return {"models": models}
 
 
 @router.post("/process", response_model=LLMResponse)
@@ -219,27 +341,23 @@ async def process_with_llm(request: LLMRequest):
     config = get_llm_config()
 
     if not config["enabled"]:
-        raise HTTPException(
-            status_code=503, detail="LLM integration is disabled in config"
-        )
+        raise HTTPException(status_code=503, detail="LLM integration is disabled in config")
 
     base_url = config["base_url"]
 
     # Build the prompt
     system_prompt = request.system_prompt or config["default_system_prompt"]
     user_prompt = (
-        request.user_prompt
-        or f"Here is the transcription:\n\n{request.transcription_text}"
+        request.user_prompt or f"Here is the transcription:\n\n{request.transcription_text}"
     )
 
     # If user provided a custom user_prompt, append the transcription
     if request.user_prompt:
-        user_prompt = (
-            f"{request.user_prompt}\n\nTranscription:\n{request.transcription_text}"
-        )
+        user_prompt = f"{request.user_prompt}\n\nTranscription:\n{request.transcription_text}"
 
     # Prepare the API request
-    payload = {
+    headers = _get_headers(config)
+    payload: dict = {
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -249,7 +367,6 @@ async def process_with_llm(request: LLMRequest):
         "stream": False,
     }
 
-    # Add model if specified
     if config["model"]:
         payload["model"] = config["model"]
 
@@ -266,11 +383,11 @@ async def process_with_llm(request: LLMRequest):
     logger.info(f"  Max tokens: {max_tokens_log}, Temperature: {temperature_log}")
 
     try:
-        # Local models can take a while to respond (warmup / long generations).
         async with httpx.AsyncClient(timeout=600.0) as client:
             response = await client.post(
                 f"{base_url}/v1/chat/completions",
                 json=payload,
+                headers=headers,
             )
 
             if response.status_code != 200:
@@ -296,21 +413,21 @@ async def process_with_llm(request: LLMRequest):
 
             return llm_response
 
-    except httpx.ConnectError:
+    except httpx.ConnectError as exc:
         raise HTTPException(
             status_code=503,
-            detail="Cannot connect to LM Studio. Make sure it's running with a model loaded.",
-        )
-    except httpx.TimeoutException:
+            detail="Cannot connect to the AI provider. Check the endpoint URL and ensure the server is running.",
+        ) from exc
+    except httpx.TimeoutException as exc:
         raise HTTPException(
             status_code=504,
             detail="LLM request timed out. The model might be overloaded.",
-        )
+        ) from exc
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"LLM processing error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/process/stream")
@@ -320,27 +437,23 @@ async def process_with_llm_stream(request: LLMRequest):
     config = get_llm_config()
 
     if not config["enabled"]:
-        raise HTTPException(
-            status_code=503, detail="LLM integration is disabled in config"
-        )
+        raise HTTPException(status_code=503, detail="LLM integration is disabled in config")
 
     base_url = config["base_url"]
 
     # Build the prompt
     system_prompt = request.system_prompt or config["default_system_prompt"]
     user_prompt = (
-        request.user_prompt
-        or f"Here is the transcription:\n\n{request.transcription_text}"
+        request.user_prompt or f"Here is the transcription:\n\n{request.transcription_text}"
     )
 
     # If user provided a custom user_prompt, append the transcription
     if request.user_prompt:
-        user_prompt = (
-            f"{request.user_prompt}\n\nTranscription:\n{request.transcription_text}"
-        )
+        user_prompt = f"{request.user_prompt}\n\nTranscription:\n{request.transcription_text}"
 
     # Prepare the API request
-    payload = {
+    headers = _get_headers(config)
+    payload: dict = {
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -350,7 +463,6 @@ async def process_with_llm_stream(request: LLMRequest):
         "stream": True,
     }
 
-    # Add model if specified
     if config["model"]:
         payload["model"] = config["model"]
 
@@ -362,26 +474,22 @@ async def process_with_llm_stream(request: LLMRequest):
         else f"  System prompt: {sanitize_for_log(system_prompt)}"
     )
     logger.info(f"  Transcription length: {len(request.transcription_text)} chars")
-    logger.info(
-        f"  Max tokens: {payload['max_tokens']}, Temperature: {payload['temperature']}"
-    )
+    logger.info(f"  Max tokens: {payload['max_tokens']}, Temperature: {payload['temperature']}")
 
-    async def generate_stream() -> AsyncGenerator[str, None]:
+    async def generate_stream() -> AsyncGenerator[str]:
         """Generate SSE stream from LLM response"""
         total_content_length = 0
         try:
-            # Local models can take a while to respond (warmup / long generations).
             async with httpx.AsyncClient(timeout=600.0) as client:
                 async with client.stream(
                     "POST",
                     f"{base_url}/v1/chat/completions",
                     json=payload,
+                    headers=headers,
                 ) as response:
                     if response.status_code != 200:
                         error_text = await response.aread()
-                        logger.error(
-                            f"LLM API error: {response.status_code} - {error_text}"
-                        )
+                        logger.error(f"LLM API error: {response.status_code} - {error_text}")
                         yield f"data: {json.dumps({'error': f'LLM server error: {response.status_code}'})}\n\n"
                         return
 
@@ -408,8 +516,8 @@ async def process_with_llm_stream(request: LLMRequest):
                                 continue
 
         except httpx.ConnectError:
-            logger.error("LLM Stream error: Cannot connect to LM Studio")
-            yield f"data: {json.dumps({'error': 'Cannot connect to LM Studio'})}\n\n"
+            logger.error("LLM Stream error: Cannot connect to AI provider")
+            yield f"data: {json.dumps({'error': 'Cannot connect to the AI provider. Check the endpoint URL.'})}\n\n"
         except httpx.TimeoutException:
             logger.error("LLM Stream error: Request timed out")
             yield f"data: {json.dumps({'error': 'Request timed out'})}\n\n"
@@ -431,7 +539,7 @@ async def process_with_llm_stream(request: LLMRequest):
 @router.post("/summarize/{recording_id}", response_model=LLMResponse)
 async def summarize_recording(
     recording_id: int,
-    custom_prompt: Optional[str] = None,
+    custom_prompt: str | None = None,
 ):
     """Convenience endpoint: fetch transcription and summarize it (non-streaming)"""
     from server.database.database import get_recording, get_transcription
@@ -448,9 +556,7 @@ async def summarize_recording(
 
     # Build full text from segments
     full_text = "\n".join(
-        f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}"
-        if seg.get("speaker")
-        else seg["text"]
+        f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}" if seg.get("speaker") else seg["text"]
         for seg in transcription["segments"]
     )
 
@@ -466,7 +572,7 @@ async def summarize_recording(
 @router.post("/summarize/{recording_id}/stream")
 async def summarize_recording_stream(
     recording_id: int,
-    custom_prompt: Optional[str] = None,
+    custom_prompt: str | None = None,
 ):
     """Convenience endpoint: fetch transcription and summarize it (streaming)."""
     from server.database.database import get_recording, get_transcription
@@ -483,9 +589,7 @@ async def summarize_recording_stream(
 
     # Build full text from segments
     full_text = "\n".join(
-        f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}"
-        if seg.get("speaker")
-        else seg["text"]
+        f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}" if seg.get("speaker") else seg["text"]
         for seg in transcription["segments"]
     )
 
@@ -645,11 +749,12 @@ async def list_available_models():
     """
     config = get_llm_config()
     base_url = config["base_url"]
+    headers = _get_headers(config)
     httpx = _get_httpx()
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{base_url}/api/v0/models")
+            response = await client.get(f"{base_url}/api/v0/models", headers=headers)
 
             if response.status_code == 200:
                 data = response.json()
@@ -679,16 +784,16 @@ async def list_available_models():
                     status_code=502,
                     detail=f"LM Studio API error: {response.status_code}",
                 )
-    except httpx.ConnectError:
+    except httpx.ConnectError as exc:
         raise HTTPException(
             status_code=503,
             detail="Cannot connect to LM Studio. Is the server running?",
-        )
-    except httpx.ConnectTimeout:
+        ) from exc
+    except httpx.ConnectTimeout as exc:
         raise HTTPException(
             status_code=503,
             detail="Connection to LM Studio timed out. Is the server running?",
-        )
+        ) from exc
 
 
 @router.post("/model/load", response_model=ServerControlResponse)
@@ -734,9 +839,7 @@ async def load_model(request: ModelLoadRequest):
             )
 
     context_length_log = sanitize_for_log(str(context_length))
-    logger.info(
-        f"Loading model via API: {sanitize_for_log(model_id)} (ctx={context_length_log})"
-    )
+    logger.info(f"Loading model via API: {sanitize_for_log(model_id)} (ctx={context_length_log})")
 
     # Build load request payload for v1 API
     payload = {
@@ -760,9 +863,7 @@ async def load_model(request: ModelLoadRequest):
                 instance_id = data.get("instance_id", model_id)
                 load_time = data.get("load_time_seconds", 0)
 
-                logger.info(
-                    f"Model {sanitize_for_log(instance_id)} loaded in {load_time:.2f}s"
-                )
+                logger.info(f"Model {sanitize_for_log(instance_id)} loaded in {load_time:.2f}s")
                 return ServerControlResponse(
                     success=True,
                     message=f"Model '{sanitize_for_log(instance_id)}' loaded successfully in {load_time:.2f}s",
@@ -801,7 +902,7 @@ async def load_model(request: ModelLoadRequest):
 
 
 @router.post("/model/unload", response_model=ServerControlResponse)
-async def unload_model(instance_id: Optional[str] = None):
+async def unload_model(instance_id: str | None = None):
     """
     Unload a loaded model to free VRAM using the v1 REST API.
 
@@ -825,8 +926,7 @@ async def unload_model(instance_id: Optional[str] = None):
                     loaded_models = [
                         m
                         for m in models
-                        if m.get("type") in ("llm", "vlm")
-                        and m.get("state") == "loaded"
+                        if m.get("type") in ("llm", "vlm") and m.get("state") == "loaded"
                     ]
 
                     if loaded_models:
@@ -859,9 +959,7 @@ async def unload_model(instance_id: Optional[str] = None):
                 data = response.json()
                 unloaded_id = data.get("instance_id", instance_id)
 
-                logger.info(
-                    f"Model {sanitize_for_log(unloaded_id)} unloaded successfully"
-                )
+                logger.info(f"Model {sanitize_for_log(unloaded_id)} unloaded successfully")
                 return ServerControlResponse(
                     success=True,
                     message=f"Model '{sanitize_for_log(unloaded_id)}' unloaded successfully",
@@ -935,7 +1033,7 @@ class ConversationCreate(BaseModel):
     """Request to create a new conversation"""
 
     recording_id: int
-    title: Optional[str] = "New Chat"
+    title: str | None = "New Chat"
 
 
 class ConversationUpdate(BaseModel):
@@ -949,8 +1047,8 @@ class MessageCreate(BaseModel):
 
     role: str  # "user" or "assistant"
     content: str
-    model: Optional[str] = None
-    tokens_used: Optional[int] = None
+    model: str | None = None
+    tokens_used: int | None = None
 
 
 class ChatRequest(BaseModel):
@@ -958,10 +1056,10 @@ class ChatRequest(BaseModel):
 
     conversation_id: int
     user_message: str
-    system_prompt: Optional[str] = None
+    system_prompt: str | None = None
     include_transcription: bool = True
-    max_tokens: Optional[int] = None
-    temperature: Optional[float] = None
+    max_tokens: int | None = None
+    temperature: float | None = None
 
 
 @router.get("/conversations/{recording_id}")
@@ -1075,23 +1173,24 @@ async def add_message_to_conversation(conversation_id: int, request: MessageCrea
 @router.post("/chat")
 async def chat_with_llm(request: ChatRequest):
     """
-    Send a message in a conversation and get an LLM response using stateful v1 API.
+    Send a message in a conversation and get a streaming LLM response.
 
-    This:
-    1. Adds the user message to the conversation
-    2. Uses LM Studio's stateful /api/v1/chat with response_id tracking
-    3. Streams the response from the model
-    4. Saves the assistant response and updates response_id
+    Uses the standard OpenAI ``/v1/chat/completions`` endpoint with full
+    message history, compatible with any OpenAI-compatible provider.
+
+    Flow:
+    1. Save the user message to the DB
+    2. Build the messages array from conversation history
+    3. Stream the response via ``/v1/chat/completions``
+    4. Save the assistant response to the DB
     """
     from server.database.database import (
         add_message,
         get_conversation_with_messages,
         get_recording,
         get_transcription,
-        update_conversation_response_id,
     )
 
-    # Get conversation and verify it exists
     conversation = get_conversation_with_messages(request.conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -1103,151 +1202,128 @@ async def chat_with_llm(request: ChatRequest):
         content=request.user_message,
     )
 
-    # Build request for stateful LM Studio v1 API
     config = get_llm_config()
     base_url = config["base_url"]
+    headers = _get_headers(config)
     httpx = _get_httpx()
+
     model_id = config.get("model")
     if not model_id:
-        model_id = await _get_loaded_model_id(base_url)
+        model_id = await _get_loaded_model_id(base_url, headers)
     if not model_id:
         raise HTTPException(
             status_code=503,
-            detail="No model loaded in LM Studio. Load a model first.",
+            detail="No model available. Select a model in Settings → AI.",
         )
 
-    # Build input with optional transcription context
-    input_text = request.user_message
+    # Build the messages array from conversation history
+    system_prompt = request.system_prompt or config.get("default_system_prompt", "")
+    messages: list[dict[str, str]] = []
 
-    response_id = conversation.get("response_id")
-    # Add transcription context only on first message (when no response_id exists)
-    if request.include_transcription and response_id is None:
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    # Inject transcription context on the first user message only
+    existing_messages = conversation.get("messages", [])
+    is_first_message = len(existing_messages) == 0
+
+    transcription_context = ""
+    if request.include_transcription and is_first_message:
         recording = get_recording(conversation["recording_id"])
         if recording:
             transcription = get_transcription(conversation["recording_id"])
             if transcription and transcription.get("segments"):
-                # Build transcription text (pure transcript, no timestamps)
                 diarization_enabled = bool(recording.get("has_diarization"))
                 if diarization_enabled:
-                    trans_text = "\n".join(
+                    transcription_context = "\n".join(
                         f"[{seg.get('speaker') or 'Speaker'}]: {seg.get('text', '')}"
                         for seg in transcription["segments"]
                     )
                 else:
-                    trans_text = "\n".join(
+                    transcription_context = "\n".join(
                         seg.get("text", "") for seg in transcription["segments"]
                     )
-                input_text = f"Context (transcription):\n{trans_text}\n\nUser: {request.user_message}"
 
-    # Prepare LLM request for v1 API
-    payload = {
-        "input": input_text,
-        "store": True,  # Request response_id for stateful conversation
-        "temperature": request.temperature or config["temperature"],
+    # Replay prior messages from DB
+    for msg in existing_messages:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+
+    # Append the current user message (with optional transcription context)
+    if transcription_context:
+        user_content = (
+            f"Context (transcription):\n{transcription_context}\n\nUser: {request.user_message}"
+        )
+    else:
+        user_content = request.user_message
+    messages.append({"role": "user", "content": user_content})
+
+    payload: dict = {
+        "messages": messages,
         "model": model_id,
+        "temperature": request.temperature or config["temperature"],
+        "stream": True,
     }
 
-    # Add previous response_id to continue conversation
-    if response_id and response_id != "stateless":
-        payload["response_id"] = response_id
-
-    # Add context length if specified
-    if config.get("context_length"):
-        payload["context_length"] = config["context_length"]
+    if request.max_tokens or config.get("max_tokens"):
+        payload["max_tokens"] = request.max_tokens or config["max_tokens"]
 
     logger.info(
-        f"Chat request to {sanitize_for_log(base_url)} for conversation {sanitize_for_log(str(request.conversation_id))}"
+        f"Chat request to {sanitize_for_log(base_url)} for conversation "
+        f"{sanitize_for_log(str(request.conversation_id))} ({len(messages)} messages)"
     )
 
-    async def generate_stream() -> AsyncGenerator[str, None]:
-        """Generate SSE stream from stateful LM Studio v1 API."""
+    async def generate_stream() -> AsyncGenerator[str]:
+        """Stream response chunks from /v1/chat/completions."""
         full_response = ""
-        new_response_id = None
-        tokens_used = 0
 
         try:
-            # Local models can take a while to respond (warmup / long generations).
             async with httpx.AsyncClient(timeout=600.0) as client:
-                response = await client.post(
-                    f"{base_url}/api/v1/chat",
+                async with client.stream(
+                    "POST",
+                    f"{base_url}/v1/chat/completions",
                     json=payload,
-                )
-
-                if response.status_code != 200:
-                    error_text = await response.aread()
-                    # Some LM Studio builds don't accept response_id. Retry stateless once.
-                    if (
-                        response.status_code == 400
-                        and payload.get("response_id")
-                        and b"response_id" in error_text
-                    ):
-                        logger.warning(
-                            "LM Studio rejected response_id; retrying without stateful context."
-                        )
-                        payload.pop("response_id", None)
-                        update_conversation_response_id(
-                            request.conversation_id, "stateless"
-                        )
-                        response = await client.post(
-                            f"{base_url}/api/v1/chat",
-                            json=payload,
-                        )
-                        if response.status_code != 200:
-                            error_text = await response.aread()
-                            logger.error(
-                                f"LLM API error: {response.status_code} - {error_text}"
-                            )
-                            yield f"data: {json.dumps({'error': f'LLM server error: {response.status_code}'})}\n\n"
-                            return
-                    else:
-                        logger.error(
-                            f"LLM API error: {response.status_code} - {error_text}"
-                        )
+                    headers=headers,
+                ) as response:
+                    if response.status_code == 401:
+                        yield f"data: {json.dumps({'error': 'Invalid API key. Check your key in Settings → AI.'})}\n\n"
+                        return
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        logger.error(f"LLM API error: {response.status_code} - {error_text}")
                         yield f"data: {json.dumps({'error': f'LLM server error: {response.status_code}'})}\n\n"
                         return
 
-                # Parse the response
-                data = response.json()
-                new_response_id = data.get("response_id")
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            data_str = line[6:]
 
-                # Extract message content from output array
-                output = data.get("output", [])
-                for item in output:
-                    if item.get("type") == "message":
-                        content = item.get("content", "")
-                        if content:
-                            full_response += content
-                            # Stream it to client
-                            yield f"data: {json.dumps({'content': content})}\n\n"
+                            if data_str.strip() == "[DONE]":
+                                break
 
-                # Get token stats
-                stats = data.get("stats", {})
-                tokens_used = stats.get("total_output_tokens", 0)
+                            try:
+                                data = json.loads(data_str)
+                                delta = data.get("choices", [{}])[0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    full_response += content
+                                    yield f"data: {json.dumps({'content': content})}\n\n"
+                            except json.JSONDecodeError:
+                                continue
 
-                # Save the response to database
-                if full_response:
-                    add_message(
-                        conversation_id=request.conversation_id,
-                        role="assistant",
-                        content=full_response,
-                        model=model_id,
-                        tokens_used=tokens_used if tokens_used > 0 else None,
-                    )
+            # Save assistant response to DB
+            if full_response:
+                add_message(
+                    conversation_id=request.conversation_id,
+                    role="assistant",
+                    content=full_response,
+                    model=model_id,
+                )
 
-                # Update conversation with new response_id for next turn
-                if new_response_id:
-                    update_conversation_response_id(
-                        request.conversation_id, new_response_id
-                    )
-                    logger.info(
-                        f"Conversation {request.conversation_id} updated with response_id: {new_response_id[:20]}..."
-                    )
-
-                yield f"data: {json.dumps({'done': True})}\n\n"
+            yield f"data: {json.dumps({'done': True})}\n\n"
 
         except httpx.ConnectError:
-            logger.error("Chat error: Cannot connect to LM Studio")
-            yield f"data: {json.dumps({'error': 'Cannot connect to LM Studio. Click Start LLM to load a model.'})}\n\n"
+            logger.error("Chat error: Cannot connect to AI provider")
+            yield f"data: {json.dumps({'error': 'Cannot connect to the AI provider. Check the endpoint URL.'})}\n\n"
         except httpx.TimeoutException:
             logger.error("Chat error: Request timed out")
             yield f"data: {json.dumps({'error': 'Request timed out'})}\n\n"
@@ -1256,7 +1332,7 @@ async def chat_with_llm(request: ChatRequest):
             yield f"data: {json.dumps({'error': 'An internal error occurred during chat'})}\n\n"
 
     return StreamingResponse(
-        generate_stream(),  # lgtm[py/stack-trace-exposure] exceptions caught in generator
+        generate_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

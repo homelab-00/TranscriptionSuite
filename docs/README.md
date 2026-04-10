@@ -12,8 +12,8 @@
 A fully local and private Speech-To-Text
 app with cross-platform support, speaker
 diarization, Audio Notebook mode,
-LM Studio integration, and both longform
-and live transcription. Electron
+AI assistant (OpenAI-compatible), and
+both longform and live transcription. Electron
 dashboard + Python backend with
 multi-backend STT (Whisper, NVIDIA NeMo,
 VibeVoice-ASR, whisper.cpp), NVIDIA GPU
@@ -92,7 +92,7 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (available for Whisper models on all platforms; not available for NeMo, VibeVoice, or whisper.cpp models)
 - **Global Keyboard Shortcuts**: System-wide shortcuts & paste-at-cursor functionality
 - **Remote Access**: Securely access your desktop at home running the model from anywhere (utilizing Tailscale) or share it on your local network via LAN
-- **Audio Notebook**: An Audio Notebook mode, with a calendar-based view, full-text search, and LM Studio integration (chat with the AI about your notes)
+- **Audio Notebook**: An Audio Notebook mode, with a calendar-based view, full-text search, and AI assistant (chat with any OpenAI-compatible provider about your notes — LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others)
 
 
 📌*Half an hour of audio transcribed in under a minute with Whisper (RTX 3060)!*
