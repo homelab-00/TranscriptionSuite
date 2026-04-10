@@ -12,7 +12,12 @@ services:
   whisper-server:
     image: ghcr.io/ggml-org/whisper.cpp:main-vulkan
     command:
-      - "whisper-server --model \"$$WHISPER_MODEL\" --host 0.0.0.0 --port 8080 --convert"
+      - >-
+        until test -f "$$WHISPER_MODEL"; do
+        echo '[whisper-server] Waiting for model $$WHISPER_MODEL to be downloaded...';
+        sleep 10;
+        done;
+        exec whisper-server --model "$$WHISPER_MODEL" --host 0.0.0.0 --port 8080 --convert
     restart: unless-stopped
     volumes:
       - huggingface-models:/models:ro
@@ -32,4 +37,4 @@ services:
   transcriptionsuite:
     depends_on:
       whisper-server:
-        condition: service_healthy
+        condition: service_started

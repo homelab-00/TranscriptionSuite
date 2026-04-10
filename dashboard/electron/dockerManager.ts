@@ -2376,7 +2376,7 @@ function isGgmlFileName(name: string): boolean {
  * Download a GGML flat-file model from the ggerganov/whisper.cpp HuggingFace repo
  * directly into `/models/` on the models volume inside the running container.
  *
- * Uses `wget` inside the container so no Python huggingface_hub dependency is needed.
+ * Uses `curl` inside the container so no Python huggingface_hub dependency is needed.
  * Downloads to a `.tmp` suffix first; renames to the final name on success.
  * On failure, the partial `.tmp` file is deleted before re-throwing.
  */
@@ -2393,7 +2393,7 @@ async function downloadGgmlModel(fileName: string): Promise<void> {
   const bin = await runtimeBin();
 
   try {
-    await execFileAsync(bin, ['exec', CONTAINER_NAME, 'wget', '-q', '-O', tmp, url], {
+    await execFileAsync(bin, ['exec', CONTAINER_NAME, 'curl', '-fsSL', '-o', tmp, url], {
       maxBuffer: 1 * 1024 * 1024,
       timeout: 1_800_000, // 30 minutes for large models
     });
