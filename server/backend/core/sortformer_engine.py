@@ -90,12 +90,35 @@ class SortformerEngine:
         logger.info("Sortformer model loaded")
 
     def unload(self) -> None:
-        """Release model memory."""
+        """Release model memory and flush Metal buffers.
+
+        MLX uses lazy evaluation backed by Metal command buffers.  Simply
+        removing the Python reference does not immediately release GPU
+        memory — pending command buffers may still hold the model weights.
+        Calling ``mx.eval()`` drains any in-flight Metal work, then
+        ``mx.metal.clear_cache()`` releases the cached Metal allocations so
+        the memory is available before the next MLX session (e.g. MLX
+        Parakeet transcription) begins.
+        """
         if not self._loaded:
             return
         del self._model
         self._model = None
         self._loaded = False
+
+        # Synchronize and clear the MLX Metal allocator cache so these
+        # buffers are truly freed before the next MLX session starts.
+        try:
+            import gc
+
+            import mlx.core as mx
+
+            mx.synchronize()  # wait for all in-flight Metal command buffers
+            gc.collect()
+            mx.metal.clear_cache()  # release cached Metal allocations
+        except Exception:
+            pass  # non-Metal build or old MLX — safe to ignore
+
         logger.info("Sortformer model unloaded")
 
     def is_loaded(self) -> bool:

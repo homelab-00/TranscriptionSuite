@@ -48,6 +48,17 @@ DEFAULT_LOCAL_ATTENTION_WINDOW: tuple[int, int] = (256, 256)
 # Mirrors the NeMo backend's max_chunk_duration_s setting.
 DEFAULT_MAX_CHUNK_DURATION_S: int = 30
 
+# Audio longer than this (seconds) falls back from local attention to chunked
+# inference.  Local attention dispatches a Metal kernel with (B*H*S_q) *
+# (2*window+1) threads; for ~10 min of audio that is ~92 M threads, which
+# reliably causes a Metal GPU fault or hang on Apple Silicon.  Chunked
+# inference processes the audio in shorter pieces and avoids the crash.
+DEFAULT_CHUNK_INFERENCE_THRESHOLD_S: int = 600  # 10 minutes
+
+# Chunk parameters used when falling back to chunked inference.
+DEFAULT_CHUNK_DURATION_S: float = 60.0
+DEFAULT_CHUNK_OVERLAP_S: float = 15.0
+
 logger = logging.getLogger(__name__)
 
 
@@ -124,6 +135,9 @@ class MLXParakeetBackend(STTBackend):
         self._use_local_attention: bool = True
         self._local_attention_window: tuple[int, int] = DEFAULT_LOCAL_ATTENTION_WINDOW
         self._max_chunk_duration_s: int = DEFAULT_MAX_CHUNK_DURATION_S
+        self._chunk_inference_threshold_s: int = DEFAULT_CHUNK_INFERENCE_THRESHOLD_S
+        self._chunk_duration_s: float = DEFAULT_CHUNK_DURATION_S
+        self._chunk_overlap_s: float = DEFAULT_CHUNK_OVERLAP_S
         # Tracks the encoder's current attention mode so we only call
         # set_attention_model() when a switch is actually needed.
         self._attention_mode: str = "global"
@@ -172,16 +186,42 @@ class MLXParakeetBackend(STTBackend):
             except (TypeError, ValueError):
                 self._max_chunk_duration_s = DEFAULT_MAX_CHUNK_DURATION_S
 
+            try:
+                self._chunk_inference_threshold_s = max(
+                    1,
+                    int(mlx_cfg.get("chunk_inference_threshold_s", DEFAULT_CHUNK_INFERENCE_THRESHOLD_S) or DEFAULT_CHUNK_INFERENCE_THRESHOLD_S),
+                )
+            except (TypeError, ValueError):
+                self._chunk_inference_threshold_s = DEFAULT_CHUNK_INFERENCE_THRESHOLD_S
+
+            try:
+                self._chunk_duration_s = max(
+                    5.0,
+                    float(mlx_cfg.get("chunk_duration_s", DEFAULT_CHUNK_DURATION_S) or DEFAULT_CHUNK_DURATION_S),
+                )
+            except (TypeError, ValueError):
+                self._chunk_duration_s = DEFAULT_CHUNK_DURATION_S
+
+            try:
+                self._chunk_overlap_s = max(
+                    0.0,
+                    float(mlx_cfg.get("chunk_overlap_s", DEFAULT_CHUNK_OVERLAP_S) or DEFAULT_CHUNK_OVERLAP_S),
+                )
+            except (TypeError, ValueError):
+                self._chunk_overlap_s = DEFAULT_CHUNK_OVERLAP_S
+
             # Attention mode starts as "global" (the model's built-in default);
             # transcribe() switches per-call based on audio duration.
             self._attention_mode = "global"
 
             logger.info(
-                "MLX Parakeet model loaded: %s (use_local_attention=%s, local_attention_window=%s, max_chunk_duration_s=%d)",
+                "MLX Parakeet model loaded: %s (use_local_attention=%s, local_attention_window=%s, "
+                "max_chunk_duration_s=%d, chunk_inference_threshold_s=%d)",
                 model_name,
                 self._use_local_attention,
                 self._local_attention_window,
                 self._max_chunk_duration_s,
+                self._chunk_inference_threshold_s,
             )
         except Exception as exc:
             raise RuntimeError(
@@ -277,33 +317,70 @@ class MLXParakeetBackend(STTBackend):
                 )
             )
 
-            # Switch attention mode based on audio duration, mirroring the
-            # NeMo backend's max_chunk_duration_s logic.
-            # - Short audio (≤ max_chunk_duration_s): global attention gives the
-            #   best quality and fits in Metal memory.
-            # - Long audio (> max_chunk_duration_s): local (sliding-window)
-            #   attention is O(N) in memory and avoids Metal OOM crashes.
+            # 3-way strategy based on audio duration:
+            #
+            # ① Short (≤ max_chunk_duration_s): global attention — best quality,
+            #    the full-sequence attention matrix fits easily in Metal.
+            #
+            # ② Medium (max_chunk_duration_s < dur ≤ chunk_inference_threshold_s):
+            #    local (sliding-window) attention — O(N) memory, single pass,
+            #    no boundary stitching artefacts.
+            #
+            # ③ Very long (> chunk_inference_threshold_s): chunked inference with
+            #    global attention per chunk.  Local attention's custom Metal kernel
+            #    dispatches B*H*S_q * (2*W+1) threads — for a 61-minute file that
+            #    is ~380 M threads, which causes a Metal GPU fault / hang on Apple
+            #    Silicon regardless of available memory.  The parakeet-mlx
+            #    chunk_duration API processes overlapping segments so boundary
+            #    artefacts are minimised.
             audio_duration_s = len(audio) / SAMPLE_RATE
-            needs_local = self._use_local_attention and audio_duration_s > self._max_chunk_duration_s
-            target_mode = "local" if needs_local else "global"
 
-            if target_mode != self._attention_mode:
-                if target_mode == "local":
-                    self._model.encoder.set_attention_model(
-                        "rel_pos_local_attn", self._local_attention_window
-                    )
-                else:
+            if self._use_local_attention and audio_duration_s > self._chunk_inference_threshold_s:
+                # Regime ③ — chunked inference.  Switch encoder back to global
+                # attention so each chunk gets the highest-quality decode.
+                if self._attention_mode != "global":
                     self._model.encoder.set_attention_model(
                         "rel_pos", self._local_attention_window
                     )
-                self._attention_mode = target_mode
+                    self._attention_mode = "global"
                 logger.info(
-                    "MLX Parakeet: switched to %s attention for %.0fs audio",
-                    target_mode,
+                    "MLX Parakeet: using chunked inference (%.0fs chunks, %.0fs overlap) for %.0fs audio",
+                    self._chunk_duration_s,
+                    self._chunk_overlap_s,
                     audio_duration_s,
                 )
+                result = self._model.transcribe(
+                    tmp_path,
+                    decoding_config=decoding_config,
+                    chunk_duration=self._chunk_duration_s,
+                    overlap_duration=self._chunk_overlap_s,
+                )
 
-            result = self._model.transcribe(tmp_path, decoding_config=decoding_config)
+            elif self._use_local_attention and audio_duration_s > self._max_chunk_duration_s:
+                # Regime ② — local sliding-window attention.
+                if self._attention_mode != "local":
+                    self._model.encoder.set_attention_model(
+                        "rel_pos_local_attn", self._local_attention_window
+                    )
+                    self._attention_mode = "local"
+                    logger.info(
+                        "MLX Parakeet: switched to local attention for %.0fs audio",
+                        audio_duration_s,
+                    )
+                result = self._model.transcribe(tmp_path, decoding_config=decoding_config)
+
+            else:
+                # Regime ① — global attention.
+                if self._attention_mode != "global":
+                    self._model.encoder.set_attention_model(
+                        "rel_pos", self._local_attention_window
+                    )
+                    self._attention_mode = "global"
+                    logger.info(
+                        "MLX Parakeet: switched to global attention for %.0fs audio",
+                        audio_duration_s,
+                    )
+                result = self._model.transcribe(tmp_path, decoding_config=decoding_config)
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 

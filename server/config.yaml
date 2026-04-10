@@ -115,6 +115,19 @@ mlx_parakeet:
     # Mirrors the NeMo backend's max_chunk_duration_s.  Default: 30.
     max_chunk_duration_s: 30
 
+    # Audio longer than this (seconds) falls back from local attention to
+    # chunked inference.  Local attention's custom Metal kernel dispatches
+    # B*H*S_q*(2*W+1) threads; at ~10 minutes that is ~92 M threads and at
+    # 61 minutes ~380 M threads — reliably causing a Metal GPU fault or hang
+    # on Apple Silicon.  Chunked inference processes the audio in shorter
+    # pieces (chunk_duration_s each, with chunk_overlap_s overlap) using
+    # global attention per chunk, which avoids the crash while keeping
+    # reasonable quality via overlap stitching.  Default: 600 (10 minutes).
+    chunk_inference_threshold_s: 600
+    # Chunk size and overlap for chunked inference (seconds).
+    chunk_duration_s: 60
+    chunk_overlap_s: 15
+
 # ----------------------------------------------------------------------------
 # VibeVoice-ASR (Experimental, In-Process Backend)
 # ----------------------------------------------------------------------------

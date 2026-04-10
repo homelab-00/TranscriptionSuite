@@ -124,15 +124,23 @@ def clear_gpu_cache() -> None:
     Clear GPU cache and run garbage collection.
 
     Use this after unloading models to free GPU memory.
+    Handles CUDA, PyTorch MPS (Apple Silicon), and MLX Metal caches.
     """
     try:
         gc.collect()
         gc.collect()
 
-        if HAS_TORCH and torch is not None and torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-            logger.debug("GPU cache cleared")
+        if HAS_TORCH and torch is not None:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logger.debug("CUDA GPU cache cleared")
+            # Flush PyTorch MPS (Apple Silicon Metal via PyTorch).
+            # mps is available when torch is built with MPS support on macOS.
+            if hasattr(torch, "mps") and torch.backends.mps.is_available():
+                torch.mps.synchronize()
+                torch.mps.empty_cache()
+                logger.debug("MPS GPU cache cleared")
     except Exception as e:
         logger.debug(f"Could not clear GPU cache: {e}")
 

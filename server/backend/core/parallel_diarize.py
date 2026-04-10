@@ -169,15 +169,50 @@ def transcribe_and_diarize(
         )
         return result, None
 
-    # Sortformer uses MLX/Metal — running it in parallel with MLX Whisper
-    # (also Metal) deadlocks the GPU.  Fall back to sequential mode.
+    # Sortformer (MLX/Metal) and PyAnnote on MPS both occupy the Metal GPU.
+    # Running either in parallel with an MLX STT backend deadlocks or
+    # corrupts the Metal command buffer.  Fall back to sequential mode and
+    # unload the diarization model first so it is not resident in Metal
+    # memory during the transcription phase.
+    from server.core.diarization_engine import DiarizationEngine
     from server.core.sortformer_engine import SortformerEngine
+    from server.core.stt.backends.factory import is_mlx_model
+
+    _stt_uses_metal = is_mlx_model(engine.model_name)
 
     if isinstance(diar_engine, SortformerEngine):
         logger.info(
-            "Sortformer + MLX detected — switching to sequential mode "
+            "Sortformer + MLX STT detected — switching to sequential mode "
             "to avoid Metal deadlock"
         )
+        # Sortformer is already loaded; unload it now so Metal memory is
+        # free during transcription.  transcribe_then_diarize reloads it
+        # in Phase 2 after the STT model is released.
+        model_manager.unload_diarization_model()
+        return transcribe_then_diarize(
+            engine=engine,
+            model_manager=model_manager,
+            file_path=file_path,
+            language=language,
+            task=task,
+            translation_target_language=translation_target_language,
+            word_timestamps=word_timestamps,
+            expected_speakers=expected_speakers,
+            cancellation_check=cancellation_check,
+            progress_callback=progress_callback,
+        )
+
+    if (
+        _stt_uses_metal
+        and isinstance(diar_engine, DiarizationEngine)
+        and getattr(diar_engine, "device", "") == "mps"
+    ):
+        logger.info(
+            "PyAnnote on MPS + MLX STT detected — switching to sequential mode "
+            "to avoid Metal deadlock"
+        )
+        # PyAnnote was pre-loaded on MPS; unload it before transcription.
+        model_manager.unload_diarization_model()
         return transcribe_then_diarize(
             engine=engine,
             model_manager=model_manager,
