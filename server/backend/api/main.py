@@ -200,6 +200,11 @@ _VIBEVOICE_RECOVERABLE_PRELOAD_ERROR_TEXTS = (
     "VibeVoice-ASR backend selected but compatible VibeVoice-ASR modules could not be imported",
 )
 
+_NEMO_RECOVERABLE_PRELOAD_ERROR_TEXTS = (
+    "NeMo toolkit is required for NVIDIA Parakeet models but is not installed",
+    "NeMo toolkit is required for NVIDIA Canary models but is not installed",
+)
+
 
 def _iter_exception_chain(exc: BaseException) -> list[BaseException]:
     chain: list[BaseException] = []
@@ -279,6 +284,67 @@ def _build_vibevoice_preload_skip_warning(
             "the model. Continuing startup without a loaded transcription model."
         ),
         "model preload skipped (VibeVoice-ASR optional dependency missing)",
+    )
+
+
+def _is_recoverable_nemo_preload_error(model_name: str, exc: BaseException) -> bool:
+    """Return True only for the known optional NeMo missing-package preload failure."""
+    try:
+        from server.core.stt.backends.factory import detect_backend_type
+    except Exception:
+        return False
+
+    backend_type = detect_backend_type(model_name)
+    if backend_type not in ("parakeet", "canary"):
+        return False
+
+    for current in _iter_exception_chain(exc):
+        if isinstance(current, ImportError) and any(
+            text in str(current) for text in _NEMO_RECOVERABLE_PRELOAD_ERROR_TEXTS
+        ):
+            return True
+    return False
+
+
+def _build_nemo_preload_skip_warning(
+    model_name: str,
+    feature_status: dict[str, object] | None,
+) -> tuple[str, str]:
+    """Return (message, timing_label) for recoverable NeMo preload failures."""
+    feature_status = feature_status or {}
+    reason = str(feature_status.get("reason", "unknown") or "unknown")
+
+    if reason == "import_failed":
+        return (
+            (
+                "Transcription preload skipped for NeMo backend "
+                f"(model={model_name}). INSTALL_NEMO was enabled, but the bootstrap "
+                f"NeMo import probe failed (reason={reason}). "
+                "Continuing startup without a loaded transcription model. The installed "
+                "NeMo toolkit may be incompatible; check container logs for details."
+            ),
+            "model preload skipped (NeMo import probe failed)",
+        )
+
+    if reason.startswith("install_failed"):
+        return (
+            (
+                "Transcription preload skipped for NeMo backend "
+                f"(model={model_name}). NeMo optional dependency installation failed during "
+                f"bootstrap (reason={reason}). Continuing startup "
+                "without a loaded transcription model."
+            ),
+            "model preload skipped (NeMo optional dependency install failed)",
+        )
+
+    return (
+        (
+            "Transcription preload skipped for NeMo backend "
+            f"(model={model_name}). Set INSTALL_NEMO=true in your Docker environment "
+            "and restart to enable NeMo-based models (Parakeet, Canary). "
+            "Continuing startup without a loaded transcription model."
+        ),
+        "model preload skipped (NeMo optional dependency missing)",
     )
 
 
@@ -576,7 +642,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         try:
             manager.load_transcription_model()
         except Exception as e:
-            if _is_recoverable_vibevoice_preload_error(selected_main_model, e):
+            if _is_recoverable_nemo_preload_error(selected_main_model, e):
+                nemo_feature_status = None
+                try:
+                    nemo_feature_status = manager.get_nemo_feature_status()
+                except Exception:
+                    nemo_feature_status = None
+
+                warning_message, timing_label = _build_nemo_preload_skip_warning(
+                    selected_main_model,
+                    nemo_feature_status,
+                )
+                logger.warning(
+                    warning_message,
+                    exc_info=True,
+                )
+                _log_time(timing_label)
+            elif _is_recoverable_vibevoice_preload_error(selected_main_model, e):
                 vibevoice_feature_status = None
                 try:
                     vibevoice_feature_status = manager.get_vibevoice_asr_feature_status()
