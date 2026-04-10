@@ -302,7 +302,8 @@ class AudioToTextRecorder:
         if self.device == "cuda" and self.compute_type == "default":
             from server.core.audio_utils import get_cuda_compute_capability
 
-            cc = get_cuda_compute_capability()
+            device_idx = self.gpu_device_index if isinstance(self.gpu_device_index, int) else 0
+            cc = get_cuda_compute_capability(device_idx)
             if cc is not None and cc < (7, 0):
                 logger.warning(
                     "GPU compute capability %d.%d < 7.0 — overriding compute_type "

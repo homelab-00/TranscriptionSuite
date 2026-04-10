@@ -28,12 +28,17 @@ async function hasCommand(name: string): Promise<boolean> {
   const cached = commandCache.get(name);
   if (cached !== undefined) return cached;
   try {
-    await execFileAsync('which', [name]);
+    // Probe the command directly instead of relying on `which`, which may not
+    // be on PATH in Electron's sanitized environment. ENOENT = not found;
+    // any other error (bad flag, non-zero exit) still proves the binary exists.
+    await execFileAsync(name, ['--version']);
     commandCache.set(name, true);
     return true;
-  } catch {
-    commandCache.set(name, false);
-    return false;
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    const found = code !== 'ENOENT' && code !== 'EACCES';
+    commandCache.set(name, found);
+    return found;
   }
 }
 

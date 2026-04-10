@@ -24,8 +24,14 @@ const execFileAsync = promisify(execFile);
 /** The long-lived wl-copy child process that maintains clipboard ownership. */
 let wlCopyChild: ChildProcess | null = null;
 
-/** Cached result of `which wl-copy`. */
+/** Cached result of wl-copy availability probe. */
 let wlCopyAvailable: boolean | null = null;
+
+/** Timestamp of last negative probe — allows re-check after TTL. */
+let wlCopyNegativeProbeAt = 0;
+
+/** Re-probe interval for negative results (60 seconds). */
+const WL_COPY_NEGATIVE_TTL_MS = 60_000;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -45,14 +51,26 @@ function readClipboardSafe(): string | null {
   }
 }
 
-/** Check whether `wl-copy` is available on the system (cached). */
+/** Check whether `wl-copy` is available on the system (cached with TTL on negatives). */
 async function hasWlCopy(): Promise<boolean> {
-  if (wlCopyAvailable !== null) return wlCopyAvailable;
+  if (wlCopyAvailable === true) return true;
+  if (wlCopyAvailable === false && Date.now() - wlCopyNegativeProbeAt < WL_COPY_NEGATIVE_TTL_MS) {
+    return false;
+  }
   try {
-    await execFileAsync('which', ['wl-copy']);
+    // Probe the command directly instead of relying on `which`, which may not
+    // be on PATH in Electron's sanitized environment.
+    await execFileAsync('wl-copy', ['--version']);
     wlCopyAvailable = true;
-  } catch {
-    wlCopyAvailable = false;
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'EACCES') {
+      wlCopyAvailable = false;
+      wlCopyNegativeProbeAt = Date.now();
+    } else {
+      // Command exists but --version flag not understood — still available
+      wlCopyAvailable = true;
+    }
   }
   return wlCopyAvailable;
 }
@@ -156,4 +174,5 @@ export function cleanupClipboard(): void {
 export function _resetClipboardState(): void {
   killPreviousWlCopy();
   wlCopyAvailable = null;
+  wlCopyNegativeProbeAt = 0;
 }

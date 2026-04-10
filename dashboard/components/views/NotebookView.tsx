@@ -1741,7 +1741,7 @@ const ImportTab = ({
                     <RotateCcw size={18} />
                   </button>
                 )}
-                {job.status !== 'processing' && (
+                {job.status !== 'processing' && job.status !== 'writing' && (
                   <button
                     onClick={() => removeJob(job.id)}
                     className="p-1 text-slate-500 transition-colors hover:text-red-400"

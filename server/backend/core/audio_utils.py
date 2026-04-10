@@ -146,36 +146,45 @@ def check_cuda_available() -> bool:
     return torch.cuda.is_available()
 
 
-# Cached result for get_cuda_compute_capability (None = not yet probed).
-_cuda_compute_capability: tuple[int, int] | None | bool = False  # False = unprobed
+# Per-device cache for get_cuda_compute_capability.
+# Key: device index; value: (major, minor) or None (query failed / no CUDA).
+_cuda_compute_capability_cache: dict[int, tuple[int, int] | None] = {}
 
 
-def get_cuda_compute_capability() -> tuple[int, int] | None:
-    """Return the CUDA compute capability of device 0 as ``(major, minor)``.
+def get_cuda_compute_capability(device_index: int = 0) -> tuple[int, int] | None:
+    """Return the CUDA compute capability of the given device as ``(major, minor)``.
+
+    Args:
+        device_index: GPU device index to query (default 0).
 
     Returns ``None`` when CUDA is unavailable or the query fails.
-    The result is cached — GPU capability cannot change at runtime.
+    The result is cached per device — GPU capability cannot change at runtime.
     """
-    global _cuda_compute_capability
-    if _cuda_compute_capability is not False:
-        return _cuda_compute_capability  # type: ignore[return-value]
+    if device_index in _cuda_compute_capability_cache:
+        return _cuda_compute_capability_cache[device_index]
 
     if not check_cuda_available():
-        _cuda_compute_capability = None
-        return _cuda_compute_capability
+        _cuda_compute_capability_cache[device_index] = None
+        return None
 
     try:
-        props = torch.cuda.get_device_properties(0)
-        _cuda_compute_capability = (props.major, props.minor)
-        return _cuda_compute_capability
+        props = torch.cuda.get_device_properties(device_index)
+        result = (props.major, props.minor)
+        _cuda_compute_capability_cache[device_index] = result
+        return result
     except Exception:
-        logger.debug("Could not query CUDA compute capability", exc_info=True)
-        _cuda_compute_capability = None
-        return _cuda_compute_capability
+        logger.debug(
+            "Could not query CUDA compute capability for device %d", device_index, exc_info=True
+        )
+        _cuda_compute_capability_cache[device_index] = None
+        return None
 
 
-def cuda_health_check() -> dict[str, Any]:
+def cuda_health_check(device_index: int = 0) -> dict[str, Any]:
     """Probe CUDA health at startup. Never raises.
+
+    Args:
+        device_index: GPU device index to probe (default 0).
 
     Returns a dict with 'status' key:
     - 'no_torch': torch not installed (not an error)
@@ -195,7 +204,7 @@ def cuda_health_check() -> dict[str, Any]:
 
     try:
         torch.cuda.init()
-        props = torch.cuda.get_device_properties(0)
+        props = torch.cuda.get_device_properties(device_index)
         return {
             "status": "healthy",
             "device_name": props.name,
@@ -220,7 +229,7 @@ def cuda_health_check() -> dict[str, Any]:
                 time.sleep(delay)
                 try:
                     torch.cuda.init()
-                    props = torch.cuda.get_device_properties(0)
+                    props = torch.cuda.get_device_properties(device_index)
                     logger.info("CUDA health check: recovered after %d retries", attempt)
                     return {
                         "status": "healthy",
@@ -263,7 +272,7 @@ def cuda_health_check() -> dict[str, Any]:
         time.sleep(0.5)
         try:
             torch.cuda.init()
-            props = torch.cuda.get_device_properties(0)
+            props = torch.cuda.get_device_properties(device_index)
             return {
                 "status": "healthy",
                 "device_name": props.name,
@@ -274,15 +283,19 @@ def cuda_health_check() -> dict[str, Any]:
             return {"status": "no_cuda", "error": str(retry_e)}
 
 
-def get_gpu_memory_info() -> dict:
-    """Get GPU memory usage information."""
+def get_gpu_memory_info(device_index: int = 0) -> dict:
+    """Get GPU memory usage information.
+
+    Args:
+        device_index: GPU device index to query (default 0).
+    """
     if not check_cuda_available():
         return {"available": False}
 
     try:
-        allocated = torch.cuda.memory_allocated() / (1024**3)  # GB
-        reserved = torch.cuda.memory_reserved() / (1024**3)  # GB
-        total = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # GB
+        allocated = torch.cuda.memory_allocated(device_index) / (1024**3)  # GB
+        reserved = torch.cuda.memory_reserved(device_index) / (1024**3)  # GB
+        total = torch.cuda.get_device_properties(device_index).total_memory / (1024**3)  # GB
 
         return {
             "available": True,

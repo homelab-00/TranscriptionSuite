@@ -251,7 +251,7 @@ TranscriptionSuite/
 │       └── codeql-config.yml       #     CodeQL configuration
 │
 ├── CLAUDE.md                       # AI assistant instructions
-├── .pre-commit-config.yaml         # Pre-commit hooks (ruff, pyright, prettier, shellcheck)
+├── .pre-commit-config.yaml         # Pre-commit hooks (ruff, codespell, prettier, ui-contract)
 ├── .gitignore                      # Git ignore patterns
 ├── .dockerignore                   # Docker build context exclusions
 └── LICENSE                         # GPL-3.0-or-later

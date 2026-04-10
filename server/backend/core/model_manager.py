@@ -225,9 +225,10 @@ class ModelManager:
         self.job_tracker = TranscriptionJobTracker()
 
         # Check GPU availability
+        self._gpu_device_index: int = config.get("transcription", {}).get("gpu_device_index", 0)
         self.gpu_available = check_cuda_available()
         if self.gpu_available:
-            gpu_info = get_gpu_memory_info()
+            gpu_info = get_gpu_memory_info(self._gpu_device_index)
             logger.info(f"GPU available with {gpu_info.get('total_gb', 'unknown')} GB memory")
         else:
             logger.warning("No GPU available, using CPU for transcription")
@@ -549,7 +550,7 @@ class ModelManager:
 
         from server.core.audio_utils import get_gpu_memory_info
 
-        gpu_info = get_gpu_memory_info()
+        gpu_info = get_gpu_memory_info(self._gpu_device_index)
         total_gb = gpu_info.get("total_gb", 0)
         if total_gb <= 0:
             return configured_batch_size
@@ -829,7 +830,9 @@ class ModelManager:
 
         status = {
             "gpu_available": self.gpu_available,
-            "gpu_memory": get_gpu_memory_info() if self.gpu_available else None,
+            "gpu_memory": get_gpu_memory_info(self._gpu_device_index)
+            if self.gpu_available
+            else None,
             "transcription": {
                 "selected_model": self.main_model_name,
                 "disabled": self.is_main_model_disabled(),

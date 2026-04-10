@@ -189,7 +189,6 @@ export function useSessionImportQueue(
             result.transcription,
             {
               hideTimestamps,
-              diarizationPerformed: result.diarization?.performed ?? false,
               diarizedFormat: configRef.current.diarizedFormat ?? 'srt',
             },
           );

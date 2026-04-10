@@ -1305,7 +1305,7 @@ async def chat_with_llm(request: ChatRequest):
                     json=payload,
                     headers=headers,
                 ) as response:
-                    if response.status_code == 401:
+                    if response.status_code in (401, 403):
                         yield f"data: {json.dumps({'error': 'Invalid API key. Check your key in Settings → AI.'})}\n\n"
                         return
                     if response.status_code != 200:

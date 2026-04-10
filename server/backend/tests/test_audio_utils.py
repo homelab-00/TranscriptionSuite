@@ -311,9 +311,9 @@ class TestGetCudaComputeCapability:
     @pytest.fixture(autouse=True)
     def _reset_cache(self):
         """Reset the module-level cache before each test."""
-        au._cuda_compute_capability = False  # False = unprobed sentinel
+        au._cuda_compute_capability_cache.clear()
         yield
-        au._cuda_compute_capability = False
+        au._cuda_compute_capability_cache.clear()
 
     def test_returns_tuple_when_cuda_available(self):
         mock_props = MagicMock()

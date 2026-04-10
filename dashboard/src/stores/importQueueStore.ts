@@ -267,7 +267,6 @@ async function processSessionJob(
   const { sessionConfig } = store.getState();
   const { outputFilename, content } = resolveTranscriptionOutput(filename, result.transcription, {
     hideTimestamps: job.hideTimestamps ?? false,
-    diarizationPerformed: result.diarization?.performed ?? false,
     diarizedFormat: sessionConfig.diarizedFormat ?? 'srt',
   });
 

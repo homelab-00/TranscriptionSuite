@@ -507,9 +507,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # CUDA health probe — detect unrecoverable GPU state before ModelManager
     from server.core.audio_utils import cuda_health_check
 
+    _gpu_device_index = config.get("transcription", "gpu_device_index", default=0)
     gpu_start = _time.perf_counter()
     emit_event("lifespan-gpu", "server", "Checking GPU...", phase="lifespan")
-    gpu_health = cuda_health_check()
+    gpu_health = cuda_health_check(device_index=_gpu_device_index)
     gpu_elapsed_ms = round((_time.perf_counter() - gpu_start) * 1000)
     _log_time(f"CUDA health check: {gpu_health['status']}")
     gpu_unrecoverable = gpu_health["status"] == "unrecoverable"

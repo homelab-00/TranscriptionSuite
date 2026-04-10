@@ -49,11 +49,11 @@ vi.mock('../clipboardWayland.js', () => ({
 
 function setAllCommandsSucceed() {
   mockExecFile.mockImplementation(
-    (cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
+    (_cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
       const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
       if (typeof cb === 'function') {
         (cb as (err: Error | null, result?: { stdout: string; stderr: string }) => void)(null, {
-          stdout: cmd === 'which' ? '/usr/bin/tool' : '',
+          stdout: '',
           stderr: '',
         });
       }
@@ -126,16 +126,14 @@ describe('[P2] pasteAtCursor', () => {
     _resetCommandCache();
     mockIsWayland.mockReturnValue(true);
 
-    // All `which` calls fail — no tools installed
+    // All command probes fail with ENOENT — no tools installed
     mockExecFile.mockImplementation(
-      (cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
+      (_cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
         const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
         if (typeof cb === 'function') {
-          if (cmd === 'which') {
-            (cb as (err: Error | null) => void)(new Error('not found'));
-          } else {
-            (cb as (err: Error | null) => void)(new Error('command not available'));
-          }
+          const err = new Error('spawn ENOENT') as NodeJS.ErrnoException;
+          err.code = 'ENOENT';
+          (cb as (err: Error | null) => void)(err);
         }
       },
     );
@@ -155,14 +153,12 @@ describe('[P2] pasteAtCursor', () => {
     mockIsWayland.mockReturnValue(false);
 
     mockExecFile.mockImplementation(
-      (cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
+      (_cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
         const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
         if (typeof cb === 'function') {
-          if (cmd === 'which') {
-            (cb as (err: Error | null) => void)(new Error('not found'));
-          } else {
-            (cb as (err: Error | null) => void)(new Error('command not available'));
-          }
+          const err = new Error('spawn ENOENT') as NodeJS.ErrnoException;
+          err.code = 'ENOENT';
+          (cb as (err: Error | null) => void)(err);
         }
       },
     );

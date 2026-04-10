@@ -152,7 +152,6 @@ export function resolveTranscriptionOutput(
   transcription: TranscriptionResponse,
   options: {
     hideTimestamps: boolean;
-    diarizationPerformed: boolean;
     diarizedFormat: 'srt' | 'ass';
   },
 ): { outputFilename: string; content: string } {
@@ -162,7 +161,8 @@ export function resolveTranscriptionOutput(
     return { outputFilename: `${stem}.txt`, content: renderTxt(transcription) };
   }
 
-  const hasSegments = transcription.segments && transcription.segments.length > 0;
+  const hasSegments =
+    transcription.segments && transcription.segments.some((s) => s.text.trim().length > 0);
 
   if (hasSegments) {
     const outputFilename = `${stem}.${options.diarizedFormat}`;

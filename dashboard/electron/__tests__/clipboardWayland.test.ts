@@ -51,27 +51,29 @@ import { reliableWriteText, _resetClipboardState } from '../clipboardWayland.js'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/** Make `which wl-copy` succeed. */
+/** Make `wl-copy --version` probe succeed. */
 function setWlCopyAvailable() {
   mockExecFile.mockImplementation(
     (_cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
       const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
       if (typeof cb === 'function') {
         (cb as (err: Error | null, result?: { stdout: string }) => void)(null, {
-          stdout: '/usr/bin/wl-copy',
+          stdout: 'wl-copy 1.0',
         });
       }
     },
   );
 }
 
-/** Make `which wl-copy` fail. */
+/** Make `wl-copy --version` probe fail with ENOENT (binary not found). */
 function setWlCopyMissing() {
   mockExecFile.mockImplementation(
     (_cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
       const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
       if (typeof cb === 'function') {
-        (cb as (err: Error | null) => void)(new Error('not found'));
+        const err = new Error('spawn wl-copy ENOENT') as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        (cb as (err: Error | null) => void)(err);
       }
     },
   );

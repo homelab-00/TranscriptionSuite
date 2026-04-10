@@ -1769,10 +1769,13 @@ def get_word_timestamps_from_audio(
 
     try:
         if model is None:
-            logger.info("Loading faster-whisper model for word timestamps...")
+            from server.core.audio_utils import check_cuda_available
+
+            device = "cuda" if check_cuda_available() else "cpu"
+            logger.info("Loading faster-whisper model for word timestamps (device=%s)...", device)
             model = faster_whisper.WhisperModel(
                 "large-v3",
-                device="cuda",
+                device=device,
                 compute_type="auto",
             )
 

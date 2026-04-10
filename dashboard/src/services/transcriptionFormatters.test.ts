@@ -101,7 +101,7 @@ describe('resolveTranscriptionOutput', () => {
   it('diarization OFF, timestamps ON, segments present → timed SRT output', () => {
     const result = resolveTranscriptionOutput(filename, timedResponse, {
       hideTimestamps: false,
-      diarizationPerformed: false,
+
       diarizedFormat: 'srt',
     });
     expect(result.outputFilename).toBe('recording.srt');
@@ -112,7 +112,7 @@ describe('resolveTranscriptionOutput', () => {
   it('diarization OFF, timestamps ON, segments present → timed ASS output', () => {
     const result = resolveTranscriptionOutput(filename, timedResponse, {
       hideTimestamps: false,
-      diarizationPerformed: false,
+
       diarizedFormat: 'ass',
     });
     expect(result.outputFilename).toBe('recording.ass');
@@ -123,7 +123,7 @@ describe('resolveTranscriptionOutput', () => {
   it('diarization OFF, timestamps ON, segments empty → .txt fallback', () => {
     const result = resolveTranscriptionOutput(filename, textOnlyResponse, {
       hideTimestamps: false,
-      diarizationPerformed: false,
+
       diarizedFormat: 'srt',
     });
     expect(result.outputFilename).toBe('recording.txt');
@@ -133,7 +133,7 @@ describe('resolveTranscriptionOutput', () => {
   it('diarization OFF, timestamps OFF → .txt plain text', () => {
     const result = resolveTranscriptionOutput(filename, timedResponse, {
       hideTimestamps: true,
-      diarizationPerformed: false,
+
       diarizedFormat: 'srt',
     });
     expect(result.outputFilename).toBe('recording.txt');
@@ -143,7 +143,7 @@ describe('resolveTranscriptionOutput', () => {
   it('diarization ON, timestamps ON → timed SRT with speakers', () => {
     const result = resolveTranscriptionOutput(filename, diarizedResponse, {
       hideTimestamps: false,
-      diarizationPerformed: true,
+
       diarizedFormat: 'srt',
     });
     expect(result.outputFilename).toBe('recording.srt');
@@ -154,7 +154,7 @@ describe('resolveTranscriptionOutput', () => {
   it('diarization ON, timestamps ON → timed ASS with speakers', () => {
     const result = resolveTranscriptionOutput(filename, diarizedResponse, {
       hideTimestamps: false,
-      diarizationPerformed: true,
+
       diarizedFormat: 'ass',
     });
     expect(result.outputFilename).toBe('recording.ass');
@@ -165,7 +165,7 @@ describe('resolveTranscriptionOutput', () => {
   it('diarization ON, timestamps OFF → .txt plain text', () => {
     const result = resolveTranscriptionOutput(filename, diarizedResponse, {
       hideTimestamps: true,
-      diarizationPerformed: true,
+
       diarizedFormat: 'ass',
     });
     expect(result.outputFilename).toBe('recording.txt');
