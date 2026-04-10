@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import httpx
 import numpy as np
 import pytest
 from server.core.stt.backends.base import BackendTranscriptionInfo
@@ -104,10 +105,25 @@ class TestLifecycle:
 
     def test_load_tolerates_server_error(self, backend: WhisperCppBackend, mock_httpx: MagicMock):
         """load() should succeed even if /load endpoint fails (server may pre-load)."""
-        mock_httpx.post.side_effect = Exception("connection refused")
+        mock_httpx.post.side_effect = Exception("unexpected 500 from server")
         with patch.dict("os.environ", {"WHISPERCPP_SERVER_URL": "http://test:8080"}):
             backend.load("ggml-base.bin", "cpu")
         assert backend.is_loaded()
+
+    def test_load_raises_on_connect_error(self, backend: WhisperCppBackend, mock_httpx: MagicMock):
+        """load() should raise RuntimeError with actionable message when sidecar is unreachable."""
+        mock_httpx.post.side_effect = httpx.ConnectError("DNS lookup failed")
+        with patch.dict("os.environ", {"WHISPERCPP_SERVER_URL": "http://test:8080"}):
+            with pytest.raises(RuntimeError, match="whisper.cpp sidecar is not reachable"):
+                backend.load("ggml-base.bin", "cpu")
+        assert not backend.is_loaded()
+
+    def test_load_raises_on_dns_oserror(self, backend: WhisperCppBackend, mock_httpx: MagicMock):
+        """load() should raise RuntimeError when DNS resolution fails with OSError."""
+        mock_httpx.post.side_effect = OSError(5, "No address associated with hostname")
+        with patch.dict("os.environ", {"WHISPERCPP_SERVER_URL": "http://test:8080"}):
+            with pytest.raises(RuntimeError, match="whisper.cpp sidecar is not reachable"):
+                backend.load("ggml-base.bin", "cpu")
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +188,24 @@ class TestTranscribe:
         assert call_kwargs is not None
         data = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data", {})
         assert data.get("translate") == "true"
+
+    def test_transcribe_raises_on_connect_error(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """transcribe() should raise RuntimeError with actionable message when sidecar is down."""
+        mock_httpx.post.side_effect = httpx.ConnectError("connection refused")
+        audio = np.zeros(16000, dtype=np.float32)
+        with pytest.raises(RuntimeError, match="whisper.cpp sidecar is not reachable"):
+            loaded_backend.transcribe(audio)
+
+    def test_transcribe_raises_on_dns_oserror(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """transcribe() should raise RuntimeError when DNS resolution fails."""
+        mock_httpx.post.side_effect = OSError(5, "No address associated with hostname")
+        audio = np.zeros(16000, dtype=np.float32)
+        with pytest.raises(RuntimeError, match="whisper.cpp sidecar is not reachable"):
+            loaded_backend.transcribe(audio)
 
 
 # ---------------------------------------------------------------------------

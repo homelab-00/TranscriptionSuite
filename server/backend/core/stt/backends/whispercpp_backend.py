@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 import numpy as np
+from httpx import ConnectError as HttpxConnectError
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
@@ -22,6 +23,14 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SERVER_URL = "http://whisper-server:8080"
 _INFERENCE_TIMEOUT = 300  # seconds — long audio can take a while
 _LOAD_TIMEOUT = 60
+
+_SIDECAR_UNREACHABLE_MSG = (
+    "whisper.cpp sidecar is not reachable at {url}. "
+    "This usually means the Vulkan runtime profile is not selected or the "
+    "sidecar container failed to start. GGML models (whisper.cpp) require "
+    'the Vulkan runtime profile — switch to "Vulkan" in Settings and restart '
+    "the container, or choose a non-GGML model for CPU mode."
+)
 
 
 def _resolve_server_url() -> str:
@@ -104,6 +113,8 @@ class WhisperCppBackend(STTBackend):
                 timeout=_LOAD_TIMEOUT,
             )
             resp.raise_for_status()
+        except (HttpxConnectError, OSError) as exc:
+            raise RuntimeError(_SIDECAR_UNREACHABLE_MSG.format(url=self._server_url)) from exc
         except Exception:
             logger.warning(
                 "WhisperCppBackend: /load call failed (server may pre-load model); "
@@ -169,13 +180,16 @@ class WhisperCppBackend(STTBackend):
             data["beam_size"] = str(beam_size)
 
         client = self._ensure_client()
-        resp = client.post(
-            f"{self._server_url}/inference",
-            files={"file": ("audio.wav", wav_bytes, "audio/wav")},
-            data=data,
-            timeout=_INFERENCE_TIMEOUT,
-        )
-        resp.raise_for_status()
+        try:
+            resp = client.post(
+                f"{self._server_url}/inference",
+                files={"file": ("audio.wav", wav_bytes, "audio/wav")},
+                data=data,
+                timeout=_INFERENCE_TIMEOUT,
+            )
+            resp.raise_for_status()
+        except (HttpxConnectError, OSError) as exc:
+            raise RuntimeError(_SIDECAR_UNREACHABLE_MSG.format(url=self._server_url)) from exc
 
         result = resp.json()
         return self._parse_response(result)

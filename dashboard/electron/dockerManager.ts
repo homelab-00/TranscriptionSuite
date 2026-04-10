@@ -1260,6 +1260,23 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     }
   }
 
+  // Pre-flight Vulkan validation: verify /dev/dri and a render node exist
+  // before Docker tries to mount them (docker-compose.vulkan.yml: devices:
+  // - /dev/dri:/dev/dri).  On systems without DRI (WSL2, missing GPU drivers),
+  // Docker fails with a cryptic "error gathering device information" message.
+  // Mirrors the checkGpu() detection logic — both require directory + render node.
+  if (runtimeProfile === 'vulkan' && process.platform === 'linux') {
+    const fs = await import('fs');
+    if (!fs.existsSync('/dev/dri') || !fs.existsSync('/dev/dri/renderD128')) {
+      throw new Error(
+        '/dev/dri was not found on this system (or has no render node). ' +
+          'The Vulkan runtime profile requires a DRI-capable GPU with kernel driver support. ' +
+          'This is common on WSL2 or systems without AMD/Intel GPU drivers. ' +
+          'Switch the Runtime Profile to "CPU" and try again.',
+      );
+    }
+  }
+
   const composeEnv: Record<string, string> = { ...tlsEnv };
   const normalizedHfDecision = normalizeHfTokenDecision(hfTokenDecision);
 
@@ -2204,10 +2221,14 @@ async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean; vulkan: boo
 
   // Detect non-NVIDIA GPU with DRI support (AMD/Intel) — suggests Vulkan profile.
   // Only relevant on Linux where /dev/dri is the kernel DRI device node.
+  // Require both the /dev/dri directory (mounted by docker-compose.vulkan.yml)
+  // AND /dev/dri/renderD128 (the actual render node) to be present.
+  // On WSL2 or systems with partial DRI, renderD128 may exist while /dev/dri
+  // is not mountable by Docker — checking both prevents false Vulkan detection.
   if (!gpu && process.platform === 'linux') {
     try {
       const fs = await import('fs');
-      vulkan = fs.existsSync('/dev/dri/renderD128');
+      vulkan = fs.existsSync('/dev/dri') && fs.existsSync('/dev/dri/renderD128');
       if (vulkan) {
         console.log(
           '[DockerManager] Non-NVIDIA GPU detected: /dev/dri/renderD128 present (Vulkan candidate)',
