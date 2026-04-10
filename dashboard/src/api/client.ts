@@ -788,8 +788,9 @@ export class APIClient {
   async createConversation(
     recordingId: number,
     title?: string,
-  ): Promise<{ conversation_id: number; title: string }> {
-    return this.post('/api/llm/conversations', { recording_id: recordingId, title });
+    model?: string,
+  ): Promise<{ conversation_id: number; title: string; model?: string | null }> {
+    return this.post('/api/llm/conversations', { recording_id: recordingId, title, model });
   }
 
   /** GET /api/llm/conversation/:id */
@@ -800,9 +801,9 @@ export class APIClient {
   /** PATCH /api/llm/conversation/:id */
   async updateConversation(
     conversationId: number,
-    title: string,
-  ): Promise<{ success: boolean; title: string }> {
-    return this.patch(`/api/llm/conversation/${conversationId}`, { title });
+    updates: { title?: string; model?: string | null },
+  ): Promise<{ success: boolean; title: string; model?: string | null }> {
+    return this.patch(`/api/llm/conversation/${conversationId}`, updates);
   }
 
   /** DELETE /api/llm/conversation/:id */
@@ -837,6 +838,7 @@ export class APIClient {
     include_transcription?: boolean;
     max_tokens?: number;
     temperature?: number;
+    model?: string;
   }): AsyncGenerator<string, void, unknown> {
     const res = await fetch(`${this.baseUrl}/api/llm/chat`, {
       method: 'POST',

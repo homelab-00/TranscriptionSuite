@@ -1034,12 +1034,14 @@ class ConversationCreate(BaseModel):
 
     recording_id: int
     title: str | None = "New Chat"
+    model: str | None = None
 
 
 class ConversationUpdate(BaseModel):
     """Request to update a conversation"""
 
-    title: str
+    title: str | None = None
+    model: str | None = None
 
 
 class MessageCreate(BaseModel):
@@ -1060,6 +1062,7 @@ class ChatRequest(BaseModel):
     include_transcription: bool = True
     max_tokens: int | None = None
     temperature: float | None = None
+    model: str | None = None
 
 
 @router.get("/conversations/{recording_id}")
@@ -1095,9 +1098,10 @@ async def create_conversation(request: ConversationCreate):
     conversation_id = db_create_conversation(
         recording_id=request.recording_id,
         title=request.title or "New Chat",
+        model=request.model,
     )
 
-    return {"conversation_id": conversation_id, "title": request.title}
+    return {"conversation_id": conversation_id, "title": request.title, "model": request.model}
 
 
 @router.get("/conversation/{conversation_id}")
@@ -1114,21 +1118,33 @@ async def get_conversation_detail(conversation_id: int):
 
 @router.patch("/conversation/{conversation_id}")
 async def update_conversation(conversation_id: int, request: ConversationUpdate):
-    """Update a conversation's title."""
+    """Update a conversation's title and/or model override."""
     from server.database.database import (
         get_conversation,
+        update_conversation_model,
         update_conversation_title,
     )
 
     # Verify conversation exists
-    if not get_conversation(conversation_id):
+    conv = get_conversation(conversation_id)
+    if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    success = update_conversation_title(conversation_id, request.title)
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to update conversation")
+    if request.title is not None:
+        success = update_conversation_title(conversation_id, request.title)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update conversation")
 
-    return {"success": True, "title": request.title}
+    # model field present in request body (even if null/empty → clear override)
+    raw_body = request.model_fields_set
+    if "model" in raw_body:
+        model_value = request.model if request.model else None
+        success = update_conversation_model(conversation_id, model_value)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update conversation model")
+
+    updated = get_conversation(conversation_id)
+    return {"success": True, "title": updated["title"], "model": updated.get("model")}
 
 
 @router.delete("/conversation/{conversation_id}")
@@ -1207,7 +1223,12 @@ async def chat_with_llm(request: ChatRequest):
     headers = _get_headers(config)
     httpx = _get_httpx()
 
-    model_id = config.get("model")
+    # 3-tier model resolution: per-request → per-conversation → global config → auto-detect
+    model_id = request.model
+    if not model_id:
+        model_id = conversation.get("model")
+    if not model_id:
+        model_id = config.get("model")
     if not model_id:
         model_id = await _get_loaded_model_id(base_url, headers)
     if not model_id:

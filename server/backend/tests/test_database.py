@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     response_id TEXT,
+    model TEXT DEFAULT NULL,
     FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
 );
 
@@ -550,6 +551,40 @@ class TestConversationCRUD:
 
     def test_delete_missing_conversation(self) -> None:
         assert db.delete_conversation(9999) is False
+
+    def test_create_with_model(self) -> None:
+        rid = _insert_sample_recording()
+        cid = db.create_conversation(rid, "Model Chat", model="gpt-4o-mini")
+
+        conv = db.get_conversation(cid)
+        assert conv is not None
+        assert conv["model"] == "gpt-4o-mini"
+
+    def test_create_without_model_defaults_null(self) -> None:
+        rid = _insert_sample_recording()
+        cid = db.create_conversation(rid, "Plain Chat")
+
+        conv = db.get_conversation(cid)
+        assert conv is not None
+        assert conv["model"] is None
+
+    def test_update_conversation_model(self) -> None:
+        rid = _insert_sample_recording()
+        cid = db.create_conversation(rid)
+
+        db.update_conversation_model(cid, "claude-sonnet")
+        conv = db.get_conversation(cid)
+        assert conv is not None
+        assert conv["model"] == "claude-sonnet"
+
+    def test_clear_conversation_model(self) -> None:
+        rid = _insert_sample_recording()
+        cid = db.create_conversation(rid, model="gpt-4o")
+
+        db.update_conversation_model(cid, None)
+        conv = db.get_conversation(cid)
+        assert conv is not None
+        assert conv["model"] is None
 
 
 class TestMessageCRUD:

@@ -185,6 +185,7 @@ def _assert_schema_sanity(conn: sqlite3.Connection) -> None:
             "created_at",
             "updated_at",
             "response_id",
+            "model",
         },
         "messages": {
             "id",
@@ -627,16 +628,18 @@ def search_recordings(query: str, limit: int = 50) -> list[dict[str, Any]]:
 # =============================================================================
 
 
-def create_conversation(recording_id: int, title: str = "New Chat") -> int:
+def create_conversation(
+    recording_id: int, title: str = "New Chat", model: str | None = None
+) -> int:
     """Create a new conversation for a recording."""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO conversations (recording_id, title)
-            VALUES (?, ?)
+            INSERT INTO conversations (recording_id, title, model)
+            VALUES (?, ?, ?)
             """,
-            (recording_id, title),
+            (recording_id, title, model),
         )
         conn.commit()
         return cursor.lastrowid or 0
@@ -727,6 +730,22 @@ def update_conversation_title(conversation_id: int, title: str) -> bool:
             WHERE id = ?
             """,
             (title, conversation_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def update_conversation_model(conversation_id: int, model: str | None) -> bool:
+    """Update a conversation's model override. Pass None to clear the override."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE conversations
+            SET model = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (model, conversation_id),
         )
         conn.commit()
         return cursor.rowcount > 0

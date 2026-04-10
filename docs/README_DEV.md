@@ -359,7 +359,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
 - **Multi-backend STT**: Pluggable backend architecture — Whisper, NeMo Parakeet/Canary, WhisperX, VibeVoice-ASR, whisper.cpp (Vulkan), MLX (Apple Silicon: Whisper, Parakeet, Canary, VibeVoice) — auto-detected from the model name
 - **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM; Whisper backends only in v1
-- **AI Assistant (OpenAI-compatible)**: Supports any OpenAI-compatible endpoint — LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others. Configurable via Settings → AI tab with API key support, model selection, and endpoint URL. Uses standard `/v1/chat/completions` with full conversation history
+- **AI Assistant (OpenAI-compatible)**: Supports any OpenAI-compatible endpoint — LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others. Configurable via Settings → AI tab with API key support, model selection, and endpoint URL. Per-conversation model overrides are available in the Notebook AI sidebar. Uses standard `/v1/chat/completions` with full conversation history
 
 ### 2.2 Platform Architectures
 
@@ -1804,7 +1804,9 @@ Full-text search in recording metadata only (title, summary).
 
 #### LLM Integration (OpenAI-compatible)
 
-LLM endpoints work with any OpenAI-compatible provider: [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/), OpenAI, Groq, OpenRouter, and others. Configure the endpoint URL, API key, and model in **Settings → AI** or via `config.yaml` (`local_llm` section). For Docker deployments, use the `LLM_API_KEY` and `LM_STUDIO_URL` environment variables.
+LLM endpoints work with any OpenAI-compatible provider: [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/), OpenAI, Groq, OpenRouter, and others. Configure the default endpoint URL, API key, and model in **Settings → AI** or via `config.yaml` (`local_llm` section). For Docker deployments, use the `LLM_API_KEY` and `LM_STUDIO_URL` environment variables.
+
+**Model resolution** follows a 3-tier fallback: per-conversation override (set in the Notebook AI sidebar) → global config model (Settings → AI) → auto-detect from provider. This lets users use different models for different conversations without changing global settings.
 
 All requests use the standard `/v1/chat/completions` API. When an API key is configured, requests include an `Authorization: Bearer` header.
 
@@ -2373,7 +2375,7 @@ npm run dev:electron
 | `ServerView.tsx` | Docker server management: image selection, container control, persisted main/live model selection including `None (Disabled)` |
 | `SettingsModal.tsx` | 5-tab settings: App, Client, Server (template-based config editor), AI (endpoint URL, API key, model selection for OpenAI-compatible providers), Notebook |
 | `AboutModal.tsx` | Profile card, version, links |
-| `AudioNoteModal.tsx` | Recording detail: audio player, transcript, AI Assistant chat sidebar |
+| `AudioNoteModal.tsx` | Recording detail: audio player, transcript, AI Assistant chat sidebar with per-conversation model selector |
 | `AddNoteModal.tsx` | Create new recording from calendar time slot |
 | `LogsView.tsx` | Processing logs and client debug output viewer |
 | `FullscreenVisualizer.tsx` | Fullscreen audio visualizer overlay |

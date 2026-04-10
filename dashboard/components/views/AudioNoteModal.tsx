@@ -24,6 +24,8 @@ import {
   XCircle,
   StopCircle,
   Plus,
+  ChevronDown,
+  RotateCw,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
@@ -34,7 +36,7 @@ import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { useWordHighlighter } from '../../src/hooks/useWordHighlighter';
 import { getConfig } from '../../src/config/store';
-import type { ChatMessage, Conversation } from '../../src/api/types';
+import type { ChatMessage, Conversation, LLMModel } from '../../src/api/types';
 
 /** Local type for chat message display (simpler than API's ChatMessage) */
 interface DisplayMessage {
@@ -61,6 +63,7 @@ interface ChatSession {
   type: 'summary' | 'chat';
   timestamp: string;
   updatedAt: string;
+  model?: string | null;
 }
 
 interface ParsedLlmSegment {
@@ -95,6 +98,7 @@ function toChatSession(conversation: Conversation): ChatSession {
     type: inferSessionType(conversation.title),
     timestamp: formatSessionTime(conversation.updated_at),
     updatedAt: conversation.updated_at,
+    model: conversation.model,
   };
 }
 
@@ -449,6 +453,11 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const [llmStatus, setLlmStatus] = useState<'active' | 'inactive'>('inactive');
   const [llmModel, setLlmModel] = useState<string | null>(null);
 
+  // Per-conversation model selector state
+  const [availableModels, setAvailableModels] = useState<LLMModel[]>([]);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -537,6 +546,16 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
           setLlmModel(s.model ?? null);
         })
         .catch(() => setLlmStatus('inactive'));
+
+      if (!modelsLoaded) {
+        apiClient
+          .getAvailableModels()
+          .then((res) => {
+            setAvailableModels(res.models ?? []);
+          })
+          .catch(() => {})
+          .finally(() => setModelsLoaded(true));
+      }
 
       rafId = requestAnimationFrame(() => {
         rafId = requestAnimationFrame(() => {
@@ -803,6 +822,33 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     }
   }, []);
 
+  // Per-conversation model change handler
+  const handleModelChange = useCallback(
+    async (newModel: string | null) => {
+      if (!activeConversationId) return;
+      try {
+        await apiClient.updateConversation(activeConversationId, { model: newModel });
+        setChatSessions((prev) =>
+          prev.map((s) => (s.id === activeConversationId ? { ...s, model: newModel } : s)),
+        );
+      } catch {
+        setSessionsError('Failed to update model.');
+      }
+      setModelDropdownOpen(false);
+    },
+    [activeConversationId],
+  );
+
+  const handleRefreshModels = useCallback(async () => {
+    try {
+      const res = await apiClient.getAvailableModels();
+      setAvailableModels(res.models ?? []);
+      setModelsLoaded(true);
+    } catch {
+      /* keep stale list */
+    }
+  }, []);
+
   const handleCreateSession = useCallback(async () => {
     if (!note?.recordingId) return;
     try {
@@ -995,7 +1041,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       return;
     }
     try {
-      await apiClient.updateConversation(target.id, newTitle);
+      await apiClient.updateConversation(target.id, { title: newTitle });
       const updatedAt = new Date().toISOString();
       setChatSessions((prev) =>
         sortChatSessions(
@@ -1111,6 +1157,22 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   }, [contextMenu, chatSessions, activeConversationId]);
 
   const activeSession = chatSessions.find((session) => session.id === activeConversationId) ?? null;
+
+  // Resolve the effective model for the active conversation
+  const effectiveModel = activeSession?.model || llmModel || 'unknown';
+  const hasModelOverride = Boolean(activeSession?.model);
+
+  // Close model dropdown on outside click
+  useEffect(() => {
+    if (!modelDropdownOpen) return;
+    const handler = () => setModelDropdownOpen(false);
+    // Delay to avoid catching the opening click
+    const id = setTimeout(() => document.addEventListener('click', handler), 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('click', handler);
+    };
+  }, [modelDropdownOpen]);
 
   /** Open inline date editor with current date pre-filled */
   const handleDateEditOpen = useCallback(() => {
@@ -1561,7 +1623,14 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="truncate text-xs font-medium">{session.title}</div>
-                              <div className="text-[10px] text-slate-500">{session.timestamp}</div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                                <span>{session.timestamp}</span>
+                                {session.model && session.model !== llmModel && (
+                                  <span className="text-accent-cyan/70 max-w-20 truncate rounded bg-white/5 px-1">
+                                    {session.model}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             {isActive && (
                               <div className="bg-accent-cyan h-1.5 w-1.5 rounded-full shadow-[0_0_5px_rgba(239,22,238,0.5)]"></div>
@@ -1651,9 +1720,80 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                     </button>
                   </div>
                   <div className="mt-2 flex items-center justify-between px-1 select-none">
-                    <span className="text-[10px] text-slate-500">
-                      Model: {llmModel ?? 'unknown'}
-                    </span>
+                    <div className="relative">
+                      <button
+                        onClick={() => activeConversationId && setModelDropdownOpen((v) => !v)}
+                        disabled={!activeConversationId}
+                        className={`flex items-center gap-1 rounded px-1 py-0.5 text-[10px] transition-colors ${
+                          activeConversationId
+                            ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                            : 'cursor-default text-slate-500'
+                        } ${hasModelOverride ? 'text-accent-cyan' : ''}`}
+                        title={
+                          hasModelOverride
+                            ? `Override: ${effectiveModel} (click to change)`
+                            : `Using default: ${effectiveModel}`
+                        }
+                      >
+                        Model: {effectiveModel}
+                        {activeConversationId && <ChevronDown size={10} />}
+                      </button>
+                      {modelDropdownOpen && activeConversationId && (
+                        <div className="absolute bottom-full left-0 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-lg border border-white/10 bg-slate-900 py-1 shadow-xl">
+                          <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
+                            <span className="text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                              Select Model
+                            </span>
+                            <button
+                              onClick={handleRefreshModels}
+                              className="rounded p-0.5 text-slate-500 hover:bg-white/10 hover:text-slate-300"
+                              title="Refresh model list"
+                            >
+                              <RotateCw size={10} />
+                            </button>
+                          </div>
+                          {hasModelOverride && (
+                            <button
+                              onClick={() => void handleModelChange(null)}
+                              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-slate-400 hover:bg-white/10 hover:text-white"
+                            >
+                              <XCircle size={12} /> Use default ({llmModel ?? 'auto'})
+                            </button>
+                          )}
+                          {availableModels.map((m) => (
+                            <button
+                              key={m.id}
+                              onClick={() => void handleModelChange(m.id)}
+                              className={`flex w-full items-center px-3 py-1.5 text-left text-[11px] transition-colors hover:bg-white/10 hover:text-white ${
+                                effectiveModel === m.id
+                                  ? 'text-accent-cyan font-medium'
+                                  : 'text-slate-400'
+                              }`}
+                            >
+                              {m.id}
+                            </button>
+                          ))}
+                          {availableModels.length === 0 && (
+                            <div className="px-3 py-1.5 text-[10px] text-slate-500">
+                              No models discovered — type a model ID below
+                            </div>
+                          )}
+                          <div className="border-t border-white/5 px-2 py-1.5">
+                            <input
+                              type="text"
+                              placeholder="Type model ID..."
+                              className="w-full rounded border border-white/10 bg-black/30 px-2 py-1 text-[11px] text-white placeholder-slate-600 focus:border-white/20 focus:outline-none"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const val = (e.target as HTMLInputElement).value.trim();
+                                  if (val) void handleModelChange(val);
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     <span className="text-[10px] text-slate-500">
                       {segments.length} segments context
                     </span>

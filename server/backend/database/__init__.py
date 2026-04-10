@@ -14,6 +14,7 @@ if TYPE_CHECKING:
         search_recordings,
         search_words,
         search_words_enhanced,
+        update_conversation_model,
         update_conversation_response_id,
         update_conversation_title,
     )
@@ -64,6 +65,7 @@ __all__ = [
     "get_conversation",
     "get_conversations",
     "update_conversation_title",
+    "update_conversation_model",
     "update_conversation_response_id",
     "get_conversation_with_messages",
     "delete_conversation",

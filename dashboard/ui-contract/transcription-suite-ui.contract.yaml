@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.17
+  spec_version: 1.0.18
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -47,7 +47,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-07T16:08:25.746Z
+    generated_at: 2026-04-10T16:02:15.654Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -510,6 +510,7 @@ utility_allowlist:
     - bottom-1
     - bottom-4
     - bottom-6
+    - bottom-full
     - bottom-right
     - cursor-pointer
     - custom-scrollbar
@@ -662,8 +663,10 @@ utility_allowlist:
     - mask-gradient-right
     - max-h-32
     - max-h-40
+    - max-h-48
     - max-h-60
     - max-h-72
+    - max-w-20
     - max-w-2xl
     - max-w-3xl
     - max-w-4xl

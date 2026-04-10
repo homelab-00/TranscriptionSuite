@@ -414,6 +414,7 @@ export interface ChatRequest {
   include_transcription?: boolean;
   max_tokens?: number;
   temperature?: number;
+  model?: string;
 }
 
 export interface Conversation {
@@ -422,6 +423,7 @@ export interface Conversation {
   title: string;
   created_at: string;
   updated_at: string;
+  model?: string | null;
   messages?: ChatMessage[];
 }
 

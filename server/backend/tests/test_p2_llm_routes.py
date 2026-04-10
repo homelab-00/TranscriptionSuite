@@ -327,3 +327,43 @@ class TestGH68ProviderModels:
         with pytest.raises(HTTPException) as exc:
             asyncio.run(llm.list_provider_models())
         assert exc.value.status_code == 503
+
+
+# ── GH-68 follow-up: Per-conversation model switching ──────────────────────
+
+
+class TestConversationModelPydantic:
+    """Pydantic models accept the new model field."""
+
+    def test_conversation_create_accepts_model(self):
+        """ConversationCreate can carry an optional model override."""
+        req = llm.ConversationCreate(recording_id=1, title="Test", model="gpt-4o-mini")
+        assert req.model == "gpt-4o-mini"
+
+    def test_conversation_create_defaults_model_none(self):
+        """ConversationCreate.model defaults to None when omitted."""
+        req = llm.ConversationCreate(recording_id=1)
+        assert req.model is None
+
+    def test_conversation_update_accepts_model(self):
+        """ConversationUpdate accepts model alongside optional title."""
+        req = llm.ConversationUpdate(model="gpt-4o")
+        assert req.model == "gpt-4o"
+        assert req.title is None
+
+    def test_conversation_update_model_in_fields_set(self):
+        """model: null is distinguishable from model absent via model_fields_set."""
+        req_with = llm.ConversationUpdate.model_validate({"model": None})
+        req_without = llm.ConversationUpdate.model_validate({})
+        assert "model" in req_with.model_fields_set
+        assert "model" not in req_without.model_fields_set
+
+    def test_chat_request_accepts_model(self):
+        """ChatRequest carries an optional per-request model override."""
+        req = llm.ChatRequest(conversation_id=1, user_message="hello", model="claude-sonnet-4-6")
+        assert req.model == "claude-sonnet-4-6"
+
+    def test_chat_request_defaults_model_none(self):
+        """ChatRequest.model defaults to None when omitted."""
+        req = llm.ChatRequest(conversation_id=1, user_message="hello")
+        assert req.model is None
