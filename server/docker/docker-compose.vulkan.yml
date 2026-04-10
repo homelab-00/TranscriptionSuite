@@ -13,7 +13,13 @@ services:
     image: ghcr.io/ggml-org/whisper.cpp:main-vulkan
     command:
       - >-
+        n=0;
         until test -f "$$WHISPER_MODEL"; do
+        n=$$((n+1));
+        if [ "$$n" -ge 180 ]; then
+        echo '[whisper-server] ERROR: Model $$WHISPER_MODEL not found after 30 minutes — exiting so Docker can restart.' >&2;
+        exit 1;
+        fi;
         echo '[whisper-server] Waiting for model $$WHISPER_MODEL to be downloaded...';
         sleep 10;
         done;
