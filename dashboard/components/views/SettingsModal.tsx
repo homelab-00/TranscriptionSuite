@@ -446,6 +446,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       try {
         const yamlText = buildSparseYaml(serverConfigUpdates);
         await api.serverConfig.writeLocal(yamlText);
+        // Tell the running server to reload config from disk so settings take
+        // effect immediately without requiring a full server restart.
+        await apiClient.reloadServerConfig().catch(() => {});
         toast.success('Server config saved — restart the server for changes to take effect');
         setServerConfigUpdates({});
       } catch {

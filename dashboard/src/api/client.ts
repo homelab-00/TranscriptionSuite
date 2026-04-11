@@ -746,6 +746,11 @@ export class APIClient {
     return this.post('/api/llm/server/stop');
   }
 
+  /** POST /api/llm/config/reload — tell the server to reload config from disk */
+  async reloadServerConfig(): Promise<void> {
+    await this.post('/api/llm/config/reload');
+  }
+
   /** GET /api/llm/models — list models from the configured AI provider */
   async getAvailableModels(): Promise<LLMModelsResponse> {
     return this.get('/api/llm/models');

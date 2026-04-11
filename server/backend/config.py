@@ -465,3 +465,9 @@ def get_config(config_path: Path | None = None) -> ServerConfig:
     if _config is None:
         _config = ServerConfig(config_path)
     return _config
+
+
+def reload_config() -> None:
+    """Invalidate the global config singleton, forcing a reload from disk on next access."""
+    global _config
+    _config = None

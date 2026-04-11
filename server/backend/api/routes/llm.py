@@ -130,9 +130,14 @@ def get_llm_config() -> dict:
         cfg = get_config()
         llm_config = cfg.config.get("local_llm", {})
 
+        # Strip a trailing /v1 segment so users can paste OpenAI-style base URLs
+        # like "https://api.example.com/v1" without causing /v1/v1/models requests.
+        raw_url = llm_config.get("base_url", default_base_url)
+        base_url = raw_url.rstrip("/").removesuffix("/v1")
+
         return {
             "enabled": llm_config.get("enabled", True),
-            "base_url": llm_config.get("base_url", default_base_url),
+            "base_url": base_url,
             "api_key": env_api_key or llm_config.get("api_key", ""),
             "model": llm_config.get("model", ""),
             "gpu_offload": llm_config.get("gpu_offload", 1.0),
@@ -148,7 +153,7 @@ def get_llm_config() -> dict:
 
     return {
         "enabled": True,
-        "base_url": default_base_url,
+        "base_url": default_base_url.rstrip("/").removesuffix("/v1"),
         "api_key": env_api_key,
         "model": "",
         "gpu_offload": 1.0,
@@ -264,6 +269,20 @@ async def get_llm_status():
         )
     except Exception as e:
         return _status(available=False, error=str(e))
+
+
+@router.post("/config/reload")
+async def reload_llm_config() -> dict[str, str]:
+    """Reload the server configuration from disk.
+
+    Called by the dashboard after writing a new local config file so the
+    running server picks up changes (e.g. updated LLM base URL) without
+    requiring a full server restart.
+    """
+    from server.config import reload_config
+
+    reload_config()
+    return {"status": "reloaded"}
 
 
 @router.get("/models")
