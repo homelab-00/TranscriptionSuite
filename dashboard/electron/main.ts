@@ -1838,7 +1838,12 @@ app.whenReady().then(() => {
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    // macOS: clicking the Dock icon should show the window if it exists but is hidden.
+    const existing = BrowserWindow.getAllWindows()[0];
+    if (existing) {
+      if (!existing.isVisible()) existing.show();
+      existing.focus();
+    } else {
       createWindow();
     }
   });
