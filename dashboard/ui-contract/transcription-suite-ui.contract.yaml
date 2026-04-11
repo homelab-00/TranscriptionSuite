@@ -1,10 +1,10 @@
 meta:
-  spec_version: 1.0.18
+  spec_version: 1.0.17
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
   generated_from:
-    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
+    repo_path: /Users/haiiro/NoSync/TranscriptionSuite/dashboard
     source_files:
       - App.tsx
       - components/__tests__/NotebookView.test.tsx
@@ -47,7 +47,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-10T16:02:15.654Z
+    generated_at: 2026-04-11T18:04:18.643Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -388,6 +388,7 @@ utility_allowlist:
     - -right-1
     - -right-3
     - -skew-x-12
+    - -space-y-1
     - -translate-y-1/2
     - absolute
     - active

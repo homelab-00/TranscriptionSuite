@@ -20,8 +20,7 @@ import {
   Copy,
   Check,
   Send,
-  Flame,
-  Zap,
+  Cpu,
   Bot,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -40,6 +39,10 @@ import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 import type { AuthToken, LLMModel } from '../../src/api/types';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { ServerConfigEditor } from './ServerConfigEditor';
+import { NvidiaIcon } from '../ui/icons/NvidiaIcon';
+import { AmdIcon } from '../ui/icons/AmdIcon';
+import { IntelIcon } from '../ui/icons/IntelIcon';
+import { AppleIcon } from '../ui/icons/AppleIcon';
 import type { RuntimeProfile } from '../../src/types/runtime';
 
 interface SettingsModalProps {
@@ -542,6 +545,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10'
               }`}
             >
+              <NvidiaIcon size={14} />
               GPU (CUDA)
             </button>
             <button
@@ -555,21 +559,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10'
               }`}
             >
-              <Flame size={14} />
-              Vulkan
-            </button>
-            <button
-              onClick={() => {
-                setAppSettings((prev) => ({ ...prev, runtimeProfile: 'cpu' }));
-                setIsDirty(true);
-              }}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-all ${
-                appSettings.runtimeProfile === 'cpu'
-                  ? 'bg-accent-orange/15 border-accent-orange/40 text-accent-orange'
-                  : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10'
-              }`}
-            >
-              CPU Only
+              <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                <AmdIcon size={30} />
+                <IntelIcon size={30} />
+              </span>
+              GPU (Vulkan)
             </button>
             <button
               onClick={() => {
@@ -582,8 +576,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10'
               }`}
             >
-              <Zap className="h-3.5 w-3.5" />
-              Metal (MLX)
+              <AppleIcon size={14} />
+              GPU (Metal)
+            </button>
+            <button
+              onClick={() => {
+                setAppSettings((prev) => ({ ...prev, runtimeProfile: 'cpu' }));
+                setIsDirty(true);
+              }}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-all ${
+                appSettings.runtimeProfile === 'cpu'
+                  ? 'bg-accent-orange/15 border-accent-orange/40 text-accent-orange'
+                  : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10'
+              }`}
+            >
+              <Cpu size={14} />
+              CPU Only
             </button>
           </div>
           <p className="text-xs text-slate-500 italic">
