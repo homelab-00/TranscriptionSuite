@@ -244,8 +244,18 @@ uv venv "$VENV_DIR" --python 3.13
 UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
   uv sync \
     --directory "$PROJECT_ROOT/server/backend" \
-    --extra mlx \
-    --no-editable
+    --extra mlx
+
+# uv's wheel cache means 'uv sync' may skip reinstalling the local 'server'
+# package when the version string hasn't changed, even if source files were
+# edited.  Force a reinstall of the local package only (all other packages
+# remain cached) so that code changes are always reflected in the bundle.
+UV_PROJECT_ENVIRONMENT="$VENV_DIR" \
+  uv pip install \
+    --python "$VENV_DIR/bin/python" \
+    --no-cache \
+    --reinstall-package server \
+    "$PROJECT_ROOT/server/backend"
 
 echo ""
 echo "✓  Python/MLX backend installed."
