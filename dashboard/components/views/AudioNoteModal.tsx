@@ -467,6 +467,12 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     y: number;
     conversationId: number;
   } | null>(null);
+  // Inline rename dialog state (replaces window.prompt, which is blocked in Electron)
+  const [renameDialog, setRenameDialog] = useState<{
+    conversationId: number;
+    currentTitle: string;
+  } | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   // Chat Sessions — fetched from API when recording is available
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
@@ -1144,25 +1150,33 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   );
 
   // Session context-menu handlers
-  const handleRenameSession = useCallback(async () => {
+  const handleRenameSession = useCallback(() => {
     if (!contextMenu) return;
     const target = chatSessions.find((session) => session.id === contextMenu.conversationId);
     if (!target) {
       setContextMenu(null);
       return;
     }
-    const newTitle = window.prompt('Enter new session title:', target.title)?.trim();
-    if (!newTitle || newTitle === target.title) {
-      setContextMenu(null);
+    // Open inline rename dialog (window.prompt is blocked in Electron on macOS)
+    setRenameValue(target.title);
+    setRenameDialog({ conversationId: target.id, currentTitle: target.title });
+    setContextMenu(null);
+  }, [contextMenu, chatSessions]);
+
+  const handleRenameCommit = useCallback(async () => {
+    if (!renameDialog) return;
+    const newTitle = renameValue.trim();
+    if (!newTitle || newTitle === renameDialog.currentTitle) {
+      setRenameDialog(null);
       return;
     }
     try {
-      await apiClient.updateConversation(target.id, { title: newTitle });
+      await apiClient.updateConversation(renameDialog.conversationId, { title: newTitle });
       const updatedAt = new Date().toISOString();
       setChatSessions((prev) =>
         sortChatSessions(
           prev.map((session) =>
-            session.id === target.id
+            session.id === renameDialog.conversationId
               ? {
                   ...session,
                   title: newTitle,
@@ -1177,8 +1191,8 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     } catch {
       toast.error('Failed to rename session.');
     }
-    setContextMenu(null);
-  }, [contextMenu, chatSessions]);
+    setRenameDialog(null);
+  }, [renameDialog, renameValue]);
 
   const handleExportSession = useCallback(async () => {
     if (!contextMenu) return;
@@ -1315,11 +1329,55 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     }
   }, [note?.recordingId, dateEditValue, onRecordingMutated, onClose]);
 
-  if (!isRendered || !note || !portalContainer) return confirmDialog;
+  if (!isRendered || !note || !portalContainer) return createPortal(confirmDialog, document.body);
 
   return (
     <>
-      {confirmDialog}
+      {/* Render confirmDialog and renameDialog via portals to document.body so they
+          always appear above the modal (z-9999), regardless of stacking context. */}
+      {createPortal(confirmDialog, document.body)}
+      {renameDialog &&
+        createPortal(
+          <div className="fixed inset-0 z-10000 flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setRenameDialog(null)}
+            />
+            <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl">
+              <div className="flex items-center border-b border-white/10 bg-white/5 px-6 py-4">
+                <span className="text-base font-semibold text-white">Rename Session</span>
+              </div>
+              <div className="bg-black/20 px-6 py-5">
+                <input
+                  autoFocus
+                  type="text"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleRenameCommit();
+                    if (e.key === 'Escape') setRenameDialog(null);
+                  }}
+                  className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
+                />
+              </div>
+              <div className="flex justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4">
+                <button
+                  onClick={() => setRenameDialog(null)}
+                  className="rounded-lg px-4 py-2 text-sm text-slate-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRenameCommit}
+                  className="bg-accent-cyan rounded-lg px-4 py-2 text-sm font-medium text-black hover:bg-cyan-300"
+                >
+                  Rename
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
       {createPortal(
         <div className="fixed inset-0 z-9999 flex items-center justify-center p-4 lg:p-8">
           {/* Backdrop */}

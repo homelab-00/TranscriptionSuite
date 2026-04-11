@@ -39,7 +39,7 @@ export function useConfirm() {
   );
 
   const dialog = state ? (
-    <Dialog open onClose={() => handleClose(false)} className="relative z-60">
+    <Dialog open onClose={() => handleClose(false)} className="relative z-10000">
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" aria-hidden="true" />
       <div className="fixed inset-0 flex items-center justify-center p-4">
         <DialogPanel className="flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl">
