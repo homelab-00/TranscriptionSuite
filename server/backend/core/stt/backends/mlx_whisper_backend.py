@@ -152,6 +152,14 @@ class MLXWhisperBackend(STTBackend):
             word_timestamps=use_word_timestamps,
         )
 
+        # Release intermediate Metal buffers after inference.
+        try:
+            import mlx.core as mx
+
+            mx.clear_cache()
+        except Exception:
+            pass
+
         # mlx-audio generate() returns STTOutput with .segments list of dicts:
         #   {"id", "seek", "start", "end", "text", "tokens", "temperature",
         #    "avg_logprob", "compression_ratio", "no_speech_prob",

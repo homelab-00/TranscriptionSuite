@@ -21,6 +21,7 @@ The model is downloaded and cached by ``parakeet-mlx`` on first load.
 
 from __future__ import annotations
 
+import gc
 import logging
 import tempfile
 from collections.abc import Callable
@@ -29,6 +30,7 @@ from typing import Any
 
 import numpy as np
 import soundfile as sf
+from server.config import get_config
 from server.core.stt.backends.base import (
     BackendDependencyError,
     BackendSegment,
@@ -141,9 +143,16 @@ class MLXParakeetBackend(STTBackend):
             raise RuntimeError(f"Failed to load MLX Parakeet model '{model_name}': {exc}") from exc
 
     def unload(self) -> None:
-        self._model = None
-        self._model_name = None
-        self._loaded = False
+        if self._model is not None:
+            import mlx.core as mx
+
+            del self._model
+            self._model = None
+            self._model_name = None
+            self._loaded = False
+            mx.clear_cache()
+            gc.collect()
+            logger.info("MLX Parakeet model unloaded")
 
     def is_loaded(self) -> bool:
         return self._loaded
@@ -210,12 +219,59 @@ class MLXParakeetBackend(STTBackend):
             else:
                 audio = audio.astype(np.float32)
 
+        # --- MLX memory optimization: local attention + chunking ------------
+        # Read MLX-specific config from the shared parakeet: section.
+        cfg = get_config()
+        parakeet_cfg = cfg.get("parakeet", default={}) or {}
+
+        audio_duration_s = len(audio) / SAMPLE_RATE
+
+        # Toggle attention model per-transcription (not at load time) so short
+        # files keep full O(n²) attention quality while long files benefit from
+        # O(n·w) local attention.
+        use_local = parakeet_cfg.get("mlx_local_attention", True)
+        threshold_s = float(parakeet_cfg.get("mlx_local_attention_threshold_s", 120))
+        if use_local and audio_duration_s > threshold_s:
+            window = parakeet_cfg.get("mlx_local_attention_window", [256, 256])
+            self._model.encoder.set_attention_model(
+                "rel_pos_local_attn", tuple(window)
+            )
+            logger.info(
+                "MLX Parakeet: local attention enabled (%.0fs > %.0fs threshold, window=%s)",
+                audio_duration_s,
+                threshold_s,
+                window,
+            )
+        else:
+            self._model.encoder.set_attention_model("rel_pos")
+            logger.debug(
+                "MLX Parakeet: full attention (%.0fs <= %.0fs threshold)",
+                audio_duration_s,
+                threshold_s,
+            )
+
+        # Chunking: split long audio into overlapping chunks for bounded memory.
+        chunk_duration_cfg = float(parakeet_cfg.get("mlx_chunk_duration_s", 120))
+        overlap_duration_cfg = float(parakeet_cfg.get("mlx_overlap_duration_s", 15))
+        # Only chunk if enabled (>0) and audio exceeds the chunk duration.
+        chunk_duration: float | None = None
+        overlap_duration: float = overlap_duration_cfg
+        if chunk_duration_cfg > 0 and audio_duration_s > chunk_duration_cfg:
+            chunk_duration = chunk_duration_cfg
+            logger.info(
+                "MLX Parakeet: chunking enabled (%.0fs audio, %.0fs chunks, %.0fs overlap)",
+                audio_duration_s,
+                chunk_duration,
+                overlap_duration,
+            )
+
         # parakeet-mlx expects a file path, write audio to a temp WAV.
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             sf.write(tmp.name, audio, SAMPLE_RATE)
             tmp_path = tmp.name
 
         try:
+            import mlx.core as mx
             from parakeet_mlx import DecodingConfig, SentenceConfig
 
             decoding_config = DecodingConfig(
@@ -228,9 +284,24 @@ class MLXParakeetBackend(STTBackend):
                     max_duration=30.0,
                 )
             )
-            result = self._model.transcribe(tmp_path, decoding_config=decoding_config)
+
+            transcribe_kwargs: dict[str, Any] = {
+                "decoding_config": decoding_config,
+            }
+            if chunk_duration is not None:
+                transcribe_kwargs["chunk_duration"] = chunk_duration
+                transcribe_kwargs["overlap_duration"] = overlap_duration
+
+            result = self._model.transcribe(tmp_path, **transcribe_kwargs)
         finally:
             Path(tmp_path).unlink(missing_ok=True)
+            # Release intermediate Metal buffers accumulated during inference.
+            try:
+                import mlx.core as mx
+
+                mx.clear_cache()
+            except Exception:
+                pass
 
         # Convert AlignedResult.sentences → BackendSegment list.
         #

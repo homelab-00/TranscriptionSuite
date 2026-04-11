@@ -97,6 +97,61 @@ parakeet:
     # Chunk the subsampling convolution to reduce peak memory.
     subsampling_conv_chunking: true
 
+    # --- MLX Parakeet Backend Settings (Apple Silicon only) ---
+    # These apply when using parakeet-mlx on Apple Silicon via Metal.
+
+    # Enable local attention for audio longer than mlx_local_attention_threshold_s.
+    # Short audio uses full attention for maximum accuracy; long audio uses local
+    # attention to cap memory at O(N) instead of O(N²).
+    # Default: true
+    mlx_local_attention: true
+
+    # Local attention context window [left, right] in frames.
+    # (256, 256) recommended balance of accuracy and memory.
+    # (128, 128) for tighter memory constraints.
+    # Default: [256, 256]
+    mlx_local_attention_window: [256, 256]
+
+    # Audio duration threshold (seconds) above which local attention is used.
+    # Files shorter than this use full attention for best quality.
+    # Default: 120 (2 minutes)
+    mlx_local_attention_threshold_s: 120
+
+    # Chunk duration (seconds) for MLX Parakeet long audio processing.
+    # Audio longer than this is split into overlapping chunks.
+    # Set to 0 to disable chunking (process entire file at once).
+    # Default: 120
+    mlx_chunk_duration_s: 120
+
+    # Overlap duration (seconds) between chunks for accurate merging.
+    # Default: 15
+    mlx_overlap_duration_s: 15
+
+# ----------------------------------------------------------------------------
+# Sortformer Diarization Settings (Apple Silicon only)
+# ----------------------------------------------------------------------------
+# Settings for the MLX Sortformer speaker diarization engine.
+# Used automatically on Apple Silicon when diarization is requested.
+sortformer:
+    # Streaming chunk duration (seconds) for Sortformer diarization.
+    # Smaller chunks use dramatically less memory (quadratic attention scaling).
+    # The streaming state carries speaker context across chunks.
+    # Recommended: 5-10s. Maximum trained: 90s.
+    # Set to 0 to disable streaming and use offline mode (higher memory).
+    # Default: 5.0
+    chunk_duration_s: 5.0
+
+# ----------------------------------------------------------------------------
+# MLX Memory Settings (Apple Silicon only)
+# ----------------------------------------------------------------------------
+# Controls Metal GPU buffer pool management for all MLX backends.
+mlx:
+    # Metal buffer cache limit in MB. Bounds how large the GPU memory pool can
+    # grow during inference. Intermediate allocations are reused from this pool.
+    # Set to 0 to disable (unlimited pool growth — not recommended).
+    # Default: 1024 (1 GB)
+    metal_cache_limit_mb: 1024
+
 # ----------------------------------------------------------------------------
 # VibeVoice-ASR (Experimental, In-Process Backend)
 # ----------------------------------------------------------------------------

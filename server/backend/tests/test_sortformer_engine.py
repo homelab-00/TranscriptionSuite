@@ -47,6 +47,8 @@ class _FakeSortformerModel:
     def __init__(self, result: _FakeDiarResult | None = None):
         self._result = result or _FakeDiarResult()
         self.generate = MagicMock(return_value=self._result)
+        # generate_stream yields one result chunk (same segments as offline).
+        self.generate_stream = MagicMock(return_value=iter([self._result]))
 
 
 def _engine_mod():
@@ -190,10 +192,15 @@ class TestSortformerEngineDiarize:
         mod = _engine_mod()
         fake = fake_model or _FakeSortformerModel()
         fake_load = MagicMock(return_value=fake)
+        # Stub get_config so tests don't depend on a real config file.
+        # Default chunk_duration_s > 0 → streaming path via generate_stream().
+        fake_cfg = MagicMock()
+        fake_cfg.get.return_value = {"chunk_duration_s": 5.0}
         ctx = patch.multiple(
             mod.__name__,
             HAS_MLX_AUDIO=True,
             _load_sortformer=fake_load,
+            get_config=MagicMock(return_value=fake_cfg),
         )
         ctx.start()
         engine = mod.SortformerEngine()
@@ -256,9 +263,12 @@ class TestSortformerEngineDiarize:
         mod = _engine_mod()
         fake_model = _FakeSortformerModel()
         fake_load = MagicMock(return_value=fake_model)
+        fake_cfg = MagicMock()
+        fake_cfg.get.return_value = {"chunk_duration_s": 5.0}
         with (
             patch.object(mod, "HAS_MLX_AUDIO", True),
             patch.object(mod, "_load_sortformer", fake_load),
+            patch.object(mod, "get_config", return_value=fake_cfg),
         ):
             engine = mod.SortformerEngine()
             assert not engine.is_loaded()
@@ -269,19 +279,22 @@ class TestSortformerEngineDiarize:
         fake_load.assert_called_once()
 
     def test_passes_threshold_to_generate(self) -> None:
-        """The engine's threshold value must be forwarded to model.generate()."""
+        """The engine's threshold value must be forwarded to generate_stream()."""
         mod = _engine_mod()
         fake_model = _FakeSortformerModel()
         fake_load = MagicMock(return_value=fake_model)
+        fake_cfg = MagicMock()
+        fake_cfg.get.return_value = {"chunk_duration_s": 5.0}
         with (
             patch.object(mod, "HAS_MLX_AUDIO", True),
             patch.object(mod, "_load_sortformer", fake_load),
+            patch.object(mod, "get_config", return_value=fake_cfg),
         ):
             engine = mod.SortformerEngine(threshold=0.75)
             engine.load()
             audio = np.zeros(16000, dtype=np.float32)
             engine.diarize_audio(audio, sample_rate=16000)
-        call_kwargs = fake_model.generate.call_args[1]
+        call_kwargs = fake_model.generate_stream.call_args[1]
         assert call_kwargs.get("threshold") == pytest.approx(0.75)
 
     def test_single_speaker_result(self) -> None:
@@ -297,13 +310,13 @@ class TestSortformerEngineDiarize:
             ctx.stop()
 
     def test_generate_receives_file_path(self) -> None:
-        """diarize_audio() writes a temp WAV and passes its path to generate()."""
+        """diarize_audio() writes a temp WAV and passes its path to generate_stream()."""
         engine, fake_model, ctx = self._make_loaded_engine()
         try:
             audio = np.zeros(16000, dtype=np.float32)
             engine.diarize_audio(audio, sample_rate=16000)
-            # generate() must have been called with a positional path argument
-            args, _ = fake_model.generate.call_args
+            # generate_stream() must have been called with a positional path argument
+            args, _ = fake_model.generate_stream.call_args
             assert len(args) == 1
             assert isinstance(args[0], str)
             assert args[0].endswith(".wav")

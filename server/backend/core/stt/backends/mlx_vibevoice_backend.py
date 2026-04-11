@@ -204,4 +204,12 @@ class MLXVibeVoiceBackend(STTBackend):
         audio = np.asarray(audio, dtype=np.float32)
         if audio.ndim > 1:
             audio = audio.squeeze()
-        return self._model.generate(audio, sampling_rate=audio_sample_rate)
+        result = self._model.generate(audio, sampling_rate=audio_sample_rate)
+        # Release intermediate Metal buffers after inference.
+        try:
+            import mlx.core as mx
+
+            mx.clear_cache()
+        except Exception:
+            pass
+        return result

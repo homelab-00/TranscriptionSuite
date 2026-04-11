@@ -9,12 +9,14 @@ group).
 
 from __future__ import annotations
 
+import gc
 import logging
 import tempfile
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from server.config import get_config
 from server.core.diarization_engine import DiarizationResult, DiarizationSegment
 
 logger = logging.getLogger(__name__)
@@ -95,6 +97,13 @@ class SortformerEngine:
         del self._model
         self._model = None
         self._loaded = False
+        try:
+            import mlx.core as mx
+
+            mx.clear_cache()
+        except Exception:
+            pass
+        gc.collect()
         logger.info("Sortformer model unloaded")
 
     def is_loaded(self) -> bool:
@@ -109,6 +118,12 @@ class SortformerEngine:
         num_speakers: int | None = None,
     ) -> DiarizationResult:
         """Run Sortformer diarization on in-memory audio.
+
+        Uses streaming inference (``generate_stream``) by default to keep
+        memory bounded — attention memory scales quadratically with chunk
+        duration, so small streaming chunks (5-10 s) are dramatically cheaper
+        than processing the full file at once.  The streaming state carries
+        speaker context across chunks so accuracy is maintained.
 
         Args:
             audio_data: Mono float32 audio samples.
@@ -129,20 +144,49 @@ class SortformerEngine:
         except ImportError as exc:
             raise RuntimeError("soundfile is required for Sortformer") from exc
 
+        # Read configurable streaming chunk duration (default 5.0 s).
+        cfg = get_config()
+        sortformer_cfg = cfg.get("sortformer", default={}) or {}
+        chunk_duration_s = float(sortformer_cfg.get("chunk_duration_s", 5.0))
+
         # Sortformer expects a file path — write a temporary WAV.
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             sf.write(tmp.name, audio_data, sample_rate)
             tmp_path = tmp.name
 
         try:
-            result = self._model.generate(tmp_path, threshold=self.threshold)
+            if chunk_duration_s > 0:
+                # Streaming inference: process in small chunks for bounded memory.
+                logger.info(
+                    "Sortformer: streaming diarization (%.1fs chunks)",
+                    chunk_duration_s,
+                )
+                all_segments_raw: list[Any] = []
+                for result in self._model.generate_stream(
+                    tmp_path,
+                    chunk_duration=chunk_duration_s,
+                    threshold=self.threshold,
+                ):
+                    all_segments_raw.extend(result.segments)
+            else:
+                # Offline inference: process entire file at once (high memory).
+                logger.info("Sortformer: offline diarization (streaming disabled)")
+                result = self._model.generate(tmp_path, threshold=self.threshold)
+                all_segments_raw = list(result.segments)
         finally:
             Path(tmp_path).unlink(missing_ok=True)
+            # Release intermediate Metal buffers.
+            try:
+                import mlx.core as mx
+
+                mx.clear_cache()
+            except Exception:
+                pass
 
         segments: list[DiarizationSegment] = []
         speakers: set[str] = set()
 
-        for seg in result.segments:
+        for seg in all_segments_raw:
             speaker = str(getattr(seg, "speaker", "UNKNOWN"))
             start = float(getattr(seg, "start", 0.0))
             end = float(getattr(seg, "end", 0.0))

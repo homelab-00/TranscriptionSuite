@@ -243,6 +243,29 @@ class ModelManager:
         # Fix 3: Start background NeMo import if NeMo models will be used
         self._start_background_nemo_import()
 
+        # Apply MLX Metal memory cache limit (Apple Silicon only).
+        self._apply_mlx_metal_cache_limit()
+
+    def _apply_mlx_metal_cache_limit(self) -> None:
+        """Set the MLX Metal buffer cache limit from config.
+
+        Reads ``mlx.metal_cache_limit_mb`` (default 1024 MB).  A value of 0
+        disables the limit.  Silently skipped on non-MLX platforms.
+        """
+        try:
+            import mlx.core as mx
+        except Exception:
+            return  # Not an MLX platform — nothing to do.
+
+        from server.config import get_config
+
+        cfg = get_config()
+        mlx_cfg = cfg.get("mlx", default={}) or {}
+        limit_mb = int(mlx_cfg.get("metal_cache_limit_mb", 1024))
+        if limit_mb > 0:
+            mx.metal.set_cache_limit(limit_mb * 1024 * 1024)
+            logger.info("MLX Metal cache limit set to %d MB", limit_mb)
+
     def _initialize_diarization_feature_status(self) -> None:
         """Initialize diarization feature availability from bootstrap state/env."""
         status_file = os.environ.get("BOOTSTRAP_STATUS_FILE", "/runtime/bootstrap-status.json")

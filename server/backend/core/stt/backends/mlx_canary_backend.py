@@ -299,9 +299,17 @@ class MLXCanaryBackend(STTBackend):
             raise RuntimeError(f"Failed to load MLX Canary model '{model_name}': {exc}") from exc
 
     def unload(self) -> None:
+        import gc
+
+        import mlx.core as mx
+
+        del self._model
         self._model = None
         self._model_name = None
         self._loaded = False
+        mx.clear_cache()
+        gc.collect()
+        logger.info("MLX Canary model unloaded")
 
     def is_loaded(self) -> bool:
         return self._loaded
@@ -406,6 +414,13 @@ class MLXCanaryBackend(STTBackend):
                 )
             finally:
                 Path(tmp_path).unlink(missing_ok=True)
+                # Release intermediate Metal buffers between chunks.
+                try:
+                    import mlx.core as mx
+
+                    mx.clear_cache()
+                except Exception:
+                    pass
 
             if isinstance(text, str) and text.strip():
                 segments.append(
