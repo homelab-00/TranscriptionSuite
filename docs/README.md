@@ -199,7 +199,7 @@ Install Docker (or Podman) before proceeding with §§ 2.3–2.5.
     * Not required if using CPU mode
 
 **Windows:**
-1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backen (during installation, if presented with the option, make sure the *'Use WSL 2 instead of Hyper-V'* checkbox is enabled).
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend (during installation, if presented with the option, make sure the *'Use WSL 2 instead of Hyper-V'* checkbox is enabled).
 After installation to make sure it's enabled, run `wsl --list --verbose` - if the number is 2, Docker is using the WSL 2 backend.
 2. Install NVIDIA GPU driver with WSL support (standard NVIDIA gaming drivers work fine)
     * Not required if using CPU mode
@@ -210,8 +210,8 @@ the server runs in CPU mode automatically.
 
 ### 2.3 Download the Dashboard app
 
-Before doing anything else, you need to download the Dashboard app for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page.
-This is just the frontend, no models or packages are downloaded yet.
+Before doing anything else, you need to download **and install** the Dashboard app for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page.
+This is just the frontend — no models or packages are downloaded yet, but it must be installed before setting up the server in the next step.
 
 >* *Linux and Windows builds are x64; macOS is arm64*
 >* *Each release artifact includes an gpg signature by my key (`.asc`)*
@@ -247,9 +247,11 @@ AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default
 
 We're now ready to start the server. This process includes two parts: downloading the Docker image and starting a Docker container based off of that image.
 
+> **Windows:** Make sure Docker Desktop is already running before proceeding. The server setup will fail if Docker Desktop is not started first.
+
 1. *Download the image*: Using the Sidebar on the left, head over to the Server tab and click the button 'Fetch Fresh Image'
 2. *Starting the container*: Scroll down a bit and click the 'Start Local' button in the #2 box
-3. *Initial setup - models, diarization*: A series of prompts will ask you for which models you want to download to begin with, and if you want to enable diarization. Specifically for diarization, you need to enter your HuggingFace token and accept the [terms of the model](https://huggingface.co/pyannote/speaker-diarization-community-1). To create that token, see [here](https://huggingface.co/docs/hub/en/security-tokens) for instructions and then create a 'Read' access token.
+3. *Initial setup - models, diarization*: A series of prompts will ask you for which models you want to download to begin with, and if you want to enable diarization. Specifically for diarization, you need to enter your HuggingFace token and accept the [terms of the model](https://huggingface.co/pyannote/speaker-diarization-community-1). To create a token, go to your [HuggingFace token settings](https://huggingface.co/settings/tokens), click *Create new token*, and select **Read** as the access type (Write or Fine-grained are not needed).
 4. **Wait** - Initial startup can take a long time, even on newer hardware and fast internet speeds; we're talking 10-20 minutes with reasonable specs though, not hours; you'll know it's done when the server status light turns green
 5. **Start the client**: Head to the Session tab and click on the 'Start Local' button inside the Client Link box - if it turns green you're ready to roll!
 
