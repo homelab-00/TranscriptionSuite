@@ -1264,10 +1264,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <div className="space-y-2.5 px-5 pb-4">
                   {setupChecks.map((check, i) => (
                     <div key={i} className="flex items-center gap-3">
-                      {check.ok ? (
-                        <CheckCircle2 size={15} className="shrink-0 text-green-400" />
-                      ) : (check as any).na ? (
+                      {(check as any).na ? (
                         <MinusCircle size={15} className="shrink-0 text-slate-600" />
+                      ) : check.ok ? (
+                        <CheckCircle2 size={15} className="shrink-0 text-green-400" />
                       ) : check.warn ? (
                         <AlertTriangle size={15} className="text-accent-orange shrink-0" />
                       ) : (
@@ -1275,10 +1275,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       )}
                       <span
                         className={`text-sm ${
-                          check.ok
-                            ? 'text-slate-300'
-                            : (check as any).na
-                              ? 'text-slate-600'
+                          (check as any).na
+                            ? 'text-slate-600'
+                            : check.ok
+                              ? 'text-slate-300'
                               : 'text-white'
                         }`}
                       >
