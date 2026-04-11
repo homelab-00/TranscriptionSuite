@@ -751,6 +751,16 @@ export class APIClient {
     await this.post('/api/llm/config/reload');
   }
 
+  /** DELETE /api/llm/conversation/:id/messages-from/:msgId — truncate history */
+  async deleteMessagesFrom(conversationId: number, messageId: number): Promise<{ deleted: number }> {
+    return this.del(`/api/llm/conversation/${conversationId}/messages-from/${messageId}`);
+  }
+
+  /** POST /api/llm/conversation/:id/generate-title — LLM-generated ≤8-word title */
+  async generateConversationTitle(conversationId: number): Promise<{ title: string }> {
+    return this.post(`/api/llm/conversation/${conversationId}/generate-title`);
+  }
+
   /** GET /api/llm/models — list models from the configured AI provider */
   async getAvailableModels(): Promise<LLMModelsResponse> {
     return this.get('/api/llm/models');

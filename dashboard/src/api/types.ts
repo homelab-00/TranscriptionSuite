@@ -372,6 +372,8 @@ export interface LLMStatus {
   model_state: string | null;
   error: string | null;
   has_api_key: boolean;
+  title_generation_prompt?: string | null;
+  auto_title_enabled?: boolean;
 }
 
 export interface LLMResponse {

@@ -784,9 +784,36 @@ def delete_message(message_id: int) -> bool:
         return cursor.rowcount > 0
 
 
+def delete_messages_from(conversation_id: int, message_id: int) -> int:
+    """Delete a message and all later messages in a conversation.
+
+    Deletes the message with ``message_id`` plus every message in the same
+    conversation whose ``id`` is greater (i.e. was inserted later).  Returns
+    the number of rows deleted.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM messages
+            WHERE conversation_id = ? AND id >= ?
+            """,
+            (conversation_id, message_id),
+        )
+        deleted = cursor.rowcount
+        if deleted:
+            cursor.execute(
+                "UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (conversation_id,),
+            )
+        conn.commit()
+        return deleted
+
+
 # =============================================================================
 # Extended Recording operations
 # =============================================================================
+
 
 
 def get_recordings_for_month(year: int, month: int) -> list[dict[str, Any]]:

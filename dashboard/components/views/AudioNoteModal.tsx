@@ -26,6 +26,7 @@ import {
   Plus,
   ChevronDown,
   RotateCw,
+  Copy,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
@@ -42,6 +43,8 @@ import type { ChatMessage, Conversation, LLMModel } from '../../src/api/types';
 interface DisplayMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** DB message ID, present for persisted messages — used for truncation. */
+  id?: number;
 }
 
 interface AudioNoteModalProps {
@@ -115,7 +118,7 @@ function toDisplayMessages(messages: ChatMessage[] | undefined): DisplayMessage[
       (m): m is ChatMessage & { role: DisplayMessage['role'] } =>
         m.role === 'user' || m.role === 'assistant',
     )
-    .map((m) => ({ role: m.role, content: m.content }));
+    .map((m) => ({ role: m.role, content: m.content, id: m.id }));
 }
 
 function parseLlmResponseSegments(rawText: string): ParsedLlmSegment[] {
@@ -475,6 +478,26 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const [chatMessages, setChatMessages] = useState<DisplayMessage[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  // Inline edit state for user messages
+  const [editingMsgIndex, setEditingMsgIndex] = useState<number | null>(null);
+  const [editingContent, setEditingContent] = useState('');
+  // Ref for the chat text input — used to auto-focus it
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  // Focus the chat input whenever the sidebar opens or a new session is created
+  useEffect(() => {
+    if (!isSidebarOpen) return;
+    // Small delay so the sidebar animation has started and the element is rendered
+    const t = setTimeout(() => chatInputRef.current?.focus(), 50);
+    return () => clearTimeout(t);
+  }, [isSidebarOpen]);
+  // Whether the server has auto-title generation enabled (fetched once on open)
+  const autoTitleEnabledRef = useRef(true);
+  useEffect(() => {
+    if (!isOpen) return;
+    apiClient.getLLMStatus().then((status) => {
+      autoTitleEnabledRef.current = status.auto_title_enabled ?? true;
+    }).catch(() => { /* leave default true */ });
+  }, [isOpen]);
 
   // Output formatting
   const [hideTimestamps, setHideTimestamps] = useState(false);
@@ -551,7 +574,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
         apiClient
           .getAvailableModels()
           .then((res) => {
-            setAvailableModels(res.models ?? []);
+            setAvailableModels([...(res.models ?? [])].sort((a, b) => a.id.localeCompare(b.id)));
           })
           .catch(() => {})
           .finally(() => setModelsLoaded(true));
@@ -842,7 +865,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const handleRefreshModels = useCallback(async () => {
     try {
       const res = await apiClient.getAvailableModels();
-      setAvailableModels(res.models ?? []);
+      setAvailableModels([...(res.models ?? [])].sort((a, b) => a.id.localeCompare(b.id)));
       setModelsLoaded(true);
     } catch {
       /* keep stale list */
@@ -871,6 +894,8 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       setChatMessages([]);
       setSessionsError(null);
       setContextMenu(null);
+      // Focus the input so the user can start typing immediately
+      setTimeout(() => chatInputRef.current?.focus(), 0);
     } catch {
       setSessionsError('Failed to create a new session.');
     }
@@ -944,8 +969,8 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   };
 
   // LLM Chat handler — sends user message and streams assistant response
-  const handleSendMessage = useCallback(async () => {
-    const text = chatInput.trim();
+  const handleSendMessage = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? chatInput).trim();
     if (!text || !note?.recordingId || isChatLoading) return;
 
     let conversationId = activeConversationId;
@@ -975,6 +1000,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     }
 
     setSessionsError(null);
+    const isFirstExchange = chatMessages.length === 0;
     setChatMessages((prev) => [
       ...prev,
       { role: 'user', content: text },
@@ -982,6 +1008,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     ]);
     setChatInput('');
     setIsChatLoading(true);
+    let streamSucceeded = false;
     try {
       const stream = apiClient.chat({
         conversation_id: conversationId,
@@ -998,6 +1025,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
           return updated;
         });
       }
+      streamSucceeded = true;
     } catch {
       setChatMessages((prev) => {
         const updated = [...prev];
@@ -1025,7 +1053,95 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       });
       setIsChatLoading(false);
     }
-  }, [chatInput, note?.recordingId, isChatLoading, activeConversationId]);
+    // Auto-generate title after the first successful exchange (if enabled)
+    if (streamSucceeded && isFirstExchange && conversationId && autoTitleEnabledRef.current) {
+      try {
+        const { title } = await apiClient.generateConversationTitle(conversationId);
+        if (title) {
+          const updatedAt = new Date().toISOString();
+          setChatSessions((prev) =>
+            sortChatSessions(
+              prev.map((session) =>
+                session.id === conversationId
+                  ? {
+                      ...session,
+                      title,
+                      type: inferSessionType(title),
+                      updatedAt,
+                      timestamp: formatSessionTime(updatedAt),
+                    }
+                  : session,
+              ),
+            ),
+          );
+        }
+      } catch {
+        // Title generation failure is non-fatal
+      }
+    }
+  }, [chatInput, note?.recordingId, isChatLoading, activeConversationId, chatMessages]);
+
+  /**
+   * Truncate conversation history then resend:
+   * - Edit mode (overrideText provided): `firstDeleteIndex` is the user message to replace.
+   *   Slice from there, delete from DB at that user message ID, resend with new text.
+   * - Regenerate mode (no overrideText): `firstDeleteIndex` is the assistant message to redo.
+   *   Walk back to find the preceding user message, truncate from THERE (so the user message
+   *   is also removed from UI and DB), then resend with its text. This ensures only one copy
+   *   of the user message is added and transcription context is re-included.
+   */
+  const handleTruncateAndRetry = useCallback(
+    async (firstDeleteIndex: number, overrideText?: string) => {
+      if (isChatLoading || !activeConversationId) return;
+
+      let truncateFromIndex = firstDeleteIndex;
+      let retryText = overrideText;
+
+      if (!retryText) {
+        // Regenerate mode: walk back to find the preceding user message and
+        // truncate from there so handleSendMessage doesn't create a duplicate.
+        for (let i = firstDeleteIndex - 1; i >= 0; i--) {
+          if (chatMessages[i].role === 'user') {
+            retryText = chatMessages[i].content;
+            truncateFromIndex = i;
+            break;
+          }
+        }
+      }
+      if (!retryText) return;
+
+      const msgToDelete = chatMessages[truncateFromIndex];
+      const dbId = msgToDelete?.id;
+
+      // Truncate optimistically in UI
+      setChatMessages((prev) => prev.slice(0, truncateFromIndex));
+      setEditingMsgIndex(null);
+      setEditingContent('');
+
+      // Truncate on the server (best-effort) if we have a DB ID
+      if (dbId !== undefined) {
+        try {
+          await apiClient.deleteMessagesFrom(activeConversationId, dbId);
+        } catch {
+          // Non-fatal: server will reconcile on next load
+        }
+      }
+
+      // Re-send directly (bypass chatInput state to avoid async timing issues)
+      await handleSendMessage(retryText);
+    },
+    [isChatLoading, activeConversationId, chatMessages, handleSendMessage],
+  );
+
+  /** Called when the user confirms an inline edit of a user message. */
+  const handleCommitEdit = useCallback(
+    (msgIndex: number) => {
+      const text = editingContent.trim();
+      if (!text) return;
+      handleTruncateAndRetry(msgIndex, text);
+    },
+    [editingContent, handleTruncateAndRetry],
+  );
 
   // Session context-menu handlers
   const handleRenameSession = useCallback(async () => {
@@ -1669,25 +1785,101 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                   {/* Dynamic chat messages */}
                   {chatMessages.map((msg, idx) =>
                     msg.role === 'user' ? (
-                      <div key={idx} className="flex flex-row-reverse gap-3 pl-8">
+                      <div key={idx} className="group flex flex-row-reverse gap-3 pl-8">
                         <div className="bg-accent-cyan/20 flex h-8 w-8 shrink-0 items-center justify-center rounded-full select-none">
                           <User size={14} className="text-accent-cyan" />
                         </div>
-                        <div className="bg-accent-cyan/10 border-accent-cyan/10 selectable-text rounded-2xl rounded-tr-none border p-3">
-                          <p className="text-sm text-white">{msg.content}</p>
+                        <div className="flex min-w-0 flex-col items-end gap-1">
+                          {editingMsgIndex === idx ? (
+                            <div className="bg-accent-cyan/10 border-accent-cyan/10 w-full rounded-2xl rounded-tr-none border p-3">
+                              <textarea
+                                className="w-full resize-none bg-transparent text-sm text-white outline-none"
+                                rows={3}
+                                autoFocus
+                                value={editingContent}
+                                onChange={(e) => setEditingContent(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleCommitEdit(idx);
+                                  }
+                                  if (e.key === 'Escape') {
+                                    setEditingMsgIndex(null);
+                                    setEditingContent('');
+                                  }
+                                }}
+                              />
+                              <div className="mt-2 flex justify-end gap-2">
+                                <button
+                                  onClick={() => { setEditingMsgIndex(null); setEditingContent(''); }}
+                                  className="rounded px-2 py-0.5 text-xs text-slate-400 hover:text-white"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => handleCommitEdit(idx)}
+                                  className="bg-accent-cyan rounded px-2 py-0.5 text-xs text-black"
+                                >
+                                  Send
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="bg-accent-cyan/10 border-accent-cyan/10 selectable-text rounded-2xl rounded-tr-none border p-3">
+                              <p className="text-sm text-white">{msg.content}</p>
+                            </div>
+                          )}
+                          {/* Hover action row — edit */}
+                          {editingMsgIndex !== idx && (
+                            <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                              <button
+                                title="Edit message"
+                                disabled={isChatLoading}
+                                onClick={() => {
+                                  setEditingMsgIndex(idx);
+                                  setEditingContent(msg.content);
+                                }}
+                                className="rounded p-1 text-slate-500 hover:bg-white/10 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ) : (
-                      <div key={idx} className="flex gap-3 pr-8">
+                      <div key={idx} className="group flex gap-3 pr-8">
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 select-none">
                           <Bot size={14} className="text-white" />
                         </div>
-                        <div className="selectable-text rounded-2xl rounded-tl-none border border-white/5 bg-white/5 p-3">
-                          {msg.content ? (
-                            renderLlmResponseContent({ content: msg.content, tone: 'chat' })
-                          ) : isChatLoading ? (
-                            <Loader2 size={14} className="animate-spin text-slate-300" />
-                          ) : null}
+                        <div className="flex min-w-0 flex-col gap-1">
+                          <div className="selectable-text rounded-2xl rounded-tl-none border border-white/5 bg-white/5 p-3">
+                            {msg.content ? (
+                              renderLlmResponseContent({ content: msg.content, tone: 'chat' })
+                            ) : isChatLoading && idx === chatMessages.length - 1 ? (
+                              <Loader2 size={14} className="animate-spin text-slate-300" />
+                            ) : null}
+                          </div>
+                          {/* Hover action row — copy + regenerate */}
+                          {msg.content && (
+                            <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                              <button
+                                title="Copy response"
+                                onClick={() => navigator.clipboard.writeText(msg.content)}
+                                className="rounded p-1 text-slate-500 hover:bg-white/10 hover:text-slate-200"
+                              >
+                                <Copy size={12} />
+                              </button>
+                              <button
+                                title="Regenerate"
+                                disabled={isChatLoading}
+                                onClick={() => handleTruncateAndRetry(idx)}
+                                className="rounded p-1 text-slate-500 hover:bg-white/10 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <RotateCw size={12} />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ),
@@ -1698,6 +1890,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                 <div className="border-t border-white/5 bg-white/2 p-4">
                   <div className="relative">
                     <input
+                      ref={chatInputRef}
                       type="text"
                       placeholder="Ask about this note..."
                       value={chatInput}
@@ -1712,7 +1905,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                       className="focus:border-accent-cyan/50 focus:ring-accent-cyan/20 w-full rounded-xl border border-white/10 bg-black/20 py-3 pr-12 pl-4 text-sm text-white placeholder-slate-500 transition-all focus:ring-1 focus:outline-none disabled:opacity-50"
                     />
                     <button
-                      onClick={handleSendMessage}
+                      onClick={() => handleSendMessage()}
                       disabled={isChatLoading || !chatInput.trim()}
                       className="bg-accent-cyan absolute top-2 right-2 rounded-lg p-1.5 text-black transition-colors hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
                     >

@@ -423,6 +423,25 @@ local_llm:
     # If empty, auto-detected from the provider's loaded models.
     # model: ""
 
+    # Prompt used to auto-generate a conversation title after the first reply.
+    # The LLM receives the first few messages and this prompt, and must respond
+    # with a plain title of 8 words or fewer.
+    title_generation_prompt: |
+      Your task is to produce a SHORT TITLE for this conversation.
+      Rules:
+      - Maximum 8 words
+      - Use the primary language of the conversation
+      - Output ONLY the title — no preamble, no explanation, no quotes, no punctuation at the end
+      Examples of good titles:
+        Copper grain boundary discussion
+        Project deadline planning
+        Python async debugging session
+        Marketing campaign brainstorm
+      Bad (do not do this): "Sure, here is a title: Grain boundaries in copper alloys."
+
+    # Whether to automatically generate a title after the first exchange.
+    auto_title_enabled: true
+
     # Default system prompt for summarization
     default_system_prompt: |
         You are a helpful assistant that analyzes transcriptions.

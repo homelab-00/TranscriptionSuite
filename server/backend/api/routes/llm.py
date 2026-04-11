@@ -63,6 +63,8 @@ class LLMStatus(BaseModel):
     model_state: str | None = None  # "loaded", "not-loaded", etc.
     error: str | None = None
     has_api_key: bool = False
+    title_generation_prompt: str | None = None
+    auto_title_enabled: bool = True
 
 
 async def _get_loaded_model_id(base_url: str, headers: dict[str, str] | None = None) -> str | None:
@@ -147,6 +149,19 @@ def get_llm_config() -> dict:
             "default_system_prompt": llm_config.get(
                 "default_system_prompt", "Summarize this transcription concisely."
             ),
+            "title_generation_prompt": llm_config.get(
+                "title_generation_prompt",
+                "Your task is to produce a SHORT TITLE for this conversation.\n"
+                "Rules:\n"
+                "- Maximum 8 words\n"
+                "- Use the primary language of the conversation\n"
+                "- Output ONLY the title — no preamble, no explanation, no quotes, no punctuation at the end\n"
+                "Examples of good titles:\n"
+                "  Copper grain boundary discussion\n"
+                "  Project deadline planning\n"
+                "Bad (do not do this): \"Sure, here is a title: Grain boundaries in copper alloys.\"",
+            ),
+            "auto_title_enabled": llm_config.get("auto_title_enabled", True),
         }
     except Exception as e:
         logger.warning(f"Could not load LLM config: {e}")
@@ -161,6 +176,18 @@ def get_llm_config() -> dict:
         "max_tokens": 2048,
         "temperature": 0.7,
         "default_system_prompt": "Summarize this transcription concisely.",
+        "title_generation_prompt": (
+            "Your task is to produce a SHORT TITLE for this conversation.\n"
+            "Rules:\n"
+            "- Maximum 8 words\n"
+            "- Use the primary language of the conversation\n"
+            "- Output ONLY the title — no preamble, no explanation, no quotes, no punctuation at the end\n"
+            "Examples of good titles:\n"
+            "  Copper grain boundary discussion\n"
+            "  Project deadline planning\n"
+            "Bad (do not do this): \"Sure, here is a title: Grain boundaries in copper alloys.\""
+        ),
+        "auto_title_enabled": True,
     }
 
 
@@ -186,7 +213,7 @@ async def get_llm_status():
     api_key_set = bool(config.get("api_key", ""))
 
     def _status(**kwargs: object) -> LLMStatus:
-        return LLMStatus(base_url=base_url, has_api_key=api_key_set, **kwargs)  # type: ignore[arg-type]
+        return LLMStatus(base_url=base_url, has_api_key=api_key_set, title_generation_prompt=config.get("title_generation_prompt"), auto_title_enabled=bool(config.get("auto_title_enabled", True)), **kwargs)  # type: ignore[arg-type]
 
     if not config["enabled"]:
         return _status(
@@ -1203,6 +1230,103 @@ async def add_message_to_conversation(conversation_id: int, request: MessageCrea
     )
 
     return {"message_id": message_id}
+
+
+@router.delete("/conversation/{conversation_id}/messages-from/{message_id}")
+async def delete_messages_from_endpoint(conversation_id: int, message_id: int):
+    """Delete a message and all later messages in the conversation.
+
+    Used by the frontend to truncate history before re-sending an edited
+    user message or regenerating an assistant response.
+    """
+    from server.database.database import delete_messages_from, get_conversation, get_messages
+
+    if not get_conversation(conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Verify the message belongs to this conversation
+    messages = get_messages(conversation_id)
+    if not any(m["id"] == message_id for m in messages):
+        raise HTTPException(status_code=404, detail="Message not found in conversation")
+
+    deleted = delete_messages_from(conversation_id, message_id)
+    return {"deleted": deleted}
+
+
+@router.post("/conversation/{conversation_id}/generate-title")
+async def generate_conversation_title(conversation_id: int):
+    """Generate a short title for a conversation using the LLM.
+
+    Sends the first few conversation messages to the LLM with a brief
+    titling prompt and updates the conversation title in the DB.
+    Returns the new title.
+    """
+    from server.database.database import get_conversation_with_messages, update_conversation_title
+
+    httpx = _get_httpx()
+    config = get_llm_config()
+    base_url = config["base_url"]
+    headers = _get_headers(config)
+
+    conversation = get_conversation_with_messages(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    messages = conversation.get("messages", [])
+    if not messages:
+        raise HTTPException(status_code=400, detail="No messages to generate title from")
+
+    model_id = config.get("model") or await _get_loaded_model_id(base_url, headers)
+    if not model_id:
+        raise HTTPException(status_code=503, detail="No model available")
+
+    title_prompt = config.get(
+        "title_generation_prompt",
+        "Your task is to produce a SHORT TITLE for this conversation.\n"
+        "Rules:\n"
+        "- Maximum 8 words\n"
+        "- Use the primary language of the conversation\n"
+        "- Output ONLY the title — no preamble, no explanation, no quotes, no punctuation at the end\n"
+        "Examples of good titles:\n"
+        "  Copper grain boundary discussion\n"
+        "  Project deadline planning\n"
+        "Bad (do not do this): \"Sure, here is a title: Grain boundaries in copper alloys.\"",
+    )
+
+    # Use the first user+assistant exchange to generate the title (keep it cheap)
+    excerpt_messages: list[dict[str, str]] = [
+        {"role": "system", "content": title_prompt},
+    ]
+    for msg in messages[:4]:
+        if msg["role"] in ("user", "assistant"):
+            excerpt_messages.append({"role": msg["role"], "content": msg["content"][:500]})
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{base_url}/v1/chat/completions",
+                json={
+                    "model": model_id,
+                    "messages": excerpt_messages,
+                    "max_tokens": 30,
+                    "temperature": 0.5,
+                    "stream": False,
+                },
+                headers=headers,
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=502, detail="LLM returned non-200 for title")
+            data = response.json()
+            raw_title = (
+                data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            )
+            # Truncate aggressively to avoid runaway responses
+            title = " ".join(raw_title.split()[:10]) if raw_title else "New Chat"
+    except httpx.ConnectError as exc:
+        raise HTTPException(status_code=503, detail="Cannot connect to AI provider") from exc
+
+    update_conversation_title(conversation_id, title)
+    return {"title": title}
 
 
 @router.post("/chat")

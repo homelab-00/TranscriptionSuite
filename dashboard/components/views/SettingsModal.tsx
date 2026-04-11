@@ -133,6 +133,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [showAiApiKey, setShowAiApiKey] = useState(false);
   const [aiStatusText, setAiStatusText] = useState<string>('');
   const [aiKeyConfigured, setAiKeyConfigured] = useState(false);
+  const [aiTitlePrompt, setAiTitlePrompt] = useState('');
+  const [aiAutoTitle, setAiAutoTitle] = useState(true);
 
   // Settings state
   const [appSettings, setAppSettings] = useState({
@@ -217,6 +219,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         setAiEnabled(!isExplicitlyDisabled);
         setAiStatusText(status.available ? 'Online' : status.error || 'Offline');
         setAiKeyConfigured(status.has_api_key ?? false);
+        if (status.title_generation_prompt != null) {
+          setAiTitlePrompt(status.title_generation_prompt);
+        }
+        if (status.auto_title_enabled != null) {
+          setAiAutoTitle(status.auto_title_enabled);
+        }
       })
       .catch(() => {
         if (!cancelled) setAiStatusText('Could not reach server');
@@ -233,8 +241,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     try {
       const response = await apiClient.getAvailableModels();
       const models = response.models || [];
-      setAiModels(models);
-      if (models.length === 0) {
+      const sorted = [...models].sort((a, b) => a.id.localeCompare(b.id));
+      setAiModels(sorted);
+      if (sorted.length === 0) {
         setAiModelsFetchError('No models found — type a model ID manually.');
       }
     } catch {
@@ -1685,6 +1694,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           )}
           {aiModelsFetchError && (
             <p className="mt-1.5 text-xs text-amber-400/80">{aiModelsFetchError}</p>
+          )}
+        </Section>
+
+        <Section title="Automatic Title Generation">
+          <AppleSwitch
+            checked={aiAutoTitle}
+            onChange={(v) => {
+              setAiAutoTitle(v);
+              handleAiFieldChange('auto_title_enabled', v);
+            }}
+            label="Auto-generate title after first exchange"
+          />
+          {aiAutoTitle && (
+            <>
+              <p className="mt-4 mb-3 text-xs text-slate-400">
+                Prompt sent to the LLM to generate the title. The response should be 8 words or
+                fewer.
+              </p>
+              <textarea
+                rows={3}
+                value={aiTitlePrompt}
+                onChange={(e) => {
+                  setAiTitlePrompt(e.target.value);
+                  handleAiFieldChange('title_generation_prompt', e.target.value);
+                }}
+                placeholder="Your task is to produce a SHORT TITLE for this conversation. Rules: Maximum 8 words, use the primary language, output ONLY the title — no preamble, no quotes, no punctuation at the end."
+                className="focus:border-accent-cyan/50 w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none"
+              />
+            </>
           )}
         </Section>
 
