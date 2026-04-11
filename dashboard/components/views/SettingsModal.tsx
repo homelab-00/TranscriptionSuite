@@ -34,7 +34,7 @@ import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { isMLXModel, isVibeVoiceASRModel } from '../../src/services/modelCapabilities';
-import { buildSparseYaml } from '../../src/utils/configTree';
+import { mergeConfigUpdates } from '../../src/utils/configTree';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 import type { AuthToken, LLMModel } from '../../src/api/types';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
@@ -442,10 +442,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     queryClient.setQueryData(['authToken'], clientSettings.authToken);
     queryClient.invalidateQueries({ queryKey: ['adminStatus'] });
 
-    // Save server config.yaml changes (if any) — write sparse overrides to local file
+    // Save server config.yaml changes (if any).
+    // Read the existing local config first so we merge new changes on top —
+    // this prevents successive saves from silently discarding settings that
+    // were saved in a previous session.
     if (Object.keys(serverConfigUpdates).length > 0) {
       try {
-        const yamlText = buildSparseYaml(serverConfigUpdates);
+        const existingYaml = await (api.serverConfig.readLocal() as Promise<string | null>).catch(
+          () => null,
+        );
+        const yamlText = mergeConfigUpdates(existingYaml, serverConfigUpdates);
         await api.serverConfig.writeLocal(yamlText);
         // Tell the running server to reload config from disk so settings take
         // effect immediately without requiring a full server restart.

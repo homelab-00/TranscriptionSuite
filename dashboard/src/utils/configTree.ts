@@ -347,3 +347,45 @@ export function buildSparseYaml(overrides: Record<string, unknown>): string {
   // Serialise to YAML text with 4-space indent
   return YAML.stringify(grouped, { indent: 4 }).trimEnd() + '\n';
 }
+
+/**
+ * Merge flat dotted-path overrides into an existing YAML string (or an empty
+ * document), returning the merged YAML text.
+ *
+ * Unlike `buildSparseYaml`, this function preserves every key that was already
+ * in `existingYaml` so that successive saves don't silently discard settings
+ * written in previous sessions.
+ */
+export function mergeConfigUpdates(
+  existingYaml: string | null,
+  updates: Record<string, unknown>,
+): string {
+  // Start from whatever is already on disk.
+  let merged: Record<string, unknown> = {};
+  if (existingYaml) {
+    try {
+      const parsed = YAML.parse(existingYaml) as Record<string, unknown> | null;
+      if (parsed && typeof parsed === 'object') {
+        merged = parsed;
+      }
+    } catch {
+      // Malformed existing YAML — start with an empty base.
+    }
+  }
+
+  // Apply the flat dotted-path updates on top, creating nested objects as needed.
+  for (const [dottedPath, value] of Object.entries(updates)) {
+    const keys = dottedPath.split('.');
+    let obj = merged;
+    for (let i = 0; i < keys.length - 1; i++) {
+      if (typeof obj[keys[i]] !== 'object' || obj[keys[i]] === null) {
+        obj[keys[i]] = {};
+      }
+      obj = obj[keys[i]] as Record<string, unknown>;
+    }
+    obj[keys[keys.length - 1]] = value;
+  }
+
+  if (Object.keys(merged).length === 0) return '';
+  return YAML.stringify(merged, { indent: 4 }).trimEnd() + '\n';
+}
