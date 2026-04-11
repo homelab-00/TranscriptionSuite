@@ -154,10 +154,13 @@ export class TrayManager {
     this.tray.setToolTip(STATE_TOOLTIP_MAP[this.state]);
     this.rebuildMenu();
 
-    // Left-click: toggle recording — start if standby, stop & transcribe if recording.
-    // When server is not running (gray icon), toggle app window visibility instead.
-    // On Linux (AppIndicator/StatusNotifier) middle-click is not supported,
-    // so left-click acts as a toggle to cover both actions.
+    // Left-click behaviour differs per platform:
+    //   macOS/Windows: left-click opens the context menu (Electron handles this automatically).
+    //     The 'click' event still fires alongside the menu, so we only handle the
+    //     disconnected→window-toggle case here and skip recording actions to avoid
+    //     unintentionally starting/stopping a recording when the user opens the menu.
+    //   Linux (AppIndicator/StatusNotifier): middle-click is not supported, so we use
+    //     left-click as a recording toggle in addition to opening the context menu.
     this.tray.on('click', () => {
       if (this.state === 'disconnected') {
         const w = this.getWindow();
@@ -171,6 +174,10 @@ export class TrayManager {
         this.rebuildMenu();
         return;
       }
+      // Recording toggle on left-click only on Linux — on macOS/Windows the context
+      // menu already provides Start/Stop Recording items, and the click event fires
+      // concurrently with menu display which would silently trigger recording.
+      if (process.platform !== 'linux') return;
       if (this.menuState.isRecording && !this.menuState.isLive) {
         this.actions.stopRecording?.();
       } else if (

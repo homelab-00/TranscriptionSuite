@@ -593,11 +593,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // System Health Check for Visual Effects
   const isSystemHealthy = serverRunning && clientConnected;
 
-  // In remote mode there is no local Docker container; derive "container" state from the
-  // remote server connection so tray controls remain functional.
+  // In remote or bare metal (MLX) mode there is no local Docker container; derive "container"
+  // state from the remote server connection so tray controls remain functional.
   const isRemoteMode = clientMode === 'remote';
   const trayContainerRunning = isRemoteMode ? clientRunning : serverRunning;
-  const trayContainerHealth = isRemoteMode
+  const trayContainerHealth = isRemoteMode || isBareMetal
     ? serverConnection.serverStatus === 'active'
       ? 'healthy'
       : serverConnection.serverStatus === 'error'
