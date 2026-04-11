@@ -16,6 +16,7 @@ import type {
   UploadResponse,
 } from '../api/types';
 import { resolveTranscriptionOutput } from '../services/transcriptionFormatters';
+import { getConfig } from '../config/store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -30,8 +31,6 @@ export interface UnifiedImportJob {
   type: ImportJobType;
   options?: TranscriptionUploadOptions;
   status: UnifiedImportJobStatus;
-  /** Whether timestamps should be stripped from output (captured at queue time) */
-  hideTimestamps?: boolean;
   /** Session jobs: path where output was saved */
   outputPath?: string;
   /** Session jobs: output filename for display */
@@ -264,9 +263,13 @@ async function processSessionJob(
   if (result.error) throw new Error(result.error);
   if (!result.transcription) throw new Error('Server returned no transcription data');
 
+  // Read hideTimestamps from the authoritative config store at write time,
+  // not from a value captured at enqueue time, so mid-queue setting changes
+  // are respected (see Issue #67).
+  const hideTimestamps = (await getConfig<boolean>('output.hideTimestamps')) ?? false;
   const { sessionConfig } = store.getState();
   const { outputFilename, content } = resolveTranscriptionOutput(filename, result.transcription, {
-    hideTimestamps: job.hideTimestamps ?? false,
+    hideTimestamps,
     diarizedFormat: sessionConfig.diarizedFormat ?? 'srt',
   });
 
@@ -423,13 +426,11 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
 
   addFiles: (files, type, options) => {
     const capturedOptions = options ? { ...options } : undefined;
-    const { hideTimestamps } = useImportQueueStore.getState().sessionConfig;
     const newJobs: UnifiedImportJob[] = files.map((file) => ({
       id: nextJobId(type),
       file,
       type,
       options: capturedOptions,
-      hideTimestamps,
       status: 'pending' as const,
     }));
     set((s) => ({ jobs: [...s.jobs, ...newJobs] }));
@@ -438,13 +439,11 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
 
   addPriorityFiles: (files, type, options) => {
     const capturedOptions = options ? { ...options } : undefined;
-    const { hideTimestamps } = useImportQueueStore.getState().sessionConfig;
     const newJobs: UnifiedImportJob[] = files.map((file) => ({
       id: nextJobId(type),
       file,
       type,
       options: capturedOptions,
-      hideTimestamps,
       status: 'pending' as const,
     }));
 
