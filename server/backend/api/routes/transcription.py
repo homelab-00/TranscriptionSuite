@@ -74,6 +74,7 @@ async def transcribe_audio(
     diarization: bool | None = Form(None),
     expected_speakers: int | None = Form(None),
     parallel_diarization: bool | None = Form(None),
+    multitrack: bool = Form(False),
 ) -> dict[str, Any]:
     """
     Transcribe an uploaded audio file.
@@ -148,6 +149,42 @@ async def transcribe_audio(
     try:
         # Get transcription engine
         engine = model_manager.transcription_engine
+
+        # --- Multitrack path: split channels, transcribe each, merge ---
+        if multitrack:
+            from server.core.multitrack import transcribe_multitrack
+
+            result = await asyncio.to_thread(
+                functools.partial(
+                    transcribe_multitrack,
+                    engine,
+                    tmp_path,
+                    language=language,
+                    task="translate" if translation_enabled else "transcribe",
+                    translation_target_language=(
+                        translation_target_language if translation_enabled else None
+                    ),
+                    cancellation_check=model_manager.job_tracker.is_cancelled,
+                )
+            )
+
+            result_dict = result.to_dict()
+
+            from server.core.webhook import dispatch as dispatch_webhook
+
+            await dispatch_webhook(
+                "longform_complete",
+                {
+                    "source": "longform",
+                    "text": result_dict.get("text", ""),
+                    "filename": file.filename or "",
+                    "duration": result_dict.get("duration", 0),
+                    "language": result_dict.get("language"),
+                    "num_speakers": result_dict.get("num_speakers", 0),
+                },
+            )
+
+            return result_dict
 
         # Check if the backend supports single-pass diarization (WhisperX)
         backend = engine._backend
@@ -493,6 +530,7 @@ def _run_file_import(
     expected_speakers: int | None,
     parallel_diarization: bool | None,
     use_parallel_default: bool,
+    multitrack: bool,
     job_id: str,
     event_loop: Any = None,
 ) -> None:
@@ -514,6 +552,54 @@ def _run_file_import(
 
         # Get transcription engine
         engine = model_manager.transcription_engine
+
+        # --- Multitrack path: split channels, transcribe each, merge ---
+        if multitrack:
+            from server.core.multitrack import transcribe_multitrack
+
+            result = transcribe_multitrack(
+                engine,
+                str(tmp_path),
+                language=language,
+                task="translate" if translation_enabled else "transcribe",
+                translation_target_language=(
+                    translation_target_language if translation_enabled else None
+                ),
+                cancellation_check=model_manager.job_tracker.is_cancelled,
+                progress_callback=on_progress,
+            )
+
+            result_dict = result.to_dict()
+            model_manager.job_tracker.end_job(
+                job_id,
+                result={
+                    "job_id": job_id[:8],
+                    "transcription": result_dict,
+                    "diarization": {
+                        "requested": False,
+                        "performed": False,
+                        "reason": "multitrack",
+                    },
+                },
+            )
+            logger.info("File import job %s completed (multitrack): %s", job_id[:8], filename)
+
+            if event_loop is not None:
+                from server.core.webhook import dispatch_fire_and_forget
+
+                dispatch_fire_and_forget(
+                    event_loop,
+                    "longform_complete",
+                    {
+                        "source": "longform",
+                        "text": result_dict.get("text", ""),
+                        "filename": filename,
+                        "duration": result_dict.get("duration", 0),
+                        "language": result_dict.get("language"),
+                        "num_speakers": result_dict.get("num_speakers", 0),
+                    },
+                )
+            return
 
         # Check if the backend supports single-pass diarization (WhisperX)
         backend = engine._backend
@@ -749,6 +835,7 @@ async def import_and_transcribe(
     enable_word_timestamps: bool = Form(True),
     expected_speakers: int | None = Form(None),
     parallel_diarization: bool | None = Form(None),
+    multitrack: bool = Form(False),
 ) -> dict[str, Any]:
     """
     Import an audio file and transcribe it in the background.
@@ -816,6 +903,7 @@ async def import_and_transcribe(
             expected_speakers=expected_speakers,
             parallel_diarization=parallel_diarization,
             use_parallel_default=use_parallel_default,
+            multitrack=multitrack,
             job_id=job_id,
             event_loop=loop,
         )

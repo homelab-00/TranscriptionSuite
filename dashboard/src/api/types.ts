@@ -102,6 +102,7 @@ export interface TranscriptionUploadOptions {
   enable_word_timestamps?: boolean;
   expected_speakers?: number;
   parallel_diarization?: boolean;
+  multitrack?: boolean;
   file_created_at?: string;
   title?: string;
 }

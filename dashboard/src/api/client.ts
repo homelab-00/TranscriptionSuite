@@ -357,6 +357,7 @@ export class APIClient {
     if (options?.enable_diarization) fd.append('diarization', 'true');
     if (options?.expected_speakers)
       fd.append('expected_speakers', String(options.expected_speakers));
+    if (options?.multitrack) fd.append('multitrack', 'true');
     return this.postFormData('/api/transcribe/audio', fd);
   }
 
@@ -486,6 +487,7 @@ export class APIClient {
       fd.append('expected_speakers', String(options.expected_speakers));
     if (options?.parallel_diarization !== undefined)
       fd.append('parallel_diarization', String(options.parallel_diarization));
+    if (options?.multitrack) fd.append('multitrack', 'true');
     if (options?.file_created_at) fd.append('file_created_at', options.file_created_at);
     if (options?.title) fd.append('title', options.title);
     return this.postFormData('/api/notebook/transcribe/upload', fd);
@@ -514,6 +516,7 @@ export class APIClient {
       fd.append('expected_speakers', String(options.expected_speakers));
     if (options?.parallel_diarization !== undefined)
       fd.append('parallel_diarization', String(options.parallel_diarization));
+    if (options?.multitrack) fd.append('multitrack', 'true');
     return this.postFormData('/api/transcribe/import', fd);
   }
 

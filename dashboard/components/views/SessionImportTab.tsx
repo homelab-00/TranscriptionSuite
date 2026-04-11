@@ -85,6 +85,7 @@ export const SessionImportTab: React.FC = () => {
   const [hideTimestamps, setHideTimestamps] = useState(false);
   const [parallelDiarization, setParallelDiarization] = useState<boolean>(false);
   const [parallelDefault, setParallelDefault] = useState<boolean>(false);
+  const [multitrack, setMultitrack] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isDragOverWatch, setIsDragOverWatch] = useState(false);
   const [logExpanded, setLogExpanded] = useState(false);
@@ -178,7 +179,10 @@ export const SessionImportTab: React.FC = () => {
 
   const handleDiarizationChange = useCallback((enabled: boolean) => {
     setDiarization(enabled);
-    if (enabled) setWordTimestamps(true);
+    if (enabled) {
+      setWordTimestamps(true);
+      setMultitrack(false);
+    }
   }, []);
 
   const handleTimestampsChange = useCallback(
@@ -197,9 +201,10 @@ export const SessionImportTab: React.FC = () => {
     (files: FileList | null) => {
       if (!files || files.length === 0) return;
       addFiles(Array.from(files), 'session-normal', {
-        enable_diarization: diarization,
+        enable_diarization: multitrack ? false : diarization,
         enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
-        parallel_diarization: diarization ? parallelDiarization : undefined,
+        parallel_diarization: diarization && !multitrack ? parallelDiarization : undefined,
+        multitrack: multitrack || undefined,
       });
 
       // 4.6 — track manual import count and possibly show hint
@@ -215,6 +220,7 @@ export const SessionImportTab: React.FC = () => {
     [
       addFiles,
       diarization,
+      multitrack,
       parallelDiarization,
       supportsExplicitWordTimestampToggle,
       wordTimestamps,
@@ -662,6 +668,16 @@ export const SessionImportTab: React.FC = () => {
               </div>
             </>
           )}
+          <div className="h-px bg-white/5"></div>
+          <AppleSwitch
+            checked={multitrack}
+            onChange={(enabled) => {
+              setMultitrack(enabled);
+              if (enabled) setDiarization(false);
+            }}
+            label="Multitrack Mode"
+            description="Separate channels into individual speaker tracks — ideal for podcast, film, or panel recordings with isolated mics"
+          />
           <div className="h-px bg-white/5"></div>
           <AppleSwitch
             checked={wordTimestamps}
