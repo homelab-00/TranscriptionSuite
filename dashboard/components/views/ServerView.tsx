@@ -603,6 +603,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   type MLXStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
   const [mlxStatus, setMlxStatus] = useState<MLXStatus>('stopped');
 
+  // Tracks model values used when the MLX server was last started — used to detect
+  // changes that require a restart while the server is running.
+  const committedModelsRef = useRef<{
+    mainTranscriber: string;
+    liveModel: string;
+    diarizationModel: string;
+  } | null>(null);
+
   // Sync mlxStatus from the main process on mount and subscribe to push updates.
   useEffect(() => {
     const api = (window as any).electronAPI;
@@ -782,13 +790,21 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     try {
       const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
       const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
+      const mainModel = sanitizeModelName(activeTranscriber) || MLX_DEFAULT_MODEL;
+      const liveModel = sanitizeModelName(normalizedLiveModel) || undefined;
+      const diarizationModel = sanitizeModelName(activeDiarizationModel) || undefined;
       await api.mlx.start({
         port: Number(port),
         hfToken: hfToken || undefined,
-        mainTranscriberModel: sanitizeModelName(activeTranscriber) || MLX_DEFAULT_MODEL,
-        liveTranscriberModel: sanitizeModelName(normalizedLiveModel) || undefined,
-        diarizationModel: sanitizeModelName(activeDiarizationModel) || undefined,
+        mainTranscriberModel: mainModel,
+        liveTranscriberModel: liveModel,
+        diarizationModel: diarizationModel,
       });
+      committedModelsRef.current = {
+        mainTranscriber: mainModel,
+        liveModel: liveModel ?? '',
+        diarizationModel: diarizationModel ?? '',
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`Failed to start Metal server: ${msg}`);
@@ -800,6 +816,101 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (!api?.mlx) return;
     await api.mlx.stop();
   }, []);
+
+  // Seed committedModelsRef on first render where the MLX server is already running
+  // (e.g. app launched with metal profile; server auto-started before view mounted).
+  useEffect(() => {
+    if (!localSelectionsHydrated || !modelsHydrated || !diarizationHydrated) return;
+    if (mlxStatus !== 'running') return;
+    if (committedModelsRef.current !== null) return;
+    committedModelsRef.current = {
+      mainTranscriber: sanitizeModelName(activeTranscriber) || MLX_DEFAULT_MODEL,
+      liveModel: sanitizeModelName(normalizedLiveModel) ?? '',
+      diarizationModel: sanitizeModelName(activeDiarizationModel) ?? '',
+    };
+  }, [
+    localSelectionsHydrated,
+    modelsHydrated,
+    diarizationHydrated,
+    mlxStatus,
+    activeTranscriber,
+    normalizedLiveModel,
+    activeDiarizationModel,
+  ]);
+
+  // Auto-restart the MLX server when the user changes the main transcriber, live model,
+  // or diarization model while the server is already running in bare-metal mode.
+  useEffect(() => {
+    if (!isMetal || !localSelectionsHydrated || !modelsHydrated || !diarizationHydrated) return;
+    if (mlxStatus !== 'running') return;
+    if (!committedModelsRef.current) return;
+
+    const currentMain = sanitizeModelName(activeTranscriber) || MLX_DEFAULT_MODEL;
+    const currentLive = sanitizeModelName(normalizedLiveModel) ?? '';
+    const currentDiarization = sanitizeModelName(activeDiarizationModel) ?? '';
+    const committed = committedModelsRef.current;
+
+    if (
+      currentMain === committed.mainTranscriber &&
+      currentLive === committed.liveModel &&
+      currentDiarization === committed.diarizationModel
+    ) {
+      return;
+    }
+
+    // Debounce so rapid selection changes (e.g. typing a custom model name)
+    // don't trigger multiple consecutive restarts.
+    const timerId = setTimeout(async () => {
+      const api = (window as any).electronAPI;
+      if (!api?.mlx) return;
+      // Re-check status at fire time — user may have stopped the server manually.
+      const statusNow = await api.mlx.getStatus().catch(() => 'stopped');
+      if (statusNow !== 'running') return;
+      // Re-check committed ref — a manual start may have updated it already.
+      const latestCommitted = committedModelsRef.current;
+      if (
+        latestCommitted &&
+        currentMain === latestCommitted.mainTranscriber &&
+        currentLive === latestCommitted.liveModel &&
+        currentDiarization === latestCommitted.diarizationModel
+      ) {
+        return;
+      }
+      const toastId = toast.loading('Restarting inference server for model change…');
+      try {
+        await api.mlx.stop();
+        const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
+        const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
+        await api.mlx.start({
+          port: Number(port),
+          hfToken: hfToken || undefined,
+          mainTranscriberModel: currentMain,
+          liveTranscriberModel: currentLive || undefined,
+          diarizationModel: currentDiarization || undefined,
+        });
+        committedModelsRef.current = {
+          mainTranscriber: currentMain,
+          liveModel: currentLive,
+          diarizationModel: currentDiarization,
+        };
+        toast.success('Inference server restarted.', { id: toastId });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        toast.error(`Failed to restart Metal server: ${msg}`, { id: toastId });
+      }
+    }, 1500);
+
+    return () => clearTimeout(timerId);
+  }, [
+    isMetal,
+    localSelectionsHydrated,
+    modelsHydrated,
+    diarizationHydrated,
+    mlxStatus,
+    activeTranscriber,
+    normalizedLiveModel,
+    activeDiarizationModel,
+  ]);
 
   // Hard-reset any non-whisper live model selection to the default whisper model.
   useEffect(() => {
