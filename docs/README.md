@@ -83,21 +83,21 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 ### 1.1 Features
 
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup*
-- **Multiple Models available**: On **Docker/Linux/Windows**: *WhisperX* ([`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU via Vulkan). On **Apple Silicon (Metal)**: [*MLX Whisper*](https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16) (tiny → large-v3-turbo), [*MLX Parakeet v3*](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3), [*MLX Canary v2*](https://huggingface.co/mlx-community/canary-1b-v2), and [*MLX VibeVoice-ASR*](https://huggingface.co/mlx-community/VibeVoice-ASR-bf16) — all running natively without Docker
-- **Speaker Diarization**: Speaker identification & diarization (subtitling) for Whisper, NeMo, and VibeVoice models; Whisper and NeMo use PyAnnote for diarization while VibeVoice does it by itself (not available for whisper.cpp models). On Apple Silicon, [*Sortformer*](https://huggingface.co/mlx-community/diar_sortformer_4spk-v1-fp32) provides Metal-native diarization for up to 4 speakers — no HuggingFace token required
+- **Multiple Models available**: On **Docker/Linux/Windows**: *WhisperX* ([`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU via Vulkan). On **Apple Silicon (Metal)**: [*MLX Whisper*](https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16) (tiny → large-v3-turbo), [*MLX Parakeet v3*](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3), [*MLX Canary v2*](https://huggingface.co/mlx-community/canary-1b-v2), and [*MLX VibeVoice-ASR*](https://huggingface.co/mlx-community/VibeVoice-ASR-bf16) - all running natively without Docker
+- **Speaker Diarization**: Speaker identification & diarization (subtitling) for Whisper, NeMo, and VibeVoice models; Whisper and NeMo use PyAnnote for diarization while VibeVoice does it by itself (not available for whisper.cpp models). On Apple Silicon, [*Sortformer*](https://huggingface.co/mlx-community/diar_sortformer_4spk-v1-fp32) provides Metal-native diarization for up to 4 speakers - no HuggingFace token required
 - **Parallel Processing**: If your VRAM budget allows it, transcribe & diarize a recording at the same time - speeding up processing time significantly
 - **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [51 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds; either using your mic or the system audio
-- **Session File Import**: Import existing audio files from the Session tab; transcription results are saved directly as `.txt` or `.srt` to a folder of your choice — no Notebook entry created
+- **Session File Import**: Import existing audio files from the Session tab; transcription results are saved directly as `.txt` or `.srt` to a folder of your choice - no Notebook entry created
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (available for Whisper models on all platforms; not available for NeMo, VibeVoice, or whisper.cpp models)
 - **Global Keyboard Shortcuts**: System-wide shortcuts & paste-at-cursor functionality
 - **Remote Access**: Securely access your desktop at home running the model from anywhere (utilizing Tailscale) or share it on your local network via LAN
-- **Audio Notebook**: An Audio Notebook mode, with a calendar-based view, full-text search, and AI assistant (chat with any OpenAI-compatible provider about your notes — LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others)
+- **Audio Notebook**: An Audio Notebook mode, with a calendar-based view, full-text search, and AI assistant (chat with any OpenAI-compatible provider about your notes - LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others)
 
 
 📌*Half an hour of audio transcribed in under a minute with Whisper (RTX 3060)!*
 
-**All transcription processing runs entirely on your own computer — your audio never leaves your machine. Internet is only needed to download model weights on first use (STT models, PyAnnote diarization, and wav2vec2 alignment models); all weights are cached locally in a Docker volume and no further internet access is required after that.*
+**All transcription processing runs entirely on your own computer - your audio never leaves your machine. Internet is only needed to download model weights on first use (STT models, PyAnnote diarization, and wav2vec2 alignment models); all weights are cached locally in a Docker volume and no further internet access is required after that.*
 
 ### 1.2 Screenshots
 
@@ -125,19 +125,19 @@ https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
 
 ## 2. Installation
 
-There are two separate installation paths — pick the one for your platform:
+There are two separate installation paths - pick the one for your platform:
 
 | Platform | Path |
 |---|---|
-| **Apple Silicon Mac (M1+)** | → [§ 2.1](#21-apple-silicon-metalmlx) — one-command setup, no Docker |
-| **Linux / Windows / Intel Mac** | → [§§ 2.2–2.5](#22-linux-windows-and-intel-mac) — Docker/Podman-based |
+| **Apple Silicon Mac (M1+)** | → [§ 2.1](#21-apple-silicon-metalmlx) - one-command setup, no Docker |
+| **Linux / Windows / Intel Mac** | → [§§ 2.2–2.5](#22-linux-windows-and-intel-mac) - Docker/Podman-based |
 
 ---
 
 ### 2.1 Apple Silicon (Metal/MLX)
 
 On Apple Silicon Macs (M1 and later) the **Metal/MLX runtime** runs the transcription
-engine natively — no Docker required, full hardware acceleration out of the box.
+engine natively - no Docker required, full hardware acceleration out of the box.
 
 A single setup script handles everything: it installs dependencies (Homebrew, Node.js,
 uv, Python 3.13), builds the Electron dashboard, and bundles the Python/MLX backend
@@ -205,13 +205,13 @@ After installation to make sure it's enabled, run `wsl --list --verbose` - if th
     * Not required if using CPU mode
 
 **macOS (Intel / CPU-only):** Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
-or [Podman Desktop](https://podman-desktop.io/) — GPU acceleration is not available on Intel macOS;
+or [Podman Desktop](https://podman-desktop.io/) - GPU acceleration is not available on Intel macOS;
 the server runs in CPU mode automatically.
 
 ### 2.3 Download the Dashboard app
 
 Before doing anything else, you need to download **and install** the Dashboard app for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page.
-This is just the frontend — no models or packages are downloaded yet, but it must be installed before setting up the server in the next step.
+This is just the frontend - no models or packages are downloaded yet, but it must be installed before setting up the server in the next step.
 
 >* *Linux and Windows builds are x64; macOS is arm64*
 >* *Each release artifact includes an gpg signature by my key (`.asc`)*
@@ -286,13 +286,13 @@ This works by running a second helper container (called whisper-server) alongsid
 
 1. In the dashboard, select **Vulkan** as the runtime profile (instead of GPU or CPU) when starting the server.
 2. The dashboard will automatically start the whisper-server helper container alongside the main container.
-3. Select a GGML model as your transcription model — the dashboard will suggest **`ggml-large-v3-turbo-q8_0.bin`** as a starting point.
-4. Download the model using the **Model Manager** tab (the download button streams the file directly from HuggingFace into the models volume — no Python or CLI tools needed).
-5. Click **Start Server** — the whisper-server sidecar will load the model and the main container will route requests to it.
+3. Select a GGML model as your transcription model - the dashboard will suggest **`ggml-large-v3-turbo-q8_0.bin`** as a starting point.
+4. Download the model using the **Model Manager** tab (the download button streams the file directly from HuggingFace into the models volume - no Python or CLI tools needed).
+5. Click **Start Server** - the whisper-server sidecar will load the model and the main container will route requests to it.
 
 > **Model switching:** The whisper.cpp sidecar loads its model once at startup. To switch models, stop the server, select the new model, then start again.
 
-**Recommended model:** `ggml-large-v3-turbo-q8_0.bin` (~1.4 GB) — best balance of speed, quality, and VRAM usage for most AMD/Intel GPUs.
+**Recommended model:** `ggml-large-v3-turbo-q8_0.bin` (~1.4 GB) - best balance of speed, quality, and VRAM usage for most AMD/Intel GPUs.
 
 **Available GGML models:**
 
@@ -322,9 +322,9 @@ This works by running a second helper container (called whisper-server) alongsid
 
 **Troubleshooting:**
 
-- _"Requires CUDA" badge on model_ — You are in Vulkan mode. Use a GGML model instead (the CUDA models won't work with the Vulkan sidecar).
-- _Download fails_ — Make sure the server container is running before downloading models. The download runs inside the container.
-- _Sidecar health check timeout_ — The model is still loading. Large GGML files can take 30–60 seconds to initialize on first start.
+- _"Requires CUDA" badge on model_ - You are in Vulkan mode. Use a GGML model instead (the CUDA models won't work with the Vulkan sidecar).
+- _Download fails_ - Make sure the server container is running before downloading models. The download runs inside the container.
+- _Sidecar health check timeout_ - The model is still loading. Large GGML files can take 30–60 seconds to initialize on first start.
 
 > **Note for older AMD GPUs (RDNA1):** If you experience Vulkan initialization errors with an RX 5500 XT or similar RDNA1 card, you may need to add `iommu=soft` to your kernel boot parameters.
 
@@ -346,9 +346,9 @@ client reaches the server and *where* the TLS certificates come from.
 
 > **Remote profile chooser:** When you click **Start Remote** without Tailscale
 > certificates configured, a dialog asks you to choose between **LAN** and **Tailscale**.
-> Pick **LAN** if both machines are on the same local network — no extra setup is needed
+> Pick **LAN** if both machines are on the same local network - no extra setup is needed
 > (a self-signed certificate is generated automatically). Pick **Tailscale** if you need
-> cross-network access (requires Tailscale certificates — see Section 3.1 below).
+> cross-network access (requires Tailscale certificates - see Section 3.1 below).
 > You can change this later in **Settings → Client → Remote Profile**.
 
 **Architecture overview:**
@@ -380,7 +380,7 @@ and automatic DNS.
 
 #### Server Machine Setup
 
-**Step 1 — Install & Authenticate Tailscale**
+**Step 1 - Install & Authenticate Tailscale**
 
 1. Install Tailscale: [tailscale.com/download](https://tailscale.com/download)
 2. Authenticate: `sudo tailscale up` (Linux) or via the Tailscale app (Windows/macOS)
@@ -391,7 +391,7 @@ Your DNS settings should look like this:
 
 ![Tailscale DNS Settings](assets/tailscale-dns-settings.png)
 
-**Step 2 — Generate TLS Certificates** *(server machine only)*
+**Step 2 - Generate TLS Certificates** *(server machine only)*
 
 ```bash
 # Replace with your actual machine name + tailnet
@@ -439,7 +439,7 @@ remote_server:
 > mv your-machine.your-tailnet.ts.net.key ~/.config/Tailscale/my-machine.key
 > ```
 
-**Step 3 — Start the Server in Remote Mode**
+**Step 3 - Start the Server in Remote Mode**
 
 1. Open the Dashboard on the server machine
 2. Navigate to the **Server** view
@@ -452,14 +452,14 @@ You can find it in the Server view's "Auth Token" field, or in the container log
 docker compose logs | grep "Admin Token:"
 ```
 
-Copy this token — you'll need it on the client machine.
+Copy this token - you'll need it on the client machine.
 
 > **Tailscale hostname:** Once the server is running, the Server view displays the
 > machine's Tailscale FQDN (e.g., `desktop.tail1234.ts.net`) with a copy button.
-> Use this exact hostname when configuring clients — don't enter just the tailnet
+> Use this exact hostname when configuring clients - don't enter just the tailnet
 > suffix (e.g., `tail1234.ts.net`).
 
-**Step 4 — Open the Firewall Port (Linux)**
+**Step 4 - Open the Firewall Port (Linux)**
 
 If the server machine runs a firewall, port 9786 must be open for
 remote clients to reach the server. Without this, connections silently time out.
@@ -484,12 +484,12 @@ detects the port may be blocked.
 4. Enable **"Use remote server instead of local"**
 5. Select **Tailscale** as the remote profile
 6. Enter the server's **full Tailscale hostname** in the host field
-   (e.g., `my-machine.tail1234.ts.net`) — copy it from the Server view on the
+   (e.g., `my-machine.tail1234.ts.net`) - copy it from the Server view on the
    server machine
 7. Set port to **`9786`**
 8. **Use HTTPS** will be automatically enabled
 9. Paste the **auth token** from the server into the Auth Token field
-10. Close the Settings modal — the client now connects to the remote server
+10. Close the Settings modal - the client now connects to the remote server
 
 > **Tip:** The client machine does *not* need certificates, Docker, or a GPU.
 > It only needs Tailscale running and a valid auth token.
@@ -504,14 +504,14 @@ detects the port may be blocked.
 Use this when both machines are on the **same local network** and you don't want
 to use Tailscale. This is common for home-lab setups or office environments.
 
-LAN mode uses the same HTTPS + token authentication as Tailscale mode — the only
+LAN mode uses the same HTTPS + token authentication as Tailscale mode - the only
 differences are the hostname (LAN IP or local DNS name instead of a `.ts.net`
 address) and the certificate source (self-signed, local CA, or other locally
 trusted certificate instead of a Tailscale-issued one).
 
 #### Server Machine Setup
 
-**Step 1 — TLS Certificate**
+**Step 1 - TLS Certificate**
 
 LAN mode requires a TLS certificate. The dashboard **auto-generates** a
 self-signed certificate on the first remote start if none exists, covering
@@ -524,15 +524,15 @@ most cases.
 > (defaults: `~/.config/TranscriptionSuite/lan-server.crt` / `.key` on Linux,
 > `~/Documents/TranscriptionSuite/lan-server.crt` / `.key` on Windows).
 
-**Step 2 — Start the Server in Remote Mode**
+**Step 2 - Start the Server in Remote Mode**
 
 Same as Tailscale above:
 1. Open the Dashboard, go to **Server** view, click **Start Remote**
 2. Copy the auth token once the container is healthy
 
-**Step 3 — Open the Firewall Port (Linux)**
+**Step 3 - Open the Firewall Port (Linux)**
 
-Same as Tailscale above — if a firewall is active:
+Same as Tailscale above - if a firewall is active:
 
 | Distribution | Command |
 |---|---|
@@ -549,7 +549,7 @@ Same as Tailscale above — if a firewall is active:
 6. Set port to **`9786`**
 7. **Use HTTPS** will be automatically enabled
 8. Paste the **auth token** from the server
-9. Close Settings — the client now connects over your local network
+9. Close Settings - the client now connects over your local network
 
 > **Note on Kubernetes / custom deployments:** If you run the server container
 > directly (e.g., via Kubernetes or your own Docker setup), you can still use the
@@ -565,7 +565,7 @@ Same as Tailscale above — if a firewall is active:
 
 Mounted at `/v1/audio/`. These endpoints follow the [OpenAI Audio API spec](https://platform.openai.com/docs/api-reference/audio) so that OpenAI-compatible clients (Open-WebUI, LM Studio, etc.) can point at TranscriptionSuite as a drop-in STT backend.
 
-**Auth:** Same rules as all other API routes — Bearer token required in TLS mode; open to localhost in local mode.
+**Auth:** Same rules as all other API routes - Bearer token required in TLS mode; open to localhost in local mode.
 
 **Error shape:** All errors follow the OpenAI error envelope:
 ```json
@@ -668,7 +668,7 @@ Open **Settings → Server** tab. In the **Outgoing Webhook** section:
 
 1. **Enable** the webhook toggle
 2. Enter the **URL** to receive POST requests
-3. *(Optional)* Enter a **Secret** — sent as `Authorization: Bearer <secret>` on every request
+3. *(Optional)* Enter a **Secret** - sent as `Authorization: Bearer <secret>` on every request
 4. Click **Send Test Webhook** to verify your endpoint receives the request
 
 These settings are also editable directly in `config.yaml`:
@@ -714,7 +714,7 @@ Every webhook POST has `Content-Type: application/json` with this envelope:
 }
 ```
 
-> **Note:** Delivery is fire-and-forget — the server sends each webhook once and does not retry on failure. Failed deliveries are logged on the server side.
+> **Note:** Delivery is fire-and-forget - the server sends each webhook once and does not retry on failure. Failed deliveries are logged on the server side.
 
 ---
 
@@ -749,7 +749,7 @@ The dashboard detects CDI automatically and uses the correct GPU configuration. 
    ```bash
    sudo nvidia-smi -pm 1
    ```
-3. If the error persists after a reboot, check the server logs for the CUDA diagnostic line (logged at startup). It contains the torch version, CUDA version, and device nodes — useful for reporting the issue.
+3. If the error persists after a reboot, check the server logs for the CUDA diagnostic line (logged at startup). It contains the torch version, CUDA version, and device nodes - useful for reporting the issue.
 4. **Advanced:** `sudo nvidia-smi --gpu-reset` can reset the GPU without a full reboot, but this affects all processes using the GPU on the host.
 5. **Workaround:** Switch to CPU mode in **Settings > Server** while you investigate.
 
@@ -789,7 +789,7 @@ For more information about the technical aspects of the project, check out [READ
 
 ## 8. License
 
-GNU General Public License v3.0 or later (GPLv3+) — See [LICENSE](../LICENSE).
+GNU General Public License v3.0 or later (GPLv3+) - See [LICENSE](../LICENSE).
 
 ---
 

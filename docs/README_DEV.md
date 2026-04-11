@@ -73,7 +73,7 @@ Technical documentation for developing and building TranscriptionSuite.
       - [Files](#files)
       - [Limitations](#limitations)
   - [7. API Reference](#7-api-reference)
-    - [7.1 API Endpoints — Quick Reference](#71-api-endpoints--quick-reference)
+    - [7.1 API Endpoints - Quick Reference](#71-api-endpoints--quick-reference)
     - [7.2 Endpoint Details](#72-endpoint-details)
       - [Health \& Status](#health--status)
         - [`GET /health`](#get-health)
@@ -170,10 +170,10 @@ Technical documentation for developing and building TranscriptionSuite.
     - [9.8 Reactive UI Updates \& State Syncing](#98-reactive-ui-updates--state-syncing)
       - [Architecture](#architecture-2)
       - [Key Files](#key-files)
-      - [`useServerEventReactor` — Transition Matrix](#useservereventreactor--transition-matrix)
-      - [`useAuthTokenSync` — Docker Log Token Detection](#useauthtokensync--docker-log-token-detection)
-      - [`SettingsModal` — Reactive Token Consumption](#settingsmodal--reactive-token-consumption)
-      - [`ServerView` — Reactive Token Read](#serverview--reactive-token-read)
+      - [`useServerEventReactor` - Transition Matrix](#useservereventreactor--transition-matrix)
+      - [`useAuthTokenSync` - Docker Log Token Detection](#useauthtokensync--docker-log-token-detection)
+      - [`SettingsModal` - Reactive Token Consumption](#settingsmodal--reactive-token-consumption)
+      - [`ServerView` - Reactive Token Read](#serverview--reactive-token-read)
       - [Explicit Invalidation After Model Reload](#explicit-invalidation-after-model-reload)
       - [`staleTime` Rationale](#staletime-rationale)
       - [Future Enhancement: SSE](#future-enhancement-sse)
@@ -216,7 +216,7 @@ Technical documentation for developing and building TranscriptionSuite.
     - [15.1 Prerequisites](#151-prerequisites)
     - [15.2 Unit Tests (CI-safe, no GPU required)](#152-unit-tests-ci-safe-no-gpu-required)
     - [15.3 Manual Server Test (Apple Silicon required)](#153-manual-server-test-apple-silicon-required)
-    - [15.4 Metal Runtime Profile — Dashboard](#154-metal-runtime-profile--dashboard)
+    - [15.4 Metal Runtime Profile - Dashboard](#154-metal-runtime-profile--dashboard)
     - [15.5 MLX Backend Notes](#155-mlx-backend-notes)
     - [15.6 Dashboard Integration Test](#156-dashboard-integration-test)
     - [15.7 Tail the Structured Log](#157-tail-the-structured-log)
@@ -357,9 +357,9 @@ TranscriptionSuite uses a **client-server architecture**:
 - **SQLite + FTS5**: Lightweight full-text search without external dependencies
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD
 - **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
-- **Multi-backend STT**: Pluggable backend architecture — Whisper, NeMo Parakeet/Canary, WhisperX, VibeVoice-ASR, whisper.cpp (Vulkan), MLX (Apple Silicon: Whisper, Parakeet, Canary, VibeVoice) — auto-detected from the model name
+- **Multi-backend STT**: Pluggable backend architecture - Whisper, NeMo Parakeet/Canary, WhisperX, VibeVoice-ASR, whisper.cpp (Vulkan), MLX (Apple Silicon: Whisper, Parakeet, Canary, VibeVoice) - auto-detected from the model name
 - **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM; Whisper backends only in v1
-- **AI Assistant (OpenAI-compatible)**: Supports any OpenAI-compatible endpoint — LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others. Configurable via Settings → AI tab with API key support, model selection, and endpoint URL. Per-conversation model overrides are available in the Notebook AI sidebar. Uses standard `/v1/chat/completions` with full conversation history
+- **AI Assistant (OpenAI-compatible)**: Supports any OpenAI-compatible endpoint - LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others. Configurable via Settings → AI tab with API key support, model selection, and endpoint URL. Per-conversation model overrides are available in the Notebook AI sidebar. Uses standard `/v1/chat/completions` with full conversation history
 
 ### 2.2 Platform Architectures
 
@@ -443,7 +443,7 @@ TranscriptionSuite/
 │   │   ├── main.ts               # Window/IPC lifecycle + main-process log routing (stdout/stderr -> client debug stream/file); session.displayMediaRequestHandler for loopback system audio
 │   │   ├── preload.ts            # Context bridge (renderer ↔ main IPC), including app:clientLogLine subscription bridge + loopback enable/disable
 │   │   ├── containerRuntime.ts    # Container runtime detection (Docker vs Podman)
-│   │   ├── dockerManager.ts      # Container CLI operations (start/stop/status/images) — supports Docker & Podman
+│   │   ├── dockerManager.ts      # Container CLI operations (start/stop/status/images) - supports Docker & Podman
 │   │   ├── shortcutManager.ts    # Global keyboard shortcuts (system-wide)
 │   │   ├── waylandShortcuts.ts   # Wayland portal integration for global shortcuts
 │   │   ├── pasteAtCursor.ts      # Paste-at-cursor feature (xdotool/wtype/platform)
@@ -566,7 +566,7 @@ Keep these version fields aligned for a release:
 
 ### 4.1 Step 1: Environment Setup
 
-**Required Node.js version:** 25.7.0 — use [nvm](https://github.com/nvm-sh/nvm) and run `nvm use` inside `dashboard/` to activate the pinned version from `.nvmrc`.
+**Required Node.js version:** 25.7.0 - use [nvm](https://github.com/nvm-sh/nvm) and run `nvm use` inside `dashboard/` to activate the pinned version from `.nvmrc`.
 
 ```bash
 # Dashboard (Node.js)
@@ -575,7 +575,7 @@ nvm use   # activates Node 25.7.0 from .nvmrc
 npm install
 cd ..
 
-# Build tools (Python — for server linting/testing + pre-commit)
+# Build tools (Python - for server linting/testing + pre-commit)
 cd build
 uv venv --python 3.13
 uv sync
@@ -585,7 +585,7 @@ cd ..
 ./build/.venv/bin/pre-commit install
 ```
 
-**Linux — Docker group membership:** The app talks to Docker without `sudo`, so your user must be in the `docker` group. If you haven't done this already:
+**Linux - Docker group membership:** The app talks to Docker without `sudo`, so your user must be in the `docker` group. If you haven't done this already:
 ```bash
 sudo usermod -aG docker $USER
 ```
@@ -721,7 +721,7 @@ uv sync
 | **macOS** | Electron + electron-builder | DMG + ZIP (arm64) | Python 3 + pip (for `dmgbuild`, see §13.7) |
 | **macOS Metal** | Local build script | Unpacked `.app` (~5 GB) | Apple Silicon Mac, Homebrew (see §15.10) |
 
-> **Note:** The macOS Metal build is **not** part of the CI release pipeline. It bundles a full Python 3.13 venv with MLX/PyTorch dependencies into the `.app`, making it ~5 GB — too large for a GitHub Release artifact. Users build it locally via `build/setup-macos-metal.sh`. See [§15.10](#1510-bare-metal-build-script) for details.
+> **Note:** The macOS Metal build is **not** part of the CI release pipeline. It bundles a full Python 3.13 venv with MLX/PyTorch dependencies into the `.app`, making it ~5 GB - too large for a GitHub Release artifact. Users build it locally via `build/setup-macos-metal.sh`. See [§15.10](#1510-bare-metal-build-script) for details.
 
 ### 5.3 Linux AppImage
 
@@ -767,7 +767,7 @@ npm run package:mac
 > On older macOS versions, install `dmgbuild` via pip and set the env var before building:
 > ```bash
 > pip3 install dmgbuild
-> # Use the full path — pip user installs may not be on PATH
+> # Use the full path - pip user installs may not be on PATH
 > export CUSTOM_DMGBUILD_PATH="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts", "posix_user") + "/dmgbuild")')"
 > npm run package:mac
 > ```
@@ -793,24 +793,24 @@ Required GitHub secrets for CI signing:
 ### 5.6 Build Assets
 
 **Source files (manually maintained in `docs/assets/`):**
-- `logo.svg` — Master vector logo (**source of truth for all raster derivatives**)
-- `logo_wide.svg` — Wide variant for documentation/marketing
-- `profile.png` — Author profile picture for About dialog
-- `homelab-00_0xBFE4CC5D72020691_public.asc` — Public key used by users to verify release `.asc` signatures
+- `logo.svg` - Master vector logo (**source of truth for all raster derivatives**)
+- `logo_wide.svg` - Wide variant for documentation/marketing
+- `profile.png` - Author profile picture for About dialog
+- `homelab-00_0xBFE4CC5D72020691_public.asc` - Public key used by users to verify release `.asc` signatures
 
 > **Important:** `docs/assets/` is the single source of truth for SVG logos.
-> Never edit the copies in `dashboard/public/` directly — run `generate-ico.sh`
+> Never edit the copies in `dashboard/public/` directly - run `generate-ico.sh`
 > to propagate changes.
 
 **Generated files (created by `build/generate-ico.sh`):**
-- `logo.png` (1024×1024) — Rasterized from logo.svg for Linux AppImage
-- `logo.ico` — Multi-resolution Windows icon (16, 32, 48, 256px)
-- `logo.icns` — macOS app icon (requires `iconutil` on macOS or `png2icns`/`libicns` on Linux)
-- `logo_wide.png` (440px tall, aspect-preserved) — Sharp wide logo used in packaged app assets
-- `logo_wide_readme.png` (880px tall, aspect-preserved) — Extra-sharp wide logo for README rendering
-- `tray-icon.png` (32×32) — System tray icon
-- `tray-icon@1x.png` (16×16) — 1× DPI tray icon
-- `tray-icon@2x.png` (32×32) — 2× DPI tray icon
+- `logo.png` (1024×1024) - Rasterized from logo.svg for Linux AppImage
+- `logo.ico` - Multi-resolution Windows icon (16, 32, 48, 256px)
+- `logo.icns` - macOS app icon (requires `iconutil` on macOS or `png2icns`/`libicns` on Linux)
+- `logo_wide.png` (440px tall, aspect-preserved) - Sharp wide logo used in packaged app assets
+- `logo_wide_readme.png` (880px tall, aspect-preserved) - Extra-sharp wide logo for README rendering
+- `tray-icon.png` (32×32) - System tray icon
+- `tray-icon@1x.png` (16×16) - 1× DPI tray icon
+- `tray-icon@2x.png` (32×32) - 2× DPI tray icon
 
 The script also copies `logo.svg` into `dashboard/public/` so the renderer can
 reference it at `/logo.svg` (e.g. sidebar brand mark, notification icon).
@@ -865,7 +865,7 @@ The Windows job includes retry logic (3 attempts, 15s delay) to handle transient
 
 Signing is **opt-in** via the repository variable `GPG_SIGNING_ENABLED`. When set to `true`, each build job imports the GPG key and runs `build/sign-electron-artifacts.sh` to produce `.asc` detached signatures.
 
-A **dedicated signing subkey** (separate from the master key) is used for CI. Only the subkey's private key and fingerprint are stored in GitHub Secrets — the master key never leaves the local machine. The subkey can be revoked independently if compromised. It expires **2027-03-28** and will need to be replaced before that date.
+A **dedicated signing subkey** (separate from the master key) is used for CI. Only the subkey's private key and fingerprint are stored in GitHub Secrets - the master key never leaves the local machine. The subkey can be revoked independently if compromised. It expires **2027-03-28** and will need to be replaced before that date.
 
 Required repository configuration (Settings → Secrets and variables → Actions):
 
@@ -975,18 +975,18 @@ modal asking them to choose LAN or Tailscale before proceeding.
    dockerManager.ts (reads config.yaml cert paths, expands tilde, checks `fs.existsSync`)
 3. If `connection.remoteProfile !== 'lan'` AND certs don't exist → shows modal
 4. User picks LAN or Tailscale → persists to `connection.remoteProfile` via `setConfig()`
-5. Container start resumes — `resolveTlsCertPaths()` now reads the chosen profile
+5. Container start resumes - `resolveTlsCertPaths()` now reads the chosen profile
    - LAN: auto-generates self-signed cert
    - Tailscale: validates cert files exist (shows error with instructions if missing)
 
 **Files involved:**
-- `dockerManager.ts` — `checkTailscaleCertsExist()` function
-- `main.ts` — `docker:checkTailscaleCertsExist` IPC handler
-- `preload.ts` — IPC bridge
-- `App.tsx` — modal state, request/resolve callbacks, JSX, check in startup flow
+- `dockerManager.ts` - `checkTailscaleCertsExist()` function
+- `main.ts` - `docker:checkTailscaleCertsExist` IPC handler
+- `preload.ts` - IPC bridge
+- `App.tsx` - modal state, request/resolve callbacks, JSX, check in startup flow
 
 **Ports:**
-- `9786` — Both HTTP and HTTPS (single port; HTTPS when `TLS_ENABLED=true`)
+- `9786` - Both HTTP and HTTPS (single port; HTTPS when `TLS_ENABLED=true`)
 
 ### 6.3 CPU Mode
 
@@ -1040,7 +1040,7 @@ to CPU inference when CUDA is unavailable (`server/backend/core/stt/engine.py`).
 
 #### Certificate expiry
 
-Tailscale certificates (Let's Encrypt) expire after **90 days**. When the app detects an expired cert at Docker start time, it attempts automatic renewal via `tailscale cert` (without sudo first — works if Tailscale operator is configured; falls back to sudo). If auto-renewal succeeds, startup continues transparently. If it fails, an actionable error is shown.
+Tailscale certificates (Let's Encrypt) expire after **90 days**. When the app detects an expired cert at Docker start time, it attempts automatic renewal via `tailscale cert` (without sudo first - works if Tailscale operator is configured; falls back to sudo). If auto-renewal succeeds, startup continues transparently. If it fails, an actionable error is shown.
 
 To renew manually:
 ```bash
@@ -1334,7 +1334,7 @@ TranscriptionSuite supports AMD and Intel GPU acceleration via a **whisper.cpp s
     └──────────────┘                                    └──────────────────┘
 ```
 
-The sidecar pattern keeps Vulkan dependencies isolated from the main CUDA container. The two containers communicate over HTTP — the main container's `WhisperCppBackend` sends WAV audio to whisper-server's `/inference` endpoint and receives timestamped transcription JSON.
+The sidecar pattern keeps Vulkan dependencies isolated from the main CUDA container. The two containers communicate over HTTP - the main container's `WhisperCppBackend` sends WAV audio to whisper-server's `/inference` endpoint and receives timestamped transcription JSON.
 
 #### How It Works
 
@@ -1344,7 +1344,7 @@ The sidecar pattern keeps Vulkan dependencies isolated from the main CUDA contai
 
 3. **Response parsing**: The whisper-server returns verbose JSON with segments and token-level timestamps (`t0`/`t1` in centiseconds). The backend maps these to standard `BackendSegment` objects with word-level timing.
 
-4. **Model loading**: On `load()`, the backend sends `POST /load` to whisper-server. If the server pre-loads the model via the `WHISPER_MODEL` environment variable (the default), this call may fail gracefully — the backend continues regardless.
+4. **Model loading**: On `load()`, the backend sends `POST /load` to whisper-server. If the server pre-loads the model via the `WHISPER_MODEL` environment variable (the default), this call may fail gracefully - the backend continues regardless.
 
 #### GGML Model Detection
 
@@ -1462,7 +1462,7 @@ whisper.cpp models have different capabilities compared to the default faster-wh
 
 > **Authentication note:** By default (local mode) all routes except `/health`, `/ready`, and `/api/auth/login` are open to localhost clients. In TLS mode every request must include `Authorization: Bearer <token>`, a valid `auth_token` cookie, or `?token=` query parameter. Admin-only endpoints additionally require the token to have `is_admin=true`.
 
-### 7.1 API Endpoints — Quick Reference
+### 7.1 API Endpoints - Quick Reference
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
@@ -1542,9 +1542,9 @@ Liveness probe. No authentication required. Always returns `200 OK`.
 Readiness probe. Returns `200` once a transcription model is loaded (or when Live Mode is active or the main model slot is disabled). Returns `503` while still loading. Clients should poll this before sending transcription requests.
 
 ```json
-// 200 — ready
+// 200 - ready
 {"status": "ready", "models": {...}}
-// 503 — still loading
+// 503 - still loading
 {"status": "loading", "models": {...}}
 ```
 
@@ -1724,11 +1724,11 @@ Get only the transcription data (segments + words) for a recording, without the 
 ##### `GET /api/notebook/recordings/{id}/export`
 Export a recording as a formatted file.
 
-**Query param:** `format` — one of `txt`, `srt`, `ass` (default: `txt`).
+**Query param:** `format` - one of `txt`, `srt`, `ass` (default: `txt`).
 
 Capability gating:
-- `txt` — always available (plain text with metadata header).
-- `srt` / `ass` — require the recording to have word-level timestamps. Returns `400` for pure-note recordings that lack timestamps.
+- `txt` - always available (plain text with metadata header).
+- `srt` / `ass` - require the recording to have word-level timestamps. Returns `400` for pure-note recordings that lack timestamps.
 
 ##### `PATCH /api/notebook/recordings/{id}/title`
 Rename a recording. **JSON body:** `{"title": "New title"}`
@@ -1740,7 +1740,7 @@ Change the `recorded_at` timestamp. **JSON body:** `{"recorded_at": "2026-03-09T
 Update or clear the AI-generated summary. **JSON body:** `{"summary": "...", "summary_model": "model-name"}`. Pass `null` for `summary` to clear it.
 
 ##### `PUT /api/notebook/recordings/{id}/summary`
-Legacy variant of the summary update — same semantics, values passed as query params.
+Legacy variant of the summary update - same semantics, values passed as query params.
 
 ##### `POST /api/notebook/transcribe/upload`
 Upload an audio file and start background transcription. Returns `202 Accepted` immediately. Poll `GET /api/admin/status` → `job_tracker.result` for completion.
@@ -1835,9 +1835,9 @@ Multi-turn chat within a conversation. Sends the full message history from the d
 
 These endpoints use LM Studio's proprietary APIs and are only relevant for local LM Studio installs:
 
-- `GET /api/llm/models/available` — List models via LM Studio's v0 API
-- `POST /api/llm/model/load` / `POST /api/llm/model/unload` — Load or unload a model. **Load body:** `{"model_id": "..."}`
-- `POST /api/llm/server/start` / `POST /api/llm/server/stop` — Start or stop the LM Studio server process (local installs only)
+- `GET /api/llm/models/available` - List models via LM Studio's v0 API
+- `POST /api/llm/model/load` / `POST /api/llm/model/unload` - Load or unload a model. **Load body:** `{"model_id": "..."}`
+- `POST /api/llm/server/start` / `POST /api/llm/server/stop` - Start or stop the LM Studio server process (local installs only)
 
 ---
 
@@ -1896,7 +1896,7 @@ Tail recent server log entries. Query params: `service` (filter), `level` (filte
 6. Stream binary audio (16kHz PCM Int16)
 7. Send stop: `{"type": "stop"}`
 8. Receive progress: `{"type": "processing_progress", "data": {"current": 45, "total": 189}}` (periodic keepalives)
-9. Receive final: `{"type": "final", "data": {"text": "...", "words": [...]}}` — or `{"type": "result_ready", "data": {"job_id": "..."}}` for results >1MB (client fetches via HTTP)
+9. Receive final: `{"type": "final", "data": {"text": "...", "words": [...]}}` - or `{"type": "result_ready", "data": {"job_id": "..."}}` for results >1MB (client fetches via HTTP)
 
 **Durability:** Results are persisted to the `transcription_jobs` table BEFORE delivery via WebSocket. If the WebSocket disconnects during processing, the client polls `GET /api/transcribe/result/{job_id}` to recover. On reconnect, `GET /api/transcribe/recent` shows undelivered results.
 
@@ -1935,7 +1935,7 @@ Tail recent server log entries. Query params: `service` (filter), `level` (filte
 
 Mounted at `/v1/audio/`. These endpoints follow the [OpenAI Audio API spec](https://platform.openai.com/docs/api-reference/audio) so that OpenAI-compatible clients (Open-WebUI, LM Studio, etc.) can point at TranscriptionSuite as a drop-in STT backend.
 
-**Auth:** Same rules as all other API routes — Bearer token required in TLS mode; open to localhost in local mode.
+**Auth:** Same rules as all other API routes - Bearer token required in TLS mode; open to localhost in local mode.
 
 **Error shape:** All errors follow the OpenAI error envelope:
 ```json
@@ -2083,7 +2083,7 @@ All payloads share a common envelope:
 
 #### Thread Safety
 
-Webhook dispatch is async (`httpx.AsyncClient`). Most dispatch points use `await dispatch(...)` directly from async route handlers. Two dispatch points run inside `asyncio.to_thread()` background threads (`/import` and notebook upload) — these capture the event loop in the route handler with `asyncio.get_running_loop()` and pass it to `dispatch_fire_and_forget()`, which uses `asyncio.run_coroutine_threadsafe()` to schedule the coroutine. The Live Mode `_on_sentence()` callback also runs from the engine's background thread and uses the same `dispatch_fire_and_forget()` pattern.
+Webhook dispatch is async (`httpx.AsyncClient`). Most dispatch points use `await dispatch(...)` directly from async route handlers. Two dispatch points run inside `asyncio.to_thread()` background threads (`/import` and notebook upload) - these capture the event loop in the route handler with `asyncio.get_running_loop()` and pass it to `dispatch_fire_and_forget()`, which uses `asyncio.run_coroutine_threadsafe()` to schedule the coroutine. The Live Mode `_on_sentence()` callback also runs from the engine's background thread and uses the same `dispatch_fire_and_forget()` pattern.
 
 #### SSRF Guard
 
@@ -2098,7 +2098,7 @@ Both `dispatch()` and `send_test_webhook()` validate the URL before making any r
 
 #### Module
 
-`server/backend/core/webhook.py` — key functions:
+`server/backend/core/webhook.py` - key functions:
 
 | Function | Purpose |
 |----------|---------|
@@ -2106,11 +2106,11 @@ Both `dispatch()` and `send_test_webhook()` validate the URL before making any r
 | `dispatch_fire_and_forget(loop, event_type, payload)` | Thread-safe wrapper; schedules `dispatch()` on the given event loop |
 | `send_test_webhook(url, secret)` | Returns `{success, status_code, message}` for the admin test endpoint |
 | `_read_webhook_config()` | Reads `(enabled, url, secret)` from `get_config()` |
-| `_is_safe_url(url)` | SSRF guard — validates URL before dispatch |
+| `_is_safe_url(url)` | SSRF guard - validates URL before dispatch |
 
 #### Tests
 
-`server/backend/tests/test_webhook.py` — 17 tests covering dispatch logic, auth header, error handling, SSRF guard, and fire-and-forget scheduling.
+`server/backend/tests/test_webhook.py` - 17 tests covering dispatch logic, auth header, error handling, SSRF guard, and fire-and-forget scheduling.
 
 ---
 
@@ -2194,7 +2194,7 @@ See [`docs/testing/TESTING.md`](testing/TESTING.md) for the full developer guide
 
 #### Architecture
 
-The whisper.cpp Vulkan backend runs as a **sidecar container** (`whisper-server`) alongside the main Python server. The main server routes transcription requests to the sidecar via HTTP — it never touches the model file directly.
+The whisper.cpp Vulkan backend runs as a **sidecar container** (`whisper-server`) alongside the main Python server. The main server routes transcription requests to the sidecar via HTTP - it never touches the model file directly.
 
 ```
 Dashboard → Main Python Server (port 9786)
@@ -2216,7 +2216,7 @@ GGML models are flat `.bin` files (or `.gguf` files), **not** HuggingFace repo d
 
 - Models are stored at the **root** of the models volume (`/models/ggml-*.bin`), not under `/models/hub/`.
 - The sidecar loads **one model at startup** via the `WHISPER_MODEL` env var. Switching models requires a container restart.
-- The Python server never loads the GGML file — it only calls the sidecar's HTTP endpoint.
+- The Python server never loads the GGML file - it only calls the sidecar's HTTP endpoint.
 
 #### Factory Routing
 
@@ -2236,7 +2236,7 @@ if (isWhisperCppModel(modelId)) return 'whispercpp';  // before 'whisper' fallba
 
 #### Dependency Logic
 
-`computeMissingModelFamilies()` in `modelSelection.ts` always treats `'whispercpp'` as installed — the sidecar is self-contained and requires no Python `INSTALL_WHISPER` flag. Adding `'whispercpp'` to `installedFamilies` unconditionally prevents false "missing dependency" warnings for Vulkan users.
+`computeMissingModelFamilies()` in `modelSelection.ts` always treats `'whispercpp'` as installed - the sidecar is self-contained and requires no Python `INSTALL_WHISPER` flag. Adding `'whispercpp'` to `installedFamilies` unconditionally prevents false "missing dependency" warnings for Vulkan users.
 
 #### Download Flow
 
@@ -2248,15 +2248,15 @@ https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{fileName}
 
 `downloadGgmlModel()` in `dockerManager.ts` runs `wget` inside the running container and saves the file to `/models/{fileName}`. On failure, the partial `.tmp` file is deleted before re-throwing (no resume in v1).
 
-The existing `downloadModelToCache()` entry point detects GGML files via `isGgmlFileName()` and routes to `downloadGgmlModel()` automatically — no UI changes needed.
+The existing `downloadModelToCache()` entry point detects GGML files via `isGgmlFileName()` and routes to `downloadGgmlModel()` automatically - no UI changes needed.
 
 #### Limitations
 
-- **No live mode** — the sidecar processes complete audio files; real-time streaming is not supported.
-- **No speaker diarization** — `supportsDiarization()` returns `false` for GGML models; pyannote integration is unavailable.
-- **No translation** for turbo variants — large-v3 and medium GGML models support translation; turbo variants do not.
-- **One model at a time** — model switching requires a server restart (sidecar loads model at startup).
-- **AMD/Intel only** — CUDA users should prefer faster-whisper models for better performance and feature coverage.
+- **No live mode** - the sidecar processes complete audio files; real-time streaming is not supported.
+- **No speaker diarization** - `supportsDiarization()` returns `false` for GGML models; pyannote integration is unavailable.
+- **No translation** for turbo variants - large-v3 and medium GGML models support translation; turbo variants do not.
+- **One model at a time** - model switching requires a server restart (sidecar loads model at startup).
+- **AMD/Intel only** - CUDA users should prefer faster-whisper models for better performance and feature coverage.
 
 ---
 
@@ -2289,10 +2289,10 @@ npm run dev:electron
 
 | Module | Purpose |
 |--------|---------|
-| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration; serverConfig IPC handlers for local YAML file read/write; Chromium loopback feature flags + `session.setDisplayMediaRequestHandler` for silent system audio capture; `server:probeConnection` (main-process connection probe returning Node.js error codes like ENOTFOUND, ECONNREFUSED, TLS errors — falls back to renderer fetch for TLS errors the certificate-error handler can accept); `tailscale:getHostname` (detects local Tailscale FQDN via `tailscale status --json`); `server:checkFirewallPort` (tests if port is reachable from non-loopback interface to detect firewall blocks); `app:getDownloadsPath` (returns system downloads folder path); `file:writeText` (writes UTF-8 text to a user-specified file path); `dialog:selectFolder` (shows folder picker dialog for output directory selection) |
+| `main.ts` | Window creation, IPC handlers, app lifecycle; tray actions route through renderer-gated startup flow; main-process log router forwards stdout/stderr lines to `client-debug.log` + `app:clientLogLine`, with one-time `electron-debug.log` migration; serverConfig IPC handlers for local YAML file read/write; Chromium loopback feature flags + `session.setDisplayMediaRequestHandler` for silent system audio capture; `server:probeConnection` (main-process connection probe returning Node.js error codes like ENOTFOUND, ECONNREFUSED, TLS errors - falls back to renderer fetch for TLS errors the certificate-error handler can accept); `tailscale:getHostname` (detects local Tailscale FQDN via `tailscale status --json`); `server:checkFirewallPort` (tests if port is reachable from non-loopback interface to detect firewall blocks); `app:getDownloadsPath` (returns system downloads folder path); `file:writeText` (writes UTF-8 text to a user-specified file path); `dialog:selectFolder` (shows folder picker dialog for output directory selection) |
 | `preload.ts` | Context bridge (safe IPC between renderer and main), including whisper install/bootstrap status typing, `onClientLogLine` bridge wiring, and `serverConfig` namespace (readTemplate, readLocal, writeLocal); `audio:enableSystemAudioLoopback` and `audio:disableSystemAudioLoopback` for loopback handler lifecycle; `server.probeConnection` and `server.checkFirewallPort` for connection diagnostics; `tailscale.getHostname` for FQDN auto-detection; `fileIO` namespace (`getDownloadsPath`, `writeText`, `selectFolder`) for Session Import file operations |
 | `containerRuntime.ts` | Auto-detects Docker or Podman, caches the result, handles rootless socket resolution; supports `CONTAINER_RUNTIME` env override |
-| `dockerManager.ts` | Container CLI wrapper for Docker/Podman — container/image management, additive optional-family install env updates, auto-generation of self-signed LAN TLS certificates (covers localhost + all detected LAN IPs), and pre-flight TLS certificate expiry check with auto-renewal for Tailscale certificates via `tailscale cert` |
+| `dockerManager.ts` | Container CLI wrapper for Docker/Podman - container/image management, additive optional-family install env updates, auto-generation of self-signed LAN TLS certificates (covers localhost + all detected LAN IPs), and pre-flight TLS certificate expiry check with auto-renewal for Tailscale certificates via `tailscale cert` |
 | `shortcutManager.ts` | Global keyboard shortcuts (system-wide registration/unregistration) |
 | `waylandShortcuts.ts` | Wayland portal integration for global shortcuts via D-Bus |
 | `pasteAtCursor.ts` | Paste-at-cursor feature (xdotool/wtype/platform dispatch) |
@@ -2328,7 +2328,7 @@ npm run dev:electron
 | `useAdminStatus.ts` | Admin authentication state |
 | `useTraySync.ts` | Resolve composite app state and sync tray icon/menu/tooltip using `ServerHealthState` from `useServerStatus` |
 | `useImportQueue.ts` | Multi-file import queue with per-file progress, retry, and cancellation |
-| `useSessionImportQueue.ts` | Session File Import queue — submits files to `/api/transcribe/import`, polls for results, and writes output as `.txt` or `.srt` via the `fileIO` IPC bridge (falls back to browser download when not in Electron) |
+| `useSessionImportQueue.ts` | Session File Import queue - submits files to `/api/transcribe/import`, polls for results, and writes output as `.txt` or `.srt` via the `fileIO` IPC bridge (falls back to browser download when not in Electron) |
 | `useClientDebugLogs.ts` | Client debug log state + renderer bridge subscription for live `app:clientLogLine` updates into the Session log terminal |
 | `DockerContext.tsx` | React context provider for Docker state sharing |
 | `ServerStatusContext.tsx` | React context provider for server connection state |
@@ -2388,7 +2388,7 @@ The dashboard enforces design consistency via a machine-validated UI contract. T
 
 | File | Purpose |
 |------|---------|
-| `ui-contract/transcription-suite-ui.contract.yaml` | Canonical contract — single source of truth for renderer styling |
+| `ui-contract/transcription-suite-ui.contract.yaml` | Canonical contract - single source of truth for renderer styling |
 | `ui-contract/transcription-suite-ui.contract.schema.json` | JSON Schema for structural validation |
 | `ui-contract/contract-baseline.json` | Content hash + version lock for semver bump enforcement |
 | `ui-contract/design-language.md` | Qualitative design direction (dark frosted glass, accent palette, motion rules) |
@@ -2431,7 +2431,7 @@ The YAML contract contains these top-level sections:
 | `foundation.tailwind` | Canonical Tailwind theme extensions (fonts, glass/accent color scales, custom blur) |
 | `foundation.tokens` | Frozen token registries: colors, blur levels, shadows, motion, radii, z-index, spacing, status mappings |
 | `global_behaviors` | Global CSS policy: body styles, selection styling, scrollbar definitions, portal layering |
-| `utility_allowlist` | Full allowed class universe — `exact_classes` (normal) + `arbitrary_classes` (bracket-value) |
+| `utility_allowlist` | Full allowed class universe - `exact_classes` (normal) + `arbitrary_classes` (bracket-value) |
 | `inline_style_allowlist` | Allowed inline style properties and animation-related literals |
 | `component_contracts` | Per-component constraints: `required_tokens`, `allowed_variants`, `structural_invariants`, `behavior_rules`, `state_rules` |
 | `validation_policy` | Enforcement severity for each check (all currently `error`) |
@@ -2511,7 +2511,7 @@ This shows a table with:
 
 | Command | Behavior |
 |---------|----------|
-| `npm install` | Installs exact versions from `package-lock.json` — no drift possible |
+| `npm install` | Installs exact versions from `package-lock.json` - no drift possible |
 | `npm install <package>@latest` | Upgrades a specific package; you must then update `package.json` to the new exact version |
 | `npm update` | No-op when all versions are pinned exactly |
 
@@ -2524,7 +2524,7 @@ npm install electron@latest --save-dev
 
 # 2. Extract the exact resolved version and update package.json
 node -e "console.log(require('./package-lock.json').packages['node_modules/electron'].version)"
-# e.g. prints 41.0.0 — edit package.json to set "electron": "41.0.0"
+# e.g. prints 41.0.0 - edit package.json to set "electron": "41.0.0"
 
 # 3. Verify lock file is stable
 npm install          # should print "up to date"
@@ -2598,9 +2598,9 @@ Both hooks are mounted once in `AppInner` immediately after `useServerStatus()`.
 | `src/hooks/useServerEventReactor.ts` | Detects `reachable` and `ready` transitions; cascades cache invalidations |
 | `src/hooks/useAuthTokenSync.ts` | Always-on Docker log scanner; keeps `apiClient`, electron-store, and the `['authToken']` cache key in sync |
 | `src/utils/dockerLogParsing.ts` | Shared `extractAdminTokenFromDockerLogLine` utility |
-| `src/hooks/useLanguages.ts` | `staleTime: 60_000` (was `Infinity`) — cache becomes stale after 60 s so invalidations actually trigger refetches |
+| `src/hooks/useLanguages.ts` | `staleTime: 60_000` (was `Infinity`) - cache becomes stale after 60 s so invalidations actually trigger refetches |
 
-#### `useServerEventReactor` — Transition Matrix
+#### `useServerEventReactor` - Transition Matrix
 
 The reactor tracks the previous values of `serverConnection.reachable` and `serverConnection.ready` in a ref and fires invalidations only on rising edges:
 
@@ -2610,9 +2610,9 @@ The reactor tracks the previous values of `serverConnection.reachable` and `serv
 | Models become ready | `false → true` on `ready` | `['languages']`, `['adminStatus']` |
 | Server becomes unreachable | `true → false` on `reachable` | _(updates ref only; no point fetching)_ |
 
-`invalidateQueries({ queryKey: ['languages'] })` uses React Query's prefix matching — it invalidates all backend-specific variants (`['languages', 'whisper']`, `['languages', 'parakeet']`, etc.) at once.
+`invalidateQueries({ queryKey: ['languages'] })` uses React Query's prefix matching - it invalidates all backend-specific variants (`['languages', 'whisper']`, `['languages', 'parakeet']`, etc.) at once.
 
-#### `useAuthTokenSync` — Docker Log Token Detection
+#### `useAuthTokenSync` - Docker Log Token Detection
 
 The hook runs independently of which view is active:
 
@@ -2623,11 +2623,11 @@ The hook runs independently of which view is active:
 5. **On detection:** Writes to `electronAPI.config.set('connection.authToken', token)`, calls `apiClient.setAuthToken(token)`, and publishes the token to `queryClient.setQueryData(['authToken'], token)` so any consumer can subscribe reactively.
 6. **Graceful no-op:** Skips all of the above in non-Electron environments (e.g., browser dev mode) by checking for `window.electronAPI.docker`.
 
-#### `SettingsModal` — Reactive Token Consumption
+#### `SettingsModal` - Reactive Token Consumption
 
 The Settings modal's Server tab auth token field is now reactive: instead of running its own Docker log scanner, it subscribes to the shared `['authToken']` query cache via `queryClient.getQueryCache().subscribe(...)`. When `useAuthTokenSync` updates the cache key, the modal's `clientSettings.authToken` state updates immediately without any interaction from the user.
 
-#### `ServerView` — Reactive Token Read
+#### `ServerView` - Reactive Token Read
 
 The `authToken` state in `ServerView` was previously set once on mount (`useEffect(..., [])`). The dependency array is now `[adminStatus]`, so the token re-reads from electron-store on every admin status poll (every 10 s) and immediately after any admin status invalidation triggered by the reactor. This catches the server-just-started case without extra infrastructure.
 
@@ -2637,14 +2637,14 @@ In `SessionView.handleReloadModels`, the `onComplete` callback calls `queryClien
 
 #### `staleTime` Rationale
 
-`useLanguages` previously used `staleTime: Infinity`, which meant React Query considered cached language data "fresh forever" — even an explicit `invalidateQueries` call would not trigger a refetch for mounted components. Changing to `staleTime: 60_000` (60 seconds) means:
+`useLanguages` previously used `staleTime: Infinity`, which meant React Query considered cached language data "fresh forever" - even an explicit `invalidateQueries` call would not trigger a refetch for mounted components. Changing to `staleTime: 60_000` (60 seconds) means:
 
 - After an invalidation the query is immediately eligible for a refetch.
 - During normal operation, 60 s avoids unnecessary network chatter (the language list is a cheap, rarely-changing GET).
 
 #### Future Enhancement: SSE
 
-For sub-second latency, a backend SSE endpoint (`/api/events`) could push `model_loaded`, `model_unloaded`, and `config_changed` events. The reactor pattern is designed to be extended with SSE — the invalidation logic stays the same, only the trigger source changes from a poll-derived transition to an `EventSource` message.
+For sub-second latency, a backend SSE endpoint (`/api/events`) could push `model_loaded`, `model_unloaded`, and `config_changed` events. The reactor pattern is designed to be extended with SSE - the invalidation logic stays the same, only the trigger source changes from a poll-derived transition to an `EventSource` message.
 
 ---
 
@@ -2717,7 +2717,7 @@ on Linux). Settings are managed through the **Settings** modal in the UI.
 | `diarization.numSpeakers` | `2` | Number of speakers when constrained |
 | `notebook.autoAdd` | `true` | Auto-add longform transcriptions to Notebook |
 | `server.hfToken` | `""` | HuggingFace token for PyAnnote diarization models |
-| `server.runtimeProfile` | `gpu` | `"gpu"` or `"cpu"` — controls Docker GPU reservation |
+| `server.runtimeProfile` | `gpu` | `"gpu"` or `"cpu"` - controls Docker GPU reservation |
 | `app.autoCopy` | `true` | Copy transcription to clipboard on completion |
 | `app.showNotifications` | `true` | Show desktop notifications |
 | `app.stopServerOnQuit` | `true` | Stop Docker container when quitting the app |
@@ -2726,7 +2726,7 @@ on Linux). Settings are managed through the **Settings** modal in the UI.
 | `app.updateCheckIntervalMode` | `24h` | Check interval: `24h`, `7d`, `28d`, or `custom` |
 | `app.updateCheckCustomHours` | `24` | Custom interval in hours (when mode is `custom`) |
 
-> **`server.runtimeProfile`** — Controls whether the Docker container is
+> **`server.runtimeProfile`** - Controls whether the Docker container is
 > launched with NVIDIA GPU reservation (`gpu`) or in CPU-only mode (`cpu`).
 > When set to `cpu`, the `docker-compose.gpu.yml` overlay is omitted and
 > `CUDA_VISIBLE_DEVICES` is set to an empty string, forcing the STT backend
@@ -2747,7 +2747,7 @@ on Linux). Settings are managed through the **Settings** modal in the UI.
 | `conversations` | LLM chat conversations |
 | `messages` | Individual chat messages |
 | `words_fts` | FTS5 virtual table for full-text search |
-| `transcription_jobs` | Durability layer — tracks transcription lifecycle (processing/completed/failed), stores results and audio paths for recovery |
+| `transcription_jobs` | Durability layer - tracks transcription lifecycle (processing/completed/failed), stores results and audio paths for recovery |
 
 ### 11.2 Database Migrations
 
@@ -2873,7 +2873,7 @@ Keep one active CodeQL workflow in `.github/workflows/` to avoid duplicate runs 
 
 ### 12.4 Pre-Commit Hooks
 
-Pre-commit checks are managed by the [pre-commit](https://pre-commit.com) framework. Configuration lives in `.pre-commit-config.yaml` at the repo root — this is the **only** tracked file related to pre-commit.
+Pre-commit checks are managed by the [pre-commit](https://pre-commit.com) framework. Configuration lives in `.pre-commit-config.yaml` at the repo root - this is the **only** tracked file related to pre-commit.
 
 #### Hooks
 
@@ -2932,11 +2932,11 @@ This project uses multiple AI coding tools (Claude Code, Gemini CLI, Cursor, etc
 
 | File | Purpose | Auto-loaded by | Git-tracked |
 |------|---------|---------------|-------------|
-| `CLAUDE.md` | Lean router — GitNexus MCP reference + pointers to detailed rules | Claude Code | Yes |
-| `AGENTS.md` | Self-contained — full project rules inlined for non-Claude tools | Gemini CLI, Cursor, Windsurf, Copilot | Yes |
-| `docs/project-context.md` | Canonical source of truth — project-specific rules for AI agents | Referenced by CLAUDE.md, inlined into AGENTS.md | Yes |
+| `CLAUDE.md` | Lean router - GitNexus MCP reference + pointers to detailed rules | Claude Code | Yes |
+| `AGENTS.md` | Self-contained - full project rules inlined for non-Claude tools | Gemini CLI, Cursor, Windsurf, Copilot | Yes |
+| `docs/project-context.md` | Canonical source of truth - project-specific rules for AI agents | Referenced by CLAUDE.md, inlined into AGENTS.md | Yes |
 | `~/.claude/rules/` | Global coding standards (not project-specific) | Claude Code only | N/A (home dir) |
-| `~/.claude/projects/.../memory/` | Auto-memory — cross-session project knowledge | Claude Code only | N/A (home dir) |
+| `~/.claude/projects/.../memory/` | Auto-memory - cross-session project knowledge | Claude Code only | N/A (home dir) |
 | `.claude/skills/` | Specialized workflows (GitNexus, UI contract, BMAD, testing) | Claude Code (on demand) | Partially |
 
 ### How it works
@@ -2965,10 +2965,10 @@ This regenerates the `<!-- gitnexus:start/end -->` block in both `CLAUDE.md` and
 
 ### Key rules
 
-- **`CLAUDE.md` should stay lean** — Claude Code already has global rules + memory. Don't duplicate.
-- **`AGENTS.md` must be self-contained** — it's the only instruction non-Claude tools see.
-- **`docs/project-context.md` is the single source of truth** — edit here, propagate to `AGENTS.md`.
-- **Never manually edit inside `<!-- gitnexus:start/end -->` markers** — `gitnexus analyze` overwrites them.
+- **`CLAUDE.md` should stay lean** - Claude Code already has global rules + memory. Don't duplicate.
+- **`AGENTS.md` must be self-contained** - it's the only instruction non-Claude tools see.
+- **`docs/project-context.md` is the single source of truth** - edit here, propagate to `AGENTS.md`.
+- **Never manually edit inside `<!-- gitnexus:start/end -->` markers** - `gitnexus analyze` overwrites them.
 
 ---
 
@@ -3002,7 +3002,7 @@ sudo systemctl enable --now nvidia-persistence.service
 
 #### CUDA unknown error after system update
 
-On rolling-release distros (Arch, Manjaro, etc.), a system update that upgrades glibc or the NVIDIA driver can break the nvidia-container-toolkit's **legacy hook mode**. The legacy pre-start hook runs `/sbin/ldconfig` inside the container, and newer glibc/driver combinations cause this to fail silently — CUDA reports `RuntimeError: CUDA failed with error unknown error` even though `nvidia-smi` works fine on the host.
+On rolling-release distros (Arch, Manjaro, etc.), a system update that upgrades glibc or the NVIDIA driver can break the nvidia-container-toolkit's **legacy hook mode**. The legacy pre-start hook runs `/sbin/ldconfig` inside the container, and newer glibc/driver combinations cause this to fail silently - CUDA reports `RuntimeError: CUDA failed with error unknown error` even though `nvidia-smi` works fine on the host.
 
 **Symptoms:**
 - Server crashes during model preload with `CUDA failed with error unknown error`
@@ -3011,7 +3011,7 @@ On rolling-release distros (Arch, Manjaro, etc.), a system update that upgrades 
 
 **Root cause:** The legacy nvidia runtime hook (`--gpus all` / `driver: nvidia` in compose) is incompatible with the updated host libraries. This is a [known issue](https://github.com/NVIDIA/nvidia-container-toolkit/issues/1246) affecting driver versions 570+ with newer glibc.
 
-**Fix — switch to CDI (Container Device Interface) mode:**
+**Fix - switch to CDI (Container Device Interface) mode:**
 
 ```bash
 # 1. Generate CDI specification for your GPU
@@ -3027,7 +3027,7 @@ sudo systemctl restart docker
 docker run --rm --device nvidia.com/gpu=all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
 ```
 
-The dashboard automatically detects CDI vs legacy mode at startup (`checkGpu()` in `dockerManager.ts`) and selects the matching compose overlay (`docker-compose.gpu-cdi.yml` or `docker-compose.gpu.yml`). No image rebuild needed — compose overlays are host-side only.
+The dashboard automatically detects CDI vs legacy mode at startup (`checkGpu()` in `dockerManager.ts`) and selects the matching compose overlay (`docker-compose.gpu-cdi.yml` or `docker-compose.gpu.yml`). No image rebuild needed - compose overlays are host-side only.
 
 #### CUDA unknown error in CDI mode (cgroupv2 device filter regression)
 
@@ -3039,7 +3039,7 @@ On systems using **CDI mode** with **cgroupv2** (the default on modern distros),
 - `torch.cuda.is_available()` returns `False` with a "CUDA unknown error" warning
 - Running the container with `--privileged` makes CUDA work
 
-**Diagnosis — confirm this is the issue:**
+**Diagnosis - confirm this is the issue:**
 ```bash
 # 1. Quick cuInit test (should print cuInit=0 if CUDA works, 999 if broken)
 docker run --rm --device nvidia.com/gpu=all nvidia/cuda:12.9.0-base-ubuntu24.04 bash -c "
@@ -3052,16 +3052,16 @@ docker run --rm --device nvidia.com/gpu=all nvidia/cuda:12.9.0-base-ubuntu24.04 
 # strace output will show: openat("/dev/nvidia-uvm", O_RDWR|O_CLOEXEC) = -1 EPERM
 ```
 
-**Root cause:** The CDI spec defines which device nodes to mount and their cgroup permissions. Docker must translate these into cgroupv2 eBPF device-allow rules. A regression in Docker, the nvidia-container-toolkit, or the kernel can cause this translation to silently fail for `/dev/nvidia-uvm` — the device file is mounted (and even has world-writable permissions), but the eBPF filter blocks the `open()` syscall with `EPERM`. Standard workarounds like `--cap-add=ALL`, `--security-opt seccomp=unconfined`, and `--device-cgroup-rule` have no effect because cgroupv2's eBPF program ignores them.
+**Root cause:** The CDI spec defines which device nodes to mount and their cgroup permissions. Docker must translate these into cgroupv2 eBPF device-allow rules. A regression in Docker, the nvidia-container-toolkit, or the kernel can cause this translation to silently fail for `/dev/nvidia-uvm` - the device file is mounted (and even has world-writable permissions), but the eBPF filter blocks the `open()` syscall with `EPERM`. Standard workarounds like `--cap-add=ALL`, `--security-opt seccomp=unconfined`, and `--device-cgroup-rule` have no effect because cgroupv2's eBPF program ignores them.
 
-**Fix — regenerate the CDI spec:**
+**Fix - regenerate the CDI spec:**
 ```bash
 sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
 ```
 
-This regenerates the CDI specification with the current toolkit version, which often produces a spec that Docker handles correctly. No Docker restart is needed — the spec is read at container creation time.
+This regenerates the CDI specification with the current toolkit version, which often produces a spec that Docker handles correctly. No Docker restart is needed - the spec is read at container creation time.
 
-**If regeneration doesn't fix it — switch to legacy mode:**
+**If regeneration doesn't fix it - switch to legacy mode:**
 
 Follow the reverse of the CDI migration above:
 ```bash
@@ -3134,7 +3134,7 @@ ldd squashfs-root/usr/bin/transcriptionsuite
 | Fedora | `fuse-libs` | `sudo dnf install fuse-libs` |
 | Arch Linux | `fuse2` | `sudo pacman -S fuse2` |
 
-**SUID sandbox error (`chrome-sandbox is owned by root and has mode 4755`):** This is handled automatically — the AppImage detects it is running inside an AppImage (via the `APPIMAGE` environment variable) and passes `--no-sandbox` to Chromium. This is the standard workaround for Electron AppImages since the squashfs mount cannot satisfy SUID permission requirements. If you still encounter this error on Ubuntu or Fedora GNOME (which use AppArmor to restrict unprivileged user namespaces), you can pass the flag manually:
+**SUID sandbox error (`chrome-sandbox is owned by root and has mode 4755`):** This is handled automatically - the AppImage detects it is running inside an AppImage (via the `APPIMAGE` environment variable) and passes `--no-sandbox` to Chromium. This is the standard workaround for Electron AppImages since the squashfs mount cannot satisfy SUID permission requirements. If you still encounter this error on Ubuntu or Fedora GNOME (which use AppArmor to restrict unprivileged user namespaces), you can pass the flag manually:
 
 ```bash
 ./TranscriptionSuite-*-x86_64.AppImage --no-sandbox
@@ -3152,7 +3152,7 @@ ELECTRON_OZONE_PLATFORM_HINT=auto ./TranscriptionSuite-*-x86_64.AppImage
 
 ### 13.5 Windows / macOS Docker Networking
 
-**Issue**: On Windows and macOS, Docker Desktop runs containers inside a Linux VM (WSL2/Hyper-V on Windows, HyperKit/Virtualization.framework on macOS). `network_mode: "host"` doesn't work as expected — the server listens inside the VM but the host can't reach `localhost:9786`.
+**Issue**: On Windows and macOS, Docker Desktop runs containers inside a Linux VM (WSL2/Hyper-V on Windows, HyperKit/Virtualization.framework on macOS). `network_mode: "host"` doesn't work as expected - the server listens inside the VM but the host can't reach `localhost:9786`.
 
 **Solution**: The layered compose system handles this automatically:
 - **Linux**: Uses `docker-compose.linux-host.yml` (`network_mode: "host"`) for direct access
@@ -3208,7 +3208,7 @@ dyld: Library not loaded: /usr/local/opt/gettext/lib/libintl.8.dylib
 **Solution**: Install `dmgbuild` locally via pip and tell electron-builder to use it:
 ```bash
 pip3 install dmgbuild
-# Use the full path — pip user installs may not be on PATH (e.g. ~/Library/Python/3.x/bin)
+# Use the full path - pip user installs may not be on PATH (e.g. ~/Library/Python/3.x/bin)
 export CUSTOM_DMGBUILD_PATH="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts", "posix_user") + "/dmgbuild")')"
 npm run package:mac
 ```
@@ -3251,7 +3251,7 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 The Metal/MLX backend provides hardware-accelerated transcription on Apple Silicon
 Macs using the `mlx-audio`, `parakeet-mlx`, and `canary-mlx` packages. When the
 Metal runtime profile is selected, the dashboard manages a native uvicorn server
-process directly — no Docker required.
+process directly - no Docker required.
 
 | Component | Details |
 |-----------|---------|
@@ -3302,7 +3302,7 @@ uv run pytest tests/test_mlx_whisper_backend.py tests/test_mlx_parakeet_backend.
 All platform-independent tests use `patch.object` / `sys.modules` stubs and run
 on any platform without Apple Silicon.
 
-**MLX Whisper** (17 tests — `test_mlx_whisper_backend.py`):
+**MLX Whisper** (17 tests - `test_mlx_whisper_backend.py`):
 
 | Class | What is tested |
 |-------|---------------|
@@ -3312,16 +3312,16 @@ on any platform without Apple Silicon.
 | `TestMLXWhisperBeamSizeFallback` | `beam_size > 1` silently falls back to greedy (`None`); `None` passes through |
 | `TestMLXWhisperResampling` | 44100 Hz audio triggers `scipy.signal.resample`; 16000 Hz skips it |
 
-**MLX VibeVoice** (15 tests — `test_mlx_vibevoice_backend.py`):  
+**MLX VibeVoice** (15 tests - `test_mlx_vibevoice_backend.py`):  
 Factory detection for `mlx-community/VibeVoice-ASR-*` variants, lifecycle, native diarization segment parse, and `is_mlx_model()` inclusion.
 
-**MLX Parakeet** (33 tests — `test_mlx_parakeet_backend.py`):  
+**MLX Parakeet** (33 tests - `test_mlx_parakeet_backend.py`):  
 Factory detection, lifecycle, transcribe, resampling, and error-path coverage for the `mlx-community/parakeet-*` variant.
 
-**MLX Canary** (33 tests — `test_mlx_canary_backend.py`):  
+**MLX Canary** (33 tests - `test_mlx_canary_backend.py`):  
 Factory detection, lifecycle, transcribe, language/task config, and error-path coverage for the `*/canary*-mlx` variant.
 
-**FasterWhisperBackend** (16 tests — `test_faster_whisper_backend.py`):
+**FasterWhisperBackend** (16 tests - `test_faster_whisper_backend.py`):
 
 | Class | What is tested |
 |-------|---------------|
@@ -3331,7 +3331,7 @@ Factory detection, lifecycle, transcribe, language/task config, and error-path c
 | `TestFasterWhisperBackendWarmup` | No-op when not loaded; calls `transcribe()` when loaded |
 | `TestFasterWhisperBackendMetadata` | `backend_name == "faster_whisper"`; `supports_translation() == True` |
 
-**SortformerEngine** (18 tests — `test_sortformer_engine.py`):
+**SortformerEngine** (18 tests - `test_sortformer_engine.py`):
 
 | Class | What is tested |
 |-------|---------------|
@@ -3340,7 +3340,7 @@ Factory detection, lifecycle, transcribe, language/task config, and error-path c
 | `TestSortformerEngineLifecycle` | `load()`, `unload()`, `is_loaded()`; idempotent `load()` |
 | `TestSortformerEngineDiarize` | `DiarizationResult` type; segment count/speakers/timestamps; auto-load; threshold forwarding; temp WAV path passed to `generate()` |
 
-**STT Backend Factory** (12 tests — `test_stt_backend_factory.py`):
+**STT Backend Factory** (12 tests - `test_stt_backend_factory.py`):
 
 Covers `detect_backend_type` for all backend types, new `asr-fp16` MLX Whisper naming scheme,
 `is_mlx_model()` for VibeVoice and new Whisper IDs, and the `whisperx → FasterWhisperBackend`
@@ -3370,7 +3370,7 @@ server/backend/.venv/bin/uvicorn server.api.main:app \
   --host 0.0.0.0 --port 9786
 ```
 
-> **Tip:** All path arguments must be fully expanded — no `$HOME` inside quoted
+> **Tip:** All path arguments must be fully expanded - no `$HOME` inside quoted
 > env vars on macOS. Use the shell expansion above (outside the quotes) or substitute
 > the actual path.
 
@@ -3434,7 +3434,7 @@ Useful optional form fields:
 
 | File          | Duration | Wall time | RTF    | Speakers |
 |---------------|----------|-----------|--------|----------|
-| 1min_test.wav | 60s      | ~3s       | ~20×   | —        |
+| 1min_test.wav | 60s      | ~3s       | ~20×   | -        |
 | 1min_test.wav | 60s      | ~6s       | ~10×   | 2 (SPEAKER_00/01) |
 | 10min.m4a     | 600s     | ~63s      | ~9.5×  | 3 (SPEAKER_00/01/02) |
 
@@ -3454,7 +3454,7 @@ Alternatively, open **Activity Monitor → Window → GPU History**.
 
 ---
 
-### 15.4 Metal Runtime Profile — Dashboard
+### 15.4 Metal Runtime Profile - Dashboard
 
 The Metal profile can be selected from two places in the dashboard:
 
@@ -3496,9 +3496,9 @@ Start/stop the server from the **Server** view using the native process controls
   is configured (default is 5), the backend silently falls back to greedy.
   This has no user-visible impact.
 - **Diarization on Metal**: Two options are available:
-  - *Sortformer* (`SortformerEngine`) — Metal-native via `mlx-audio`; up to 4 speakers;
+  - *Sortformer* (`SortformerEngine`) - Metal-native via `mlx-audio`; up to 4 speakers;
     no HuggingFace token required. Default for Apple Silicon.
-  - *PyAnnote* (`DiarizationEngine`) — MPS or CPU; requires HF token and model acceptance.
+  - *PyAnnote* (`DiarizationEngine`) - MPS or CPU; requires HF token and model acceptance.
 - **Live Mode**: Uses `FasterWhisperBackend` on Metal (whisperx conflicts with mlx-audio);
   auto-selected when whisperx is not importable.
 - **Performance**: ~3 s per minute of audio on M-series with `whisper-large-v3-turbo-asr-fp16`.
@@ -3511,11 +3511,11 @@ Start/stop the server from the **Server** view using the native process controls
 
 1. Run `npm run dev:electron` from `dashboard/`.
 2. Open **Server** view → select **Metal (MLX)** runtime profile.
-3. Click **Start Metal Server** — the status light should turn green within ~5 s.
+3. Click **Start Metal Server** - the status light should turn green within ~5 s.
 4. Verify the server log in the dashboard shows uvicorn startup output.
-5. Open the **Session** view and upload an audio file — confirm the transcript appears.
-6. Click **Stop** in the Server view — the status light should go grey.
-7. Quit the app and relaunch — the server should auto-start if Metal is still selected.
+5. Open the **Session** view and upload an audio file - confirm the transcript appears.
+6. Click **Stop** in the Server view - the status light should go grey.
+7. Quit the app and relaunch - the server should auto-start if Metal is still selected.
 
 ---
 
@@ -3573,7 +3573,7 @@ If `mlx.available` is `false`, check `mlx.reason`:
 
 #### How it differs from the CI macOS build
 
-| | `build-electron-mac.sh` (CI — §5.5) | `setup-macos-metal.sh` (local — this section) |
+| | `build-electron-mac.sh` (CI - §5.5) | `setup-macos-metal.sh` (local - this section) |
 |---|---|---|
 | **Purpose** | Produce release artifacts for GitHub | One-command local setup for Metal users |
 | **Runner** | GitHub Actions `macos-14` | User's own Apple Silicon Mac |
@@ -3604,7 +3604,7 @@ The script performs these steps:
 7. Creates a Python 3.13 venv inside `<app>/Contents/Resources/backend/.venv`
 8. Installs all server dependencies with `uv sync --extra mlx --no-editable`
 
-> **Why `--no-editable`?** This bakes the server package into `site-packages` instead of creating a `.pth` symlink back to the source tree. The resulting `.app` is fully self-contained — it does not depend on the cloned repo at runtime.
+> **Why `--no-editable`?** This bakes the server package into `site-packages` instead of creating a `.pth` symlink back to the source tree. The resulting `.app` is fully self-contained - it does not depend on the cloned repo at runtime.
 
 > **Why is the venv created after the copy?** The venv is created at the _final_ app location so that any absolute paths written during `uv sync` (e.g. the `uvicorn` console-script shebang) point to the correct path. In practice, `mlxServerManager.ts` invokes `python -m uvicorn` instead of the console script, but in-place creation avoids surprises.
 
@@ -3637,14 +3637,14 @@ results.
 |--------|-------------|
 | `setup_time` | `backend.load()` + warmup pass (cold start including JIT compile) |
 | `transcribe_time` | `backend.transcribe()` wall time for the audio |
-| `RTF` | `transcribe_time / audio_duration` — lower is faster; 1.0x = real-time |
+| `RTF` | `transcribe_time / audio_duration` - lower is faster; 1.0x = real-time |
 | `word_count` | Words in the transcription output |
 
 **Outputs:**
 
 - Console: ASCII timing table + per-model text + word-level diff vs. reference model
-- `benchmark_<timestamp>.json` — full results including segments
-- `benchmark_<timestamp>.csv` — summary rows, easy to open in a spreadsheet
+- `benchmark_<timestamp>.json` - full results including segments
+- `benchmark_<timestamp>.csv` - summary rows, easy to open in a spreadsheet
 
 > Model download time is **not** included in `setup_time` if the model is already
 > cached. First-run times are dominated by download; subsequent runs measure pure
@@ -3666,7 +3666,7 @@ python scripts/benchmark_stt.py --input samples/input/clip.m4a
 # All files in a directory, specific group
 python scripts/benchmark_stt.py --dir samples/input/ --group mlx-whisper
 
-# Explicit model list — append @<device> to override device per model
+# Explicit model list - append @<device> to override device per model
 python scripts/benchmark_stt.py \
   --models "mlx-community/whisper-tiny-asr-fp16" "Systran/faster-whisper-tiny@cpu" \
   --input clip.m4a
