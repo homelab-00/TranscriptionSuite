@@ -129,6 +129,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [aiEnabled, setAiEnabled] = useState(true);
   const [aiModels, setAiModels] = useState<LLMModel[]>([]);
   const [aiModelsLoading, setAiModelsLoading] = useState(false);
+  const [aiModelDropdownOpen, setAiModelDropdownOpen] = useState(false);
   const [showAiApiKey, setShowAiApiKey] = useState(false);
   const [aiStatusText, setAiStatusText] = useState<string>('');
   const [aiKeyConfigured, setAiKeyConfigured] = useState(false);
@@ -1619,7 +1620,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         </Section>
 
         <Section title="Model">
-          <div className="flex gap-2">
+          <div className="relative flex gap-2">
             <input
               type="text"
               value={aiModel}
@@ -1627,12 +1628,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 setAiModel(e.target.value);
                 handleAiFieldChange('model', e.target.value);
               }}
+              onFocus={() => aiModels.length > 0 && setAiModelDropdownOpen(true)}
+              onBlur={() => setAiModelDropdownOpen(false)}
               placeholder="Auto-detect from provider"
-              list="ai-model-list"
               className="focus:border-accent-cyan/50 flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
             />
             <button
-              onClick={loadAiModels}
+              onClick={() => {
+                loadAiModels();
+                setAiModelDropdownOpen(true);
+              }}
               disabled={aiModelsLoading}
               className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-slate-400 transition-colors hover:text-white disabled:opacity-50"
               title="Fetch models from provider"
@@ -1643,15 +1648,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <RefreshCw size={16} />
               )}
             </button>
+            {aiModelDropdownOpen && aiModels.length > 0 && (
+              <div className="custom-scrollbar absolute top-full left-0 z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-white/10 bg-slate-900 py-1 shadow-xl">
+                {aiModels.map((m) => (
+                  <button
+                    key={m.id}
+                    onMouseDown={(e) => {
+                      // mousedown fires before the input's onBlur so we can
+                      // set the value before the dropdown is closed.
+                      e.preventDefault();
+                      setAiModel(m.id);
+                      handleAiFieldChange('model', m.id);
+                      setAiModelDropdownOpen(false);
+                    }}
+                    className={`flex w-full items-center px-3 py-1.5 text-left text-sm transition-colors hover:bg-white/10 hover:text-white ${
+                      aiModel === m.id ? 'text-accent-cyan font-medium' : 'text-slate-300'
+                    }`}
+                  >
+                    {m.id}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <datalist id="ai-model-list">
-            {aiModels.map((m) => (
-              <option key={m.id} value={m.id} />
-            ))}
-          </datalist>
-          {aiModels.length > 0 && (
+          {aiModels.length > 0 && !aiModelDropdownOpen && (
             <p className="mt-1.5 text-xs text-slate-500">
-              {aiModels.length} model{aiModels.length !== 1 ? 's' : ''} available from provider
+              {aiModels.length} model{aiModels.length !== 1 ? 's' : ''} available — click the
+              input to pick one
             </p>
           )}
           {aiModelsFetchError && (
