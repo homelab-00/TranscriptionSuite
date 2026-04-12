@@ -40,13 +40,22 @@ MAX_CHANNELS: int = 16  # Safety cap to prevent unbounded serial probing
 # ---------------------------------------------------------------------------
 
 
-def probe_channels(file_path: str) -> dict[str, Any]:
+def probe_channels(
+    file_path: str,
+    cancellation_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
     """Probe an audio file for channel count and per-channel mean volume.
 
     Returns:
         ``{"num_channels": int, "channel_levels_db": [float, ...]}``
         where each level is the mean volume in dBFS for that channel index.
         A completely silent channel reads as -91.0 (ffmpeg floor).
+
+    If *cancellation_check* is provided, it is invoked at the top of each
+    iteration of the volumedetect loop BEFORE launching ffmpeg. If it returns
+    True, TranscriptionCancelledError is raised and no partial dict is
+    returned. ffmpeg is not interrupted mid-run — worst-case wait is bounded
+    by a single channel's 120 s timeout. A broken check (raising) propagates.
     """
     # Step 1: get channel count from ffprobe
     try:
@@ -95,6 +104,11 @@ def probe_channels(file_path: str) -> dict[str, Any]:
     # Step 2: measure per-channel mean volume via volumedetect
     levels: list[float] = []
     for ch_idx in range(num_channels):
+        if cancellation_check is not None:
+            # A broken check (lock corruption, etc.) must propagate rather than
+            # silently finish the remaining channels.
+            if cancellation_check():
+                raise TranscriptionCancelledError("Transcription cancelled during channel probe")
         level = _measure_channel_volume(file_path, ch_idx)
         levels.append(level)
 
@@ -317,7 +331,7 @@ def transcribe_multitrack(
     Falls through to standard single-file transcription for mono files.
     """
     logger.info("Multitrack: probing channels in %s", file_path)
-    probe = probe_channels(file_path)
+    probe = probe_channels(file_path, cancellation_check=cancellation_check)
     num_ch = probe["num_channels"]
 
     if num_ch <= 1:

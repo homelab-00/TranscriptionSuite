@@ -188,6 +188,158 @@ class TestProbeChannels:
         assert result["num_channels"] == 0
 
 
+class TestProbeChannelsCancellation:
+    """cancellation_check between volumedetect calls — bounds worst-case
+    unresponsive wait to a single channel's 120 s timeout instead of
+    num_channels * 120 s (up to 32 min with MAX_CHANNELS=16)."""
+
+    @staticmethod
+    def _fake_run_factory(
+        ffprobe_stdout: str, volumedetect_calls: list[int]
+    ) -> Callable[..., subprocess.CompletedProcess[str]]:
+        """Build a side_effect that returns ffprobe JSON, then records each
+        volumedetect invocation by appending the channel index to the list."""
+
+        def _fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            if cmd[0] == "ffprobe":
+                return subprocess.CompletedProcess(cmd, 0, stdout=ffprobe_stdout, stderr="")
+            ch_idx_raw = cmd[cmd.index("-af") + 1]
+            ch_num = int(ch_idx_raw.split("c0=c")[1].split(",")[0])
+            volumedetect_calls.append(ch_num)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="mean_volume: -20.0 dB")
+
+        return _fake_run
+
+    def test_cancellation_check_none_is_noop(self) -> None:
+        ffprobe_stdout = json.dumps({"streams": [{"channels": 3}]})
+        calls: list[int] = []
+
+        with patch(
+            "server.core.multitrack.subprocess.run",
+            side_effect=self._fake_run_factory(ffprobe_stdout, calls),
+        ):
+            result = probe_channels("/fake/f.wav", cancellation_check=None)
+
+        assert result["num_channels"] == 3
+        assert calls == [0, 1, 2]
+
+    def test_cancellation_check_false_is_noop(self) -> None:
+        ffprobe_stdout = json.dumps({"streams": [{"channels": 3}]})
+        calls: list[int] = []
+
+        with patch(
+            "server.core.multitrack.subprocess.run",
+            side_effect=self._fake_run_factory(ffprobe_stdout, calls),
+        ):
+            result = probe_channels("/fake/f.wav", cancellation_check=lambda: False)
+
+        assert result["num_channels"] == 3
+        assert calls == [0, 1, 2]
+
+    def test_cancelled_before_first_channel_raises_with_no_volumedetect(self) -> None:
+        from server.core.model_manager import TranscriptionCancelledError
+
+        ffprobe_stdout = json.dumps({"streams": [{"channels": 4}]})
+        calls: list[int] = []
+
+        with patch(
+            "server.core.multitrack.subprocess.run",
+            side_effect=self._fake_run_factory(ffprobe_stdout, calls),
+        ):
+            with pytest.raises(
+                TranscriptionCancelledError,
+                match="cancelled during channel probe",
+            ):
+                probe_channels("/fake/f.wav", cancellation_check=lambda: True)
+
+        # ffprobe still ran (it's before the loop) but no volumedetect fired.
+        assert calls == []
+
+    def test_cancelled_mid_loop_raises_after_one_volumedetect(self) -> None:
+        from server.core.model_manager import TranscriptionCancelledError
+
+        ffprobe_stdout = json.dumps({"streams": [{"channels": 3}]})
+        calls: list[int] = []
+
+        def _cancel_after_first() -> bool:
+            return len(calls) >= 1
+
+        with patch(
+            "server.core.multitrack.subprocess.run",
+            side_effect=self._fake_run_factory(ffprobe_stdout, calls),
+        ):
+            with pytest.raises(
+                TranscriptionCancelledError,
+                match="cancelled during channel probe",
+            ):
+                probe_channels("/fake/f.wav", cancellation_check=_cancel_after_first)
+
+        # Exactly one volumedetect completed before the check flipped True.
+        assert calls == [0]
+
+    def test_broken_cancellation_check_propagates(self) -> None:
+        ffprobe_stdout = json.dumps({"streams": [{"channels": 3}]})
+        calls: list[int] = []
+
+        def _broken() -> bool:
+            raise RuntimeError("cancellation registry corrupted")
+
+        with patch(
+            "server.core.multitrack.subprocess.run",
+            side_effect=self._fake_run_factory(ffprobe_stdout, calls),
+        ):
+            with pytest.raises(RuntimeError, match="cancellation registry"):
+                probe_channels("/fake/f.wav", cancellation_check=_broken)
+
+        # The check fired at the TOP of iteration 0, before any volumedetect.
+        assert calls == []
+
+    def test_mono_file_skips_cancellation_loop_entirely(self) -> None:
+        """Early-return on num_channels <= 1 — cancellation_check is irrelevant."""
+        ffprobe_stdout = json.dumps({"streams": [{"channels": 1}]})
+        invoked = {"n": 0}
+
+        def _track() -> bool:
+            invoked["n"] += 1
+            return True  # Would cancel if ever called.
+
+        with patch(
+            "server.core.multitrack.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, stdout=ffprobe_stdout, stderr=""),
+        ):
+            result = probe_channels("/fake/mono.wav", cancellation_check=_track)
+
+        assert result["num_channels"] == 1
+        assert result["channel_levels_db"] == []
+        assert invoked["n"] == 0  # The check was never called.
+
+    def test_transcribe_multitrack_threads_cancellation_into_probe(self) -> None:
+        """Call-site wiring: transcribe_multitrack's cancellation_check must
+        reach probe_channels as a kwarg (not silently dropped)."""
+
+        def sentinel() -> bool:
+            return False
+
+        captured_kwargs: dict[str, Any] = {}
+
+        def _spy_probe(file_path: str, **kwargs: Any) -> dict[str, Any]:
+            captured_kwargs.update(kwargs)
+            # Return mono so transcribe_multitrack early-exits via the engine stub.
+            return {"num_channels": 1, "channel_levels_db": []}
+
+        engine = MagicMock()
+        engine.transcribe_file.return_value = _make_result([])
+
+        with patch("server.core.multitrack.probe_channels", side_effect=_spy_probe):
+            transcribe_multitrack(
+                engine,
+                "/fake/f.wav",
+                cancellation_check=sentinel,
+            )
+
+        assert captured_kwargs.get("cancellation_check") is sentinel
+
+
 # ---------------------------------------------------------------------------
 # split_channels (mocked ffmpeg)
 # ---------------------------------------------------------------------------
