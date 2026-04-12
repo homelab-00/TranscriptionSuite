@@ -2,7 +2,6 @@
 
 # Acceptance Test-Driven Development (ATDD)
 
-**Workflow ID**: `_bmad/tea/testarch/bmad-testarch-atdd`
 **Version**: 5.0 (Step-File Architecture)
 
 ---

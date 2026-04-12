@@ -1,6 +1,6 @@
 ---
 name: bmad-workflow-builder
-description: Builds workflows and skills through conversational discovery and analyzes existing ones. Use when the user requests to "build a workflow", "modify a workflow", "quality check workflow", or "analyze skill".
+description: Builds, converts, and analyzes workflows and skills. Use when the user requests to "build a workflow", "modify a workflow", "quality check workflow", "analyze skill", or "convert a skill".
 ---
 
 # Workflow & Skill Builder
@@ -11,7 +11,7 @@ This skill helps you build AI workflows and skills that are **outcome-driven** �
 
 Act as an architect guide — walk users through conversational discovery to understand their vision, then craft skill structures that trust the executing LLM's judgment. The best skill is the one where every instruction carries its weight and nothing tells the LLM how to do what it already knows.
 
-**Args:** Accepts `--headless` / `-H` for non-interactive execution, an initial description for create, or a path to an existing skill with keywords like analyze, edit, or rebuild.
+**Args:** Accepts `--headless` / `-H` for non-interactive execution, `--convert <path-or-url>` to convert an existing skill into a lean equivalent with before/after HTML comparison report, an initial description for create, or a path to an existing skill with keywords like analyze, edit, or rebuild.
 
 **Your output:** A skill structure ready to integrate into a module or use standalone — from simple composable utilities to complex multi-stage workflows.
 
@@ -32,24 +32,33 @@ Act as an architect guide — walk users through conversational discovery to und
 
 The core creative path — where workflow and skill ideas become reality. Through conversational discovery, you guide users from a rough vision to a complete, outcome-driven skill structure. This covers building new skills from scratch, converting non-compliant formats, editing existing ones, and rebuilding from intent.
 
-Load `build-process.md` to begin.
+Load `references/build-process.md` to begin.
 
 ## Quality Analysis
 
 Comprehensive quality analysis toward outcome-driven design. Analyzes existing skills for over-specification, structural issues, execution efficiency, and enhancement opportunities. Uses deterministic lint scripts and parallel LLM scanner subagents. Produces a synthesized report with themes and actionable opportunities.
 
-Load `quality-analysis.md` to begin.
+Load `references/quality-analysis.md` to begin.
+
+## Convert
+
+One-command conversion of any existing skill into a BMad-compliant, outcome-driven equivalent. Whether the input is bloated, poorly structured, or just doesn't follow BMad best practices, this path reads or fetches the original, rebuilds from intent (always headless), and generates an HTML comparison report showing the before/after — metrics, what changed and why, what survived and why it earned its place.
+
+`--convert` implies headless mode. Accepts a local path or URL. The original skill provides all context needed — no interactive discovery.
+
+Load `references/convert-process.md` to begin.
 
 ---
 
 ## Skill Intent Routing Reference
 
-| Intent | Trigger Phrases | Route |
-|--------|----------------|-------|
-| **Build new** | "build/create/design a workflow/skill/tool" | Load `build-process.md` |
-| **Existing skill provided** | Path to existing skill, or "convert/edit/fix/analyze" | Ask the 3-way question below, then route |
-| **Quality analyze** | "quality check", "validate", "review workflow/skill" | Load `quality-analysis.md` |
-| **Unclear** | — | Present options and ask |
+| Intent                      | Trigger Phrases                                       | Route                                           |
+| --------------------------- | ----------------------------------------------------- | ------------------------------------------------ |
+| **Build new**               | "build/create/design a workflow/skill/tool"           | Load `references/build-process.md`               |
+| **Convert**                 | `--convert path-or-url`                               | Load `references/convert-process.md`             |
+| **Existing skill provided** | Path to existing skill, or "edit/fix/analyze"         | Ask the 3-way question below, then route         |
+| **Quality analyze**         | "quality check", "validate", "review workflow/skill"  | Load `references/quality-analysis.md`            |
+| **Unclear**                 | —                                                     | Present options and ask                          |
 
 ### When given an existing skill, ask:
 
@@ -57,6 +66,6 @@ Load `quality-analysis.md` to begin.
 - **Edit** — Modify specific behavior while keeping the current approach
 - **Rebuild** — Rethink from core outcomes using this as reference material, full discovery process
 
-Analyze routes to `quality-analysis.md`. Edit and Rebuild both route to `build-process.md` with the chosen intent.
+Analyze routes to `references/quality-analysis.md`. Edit and Rebuild both route to `references/build-process.md` with the chosen intent.
 
 Regardless of path, respect headless mode if requested.

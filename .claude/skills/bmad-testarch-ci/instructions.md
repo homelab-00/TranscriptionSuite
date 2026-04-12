@@ -2,7 +2,6 @@
 
 # CI/CD Pipeline Setup
 
-**Workflow ID**: `_bmad/tea/testarch/bmad-testarch-ci`
 **Version**: 5.0 (Step-File Architecture)
 
 ---

@@ -109,12 +109,7 @@ def parse_frontmatter(content: str) -> tuple[dict | None, list[dict]]:
             'severity': 'high', 'category': 'frontmatter',
             'issue': f'Name "{name}" is not kebab-case',
         })
-    elif not name.startswith('bmad-'):
-        findings.append({
-            'file': 'SKILL.md', 'line': 1,
-            'severity': 'medium', 'category': 'frontmatter',
-            'issue': f'Name "{name}" does not follow bmad-* naming convention',
-        })
+    # bmad- prefix check removed — bmad- is reserved for official BMad creations only
 
     # description check
     desc = fm.get('description')

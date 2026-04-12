@@ -12,7 +12,7 @@ Covers:
 - Sequential pattern detection in prompts (numbered Read/Grep/Glob steps)
 - Subagent-from-subagent detection
 - Loop patterns (read all, analyze each, for each file)
-- Memory loading pattern detection (load all memory, read all sidecar, etc.)
+- Memory loading pattern detection (load all memory, read all memory, etc.)
 - Multi-source operation detection
 """
 
@@ -149,8 +149,8 @@ def scan_sequential_patterns(filepath: Path, rel_path: str) -> list[dict]:
     # Memory loading patterns (agent-specific)
     memory_loading_patterns = [
         (r'[Ll]oad all (?:memory|memories)', 'load-all-memory'),
-        (r'[Rr]ead all sidecar (?:files|data)', 'read-all-sidecar'),
-        (r'[Ll]oad (?:entire|full|complete) sidecar', 'load-entire-sidecar'),
+        (r'[Rr]ead all (?:memory|agent memory) (?:files|data)', 'read-all-memory'),
+        (r'[Ll]oad (?:entire|full|complete) (?:memory|agent memory)', 'load-entire-memory'),
         (r'[Ll]oad all (?:context|state)', 'load-all-context'),
         (r'[Rr]ead (?:entire|full|complete) memory', 'read-entire-memory'),
     ]
@@ -252,7 +252,7 @@ def scan_execution_deps(skill_path: Path) -> dict:
     for p in sequential_patterns:
         if p['type'] == 'subagent-chain-violation':
             severity = 'critical'
-        elif p['type'] in ('load-all-memory', 'read-all-sidecar', 'load-entire-sidecar',
+        elif p['type'] in ('load-all-memory', 'read-all-memory', 'load-entire-memory',
                            'load-all-context', 'read-entire-memory'):
             severity = 'high'
         else:

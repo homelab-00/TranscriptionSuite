@@ -1,7 +1,6 @@
 ---
 name: bmad-cis-storytelling
 description: 'Craft compelling narratives using story frameworks. Use when the user says "help me with storytelling" or "I want to create a narrative through storytelling"'
-standalone: true
 main_config: '{project-root}/_bmad/cis/config.yaml'
 ---
 
@@ -26,7 +25,6 @@ Load config from `{main_config}` and resolve:
 
 ### Paths
 
-- `skill_path` = `{project-root}/_bmad/cis/workflows/bmad-cis-storytelling`
 - `template_file` = `./template.md`
 - `story_frameworks_file` = `./story-types.csv`
 - `default_output_file` = `{output_folder}/story-{date}.md`

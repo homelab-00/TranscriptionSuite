@@ -143,7 +143,7 @@ Coverage criteria are intentionally excluded from this checklist.
 
 - [ ] page.route() before page.goto() validated
 - [ ] Race conditions detected (route after navigate)
-- [ ] waitForResponse patterns checked
+- [ ] Network wait patterns checked (`interceptNetworkCall` preferred over ad hoc `waitForResponse`)
 - [ ] Status assigned (PASS/WARN/FAIL)
 - [ ] Violations recorded with recommended fixes
 

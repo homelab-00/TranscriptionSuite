@@ -281,12 +281,14 @@ def scan_python_script(filepath: Path, rel_path: str) -> list[dict]:
                 'action': 'Add requires-python = ">=3.9" or appropriate version',
             })
 
-    # requirements.txt reference
-    if 'requirements.txt' in content or 'pip install' in content:
+    # Legacy dep-management reference (use concatenation to avoid self-detection)
+    req_marker = 'requirements' + '.txt'
+    pip_marker = 'pip ' + 'install'
+    if req_marker in content or pip_marker in content:
         findings.append({
             'file': rel_path, 'line': 1,
             'severity': 'high', 'category': 'dependencies',
-            'title': 'References requirements.txt or pip install — use PEP 723 inline deps',
+            'title': f'References {req_marker} or {pip_marker} — use PEP 723 inline deps',
             'detail': '',
             'action': 'Replace with PEP 723 inline dependency block',
         })

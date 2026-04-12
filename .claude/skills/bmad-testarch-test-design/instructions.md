@@ -2,7 +2,6 @@
 
 # Test Design and Risk Assessment
 
-**Workflow ID**: `_bmad/tea/testarch/bmad-testarch-test-design`
 **Version**: 5.0 (Step-File Architecture)
 
 ---

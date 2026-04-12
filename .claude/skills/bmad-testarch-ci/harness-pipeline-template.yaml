@@ -8,6 +8,7 @@
 #   TEST_CMD          - main test command (e.g., npm run test:e2e, npm test, npx vitest)
 #   LINT_CMD          - lint command (e.g., npm run lint)
 #   BROWSER_INSTALL   - browser install command (frontend/fullstack only; omit for backend)
+#   PLAYWRIGHT_IMAGE  - keep in sync with your @playwright/test version (example: mcr.microsoft.com/playwright:v1.58.2-noble)
 
 pipeline:
   name: Test Pipeline
@@ -80,7 +81,7 @@ pipeline:
                   identifier: browsers
                   spec:
                     connectorRef: account.harnessImage
-                    image: mcr.microsoft.com/playwright:v1.50.0-noble
+                    image: mcr.microsoft.com/playwright:v1.58.2-noble # Replace with PLAYWRIGHT_IMAGE
                     shell: Sh
                     command: npx playwright install --with-deps chromium # Replace with BROWSER_INSTALL
 
@@ -91,7 +92,7 @@ pipeline:
                       identifier: shard_1
                       spec:
                         connectorRef: account.harnessImage
-                        image: mcr.microsoft.com/playwright:v1.50.0-noble
+                        image: mcr.microsoft.com/playwright:v1.58.2-noble # Replace with PLAYWRIGHT_IMAGE
                         shell: Sh
                         command: npm run test:e2e -- --shard=1/4 # Replace with TEST_CMD + shard args
                   - step:
@@ -100,7 +101,7 @@ pipeline:
                       identifier: shard_2
                       spec:
                         connectorRef: account.harnessImage
-                        image: mcr.microsoft.com/playwright:v1.50.0-noble
+                        image: mcr.microsoft.com/playwright:v1.58.2-noble # Replace with PLAYWRIGHT_IMAGE
                         shell: Sh
                         command: npm run test:e2e -- --shard=2/4 # Replace with TEST_CMD + shard args
                   - step:
@@ -109,7 +110,7 @@ pipeline:
                       identifier: shard_3
                       spec:
                         connectorRef: account.harnessImage
-                        image: mcr.microsoft.com/playwright:v1.50.0-noble
+                        image: mcr.microsoft.com/playwright:v1.58.2-noble # Replace with PLAYWRIGHT_IMAGE
                         shell: Sh
                         command: npm run test:e2e -- --shard=3/4 # Replace with TEST_CMD + shard args
                   - step:
@@ -118,7 +119,7 @@ pipeline:
                       identifier: shard_4
                       spec:
                         connectorRef: account.harnessImage
-                        image: mcr.microsoft.com/playwright:v1.50.0-noble
+                        image: mcr.microsoft.com/playwright:v1.58.2-noble # Replace with PLAYWRIGHT_IMAGE
                         shell: Sh
                         command: npm run test:e2e -- --shard=4/4 # Replace with TEST_CMD + shard args
 
@@ -145,7 +146,7 @@ pipeline:
                   identifier: burn_in_loop
                   spec:
                     connectorRef: account.harnessImage
-                    image: mcr.microsoft.com/playwright:v1.50.0-noble
+                    image: mcr.microsoft.com/playwright:v1.58.2-noble # Replace with PLAYWRIGHT_IMAGE
                     shell: Sh
                     command: |
                       npm ci

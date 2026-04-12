@@ -293,6 +293,14 @@ def scan_prompt_metrics(skill_path: Path) -> dict:
         data['is_skill_md'] = True
         files_data.append(data)
 
+    # Detect memory agent
+    is_memory_agent = False
+    assets_dir = skill_path / 'assets'
+    if assets_dir.exists():
+        is_memory_agent = any(
+            f.name.endswith('-template.md') for f in assets_dir.iterdir() if f.is_file()
+        )
+
     # Prompt files at skill root
     skip_files = {'SKILL.md'}
 
@@ -306,6 +314,19 @@ def scan_prompt_metrics(skill_path: Path) -> dict:
             data['prompt_frontmatter'] = pfm
 
             files_data.append(data)
+
+    # Also scan references/ for capability prompts (memory agents keep prompts here)
+    refs_dir = skill_path / 'references'
+    if refs_dir.exists():
+        for f in sorted(refs_dir.iterdir()):
+            if f.is_file() and f.suffix == '.md':
+                data = scan_file_patterns(f, f'references/{f.name}')
+                data['is_skill_md'] = False
+
+                pfm = parse_prompt_frontmatter(f)
+                data['prompt_frontmatter'] = pfm
+
+                files_data.append(data)
 
     # Resources (just sizes, for progressive disclosure assessment)
     resources_dir = skill_path / 'resources'
@@ -338,6 +359,7 @@ def scan_prompt_metrics(skill_path: Path) -> dict:
         'skill_path': str(skill_path),
         'timestamp': datetime.now(timezone.utc).isoformat(),
         'status': 'info',
+        'is_memory_agent': is_memory_agent,
         'skill_md_summary': {
             'line_count': skill_md_data['line_count'] if skill_md_data else 0,
             'token_estimate': skill_md_data['token_estimate'] if skill_md_data else 0,

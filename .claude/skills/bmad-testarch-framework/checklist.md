@@ -53,7 +53,7 @@ Before starting the workflow:
 - [ ] Config file uses TypeScript (if `use_typescript: true`)
 - [ ] Timeouts configured correctly (action: 15s, navigation: 30s, test: 60s)
 - [ ] Base URL configured with environment variable fallback
-- [ ] Trace/screenshot/video set to retain-on-failure
+- [ ] Trace set to `retain-on-failure-and-retries`, screenshot to `only-on-failure`, video to `retain-on-failure`
 - [ ] Multiple reporters configured (HTML + JUnit + console)
 - [ ] Parallel execution enabled
 - [ ] CI-specific settings configured (retries, workers)

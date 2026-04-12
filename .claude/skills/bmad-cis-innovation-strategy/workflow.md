@@ -1,7 +1,6 @@
 ---
 name: bmad-cis-innovation-strategy
 description: 'Identify disruption opportunities and architect business model innovation. Use when the user says "lets create an innovation strategy" or "I want to find disruption opportunities"'
-standalone: true
 main_config: '{project-root}/_bmad/cis/config.yaml'
 ---
 
@@ -26,7 +25,6 @@ Load config from `{main_config}` and resolve:
 
 ### Paths
 
-- `skill_path` = `{project-root}/_bmad/cis/workflows/bmad-cis-innovation-strategy`
 - `template_file` = `./template.md`
 - `innovation_frameworks_file` = `./innovation-frameworks.csv`
 - `default_output_file` = `{output_folder}/innovation-strategy-{date}.md`

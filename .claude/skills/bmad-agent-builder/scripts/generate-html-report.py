@@ -491,7 +491,7 @@ init();
 def generate_html(report_data: dict) -> str:
     data_json = json.dumps(report_data, indent=None, ensure_ascii=False)
     data_tag = f'<script id="report-data" type="application/json">{data_json}</script>'
-    html = HTML_TEMPLATE.replace('<script>\nconst DATA', f'{data_tag}\n<script>\nconst DATA')
+    html = HTML_TEMPLATE.replace('<script>\nconst RAW', f'{data_tag}\n<script>\nconst RAW')
     html = html.replace('SKILL_NAME', report_data.get('meta', {}).get('skill_name', 'Unknown'))
     return html
 

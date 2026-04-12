@@ -2,7 +2,6 @@
 
 # Test Framework Setup
 
-**Workflow ID**: `_bmad/tea/testarch/bmad-testarch-framework`
 **Version**: 5.0 (Step-File Architecture)
 
 ---

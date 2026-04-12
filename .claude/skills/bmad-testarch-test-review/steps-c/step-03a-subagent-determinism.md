@@ -98,7 +98,7 @@ if (testFileContent.includes('waitForTimeout')) {
     severity: 'MEDIUM',
     category: 'hard-wait',
     description: 'Test uses waitForTimeout - creates flakiness',
-    suggestion: 'Replace with expect(locator).toBeVisible() or waitForResponse',
+    suggestion: 'Replace with expect(locator).toBeVisible() or interceptNetworkCall-based network waits',
   });
 }
 

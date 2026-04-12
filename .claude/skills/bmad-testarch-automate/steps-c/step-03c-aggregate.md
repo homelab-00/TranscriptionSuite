@@ -210,10 +210,15 @@ export const mockPaymentSuccess = async (page: Page) => {
 **D) Helper Utilities** (`tests/fixtures/helpers.ts`):
 
 ```typescript
-import { expect, Page } from '@playwright/test';
+import { Page } from '@playwright/test';
+import { interceptNetworkCall } from '@seontechnologies/playwright-utils/intercept-network-call';
 
-export const waitForApiResponse = async (page: Page, urlPattern: string) => {
-  return page.waitForResponse((response) => response.url().includes(urlPattern) && response.ok());
+export const observeApiCall = (page: Page, urlPattern: string, method: string = 'GET') => {
+  return interceptNetworkCall({
+    page,
+    method,
+    url: urlPattern,
+  });
 };
 ```
 

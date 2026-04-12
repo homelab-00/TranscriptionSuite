@@ -1,7 +1,6 @@
 ---
 name: bmad-cis-problem-solving
 description: 'Apply systematic problem-solving methodologies to complex challenges. Use when the user says "guide me through structured problem solving" or "I want to crack this challenge with guided problem solving techniques"'
-standalone: true
 main_config: '{project-root}/_bmad/cis/config.yaml'
 ---
 
@@ -26,7 +25,6 @@ Load config from `{main_config}` and resolve:
 
 ### Paths
 
-- `skill_path` = `{project-root}/_bmad/cis/workflows/bmad-cis-problem-solving`
 - `template_file` = `./template.md`
 - `solving_methods_file` = `./solving-methods.csv`
 - `default_output_file` = `{output_folder}/problem-solution-{date}.md`

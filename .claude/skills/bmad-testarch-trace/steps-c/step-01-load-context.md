@@ -2,7 +2,7 @@
 name: 'step-01-load-context'
 description: 'Load requirements, knowledge base, and related artifacts'
 nextStepFile: './step-02-discover-tests.md'
-knowledgeIndex: '{project-root}/_bmad/tea/agents/bmad-tea/resources/tea-index.csv'
+knowledgeIndex: './resources/tea-index.csv'
 outputFile: '{test_artifacts}/traceability-report.md'
 ---
 

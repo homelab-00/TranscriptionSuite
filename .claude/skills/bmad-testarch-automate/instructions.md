@@ -2,7 +2,6 @@
 
 # Test Automation Expansion
 
-**Workflow ID**: `_bmad/tea/testarch/bmad-testarch-automate`
 **Version**: 5.0 (Step-File Architecture)
 
 ---

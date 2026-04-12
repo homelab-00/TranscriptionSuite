@@ -6,11 +6,12 @@ can use instead of reading all files itself. Covers:
 - Frontmatter parsing and validation
 - Section inventory (H2/H3 headers)
 - Template artifact detection
-- Agent name validation (bmad-{code}-agent-{name} or bmad-agent-{name})
-- Required agent sections (Overview, Identity, Communication Style, Principles, On Activation)
+- Agent name validation (kebab-case, must contain 'agent')
+- Required agent sections (stateless vs memory agent bootloader detection)
 - Memory path consistency checking
 - Language/directness pattern grep
 - On Exit / Exiting section detection (invalid)
+- Capability file scanning in references/ directory
 """
 
 # /// script
@@ -44,7 +45,11 @@ TEMPLATE_ARTIFACTS = [
     r'\{if-module\}', r'\{/if-module\}',
     r'\{if-headless\}', r'\{/if-headless\}',
     r'\{if-autonomous\}', r'\{/if-autonomous\}',
-    r'\{if-sidecar\}', r'\{/if-sidecar\}',
+    r'\{if-memory\}', r'\{/if-memory\}',
+    r'\{if-memory-agent\}', r'\{/if-memory-agent\}',
+    r'\{if-stateless-agent\}', r'\{/if-stateless-agent\}',
+    r'\{if-evolvable\}', r'\{/if-evolvable\}',
+    r'\{if-pulse\}', r'\{/if-pulse\}',
     r'\{displayName\}', r'\{skillName\}',
 ]
 # Runtime variables that ARE expected (not artifacts)
@@ -113,12 +118,11 @@ def parse_frontmatter(content: str) -> tuple[dict | None, list[dict]]:
             'severity': 'high', 'category': 'frontmatter',
             'issue': f'Name "{name}" is not kebab-case',
         })
-    elif not (re.match(r'^bmad-[a-z0-9]+-agent-[a-z0-9]+(-[a-z0-9]+)*$', name)
-              or re.match(r'^bmad-agent-[a-z0-9]+(-[a-z0-9]+)*$', name)):
+    elif 'agent' not in name.split('-'):
         findings.append({
             'file': 'SKILL.md', 'line': 1,
             'severity': 'medium', 'category': 'frontmatter',
-            'issue': f'Name "{name}" does not follow bmad-{{code}}-agent-{{name}} or bmad-agent-{{name}} pattern',
+            'issue': f'Name "{name}" should contain "agent" (e.g., agent-{{name}} or {{code}}-agent-{{name}})',
         })
 
     # description check
@@ -163,21 +167,49 @@ def extract_sections(content: str) -> list[dict]:
     return sections
 
 
-def check_required_sections(sections: list[dict]) -> list[dict]:
+def detect_memory_agent(skill_path: Path, content: str) -> bool:
+    """Detect if this is a memory agent bootloader (vs stateless agent).
+
+    Memory agents have assets/ with sanctum template files and contain
+    Three Laws / Sacred Truth in their SKILL.md.
+    """
+    assets_dir = skill_path / 'assets'
+    has_templates = (
+        assets_dir.exists()
+        and any(f.name.endswith('-template.md') for f in assets_dir.iterdir() if f.is_file())
+    )
+    has_three_laws = 'First Law:' in content and 'Second Law:' in content
+    has_sacred_truth = 'Sacred Truth' in content
+    return has_templates or (has_three_laws and has_sacred_truth)
+
+
+def check_required_sections(sections: list[dict], is_memory_agent: bool) -> list[dict]:
     """Check for required and invalid sections."""
     findings = []
     h2_titles = [s['title'] for s in sections if s['level'] == 2]
 
-    required = ['Overview', 'Identity', 'Communication Style', 'Principles', 'On Activation']
-    for req in required:
-        if req not in h2_titles:
-            findings.append({
-                'file': 'SKILL.md', 'line': 1,
-                'severity': 'high', 'category': 'sections',
-                'issue': f'Missing ## {req} section',
-            })
+    if is_memory_agent:
+        # Memory agent bootloaders have a different required structure
+        required = ['The Three Laws', 'The Sacred Truth', 'On Activation']
+        for req in required:
+            if req not in h2_titles:
+                findings.append({
+                    'file': 'SKILL.md', 'line': 1,
+                    'severity': 'high', 'category': 'sections',
+                    'issue': f'Missing ## {req} section (required for memory agent bootloader)',
+                })
+    else:
+        # Stateless agents use the traditional full structure
+        required = ['Overview', 'Identity', 'Communication Style', 'Principles', 'On Activation']
+        for req in required:
+            if req not in h2_titles:
+                findings.append({
+                    'file': 'SKILL.md', 'line': 1,
+                    'severity': 'high', 'category': 'sections',
+                    'issue': f'Missing ## {req} section',
+                })
 
-    # Invalid sections
+    # Invalid sections (both types)
     for s in sections:
         if s['level'] == 2:
             for pattern, message in INVALID_SECTIONS:
@@ -218,7 +250,7 @@ def extract_memory_paths(skill_path: Path) -> tuple[list[str], list[dict]]:
     memory_paths = set()
 
     # Memory path patterns
-    mem_pattern = re.compile(r'(?:memory/|sidecar/)[\w\-/]+(?:\.\w+)?')
+    mem_pattern = re.compile(r'memory/[\w\-/]+(?:\.\w+)?')
 
     files_to_scan = []
 
@@ -226,7 +258,7 @@ def extract_memory_paths(skill_path: Path) -> tuple[list[str], list[dict]]:
     if skill_md.exists():
         files_to_scan.append(('SKILL.md', skill_md))
 
-    for subdir in ['prompts', 'resources']:
+    for subdir in ['prompts', 'resources', 'references']:
         d = skill_path / subdir
         if d.exists():
             for f in sorted(d.iterdir()):
@@ -247,20 +279,12 @@ def extract_memory_paths(skill_path: Path) -> tuple[list[str], list[dict]]:
         prefixes.add(prefix)
 
     memory_prefixes = {p for p in prefixes if 'memory' in p.lower()}
-    sidecar_prefixes = {p for p in prefixes if 'sidecar' in p.lower()}
 
     if len(memory_prefixes) > 1:
         findings.append({
             'file': 'multiple', 'line': 0,
             'severity': 'medium', 'category': 'memory-paths',
             'issue': f'Inconsistent memory path prefixes: {", ".join(sorted(memory_prefixes))}',
-        })
-
-    if len(sidecar_prefixes) > 1:
-        findings.append({
-            'file': 'multiple', 'line': 0,
-            'severity': 'medium', 'category': 'memory-paths',
-            'issue': f'Inconsistent sidecar path prefixes: {", ".join(sorted(sidecar_prefixes))}',
         })
 
     return sorted_paths, findings
@@ -274,6 +298,15 @@ def check_prompt_basics(skill_path: Path) -> tuple[list[dict], list[dict]]:
 
     prompt_files = [f for f in sorted(skill_path.iterdir())
                     if f.is_file() and f.suffix == '.md' and f.name not in skip_files]
+
+    # Also scan references/ for capability prompts (memory agents keep prompts here)
+    refs_dir = skill_path / 'references'
+    if refs_dir.exists():
+        prompt_files.extend(
+            f for f in sorted(refs_dir.iterdir())
+            if f.is_file() and f.suffix == '.md'
+        )
+
     if not prompt_files:
         return prompt_details, findings
 
@@ -344,13 +377,16 @@ def scan_structure_capabilities(skill_path: Path) -> dict:
 
     skill_content = skill_md.read_text(encoding='utf-8')
 
+    # Detect agent type
+    is_memory_agent = detect_memory_agent(skill_path, skill_content)
+
     # Frontmatter
     frontmatter, fm_findings = parse_frontmatter(skill_content)
     all_findings.extend(fm_findings)
 
     # Sections
     sections = extract_sections(skill_content)
-    section_findings = check_required_sections(sections)
+    section_findings = check_required_sections(sections, is_memory_agent)
     all_findings.extend(section_findings)
 
     # Template artifacts in SKILL.md
@@ -397,6 +433,7 @@ def scan_structure_capabilities(skill_path: Path) -> dict:
         'metadata': {
             'frontmatter': frontmatter,
             'sections': sections,
+            'is_memory_agent': is_memory_agent,
         },
         'prompt_details': prompt_details,
         'memory_paths': memory_paths,

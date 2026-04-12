@@ -1,6 +1,6 @@
 # Skill Authoring Best Practices
 
-For field definitions and description format, see `./references/standard-fields.md`. For quality dimensions, see `./references/quality-dimensions.md`.
+For field definitions and description format, see `./standard-fields.md`. For quality dimensions, see `./quality-dimensions.md`.
 
 ## Core Philosophy: Outcome-Based Authoring
 
@@ -10,11 +10,11 @@ Skills should describe **what to achieve**, not **how to achieve it**. The LLM i
 
 ### Outcome vs Prescriptive
 
-| Prescriptive (avoid) | Outcome-based (prefer) |
-|---|---|
-| "Step 1: Ask about goals. Step 2: Ask about constraints. Step 3: Summarize and confirm." | "Ensure the user's vision is fully captured — goals, constraints, and edge cases — before proceeding." |
-| "Load config. Read user_name. Read communication_language. Greet the user by name in their language." | "Load available config and greet the user appropriately." |
-| "Create a file. Write the header. Write section 1. Write section 2. Save." | "Produce a report covering X, Y, and Z." |
+| Prescriptive (avoid)                                                                                  | Outcome-based (prefer)                                                                                 |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| "Step 1: Ask about goals. Step 2: Ask about constraints. Step 3: Summarize and confirm."              | "Ensure the user's vision is fully captured — goals, constraints, and edge cases — before proceeding." |
+| "Load config. Read user_name. Read communication_language. Greet the user by name in their language." | "Load available config and greet the user appropriately."                                              |
+| "Create a file. Write the header. Write section 1. Write section 2. Save."                            | "Produce a report covering X, Y, and Z."                                                               |
 
 The prescriptive versions miss requirements the author didn't think of. The outcome-based versions let the LLM adapt to the actual situation.
 
@@ -29,11 +29,11 @@ The prescriptive versions miss requirements the author didn't think of. The outc
 
 Reserve exact steps for **fragile operations** where getting it wrong has consequences — script invocations, exact file paths, specific CLI commands, API calls with precise parameters. These need low freedom because there's one right way to do them.
 
-| Freedom | When | Example |
-|---------|------|---------|
-| **High** (outcomes) | Multiple valid approaches, LLM judgment adds value | "Ensure the user's requirements are complete" |
-| **Medium** (guided) | Preferred approach exists, some variation OK | "Present findings in a structured report with an executive summary" |
-| **Low** (exact) | Fragile, one right way, consequences for deviation | `python3 scripts/scan-path-standards.py {skill-path}` |
+| Freedom             | When                                               | Example                                                             |
+| ------------------- | -------------------------------------------------- | ------------------------------------------------------------------- |
+| **High** (outcomes) | Multiple valid approaches, LLM judgment adds value | "Ensure the user's requirements are complete"                       |
+| **Medium** (guided) | Preferred approach exists, some variation OK       | "Present findings in a structured report with an executive summary" |
+| **Low** (exact)     | Fragile, one right way, consequences for deviation | `python3 scripts/scan-path-standards.py {skill-path}`               |
 
 ## Patterns
 
@@ -63,10 +63,10 @@ Before finalizing significant artifacts, fan out reviewers with different perspe
 
 Consider whether the skill benefits from multiple execution modes:
 
-| Mode | When | Behavior |
-|------|------|----------|
-| **Guided** | Default | Conversational discovery with soft gates |
-| **Yolo** | "just draft it" | Ingest everything, draft complete artifact, then refine |
+| Mode         | When                | Behavior                                                      |
+| ------------ | ------------------- | ------------------------------------------------------------- |
+| **Guided**   | Default             | Conversational discovery with soft gates                      |
+| **Yolo**     | "just draft it"     | Ingest everything, draft complete artifact, then refine       |
 | **Headless** | `--headless` / `-H` | Complete the task without user input, using sensible defaults |
 
 Not all skills need all three. But considering them during design prevents locking into a single interaction model.
@@ -90,16 +90,16 @@ For complex tasks with consequences: plan → validate → execute → verify. C
 
 ## Anti-Patterns
 
-| Anti-Pattern | Fix |
-|---|---|
-| Numbered steps for things the LLM would figure out | Describe the outcome and why it matters |
-| Explaining how to load config (the mechanic) | List the config keys and their defaults (the outcome) |
-| Prescribing exact greeting/menu format | "Greet the user and present capabilities" |
-| Spelling out headless mode in detail | "If headless, complete without user input" |
-| Too many options upfront | One default with escape hatch |
-| Deep reference nesting (A→B→C) | Keep references 1 level from SKILL.md |
-| Inconsistent terminology | Choose one term per concept |
-| Scripts that classify meaning via regex | Intelligence belongs in prompts, not scripts |
+| Anti-Pattern                                       | Fix                                                   |
+| -------------------------------------------------- | ----------------------------------------------------- |
+| Numbered steps for things the LLM would figure out | Describe the outcome and why it matters               |
+| Explaining how to load config (the mechanic)       | List the config keys and their defaults (the outcome) |
+| Prescribing exact greeting/menu format             | "Greet the user and present capabilities"             |
+| Spelling out headless mode in detail               | "If headless, complete without user input"            |
+| Too many options upfront                           | One default with escape hatch                         |
+| Deep reference nesting (A→B→C)                     | Keep references 1 level from SKILL.md                 |
+| Inconsistent terminology                           | Choose one term per concept                           |
+| Scripts that classify meaning via regex            | Intelligence belongs in prompts, not scripts          |
 
 ## Scripts in Skills
 

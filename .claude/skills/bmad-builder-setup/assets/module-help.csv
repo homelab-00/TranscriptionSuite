@@ -1,6 +1,0 @@
-module,skill,display-name,menu-code,description,action,args,phase,after,before,required,output-location,outputs
-BMad Builder,bmad-builder-setup,Setup Builder Module,SB,"Install or update BMad Builder module config and help entries. Collects user preferences, writes config.yaml, and migrates legacy configs.",configure,,anytime,,,false,{project-root}/_bmad,config.yaml and config.user.yaml
-BMad Builder,bmad-agent-builder,Build an Agent,BA,"Create, edit, convert, or fix an agent skill.",build-process,"[-H] [description | path]",anytime,,bmad-agent-builder:quality-optimizer,false,output_folder,agent skill
-BMad Builder,bmad-agent-builder,Optimize an Agent,OA,Validate and optimize an existing agent skill. Produces a quality report.,quality-optimizer,[-H] [path],anytime,bmad-agent-builder:build-process,,false,bmad_builder_reports,quality report
-BMad Builder,bmad-workflow-builder,Build a Workflow,BW,"Create, edit, convert, or fix a workflow or utility skill.",build-process,"[-H] [description | path]",anytime,,bmad-workflow-builder:quality-optimizer,false,output_folder,workflow skill
-BMad Builder,bmad-workflow-builder,Optimize a Workflow,OW,Validate and optimize an existing workflow or utility skill. Produces a quality report.,quality-optimizer,[-H] [path],anytime,bmad-workflow-builder:build-process,,false,bmad_builder_reports,quality report

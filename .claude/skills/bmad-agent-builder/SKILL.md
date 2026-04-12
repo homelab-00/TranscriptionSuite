@@ -30,26 +30,34 @@ Act as an architect guide — walk users through conversational discovery to und
 
 ## Build Process
 
-The core creative path — where agent ideas become reality. Through conversational discovery, you guide users from a rough vision to a complete, outcome-driven agent skill. This covers building new agents from scratch, converting non-compliant formats, editing existing ones, and rebuilding from intent.
+The core creative path — where agent ideas become reality. Through conversational discovery, you guide users from a rough vision to a complete, outcome-driven agent skill.
 
-Load `build-process.md` to begin.
+The builder produces three agent types along a spectrum:
+
+- **Stateless agent** — everything in SKILL.md, no memory, no First Breath. For focused experts handling isolated sessions.
+- **Memory agent** — lean bootloader SKILL.md + sanctum (6 standard files + First Breath). For agents that build understanding over time.
+- **Autonomous agent** — memory agent + PULSE. For agents that operate on their own between sessions.
+
+Agent type is determined during Phase 1 discovery, not upfront. The builder covers building new agents, converting existing ones, editing, and rebuilding from intent.
+
+Load `./references/build-process.md` to begin.
 
 ## Quality Analysis
 
 Comprehensive quality analysis toward outcome-driven design. Analyzes existing agents for over-specification, structural issues, persona-capability alignment, execution efficiency, and enhancement opportunities. Produces a synthesized report with agent portrait, capability dashboard, themes, and actionable opportunities.
 
-Load `quality-analysis.md` to begin.
+Load `./references/quality-analysis.md` to begin.
 
 ---
 
 ## Quick Reference
 
-| Intent | Trigger Phrases | Route |
-|--------|----------------|-------|
-| **Build new** | "build/create/design a new agent" | Load `build-process.md` |
+| Intent                      | Trigger Phrases                                       | Route                                    |
+| --------------------------- | ----------------------------------------------------- | ---------------------------------------- |
+| **Build new**               | "build/create/design a new agent"                     | Load `./references/build-process.md`                |
 | **Existing agent provided** | Path to existing agent, or "convert/edit/fix/analyze" | Ask the 3-way question below, then route |
-| **Quality analyze** | "quality check", "validate", "review agent" | Load `quality-analysis.md` |
-| **Unclear** | — | Present options and ask |
+| **Quality analyze**         | "quality check", "validate", "review agent"           | Load `./references/quality-analysis.md`             |
+| **Unclear**                 | —                                                     | Present options and ask                  |
 
 ### When given an existing agent, ask:
 
@@ -57,6 +65,6 @@ Load `quality-analysis.md` to begin.
 - **Edit** — Modify specific behavior while keeping the current approach
 - **Rebuild** — Rethink from core outcomes and persona, using this as reference material, full discovery process
 
-Analyze routes to `quality-analysis.md`. Edit and Rebuild both route to `build-process.md` with the chosen intent.
+Analyze routes to `./references/quality-analysis.md`. Edit routes to `./references/edit-guidance.md`. Rebuild routes to `./references/build-process.md` with the chosen intent.
 
 Regardless of path, respect headless mode if requested.

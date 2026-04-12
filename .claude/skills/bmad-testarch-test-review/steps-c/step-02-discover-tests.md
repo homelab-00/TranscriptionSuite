@@ -73,6 +73,13 @@ All commands use the same named session to target the correct browser:
 6. `playwright-cli -s=tea-review network` → capture network request log
 7. `playwright-cli -s=tea-review close`
 
+After capturing `trace.zip`, prefer Playwright's newer trace CLI for local or downloaded artifact analysis:
+
+- `npx playwright trace open <trace.zip>` to start a trace session
+- `npx playwright trace actions --grep="expect"` to jump to the failing assertion
+- `npx playwright trace action <n>` / `trace snapshot <n> --name after` for root-cause details
+- `npx playwright trace close` when done
+
 > **Session Hygiene:** Always close sessions using `playwright-cli -s=tea-review close`. Do NOT use `close-all` — it kills every session on the machine and breaks parallel execution.
 
 ---
