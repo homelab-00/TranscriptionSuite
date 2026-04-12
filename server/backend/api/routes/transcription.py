@@ -10,6 +10,7 @@ Handles:
 
 import asyncio
 import functools
+import json as _json
 import logging
 import tempfile
 from pathlib import Path
@@ -20,8 +21,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from server.api.routes.utils import get_client_name
 from server.config import resolve_main_transcriber_model
+from server.core.json_utils import sanitize_for_json
 from server.core.model_manager import TranscriptionCancelledError
 from server.core.stt.backends.base import STTBackend
+from server.database.job_repository import (
+    create_job,
+    mark_delivered,
+    mark_failed,
+    save_result,
+)
 from server.logging import sanitize_log_value
 
 logger = logging.getLogger(__name__)
@@ -121,6 +129,57 @@ async def transcribe_audio(
             detail=f"A transcription is already running for {active_user}",
         )
 
+    # Persist-before-deliver: create the job row so results can be saved and
+    # clients can recover via GET /result/{job_id} on delivery failure.
+    db_job_id: str | None = job_id
+    try:
+        create_job(
+            job_id=job_id,
+            source="audio_upload",
+            client_name=client_name,
+            language=language,
+            task="translate" if translation_enabled else "transcribe",
+            translation_target=(translation_target_language if translation_enabled else None),
+        )
+    except Exception as _e:
+        logger.warning(
+            "Failed to create job row for %s: %s",
+            sanitize_log_value(job_id),
+            _e,
+        )
+        db_job_id = None
+
+    # Tracks whether save_result succeeded. Gates mark_delivered (so we never
+    # mark an unpersisted row as delivered) and mark_failed (so a post-persist
+    # exception — e.g. webhook failure — cannot clobber status='completed').
+    _persisted = False
+
+    def _persist_result(result_dict: dict[str, Any]) -> None:
+        """Persist result to DB before delivery.
+
+        DB failure logs CRITICAL but never raises — delivery must not be
+        sacrificed for DB consistency. See project invariant in CLAUDE.md.
+        """
+        nonlocal _persisted
+        if db_job_id is None:
+            return
+        try:
+            sanitized = sanitize_for_json(result_dict)
+            save_result(
+                job_id=db_job_id,
+                result_text=sanitized.get("text", "") or "",
+                result_json=_json.dumps(sanitized, ensure_ascii=False),
+                result_language=sanitized.get("language"),
+                duration_seconds=sanitized.get("duration"),
+            )
+            _persisted = True
+        except Exception:
+            logger.critical(
+                "Failed to persist result for job %s — delivery will proceed",
+                sanitize_log_value(db_job_id),
+                exc_info=True,
+            )
+
     # Detect standalone client via header
     client_type = request.headers.get("X-Client-Type", "")
 
@@ -139,14 +198,20 @@ async def transcribe_audio(
         if diarization is None:
             diarization = False
 
-    # Save uploaded file to temp location
-    suffix = Path(file.filename).suffix or ".wav"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await file.read()
-        tmp.write(content)
-        tmp_path = tmp.name
+    # Moved inside the main try/except/finally so that tempfile I/O failures
+    # (client disconnect during read, disk full, etc.) trigger mark_failed and
+    # end_job via the shared handlers below, instead of leaking a 'processing'
+    # row and a busy tracker slot.
+    tmp_path: str | None = None
 
     try:
+        # Save uploaded file to temp location
+        suffix = Path(file.filename).suffix or ".wav"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
         # Get transcription engine
         engine = model_manager.transcription_engine
 
@@ -170,6 +235,10 @@ async def transcribe_audio(
 
             result_dict = result.to_dict()
 
+            # Persist to DB BEFORE delivery so a client disconnect can recover
+            # via GET /result/{job_id}.
+            _persist_result(result_dict)
+
             from server.core.webhook import dispatch as dispatch_webhook
 
             await dispatch_webhook(
@@ -183,6 +252,16 @@ async def transcribe_audio(
                     "num_speakers": result_dict.get("num_speakers", 0),
                 },
             )
+
+            if _persisted and db_job_id is not None:
+                try:
+                    mark_delivered(db_job_id)
+                except Exception as _e:
+                    logger.warning(
+                        "Failed to mark job %s as delivered: %s",
+                        sanitize_log_value(db_job_id),
+                        _e,
+                    )
 
             return result_dict
 
@@ -236,7 +315,23 @@ async def transcribe_audio(
                     num_speakers=diar_result.num_speakers,
                 )
 
-                return result.to_dict()
+                result_dict = result.to_dict()
+
+                # Persist to DB BEFORE delivery so a client disconnect can recover
+                # via GET /result/{job_id}.
+                _persist_result(result_dict)
+
+                if _persisted and db_job_id is not None:
+                    try:
+                        mark_delivered(db_job_id)
+                    except Exception as _e:
+                        logger.warning(
+                            "Failed to mark job %s as delivered: %s",
+                            sanitize_log_value(db_job_id),
+                            _e,
+                        )
+
+                return result_dict
 
             except Exception:
                 logger.warning(
@@ -342,6 +437,10 @@ async def transcribe_audio(
 
         result_dict = result.to_dict()
 
+        # Persist to DB BEFORE delivery so a client disconnect can recover
+        # via GET /result/{job_id}.
+        _persist_result(result_dict)
+
         # Fire outgoing webhook for completed transcription
         from server.core.webhook import dispatch as dispatch_webhook
 
@@ -357,28 +456,68 @@ async def transcribe_audio(
             },
         )
 
+        if _persisted and db_job_id is not None:
+            try:
+                mark_delivered(db_job_id)
+            except Exception as _e:
+                logger.warning(
+                    "Failed to mark job %s as delivered: %s",
+                    sanitize_log_value(db_job_id),
+                    _e,
+                )
+
         return result_dict
 
     except ValueError as e:
+        # Skip mark_failed if we already persisted a completed result — a later
+        # raise (e.g. webhook failure) must not clobber status='completed'.
+        if not _persisted and db_job_id is not None:
+            try:
+                mark_failed(db_job_id, str(e))
+            except Exception as _mf_err:
+                logger.warning(
+                    "Failed to mark job %s as failed: %s",
+                    sanitize_log_value(db_job_id),
+                    _mf_err,
+                )
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     except TranscriptionCancelledError:
         logger.info("Transcription cancelled by user")
+        if not _persisted and db_job_id is not None:
+            try:
+                mark_failed(db_job_id, "Transcription cancelled by user")
+            except Exception as _mf_err:
+                logger.warning(
+                    "Failed to mark job %s as failed: %s",
+                    sanitize_log_value(db_job_id),
+                    _mf_err,
+                )
         raise HTTPException(status_code=499, detail="Transcription cancelled by user") from None
 
     except Exception as e:
         logger.error("Transcription failed", exc_info=True)
+        if not _persisted and db_job_id is not None:
+            try:
+                mark_failed(db_job_id, str(e))
+            except Exception as _mf_err:
+                logger.warning(
+                    "Failed to mark job %s as failed: %s",
+                    sanitize_log_value(db_job_id),
+                    _mf_err,
+                )
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     finally:
         # Release the job slot
         model_manager.job_tracker.end_job(job_id)
 
-        # Cleanup temp file
-        try:
-            Path(tmp_path).unlink()
-        except OSError:
-            logger.warning("Failed to cleanup temp file %s", tmp_path, exc_info=True)
+        # Cleanup temp file (may be None if the tempfile write itself failed)
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink()
+            except OSError:
+                logger.warning("Failed to cleanup temp file %s", tmp_path, exc_info=True)
 
 
 @router.post("/quick", response_model=TranscriptionResponse)
