@@ -375,6 +375,11 @@ class AudioToTextRecorder:
         if shared_backend is not None:
             self._backend = shared_backend
             self._model_loaded = True
+            # Apply this recorder's whisper_decode options to the shared backend
+            # too. Currently a no-op when main/live read the same config key, but
+            # keeps per-instance initialization symmetrical with _load_model() and
+            # future-proofs against config split (e.g. a live_transcriber.whisper_decode).
+            self._apply_decode_options(shared_backend)
             logger.info(
                 f"AudioToTextRecorder '{instance_name}' using shared backend "
                 f"(model={self.model_name})"
@@ -387,6 +392,20 @@ class AudioToTextRecorder:
         self.recording_thread.start()
 
         logger.info(f"AudioToTextRecorder '{instance_name}' initialized")
+
+    def _apply_decode_options(self, backend: Any) -> None:
+        """Apply configured whisper_decode options to *backend* if any are set.
+
+        Called from both _load_model() (owned backend) and __init__'s
+        shared-backend branch, so decode options (no_speech_threshold,
+        compression_ratio_threshold, hallucination_silence_threshold, etc.)
+        reach the backend regardless of whether this recorder owns it.
+
+        For non-Whisper backends (NeMo, Parakeet, Canary) the base class's
+        default configure_decode_options is a no-op, so this call is safe.
+        """
+        if self.whisper_decode:
+            backend.configure_decode_options(self.whisper_decode)
 
     def _load_model(self) -> None:
         """Load the STT model via the appropriate backend."""
@@ -412,8 +431,7 @@ class AudioToTextRecorder:
             )
 
             # Pass extra decode options (e.g. no_speech_threshold) to Whisper-family backends.
-            if self.whisper_decode:
-                backend.configure_decode_options(self.whisper_decode)
+            self._apply_decode_options(backend)
 
             # Fix 4: Use background warmup for NeMo models to reduce startup blocking
             backend_name = backend.backend_name
