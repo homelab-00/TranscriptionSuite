@@ -13,6 +13,7 @@ import json
 import subprocess
 import sys
 import types
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -570,3 +571,199 @@ class TestTranscribeMultitrack:
         assert result.words[0]["speaker"] == "Speaker 1"
         assert result.words[1]["speaker"] == "Speaker 2"
         assert engine.transcribe_file.call_count == 2
+
+
+class TestTranscribeMultitrackProgressScaling:
+    """The caller-supplied progress_callback must observe a monotone 0 → N*total
+    sequence across all tracks rather than N independent 0 → total walks."""
+
+    @staticmethod
+    def _engine_that_reports_progress(
+        reports: list[tuple[int, int]], track_results: list[Any]
+    ) -> MagicMock:
+        """Build an engine stub whose transcribe_file fires each tuple in
+        `reports` into the passed-in progress_callback, then returns one of
+        `track_results` (popped FIFO)."""
+        engine = MagicMock()
+        results_iter = iter(track_results)
+
+        def _fake_transcribe(_file, **kwargs: Any) -> Any:
+            cb = kwargs.get("progress_callback")
+            if cb is not None:
+                for current, total in reports:
+                    cb(current, total)
+            return next(results_iter)
+
+        engine.transcribe_file.side_effect = _fake_transcribe
+        return engine
+
+    def test_outer_callback_observes_monotone_rescaled_progress(self) -> None:
+        # 3 tracks, each reports (0, 100) then (100, 100).
+        # Expected outer calls, in order:
+        #   track 0: (0*100 + 0, 3*100)=(0,300),   (0*100 + 100, 300)=(100,300)
+        #   track 1: (1*100 + 0, 300)=(100,300),   (1*100 + 100, 300)=(200,300)
+        #   track 2: (2*100 + 0, 300)=(200,300),   (2*100 + 100, 300)=(300,300)
+        outer_calls: list[tuple[int, int]] = []
+        engine = self._engine_that_reports_progress(
+            reports=[(0, 100), (100, 100)],
+            track_results=[
+                _make_result([{"word": f"t{i}", "start": 0.0, "end": 0.1}]) for i in range(3)
+            ],
+        )
+
+        with (
+            patch(
+                "server.core.multitrack.probe_channels",
+                return_value={"num_channels": 3, "channel_levels_db": [-20.0, -20.0, -20.0]},
+            ),
+            patch(
+                "server.core.multitrack.split_channels",
+                return_value=["/tmp/ch0.wav", "/tmp/ch1.wav", "/tmp/ch2.wav"],
+            ),
+            patch("server.core.multitrack.Path"),
+        ):
+            transcribe_multitrack(
+                engine,
+                "/fake/three_ch.wav",
+                progress_callback=lambda c, t: outer_calls.append((c, t)),
+            )
+
+        assert outer_calls == [
+            (0, 300),
+            (100, 300),
+            (100, 300),
+            (200, 300),
+            (200, 300),
+            (300, 300),
+        ]
+        # Final value is exactly N * per_track_total.
+        assert outer_calls[-1] == (300, 300)
+
+    def test_none_progress_callback_is_forwarded_as_none(self) -> None:
+        engine = MagicMock()
+        engine.transcribe_file.return_value = _make_result([])
+
+        with (
+            patch(
+                "server.core.multitrack.probe_channels",
+                return_value={"num_channels": 2, "channel_levels_db": [-20.0, -20.0]},
+            ),
+            patch(
+                "server.core.multitrack.split_channels",
+                return_value=["/tmp/ch0.wav", "/tmp/ch1.wav"],
+            ),
+            patch("server.core.multitrack.Path"),
+        ):
+            transcribe_multitrack(engine, "/fake/two_ch.wav", progress_callback=None)
+
+        # Each per-track call must pass progress_callback=None, not a wrapper.
+        for call in engine.transcribe_file.call_args_list:
+            assert call.kwargs["progress_callback"] is None
+
+    def test_single_active_channel_scales_one_of_one(self) -> None:
+        outer_calls: list[tuple[int, int]] = []
+        engine = self._engine_that_reports_progress(
+            reports=[(50, 100), (100, 100)],
+            track_results=[_make_result([])],
+        )
+
+        with (
+            patch(
+                "server.core.multitrack.probe_channels",
+                return_value={"num_channels": 4, "channel_levels_db": [-91.0, -20.0, -91.0, -91.0]},
+            ),
+            patch(
+                "server.core.multitrack.split_channels",
+                return_value=["/tmp/ch1.wav"],
+            ),
+            patch("server.core.multitrack.Path"),
+        ):
+            transcribe_multitrack(
+                engine,
+                "/fake/one_active.wav",
+                progress_callback=lambda c, t: outer_calls.append((c, t)),
+            )
+
+        # With one active track, scaling is effectively identity:
+        # (0*100 + 50, 1*100) = (50, 100), then (0*100 + 100, 100) = (100, 100).
+        assert outer_calls == [(50, 100), (100, 100)]
+
+    def test_zero_total_passes_through_unchanged(self) -> None:
+        """Backends occasionally emit (0, 0) as a first heartbeat; the wrapper
+        must not divide by zero nor scale it — forward it verbatim."""
+        outer_calls: list[tuple[int, int]] = []
+        engine = self._engine_that_reports_progress(
+            reports=[(0, 0), (42, 100)],  # bad heartbeat then a normal report
+            track_results=[_make_result([]), _make_result([])],
+        )
+
+        with (
+            patch(
+                "server.core.multitrack.probe_channels",
+                return_value={"num_channels": 2, "channel_levels_db": [-20.0, -20.0]},
+            ),
+            patch(
+                "server.core.multitrack.split_channels",
+                return_value=["/tmp/ch0.wav", "/tmp/ch1.wav"],
+            ),
+            patch("server.core.multitrack.Path"),
+        ):
+            transcribe_multitrack(
+                engine,
+                "/fake/two_ch.wav",
+                progress_callback=lambda c, t: outer_calls.append((c, t)),
+            )
+
+        # First tuple of each track is (0, 0) — forwarded unchanged (no scale);
+        # second tuple is the normal scaled report.
+        assert outer_calls[0] == (0, 0)  # track 0 first report, pass-through
+        assert outer_calls[1] == (0 * 100 + 42, 2 * 100)  # track 0 scaled
+        assert outer_calls[2] == (0, 0)  # track 1 first report, pass-through
+        assert outer_calls[3] == (1 * 100 + 42, 2 * 100)  # track 1 scaled
+
+    def test_wrappers_do_not_share_track_index_late_binding(self) -> None:
+        """Python closure gotcha: without `_i=track_idx` default-arg binding,
+        all three wrappers would capture the final value of `track_idx` (2).
+        Call each wrapper after the loop completes and verify each reports its
+        own track index."""
+        captured_callbacks: list[Callable[[int, int], None]] = []
+
+        def _capture_cb_engine(
+            _file: str,
+            *,
+            progress_callback: Callable[[int, int], None] | None = None,
+            **kwargs: Any,
+        ) -> Any:
+            if progress_callback is not None:
+                captured_callbacks.append(progress_callback)
+            return _make_result([])
+
+        engine = MagicMock()
+        engine.transcribe_file.side_effect = _capture_cb_engine
+
+        outer_calls: list[tuple[int, int]] = []
+
+        with (
+            patch(
+                "server.core.multitrack.probe_channels",
+                return_value={"num_channels": 3, "channel_levels_db": [-20.0] * 3},
+            ),
+            patch(
+                "server.core.multitrack.split_channels",
+                return_value=["/tmp/a.wav", "/tmp/b.wav", "/tmp/c.wav"],
+            ),
+            patch("server.core.multitrack.Path"),
+        ):
+            transcribe_multitrack(
+                engine,
+                "/fake/three_ch.wav",
+                progress_callback=lambda c, t: outer_calls.append((c, t)),
+            )
+
+        assert len(captured_callbacks) == 3
+        # Call each wrapper AFTER the loop has completed — classic late-binding
+        # test. Each should still report its own track index.
+        for cb in captured_callbacks:
+            cb(0, 100)
+        # Expected: (0,300), (100,300), (200,300)
+        assert outer_calls == [(0, 300), (100, 300), (200, 300)]

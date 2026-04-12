@@ -363,6 +363,32 @@ def transcribe_multitrack(
                 active[track_idx],
             )
 
+            # Scale the per-track (current, total) progress into overall progress
+            # across all N tracks so the client sees a monotone 0 → N*total walk
+            # instead of the raw 0 → total resetting N times. Semantics-agnostic:
+            # works whether backends emit samples, seconds, or chunk counts.
+            # `_i=track_idx` captures the loop var by value — avoids the classic
+            # late-binding closure bug (all wrappers capturing the final idx).
+            track_progress_cb: Callable[[int, int], None] | None
+            if progress_callback is None:
+                track_progress_cb = None
+            else:
+                user_cb = progress_callback
+
+                def _scaled(
+                    current: int,
+                    total: int,
+                    _i: int = track_idx,
+                    _n: int = total_tracks,
+                    _cb: Callable[[int, int], None] = user_cb,
+                ) -> None:
+                    if total <= 0:
+                        _cb(current, total)
+                        return
+                    _cb(_i * total + current, _n * total)
+
+                track_progress_cb = _scaled
+
             result = engine.transcribe_file(
                 ch_file,
                 language=language,
@@ -370,7 +396,7 @@ def transcribe_multitrack(
                 translation_target_language=translation_target_language,
                 word_timestamps=True,
                 cancellation_check=cancellation_check,
-                progress_callback=progress_callback,
+                progress_callback=track_progress_cb,
             )
             track_results.append(result)
 
