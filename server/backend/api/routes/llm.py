@@ -430,9 +430,11 @@ async def process_with_llm(request: LLMRequest):
         else f"  System prompt: {sanitize_for_log(system_prompt)}"
     )
     logger.info(f"  Transcription length: {len(request.transcription_text)} chars")
-    max_tokens_log = sanitize_for_log(str(payload["max_tokens"]))
-    temperature_log = sanitize_for_log(str(payload["temperature"]))
-    logger.info(f"  Max tokens: {max_tokens_log}, Temperature: {temperature_log}")
+    logger.info(
+        "  Max tokens: %d, Temperature: %.2f",
+        int(payload["max_tokens"]),
+        float(payload["temperature"]),
+    )
 
     try:
         async with httpx.AsyncClient(timeout=600.0) as client:
@@ -526,7 +528,11 @@ async def process_with_llm_stream(request: LLMRequest):
         else f"  System prompt: {sanitize_for_log(system_prompt)}"
     )
     logger.info(f"  Transcription length: {len(request.transcription_text)} chars")
-    logger.info("  Max tokens: %s, Temperature: %s", payload["max_tokens"], payload["temperature"])
+    logger.info(
+        "  Max tokens: %d, Temperature: %.2f",
+        int(payload["max_tokens"]),
+        float(payload["temperature"]),
+    )
 
     async def generate_stream() -> AsyncGenerator[str]:
         """Generate SSE stream from LLM response"""
