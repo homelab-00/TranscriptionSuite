@@ -27,6 +27,7 @@ import { MLXServerManager, type MLXStartOptions } from './mlxServerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
 import { UpdateInstaller } from './updateInstaller.js';
+import { createAppState, InstallGate } from './appState.js';
 import {
   registerShortcuts,
   unregisterShortcuts,
@@ -477,6 +478,25 @@ updateInstaller.on('status', (status) => {
       win.webContents.send('updates:installerStatus', status);
     }
   }
+});
+
+// ─── App State + Install Gate ──────────────────────────────────────────
+// `isAppIdle()` queries /api/admin/status.models.job_tracker.is_busy (exposed by
+// model_manager.get_status()). Fail-closed on network error / timeout.
+// `InstallGate` defers `updates:install` when busy and fires `updates:installReady`
+// to all BrowserWindows once the server reports idle — the renderer surfaces the
+// toast; users must re-confirm via [Install now].
+const appState = createAppState(store);
+const installGate = new InstallGate({
+  idleCheck: () => appState.isAppIdle(),
+  onReady: () => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('updates:installReady');
+      }
+    }
+  },
+  doInstall: async () => updateInstaller.install(),
 });
 
 // Wire tray context-menu actions → IPC messages to the renderer
@@ -1243,7 +1263,11 @@ ipcMain.handle('updates:download', async () => {
 });
 
 ipcMain.handle('updates:install', async () => {
-  return updateInstaller.install();
+  return installGate.requestInstall();
+});
+
+ipcMain.handle('updates:cancelPendingInstall', async () => {
+  return installGate.cancelPending();
 });
 
 ipcMain.handle('updates:cancelDownload', async () => {
@@ -1677,6 +1701,10 @@ function shutdownLog(message: string): void {
  * local mode), destroy tray and update manager.  Idempotent — only runs once;
  * every caller awaits the same Promise.
  */
+// Flipped to true by the SIGINT/SIGTERM/SIGHUP handlers so gracefulShutdown
+// skips its interactive dialog during non-interactive session teardown.
+let signalShutdown = false;
+
 function gracefulShutdown(): Promise<void> {
   if (shutdownPromise) return shutdownPromise;
   isQuitting = true;
@@ -1704,6 +1732,51 @@ function gracefulShutdown(): Promise<void> {
 
     if (shouldStopServer && !useRemote) {
       try {
+        // M3: pre-check active-transcription guard. Fixes the data-loss risk
+        // where force-stop killed an in-flight job without asking.
+        // `server-unreachable`, `auth-error`, and `unknown` all skip the dialog
+        // (we can't verify busy state — blocking quit is worse UX than
+        // force-stopping). Signal-path teardown also skips the dialog.
+        const idle = await appState.isAppIdle(2000);
+        const canDialog =
+          idle.idle === false &&
+          !signalShutdown &&
+          idle.reason !== 'server-unreachable' &&
+          idle.reason !== 'auth-error' &&
+          idle.reason !== 'unknown';
+        if (idle.idle === false && !canDialog) {
+          shutdownLog(
+            `[Shutdown] Skipping busy-dialog: signal=${signalShutdown}, reason=${idle.reason}`,
+          );
+        }
+        if (canDialog && idle.idle === false) {
+          const busyReason = idle.reason;
+          shutdownLog(`[Shutdown] Quit requested while busy: ${busyReason}`);
+          const { response } = await dialog.showMessageBox({
+            type: 'warning',
+            buttons: ['Wait for transcription', 'Quit anyway'],
+            defaultId: 0,
+            cancelId: 0,
+            message: 'Active transcription in progress',
+            detail: busyReason,
+          });
+          if (response === 0) {
+            const deadline = Date.now() + 120_000;
+            while (Date.now() < deadline) {
+              const poll = await appState.isAppIdle(2000);
+              if (poll.idle === true || poll.reason === 'server-unreachable') break;
+              await new Promise((r) => setTimeout(r, 5_000));
+            }
+            if (Date.now() >= deadline) {
+              shutdownLog('[Shutdown] Idle-wait ceiling reached, forcing stop.');
+            } else {
+              shutdownLog('[Shutdown] Server idle; proceeding with container stop.');
+            }
+          } else {
+            shutdownLog('[Shutdown] User chose "Quit anyway".');
+          }
+        }
+
         shutdownLog('[Shutdown] Stopping server container (docker stop)…');
         await Promise.race([
           dockerManager.forceStopContainer(10),
@@ -1725,6 +1798,7 @@ function gracefulShutdown(): Promise<void> {
     unregisterShortcuts();
     trayManager.destroy();
     updateManager.destroy();
+    installGate.destroy();
     updateInstaller.destroy();
     await mlxServerManager.destroy();
     await watcherManager.destroyAll();
@@ -1740,6 +1814,10 @@ function gracefulShutdown(): Promise<void> {
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
   process.on(sig, () => {
     shutdownLog(`[Shutdown] Received ${sig}`);
+    // Signal-path shutdown: systemd / Wayland session teardown can't render
+    // a blocking dialog reliably. Skip the interactive busy-prompt and just
+    // proceed, logging the state for diagnostics.
+    signalShutdown = true;
     gracefulShutdown().finally(() => app.exit(0));
   });
 }

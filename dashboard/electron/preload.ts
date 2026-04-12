@@ -208,14 +208,23 @@ export interface ElectronAPI {
       | { ok: true; reason?: 'already-downloading' }
       | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
     >;
-    /** Quit and install when a download is ready. No-op otherwise. */
-    install: () => Promise<{ ok: boolean; reason?: string }>;
+    /**
+     * Request install. When the server is busy the install is deferred and
+     * the caller receives `{ok:false, reason:'deferred-until-idle', detail}`.
+     * A later `updates:installReady` event signals the pending install is
+     * now actionable. Pass-through `doInstall()` result otherwise.
+     */
+    install: () => Promise<{ ok: boolean; reason?: string; detail?: string }>;
     /** Cancel any active download. No-op when idle. */
     cancelDownload: () => Promise<{ ok: boolean }>;
+    /** Cancel a pending (deferred-until-idle) install. Idempotent. */
+    cancelPendingInstall: () => Promise<{ ok: true }>;
     /** Read the current installer state. */
     getInstallerStatus: () => Promise<InstallerStatus>;
     /** Subscribe to installer state transitions. Returns an unsubscribe fn. */
     onInstallerStatus: (callback: (status: InstallerStatus) => void) => () => void;
+    /** Fires when a deferred install transitions to actionable (server idle). */
+    onInstallReady: (callback: () => void) => () => void;
   };
   clipboard: {
     writeText: (text: string) => Promise<void>;
@@ -496,12 +505,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     download: () => ipcRenderer.invoke('updates:download'),
     install: () => ipcRenderer.invoke('updates:install'),
     cancelDownload: () => ipcRenderer.invoke('updates:cancelDownload'),
+    cancelPendingInstall: () => ipcRenderer.invoke('updates:cancelPendingInstall'),
     getInstallerStatus: () => ipcRenderer.invoke('updates:getInstallerStatus'),
     onInstallerStatus: (callback: (status: InstallerStatus) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, status: InstallerStatus) =>
         callback(status);
       ipcRenderer.on('updates:installerStatus', handler);
       return () => ipcRenderer.removeListener('updates:installerStatus', handler);
+    },
+    onInstallReady: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('updates:installReady', handler);
+      return () => ipcRenderer.removeListener('updates:installReady', handler);
     },
   },
   clipboard: {

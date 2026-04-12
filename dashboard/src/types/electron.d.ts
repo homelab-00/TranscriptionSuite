@@ -187,10 +187,12 @@ interface ElectronAPI {
       | { ok: true; reason?: 'already-downloading' }
       | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
     >;
-    install: () => Promise<{ ok: boolean; reason?: string }>;
+    install: () => Promise<{ ok: boolean; reason?: string; detail?: string }>;
     cancelDownload: () => Promise<{ ok: boolean }>;
+    cancelPendingInstall: () => Promise<{ ok: true }>;
     getInstallerStatus: () => Promise<InstallerStatus>;
     onInstallerStatus: (callback: (status: InstallerStatus) => void) => () => void;
+    onInstallReady: (callback: () => void) => () => void;
   };
   clipboard: {
     writeText: (text: string) => Promise<void>;
