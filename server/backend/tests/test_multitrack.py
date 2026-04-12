@@ -13,6 +13,7 @@ import json
 import subprocess
 import sys
 import types
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -221,6 +222,136 @@ class TestSplitChannels:
         with patch("server.core.multitrack.subprocess.run", side_effect=failing_run):
             with pytest.raises(RuntimeError, match="Failed to extract channel"):
                 split_channels(str(tmp_path / "input.wav"), [0, 1])
+
+    def test_cancellation_check_none_is_noop(self, tmp_path: Any) -> None:
+        """Explicit None (the default) must preserve pre-change behavior."""
+        with patch("server.core.multitrack.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess([], 0)
+            paths = split_channels(str(tmp_path / "input.wav"), [0, 1], cancellation_check=None)
+        assert len(paths) == 2
+        assert mock_run.call_count == 2
+
+    def test_cancellation_check_false_is_noop(self, tmp_path: Any) -> None:
+        with patch("server.core.multitrack.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess([], 0)
+            paths = split_channels(
+                str(tmp_path / "input.wav"),
+                [0, 1],
+                cancellation_check=lambda: False,
+            )
+        assert len(paths) == 2
+        assert mock_run.call_count == 2
+
+    def test_cancelled_before_first_channel_raises_with_no_files(self, tmp_path: Any) -> None:
+        """If cancellation is already set, ffmpeg must never be invoked and
+        no temp files must be created."""
+        from server.core.model_manager import TranscriptionCancelledError
+
+        with patch("server.core.multitrack.subprocess.run") as mock_run:
+            with pytest.raises(
+                TranscriptionCancelledError,
+                match="cancelled during channel split",
+            ):
+                split_channels(
+                    str(tmp_path / "input.wav"),
+                    [0, 1, 2],
+                    cancellation_check=lambda: True,
+                )
+        assert mock_run.call_count == 0
+
+    def test_cancelled_mid_loop_unlinks_partial_files(self, tmp_path: Any) -> None:
+        """A stateful cancellation_check that flips True after the first
+        iteration must cause the first temp file to be unlinked before the
+        TranscriptionCancelledError is raised."""
+        from server.core.model_manager import TranscriptionCancelledError
+
+        cancelled = {"value": False}
+        created_paths: list[str] = []
+
+        def _cancel_after_first() -> bool:
+            if len(created_paths) >= 1:
+                return True
+            return cancelled["value"]
+
+        def _record_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            # cmd[-1] is the output temp path
+            created_paths.append(cmd[-1])
+            # Touch the file so we can later assert it was unlinked.
+            Path(cmd[-1]).write_bytes(b"")
+            return subprocess.CompletedProcess(cmd, 0)
+
+        with patch("server.core.multitrack.subprocess.run", side_effect=_record_run):
+            with pytest.raises(
+                TranscriptionCancelledError,
+                match="cancelled during channel split",
+            ):
+                split_channels(
+                    str(tmp_path / "input.wav"),
+                    [0, 1, 2],
+                    cancellation_check=_cancel_after_first,
+                )
+
+        # ffmpeg ran exactly once (for channel 0); the check observed True on the
+        # top of iteration 2 and short-circuited before ffmpeg for channel 1.
+        assert len(created_paths) == 1
+        # And the one temp file we created must have been cleaned up.
+        assert not Path(created_paths[0]).exists()
+
+    def test_cancellation_check_raising_still_cleans_up_partials(self, tmp_path: Any) -> None:
+        """If the cancellation callback itself raises, already-extracted temp
+        files must be cleaned up before the exception propagates."""
+        created_paths: list[str] = []
+
+        def _record_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            created_paths.append(cmd[-1])
+            Path(cmd[-1]).write_bytes(b"")
+            return subprocess.CompletedProcess(cmd, 0)
+
+        def _broken_check() -> bool:
+            if len(created_paths) >= 1:
+                raise RuntimeError("cancellation registry went away")
+            return False
+
+        with patch("server.core.multitrack.subprocess.run", side_effect=_record_run):
+            with pytest.raises(RuntimeError, match="cancellation registry"):
+                split_channels(
+                    str(tmp_path / "input.wav"),
+                    [0, 1, 2],
+                    cancellation_check=_broken_check,
+                )
+
+        assert len(created_paths) == 1
+        assert not Path(created_paths[0]).exists()
+
+    def test_cleanup_unlink_failure_does_not_mask_original_error(self, tmp_path: Any) -> None:
+        """A PermissionError during unlink must be logged and swallowed so the
+        real TranscriptionCancelledError reaches the caller."""
+        from server.core.model_manager import TranscriptionCancelledError
+
+        def _record_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            Path(cmd[-1]).write_bytes(b"")
+            return subprocess.CompletedProcess(cmd, 0)
+
+        calls = {"n": 0}
+
+        def _cancel_after_first() -> bool:
+            calls["n"] += 1
+            return calls["n"] > 1  # False for iter 0, True for iter 1
+
+        with (
+            patch("server.core.multitrack.subprocess.run", side_effect=_record_run),
+            patch.object(
+                Path,
+                "unlink",
+                side_effect=PermissionError("read-only filesystem"),
+            ),
+        ):
+            with pytest.raises(TranscriptionCancelledError):
+                split_channels(
+                    str(tmp_path / "input.wav"),
+                    [0, 1, 2],
+                    cancellation_check=_cancel_after_first,
+                )
 
 
 # ---------------------------------------------------------------------------

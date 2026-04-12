@@ -21,6 +21,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from server.core.model_manager import TranscriptionCancelledError
+
 if TYPE_CHECKING:
     from server.core.stt.engine import AudioToTextRecorder, TranscriptionResult
 
@@ -159,14 +161,43 @@ def split_channels(
     file_path: str,
     channel_indices: list[int],
     target_sample_rate: int = 16000,
+    cancellation_check: Callable[[], bool] | None = None,
 ) -> list[str]:
     """Extract each channel to a separate temp mono WAV file.
 
     Returns list of temp file paths (caller is responsible for cleanup).
     The order matches *channel_indices*.
+
+    If *cancellation_check* is provided, it is invoked at the top of each
+    channel iteration BEFORE launching ffmpeg. If it returns True, any
+    already-extracted temp files are unlinked and TranscriptionCancelledError
+    is raised. ffmpeg is not interrupted mid-run — the worst-case wait is
+    therefore bounded by a single channel's 300 s timeout.
     """
     temp_paths: list[str] = []
+
+    def _cleanup_partials() -> None:
+        for p in temp_paths:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except OSError as _e:
+                # Best-effort cleanup — never let a cleanup failure mask the
+                # real cancellation or ffmpeg error that triggered us.
+                logger.warning("Failed to unlink partial channel file %s: %s", p, _e)
+        temp_paths.clear()
+
     for ch_idx in channel_indices:
+        if cancellation_check is not None:
+            try:
+                _cancelled = cancellation_check()
+            except Exception:
+                # A broken check must not leak already-extracted temp files.
+                _cleanup_partials()
+                raise
+            if _cancelled:
+                _cleanup_partials()
+                raise TranscriptionCancelledError("Transcription cancelled during channel split")
+
         tmp = tempfile.NamedTemporaryFile(
             delete=False,
             suffix=f"_ch{ch_idx}.wav",
@@ -197,9 +228,7 @@ def split_channels(
         except Exception as exc:
             # Clean up the file we just created on failure
             Path(tmp.name).unlink(missing_ok=True)
-            # Also clean up any previously created files
-            for p in temp_paths:
-                Path(p).unlink(missing_ok=True)
+            _cleanup_partials()
             raise RuntimeError(f"Failed to extract channel {ch_idx}: {exc}") from exc
 
     return temp_paths
@@ -321,7 +350,7 @@ def transcribe_multitrack(
     # Split active channels into separate mono files (even for a single active channel,
     # to avoid feeding a multi-channel file to the STT engine which would mix to mono
     # and potentially degrade quality with bleed from the silent channel)
-    channel_files = split_channels(file_path, active)
+    channel_files = split_channels(file_path, active, cancellation_check=cancellation_check)
     try:
         track_results: list[TranscriptionResult] = []
         total_tracks = len(channel_files)
