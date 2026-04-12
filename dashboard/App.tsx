@@ -26,6 +26,7 @@ import { getConfig, setConfig } from './src/config/store';
 import { useLiveMode } from './src/hooks/useLiveMode';
 import { useImportQueueStore, selectIsUploading } from './src/stores/importQueueStore';
 import { QueuePausedBanner } from './components/ui/QueuePausedBanner';
+import { UpdateBanner } from './components/ui/UpdateBanner';
 import { ActivityNotifications } from './components/ui/ActivityNotifications';
 import { useStarPopup } from './src/hooks/useStarPopup';
 import { useBootstrapDownloads } from './src/hooks/useBootstrapDownloads';
@@ -684,6 +685,10 @@ const AppInner: React.FC = () => {
       <main className="relative flex min-w-0 flex-1 flex-col">
         {/* Top Gradient Fade for aesthetic scrolling */}
         <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 h-8 bg-linear-to-b from-slate-900/10 to-transparent"></div>
+
+        {/* In-app Dashboard update banner — visible across all views. */}
+        {/* M3-HANDOFF: replace isBusy with the server-side isAppIdle() predicate once M3 lands. */}
+        <UpdateBanner isBusy={clientRunning || isUploading} />
 
         {/* Queue paused banner — visible across all views */}
         <QueuePausedBanner />

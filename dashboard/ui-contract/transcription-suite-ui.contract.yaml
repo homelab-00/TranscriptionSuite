@@ -4,7 +4,7 @@ meta:
   source_scope: mockup_repo
   validation_method: static_source_scan
   generated_from:
-    repo_path: /Users/haiiro/NoSync/TranscriptionSuite/dashboard
+    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
     source_files:
       - App.tsx
       - components/__tests__/NotebookView.test.tsx
@@ -13,6 +13,7 @@ meta:
       - components/AudioVisualizer.tsx
       - components/PopOutWindow.tsx
       - components/Sidebar.tsx
+      - components/ui/__tests__/UpdateBanner.test.tsx
       - components/ui/ActivityNotifications.tsx
       - components/ui/AppleSwitch.tsx
       - components/ui/Button.tsx
@@ -28,6 +29,7 @@ meta:
       - components/ui/QueuePausedBanner.tsx
       - components/ui/ShortcutCapture.tsx
       - components/ui/StatusLight.tsx
+      - components/ui/UpdateBanner.tsx
       - components/views/AboutModal.tsx
       - components/views/AddNoteModal.tsx
       - components/views/AudioNoteModal.tsx
@@ -47,7 +49,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-11T22:56:42.123Z
+    generated_at: 2026-04-12T19:31:07.834Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -434,6 +436,7 @@ utility_allowlist:
     - bg-blue-400
     - bg-blue-500
     - bg-blue-500/10
+    - bg-cyan-400/70
     - bg-glass-100
     - bg-glass-100/30
     - bg-glass-100/50
@@ -1064,6 +1067,7 @@ inline_style_allowlist:
     - "#0f172a"
     - ${100 / visibleSlots}%
     - ${item.progress}%
+    - ${percent}%
     - "0"
     - "0.16"
     - "0.3"
@@ -2184,6 +2188,23 @@ component_contracts:
     state_rules:
       - id: compact-density-mode
         rule: Compact mode behavior is governed by visibleSlots threshold and keeps AI/duration collapse behavior.
+  UpdateBanner:
+    file: components/ui/UpdateBanner.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
 validation_policy:
   unknown_utility_class: error
   missing_required_field: error

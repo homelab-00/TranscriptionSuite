@@ -1,0 +1,285 @@
+/**
+ * UpdateBanner — persistent banner surfacing in-app Dashboard updates.
+ *
+ * Four visual states driven by InstallerStatus + UpdateStatus:
+ *   • available      — "v{x} available — [Download] [Later]"
+ *   • downloading    — "Downloading v{x} — {n}%"  (progress bar, no buttons)
+ *   • ready          — "v{x} ready — [Quit & Install] [Later]"
+ *   • ready_blocked  — "v{x} ready — will install when jobs finish"
+ *                      (install disabled, no Later)
+ *
+ * Hidden when no update is available or when the user snoozed the banner
+ * within the last 4 hours. Snooze is persisted under
+ * `updates.bannerSnoozedUntil` (epoch ms).
+ *
+ * IMPORTANT: This component MUST call `updates.getInstallerStatus()` on mount.
+ * Installer state is broadcast only on transitions, so a DevTools reload
+ * during an active download would otherwise see `state: 'idle'` until the
+ * next transition. See _bmad-output/implementation-artifacts/deferred-work.md.
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+import { getConfig, setConfig } from '../../src/config/store';
+
+const SNOOZE_MS = 4 * 60 * 60 * 1000;
+const STATUS_POLL_MS = 60_000;
+const NOW_TICK_MS = 30_000;
+
+export type BannerVisualState = 'hidden' | 'available' | 'downloading' | 'ready' | 'ready_blocked';
+
+export interface DerivedBanner {
+  state: BannerVisualState;
+  version: string | null;
+  percent?: number;
+}
+
+/**
+ * Pure mapping from upstream signals → banner visual state.
+ * Exported so the test suite can hit every I/O matrix row without rendering.
+ */
+export function deriveBannerState(
+  installer: InstallerStatus | null,
+  updateStatus: UpdateStatus | null,
+  isBusy: boolean,
+  now: number,
+  snoozedUntil: number,
+): DerivedBanner {
+  const snoozed = snoozedUntil > now;
+  // Optional-chain .app as well — a persisted UpdateStatus from an older app
+  // version may be missing .app entirely, and unguarded access would crash.
+  const latestVersion = updateStatus?.app?.latest ?? null;
+  const updateAvailable = updateStatus?.app?.updateAvailable === true;
+  const availableFromPoll: DerivedBanner =
+    !snoozed && updateAvailable && latestVersion != null && latestVersion !== ''
+      ? { state: 'available', version: latestVersion }
+      : { state: 'hidden', version: null };
+
+  if (!installer) return availableFromPoll;
+
+  switch (installer.state) {
+    case 'downloading':
+      return {
+        state: 'downloading',
+        version: installer.version,
+        percent: installer.percent,
+      };
+    case 'checking':
+      return { state: 'downloading', version: latestVersion, percent: 0 };
+    case 'downloaded':
+      return {
+        state: isBusy ? 'ready_blocked' : 'ready',
+        version: installer.version,
+      };
+    case 'idle':
+    case 'cancelled':
+    case 'error':
+    default:
+      return availableFromPoll;
+  }
+}
+
+export interface UpdateBannerProps {
+  // M3-HANDOFF: replace with the server-side isAppIdle() predicate once M3 ships.
+  isBusy: boolean;
+}
+
+function isElectron(): boolean {
+  return typeof window !== 'undefined' && 'electronAPI' in window && !!window.electronAPI;
+}
+
+export function UpdateBanner({ isBusy }: UpdateBannerProps) {
+  const [installer, setInstaller] = useState<InstallerStatus | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [snoozedUntil, setSnoozedUntil] = useState<number>(0);
+  const [now, setNow] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    if (!isElectron()) return;
+    const api = window.electronAPI?.updates;
+    if (!api) return;
+
+    let cancelled = false;
+
+    // Mount-time installer sync — required because installer state is never replayed.
+    // Only apply the snapshot if a live transition event hasn't already populated
+    // state; otherwise the async snapshot could clobber a fresher update.
+    api
+      .getInstallerStatus()
+      .then((s) => {
+        if (!cancelled) setInstaller((prev) => prev ?? s);
+      })
+      .catch((err: unknown) => {
+        console.error('UpdateBanner: getInstallerStatus failed', err);
+      });
+
+    // Initial UpdateStatus read + 60s poll to surface newly-scheduled checks.
+    const pollStatus = () => {
+      api
+        .getStatus()
+        .then((s) => {
+          if (!cancelled) setUpdateStatus(s);
+        })
+        .catch((err: unknown) => {
+          console.error('UpdateBanner: getStatus failed', err);
+        });
+    };
+    pollStatus();
+    const statusTimer = setInterval(pollStatus, STATUS_POLL_MS);
+
+    // Read persisted snooze.
+    getConfig<number>('updates.bannerSnoozedUntil')
+      .then((v) => {
+        if (!cancelled) setSnoozedUntil(typeof v === 'number' ? v : 0);
+      })
+      .catch((err: unknown) => {
+        console.error('UpdateBanner: getConfig snooze failed', err);
+      });
+
+    // Live installer transitions.
+    const unsubscribe = api.onInstallerStatus((s) => {
+      if (!cancelled) setInstaller(s);
+    });
+
+    // Track current time so the snoozed banner re-appears after expiry.
+    const nowTimer = setInterval(() => {
+      if (!cancelled) setNow(Date.now());
+    }, NOW_TICK_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(statusTimer);
+      clearInterval(nowTimer);
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, []);
+
+  const handleSnooze = useCallback(async () => {
+    const until = Date.now() + SNOOZE_MS;
+    setSnoozedUntil(until);
+    try {
+      await setConfig('updates.bannerSnoozedUntil', until);
+    } catch (err) {
+      console.error('UpdateBanner: setConfig snooze failed', err);
+    }
+  }, []);
+
+  const handleDownload = useCallback(async () => {
+    const api = window.electronAPI?.updates;
+    if (!api) return;
+    try {
+      await api.download();
+    } catch (err) {
+      console.error('UpdateBanner: download invocation failed', err);
+    }
+  }, []);
+
+  const handleInstall = useCallback(async () => {
+    const api = window.electronAPI?.updates;
+    if (!api) return;
+    try {
+      await api.install();
+    } catch (err) {
+      console.error('UpdateBanner: install invocation failed', err);
+    }
+  }, []);
+
+  const derived = deriveBannerState(installer, updateStatus, isBusy, now, snoozedUntil);
+
+  if (derived.state === 'hidden') return null;
+
+  const accent = 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200';
+  const primaryBtn =
+    'rounded bg-cyan-400/20 px-3 py-1 text-xs font-medium text-cyan-100 transition-colors hover:bg-cyan-400/30';
+  const disabledBtn =
+    'rounded bg-white/10 px-3 py-1 text-xs font-medium text-slate-400 cursor-not-allowed';
+  const laterBtn =
+    'rounded bg-white/5 px-3 py-1 text-xs font-medium text-slate-300 transition-colors hover:bg-white/10';
+
+  switch (derived.state) {
+    case 'available':
+      return (
+        <div
+          role="status"
+          aria-label="Update available"
+          className={`flex items-center justify-between gap-3 border ${accent} px-4 py-2 text-sm`}
+        >
+          <span>{derived.version} available</span>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={handleDownload} className={primaryBtn}>
+              Download
+            </button>
+            <button type="button" onClick={handleSnooze} className={laterBtn}>
+              Later
+            </button>
+          </div>
+        </div>
+      );
+
+    case 'downloading': {
+      // Nullish coalescing doesn't defend against NaN (electron-updater can emit
+      // partial progress during early connection). Clamp explicitly.
+      const rawPercent = derived.percent;
+      const percent = Number.isFinite(rawPercent)
+        ? Math.max(0, Math.min(100, rawPercent as number))
+        : 0;
+      return (
+        <div
+          role="status"
+          aria-label="Update downloading"
+          className={`flex flex-col gap-1 border ${accent} px-4 py-2 text-sm`}
+        >
+          <span>
+            Downloading {derived.version ?? '…'} — {percent}%
+          </span>
+          <div className="h-1 w-full overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-cyan-400/70 transition-all duration-300"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    case 'ready':
+      return (
+        <div
+          role="status"
+          aria-label="Update ready"
+          className={`flex items-center justify-between gap-3 border ${accent} px-4 py-2 text-sm`}
+        >
+          <span>{derived.version} ready</span>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={handleInstall} className={primaryBtn}>
+              Quit & Install
+            </button>
+            <button type="button" onClick={handleSnooze} className={laterBtn}>
+              Later
+            </button>
+          </div>
+        </div>
+      );
+
+    case 'ready_blocked':
+      return (
+        <div
+          role="status"
+          aria-label="Update ready, queued"
+          className={`flex items-center justify-between gap-3 border ${accent} px-4 py-2 text-sm`}
+        >
+          <span>{derived.version} ready — will install when jobs finish</span>
+          <button
+            type="button"
+            disabled
+            title="Will install when jobs finish"
+            className={disabledBtn}
+          >
+            Quit & Install
+          </button>
+        </div>
+      );
+
+    default:
+      return null;
+  }
+}

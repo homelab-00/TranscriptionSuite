@@ -425,6 +425,7 @@ const store = new Store({
     'server.containerExistsLastSeen': false,
     'updates.lastStatus': null,
     'updates.lastNotified': { appLatest: '', serverLatest: '' },
+    'updates.bannerSnoozedUntil': 0,
     'server.runtimeProfile': 'cpu',
     'server.gpuAutoDetectDone': false,
     'server.mainModelSelection': 'nvidia/parakeet-tdt-0.6b-v3',
