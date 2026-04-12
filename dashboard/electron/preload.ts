@@ -29,6 +29,21 @@ export interface TrayMenuState {
   isStandby?: boolean;
 }
 
+export type InstallerStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | {
+      state: 'downloading';
+      version: string;
+      percent: number;
+      bytesPerSecond: number;
+      transferred: number;
+      total: number;
+    }
+  | { state: 'downloaded'; version: string }
+  | { state: 'cancelled' }
+  | { state: 'error'; message: string };
+
 // Keep in sync with src/types/runtime.ts (canonical) and src/types/electron.d.ts
 export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
@@ -188,6 +203,19 @@ export interface ElectronAPI {
   updates: {
     getStatus: () => Promise<UpdateStatus | null>;
     checkNow: () => Promise<UpdateStatus>;
+    /** Begin download. Guards against concurrent calls. */
+    download: () => Promise<
+      | { ok: true; reason?: 'already-downloading' }
+      | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
+    >;
+    /** Quit and install when a download is ready. No-op otherwise. */
+    install: () => Promise<{ ok: boolean; reason?: string }>;
+    /** Cancel any active download. No-op when idle. */
+    cancelDownload: () => Promise<{ ok: boolean }>;
+    /** Read the current installer state. */
+    getInstallerStatus: () => Promise<InstallerStatus>;
+    /** Subscribe to installer state transitions. Returns an unsubscribe fn. */
+    onInstallerStatus: (callback: (status: InstallerStatus) => void) => () => void;
   };
   clipboard: {
     writeText: (text: string) => Promise<void>;
@@ -283,6 +311,7 @@ export interface UpdateStatus {
   lastChecked: string;
   app: ComponentUpdateStatus;
   server: ComponentUpdateStatus;
+  installer?: InstallerStatus;
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -464,6 +493,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updates: {
     getStatus: () => ipcRenderer.invoke('updates:getStatus'),
     checkNow: () => ipcRenderer.invoke('updates:checkNow'),
+    download: () => ipcRenderer.invoke('updates:download'),
+    install: () => ipcRenderer.invoke('updates:install'),
+    cancelDownload: () => ipcRenderer.invoke('updates:cancelDownload'),
+    getInstallerStatus: () => ipcRenderer.invoke('updates:getInstallerStatus'),
+    onInstallerStatus: (callback: (status: InstallerStatus) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: InstallerStatus) =>
+        callback(status);
+      ipcRenderer.on('updates:installerStatus', handler);
+      return () => ipcRenderer.removeListener('updates:installerStatus', handler);
+    },
   },
   clipboard: {
     writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),

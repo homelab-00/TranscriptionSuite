@@ -183,6 +183,14 @@ interface ElectronAPI {
   updates: {
     getStatus: () => Promise<UpdateStatus | null>;
     checkNow: () => Promise<UpdateStatus>;
+    download: () => Promise<
+      | { ok: true; reason?: 'already-downloading' }
+      | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
+    >;
+    install: () => Promise<{ ok: boolean; reason?: string }>;
+    cancelDownload: () => Promise<{ ok: boolean }>;
+    getInstallerStatus: () => Promise<InstallerStatus>;
+    onInstallerStatus: (callback: (status: InstallerStatus) => void) => () => void;
   };
   clipboard: {
     writeText: (text: string) => Promise<void>;
@@ -218,10 +226,26 @@ interface ComponentUpdateStatus {
   error: string | null;
 }
 
+type InstallerStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | {
+      state: 'downloading';
+      version: string;
+      percent: number;
+      bytesPerSecond: number;
+      transferred: number;
+      total: number;
+    }
+  | { state: 'downloaded'; version: string }
+  | { state: 'cancelled' }
+  | { state: 'error'; message: string };
+
 interface UpdateStatus {
   lastChecked: string;
   app: ComponentUpdateStatus;
   server: ComponentUpdateStatus;
+  installer?: InstallerStatus;
 }
 
 interface Window {

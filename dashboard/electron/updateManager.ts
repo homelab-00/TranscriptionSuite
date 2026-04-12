@@ -25,10 +25,36 @@ export interface ComponentUpdateStatus {
   error: string | null;
 }
 
+/**
+ * Runtime state of the UpdateInstaller (electron-updater wrapper).
+ *
+ * Ephemeral — never persisted across app launches; always starts at
+ * `{ state: 'idle' }`. M2's banner maps these 1:1 to its visual states.
+ */
+export type InstallerStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | {
+      state: 'downloading';
+      version: string;
+      percent: number;
+      bytesPerSecond: number;
+      transferred: number;
+      total: number;
+    }
+  | { state: 'downloaded'; version: string }
+  | { state: 'cancelled' }
+  | { state: 'error'; message: string };
+
 export interface UpdateStatus {
   lastChecked: string; // ISO timestamp
   app: ComponentUpdateStatus;
   server: ComponentUpdateStatus;
+  /**
+   * Optional — populated by UpdateInstaller on each state transition.
+   * Absent in persisted statuses from versions before M1.
+   */
+  installer?: InstallerStatus;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────

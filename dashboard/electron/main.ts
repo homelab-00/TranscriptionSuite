@@ -26,6 +26,7 @@ import { StartupEventWatcher } from './startupEventWatcher.js';
 import { MLXServerManager, type MLXStartOptions } from './mlxServerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
+import { UpdateInstaller } from './updateInstaller.js';
 import {
   registerShortcuts,
   unregisterShortcuts,
@@ -461,6 +462,21 @@ const mlxServerManager = new MLXServerManager(() => mainWindow ?? null);
 // ─── Update Manager ─────────────────────────────────────────────────────────
 
 const updateManager = new UpdateManager(store);
+
+// ─── Update Installer ───────────────────────────────────────────────────────
+
+// Wraps electron-updater's autoUpdater with an explicit state machine for
+// the in-app update flow. M1 scope is wiring only — UI (M2), safety gate
+// (M3), compat guard (M4), and platform hardening (M7) arrive later.
+const updateInstaller = new UpdateInstaller();
+
+updateInstaller.on('status', (status) => {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('updates:installerStatus', status);
+    }
+  }
+});
 
 // Wire tray context-menu actions → IPC messages to the renderer
 trayManager.setActions({
@@ -1221,6 +1237,22 @@ ipcMain.handle('updates:checkNow', async () => {
   return updateManager.check();
 });
 
+ipcMain.handle('updates:download', async () => {
+  return updateInstaller.startDownload();
+});
+
+ipcMain.handle('updates:install', async () => {
+  return updateInstaller.install();
+});
+
+ipcMain.handle('updates:cancelDownload', async () => {
+  return updateInstaller.cancelDownload();
+});
+
+ipcMain.handle('updates:getInstallerStatus', async () => {
+  return updateInstaller.getStatus();
+});
+
 // ─── Server Connection Probe IPC ────────────────────────────────────────────
 
 /**
@@ -1692,6 +1724,7 @@ function gracefulShutdown(): Promise<void> {
     unregisterShortcuts();
     trayManager.destroy();
     updateManager.destroy();
+    updateInstaller.destroy();
     await mlxServerManager.destroy();
     await watcherManager.destroyAll();
     shutdownLog('[Shutdown] Cleanup complete.');
