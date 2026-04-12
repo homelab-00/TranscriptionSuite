@@ -420,7 +420,7 @@ class MLXCanaryBackend(STTBackend):
 
                     mx.clear_cache()
                 except Exception:
-                    pass
+                    logger.debug("mlx cache clear failed (non-critical)", exc_info=True)
 
             if isinstance(text, str) and text.strip():
                 segments.append(

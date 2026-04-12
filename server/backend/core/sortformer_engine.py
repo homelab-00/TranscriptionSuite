@@ -102,7 +102,7 @@ class SortformerEngine:
 
             mx.clear_cache()
         except Exception:
-            pass
+            logger.debug("mlx cache clear failed (non-critical)", exc_info=True)
         gc.collect()
         logger.info("Sortformer model unloaded")
 
@@ -181,7 +181,7 @@ class SortformerEngine:
 
                 mx.clear_cache()
             except Exception:
-                pass
+                logger.debug("mlx cache clear failed (non-critical)", exc_info=True)
 
         segments: list[DiarizationSegment] = []
         speakers: set[str] = set()

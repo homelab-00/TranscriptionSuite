@@ -158,7 +158,7 @@ class MLXWhisperBackend(STTBackend):
 
             mx.clear_cache()
         except Exception:
-            pass
+            logger.debug("mlx cache clear failed (non-critical)", exc_info=True)
 
         # mlx-audio generate() returns STTOutput with .segments list of dicts:
         #   {"id", "seek", "start", "end", "text", "tokens", "temperature",

@@ -233,9 +233,7 @@ class MLXParakeetBackend(STTBackend):
         threshold_s = float(parakeet_cfg.get("mlx_local_attention_threshold_s", 120))
         if use_local and audio_duration_s > threshold_s:
             window = parakeet_cfg.get("mlx_local_attention_window", [256, 256])
-            self._model.encoder.set_attention_model(
-                "rel_pos_local_attn", tuple(window)
-            )
+            self._model.encoder.set_attention_model("rel_pos_local_attn", tuple(window))
             logger.info(
                 "MLX Parakeet: local attention enabled (%.0fs > %.0fs threshold, window=%s)",
                 audio_duration_s,
@@ -301,7 +299,7 @@ class MLXParakeetBackend(STTBackend):
 
                 mx.clear_cache()
             except Exception:
-                pass
+                logger.debug("mlx cache clear failed (non-critical)", exc_info=True)
 
         # Convert AlignedResult.sentences → BackendSegment list.
         #

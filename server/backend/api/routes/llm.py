@@ -159,7 +159,7 @@ def get_llm_config() -> dict:
                 "Examples of good titles:\n"
                 "  Copper grain boundary discussion\n"
                 "  Project deadline planning\n"
-                "Bad (do not do this): \"Sure, here is a title: Grain boundaries in copper alloys.\"",
+                'Bad (do not do this): "Sure, here is a title: Grain boundaries in copper alloys."',
             ),
             "auto_title_enabled": llm_config.get("auto_title_enabled", True),
         }
@@ -185,7 +185,7 @@ def get_llm_config() -> dict:
             "Examples of good titles:\n"
             "  Copper grain boundary discussion\n"
             "  Project deadline planning\n"
-            "Bad (do not do this): \"Sure, here is a title: Grain boundaries in copper alloys.\""
+            'Bad (do not do this): "Sure, here is a title: Grain boundaries in copper alloys."'
         ),
         "auto_title_enabled": True,
     }
@@ -213,7 +213,13 @@ async def get_llm_status():
     api_key_set = bool(config.get("api_key", ""))
 
     def _status(**kwargs: object) -> LLMStatus:
-        return LLMStatus(base_url=base_url, has_api_key=api_key_set, title_generation_prompt=config.get("title_generation_prompt"), auto_title_enabled=bool(config.get("auto_title_enabled", True)), **kwargs)  # type: ignore[arg-type]
+        return LLMStatus(
+            base_url=base_url,
+            has_api_key=api_key_set,
+            title_generation_prompt=config.get("title_generation_prompt"),
+            auto_title_enabled=bool(config.get("auto_title_enabled", True)),
+            **kwargs,
+        )  # type: ignore[arg-type]
 
     if not config["enabled"]:
         return _status(
@@ -520,7 +526,7 @@ async def process_with_llm_stream(request: LLMRequest):
         else f"  System prompt: {sanitize_for_log(system_prompt)}"
     )
     logger.info(f"  Transcription length: {len(request.transcription_text)} chars")
-    logger.info(f"  Max tokens: {payload['max_tokens']}, Temperature: {payload['temperature']}")
+    logger.info("  Max tokens: %s, Temperature: %s", payload["max_tokens"], payload["temperature"])
 
     async def generate_stream() -> AsyncGenerator[str]:
         """Generate SSE stream from LLM response"""
@@ -751,7 +757,9 @@ async def start_lm_studio_server():
                         )
                     else:
                         # No model loaded - try to load the configured one
-                        logger.info(f"No model loaded. Attempting to load: {model_id}")
+                        logger.info(
+                            "No model loaded. Attempting to load: %s", sanitize_for_log(model_id)
+                        )
                         load_result = await load_model(
                             ModelLoadRequest(
                                 model_id=model_id,
@@ -1290,7 +1298,7 @@ async def generate_conversation_title(conversation_id: int):
         "Examples of good titles:\n"
         "  Copper grain boundary discussion\n"
         "  Project deadline planning\n"
-        "Bad (do not do this): \"Sure, here is a title: Grain boundaries in copper alloys.\"",
+        'Bad (do not do this): "Sure, here is a title: Grain boundaries in copper alloys."',
     )
 
     # Use the first user+assistant exchange to generate the title (keep it cheap)
@@ -1317,9 +1325,7 @@ async def generate_conversation_title(conversation_id: int):
             if response.status_code != 200:
                 raise HTTPException(status_code=502, detail="LLM returned non-200 for title")
             data = response.json()
-            raw_title = (
-                data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-            )
+            raw_title = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
             # Truncate aggressively to avoid runaway responses
             title = " ".join(raw_title.split()[:10]) if raw_title else "New Chat"
     except httpx.ConnectError as exc:
