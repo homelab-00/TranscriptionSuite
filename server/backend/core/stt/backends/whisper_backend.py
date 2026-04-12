@@ -114,6 +114,22 @@ class WhisperBackend(STTBackend):
         if self._model is None:
             raise RuntimeError("Whisper model is not loaded")
 
+        # Merge extra decode options (e.g. no_speech_threshold,
+        # compression_ratio_threshold) from configure_decode_options().
+        # Explicit args take precedence — skip keys already in the call.
+        _explicit_keys = {
+            "language",
+            "task",
+            "beam_size",
+            "initial_prompt",
+            "suppress_tokens",
+            "vad_filter",
+            "word_timestamps",
+        }
+        extra_kwargs: dict[str, Any] = {
+            key: value for key, value in self._decode_options.items() if key not in _explicit_keys
+        }
+
         segments_iter, info = self._model.transcribe(
             audio,
             language=language,
@@ -123,6 +139,7 @@ class WhisperBackend(STTBackend):
             suppress_tokens=suppress_tokens if suppress_tokens is not None else [-1],
             vad_filter=vad_filter,
             word_timestamps=word_timestamps,
+            **extra_kwargs,
         )
 
         result_segments: list[BackendSegment] = []

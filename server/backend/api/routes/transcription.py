@@ -217,6 +217,9 @@ async def transcribe_audio(
                         language=language,
                         task="translate" if translation_enabled else "transcribe",
                         beam_size=engine.beam_size,
+                        initial_prompt=engine.initial_prompt,
+                        suppress_tokens=engine.suppress_tokens,
+                        vad_filter=engine.faster_whisper_vad_filter,
                         num_speakers=expected_speakers,
                     )
                 )
@@ -640,6 +643,9 @@ def _run_file_import(
                     language=language,
                     task="translate" if translation_enabled else "transcribe",
                     beam_size=engine.beam_size,
+                    initial_prompt=engine.initial_prompt,
+                    suppress_tokens=engine.suppress_tokens,
+                    vad_filter=engine.faster_whisper_vad_filter,
                     num_speakers=expected_speakers,
                     progress_callback=on_progress,
                 )

@@ -224,6 +224,7 @@ class WhisperXBackend(STTBackend):
             beam_size=beam_size,
             initial_prompt=initial_prompt,
             suppress_tokens=suppress_tokens,
+            vad_filter=vad_filter,
         )
         logger.info("WhisperX transcribe took %.2fs", time.perf_counter() - t0)
 
@@ -276,6 +277,9 @@ class WhisperXBackend(STTBackend):
         language: str | None = None,
         task: str = "transcribe",
         beam_size: int = 5,
+        initial_prompt: str | None = None,
+        suppress_tokens: list[int] | None = None,
+        vad_filter: bool = True,
         num_speakers: int | None = None,
         hf_token: str | None = None,
     ) -> DiarizedTranscriptionResult | None:
@@ -304,8 +308,9 @@ class WhisperXBackend(STTBackend):
             language=language,
             task=task,
             beam_size=beam_size,
-            initial_prompt=None,
-            suppress_tokens=None,
+            initial_prompt=initial_prompt,
+            suppress_tokens=suppress_tokens,
+            vad_filter=vad_filter,
         )
         detected_language = wx_result.get("language", language)
 
@@ -429,6 +434,7 @@ class WhisperXBackend(STTBackend):
         beam_size: int,
         initial_prompt: str | None,
         suppress_tokens: list[int] | None,
+        vad_filter: bool = True,
     ) -> dict[str, Any]:
         """Call WhisperX transcribe across old/new signatures.
 
@@ -469,6 +475,26 @@ class WhisperXBackend(STTBackend):
             else:
                 patch_fields["suppress_tokens"] = suppress_tokens
                 compat_fields.add("suppress_tokens")
+
+        # vad_filter — same inspect+compat pattern as beam_size et al.
+        if "vad_filter" in param_names:
+            kwargs["vad_filter"] = vad_filter
+        else:
+            patch_fields["vad_filter"] = vad_filter
+            compat_fields.add("vad_filter")
+
+        # Merge extra decode options from configure_decode_options() (e.g.
+        # no_speech_threshold, compression_ratio_threshold).  Each key is
+        # routed through the same inspect / compat-patch dispatch.
+        # Explicit args above take precedence — skip keys already committed.
+        for key, value in self._decode_options.items():
+            if key in kwargs or key in patch_fields:
+                continue
+            if key in param_names:
+                kwargs[key] = value
+            else:
+                patch_fields[key] = value
+                compat_fields.add(key)
 
         previous_options: Any | None = None
         options_patched = False

@@ -56,6 +56,22 @@ class DiarizedTranscriptionResult:
 class STTBackend(abc.ABC):
     """Abstract base class for speech-to-text backends."""
 
+    _decode_options: dict[str, Any] = {}
+
+    def configure_decode_options(self, options: dict[str, Any]) -> None:
+        """Store extra decode/anti-hallucination options for Whisper-family backends.
+
+        These are merged into the ``transcribe()`` kwargs by backends that
+        support them (WhisperX, faster-whisper, Whisper).  Non-Whisper backends
+        silently ignore them.
+
+        Args:
+            options: Mapping of faster-whisper ``WhisperModel.transcribe`` kwargs
+                (e.g. ``no_speech_threshold``, ``compression_ratio_threshold``).
+        """
+        # Instance copy — avoids mutating the class default.
+        self._decode_options = dict(options)
+
     @abc.abstractmethod
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         """Load the model.
@@ -131,6 +147,9 @@ class STTBackend(abc.ABC):
         language: str | None = None,
         task: str = "transcribe",
         beam_size: int = 5,
+        initial_prompt: str | None = None,
+        suppress_tokens: list[int] | None = None,
+        vad_filter: bool = True,
         num_speakers: int | None = None,
         hf_token: str | None = None,
         progress_callback: Callable[[int, int], None] | None = None,

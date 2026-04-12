@@ -282,6 +282,10 @@ class AudioToTextRecorder:
             suppress_tokens if suppress_tokens is not None else stt_cfg.get("suppress_tokens", [-1])
         )
 
+        # Extra decode/anti-hallucination options for Whisper-family backends
+        # (e.g. no_speech_threshold, compression_ratio_threshold).
+        self.whisper_decode: dict[str, Any] = main_cfg.get("whisper_decode", {}) or {}
+
         # Silero deactivity detection from stt config
         silero_deactivity_detection = (
             silero_deactivity_detection
@@ -406,6 +410,10 @@ class AudioToTextRecorder:
                 download_root=self.download_root,
                 batch_size=self.batch_size,
             )
+
+            # Pass extra decode options (e.g. no_speech_threshold) to Whisper-family backends.
+            if self.whisper_decode:
+                backend.configure_decode_options(self.whisper_decode)
 
             # Fix 4: Use background warmup for NeMo models to reduce startup blocking
             backend_name = backend.backend_name

@@ -363,11 +363,14 @@ class VibeVoiceASRBackend(STTBackend):
         language: str | None = None,
         task: str = "transcribe",
         beam_size: int = 5,
+        initial_prompt: str | None = None,
+        suppress_tokens: list[int] | None = None,
+        vad_filter: bool = True,
         num_speakers: int | None = None,
         hf_token: str | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> DiarizedTranscriptionResult | None:
-        del num_speakers, hf_token
+        del num_speakers, hf_token, initial_prompt, suppress_tokens, vad_filter
         if task.strip().lower() == "translate":
             raise ValueError(
                 "VibeVoice-ASR translation is not supported in TranscriptionSuite v1 integration."

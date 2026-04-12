@@ -78,6 +78,26 @@ main_transcriber:
     # Use faster-whisper's built-in VAD to filter silence.
     faster_whisper_vad_filter: true
 
+    # Extra decode / anti-hallucination options for Whisper-family backends
+    # (faster-whisper, WhisperX, Whisper).  These are passed directly to
+    # WhisperModel.transcribe() as keyword arguments.  Keys not recognised
+    # by the installed library version are silently ignored.
+    # NeMo and VibeVoice backends ignore this section entirely.
+    #
+    # Commonly tuned hallucination-related options:
+    #   no_speech_threshold: 0.6         # Segments below this are marked as no-speech
+    #   compression_ratio_threshold: 2.4 # Segments above this ratio are treated as failed
+    #   log_prob_threshold: -1.0         # Segments below this average log-prob are treated as failed
+    #   condition_on_previous_text: true  # Condition on previous output (set false to reduce loops)
+    #   hallucination_silence_threshold: null  # Skip silent gaps longer than this (seconds)
+    #   repetition_penalty: 1.0          # Penalise repeated tokens (>1.0 discourages repetition)
+    #   prompt_reset_on_temperature: 0.5 # Reset initial_prompt when temperature exceeds this
+    # Example:
+    #   whisper_decode:
+    #     no_speech_threshold: 0.6
+    #     compression_ratio_threshold: 2.4
+    whisper_decode: {}
+
     # Prevent the library from creating its own log file.
     no_log_file: true
 

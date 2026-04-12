@@ -113,6 +113,13 @@ class FasterWhisperBackend(STTBackend):
         if suppress_tokens is not None:
             kwargs["suppress_tokens"] = suppress_tokens
 
+        # Merge extra decode options (e.g. no_speech_threshold,
+        # compression_ratio_threshold) from configure_decode_options().
+        # Explicit args above take precedence over _decode_options.
+        for key, value in self._decode_options.items():
+            if key not in kwargs:
+                kwargs[key] = value
+
         t0 = time.perf_counter()
         segments_gen, info = self._model.transcribe(audio, **kwargs)
 

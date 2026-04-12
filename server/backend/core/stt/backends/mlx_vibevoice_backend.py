@@ -136,12 +136,16 @@ class MLXVibeVoiceBackend(STTBackend):
         language: str | None = None,
         task: str = "transcribe",
         beam_size: int = 5,
+        initial_prompt: str | None = None,
+        suppress_tokens: list[int] | None = None,
+        vad_filter: bool = True,
         num_speakers: int | None = None,
         hf_token: str | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> DiarizedTranscriptionResult | None:
         """Transcribe with native VibeVoice speaker diarization."""
-        del num_speakers, hf_token  # Model determines speakers internally
+        # Model determines speakers internally; Whisper-specific decode options not applicable.
+        del num_speakers, hf_token, initial_prompt, suppress_tokens, vad_filter
         if self._model is None:
             raise RuntimeError("MLX VibeVoice model not loaded")
 
