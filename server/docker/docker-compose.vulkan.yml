@@ -7,6 +7,37 @@
 # "whisper-server" and the port mapping is harmless.
 #
 # Usage: docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.vulkan.yml up -d
+#
+# --- GH-62 review follow-ups (deferred, not blocking the parser fix) -------
+# TODO(GH-62-followup #A): image tag ``main-vulkan`` is a rolling tag; an
+#   upstream response-schema change (e.g. ``start`` → ``t0``) would silently
+#   corrupt every transcription timestamp with only a warning. Pin a SHA
+#   digest or add a schema-probe at backend load time.
+# TODO(GH-62-followup #B): ``devices: /dev/dri`` makes the container refuse
+#   to start on hosts without the Vulkan device file; the dashboard only
+#   sees "sidecar unreachable" with no specific diagnostic. Add a host-side
+#   pre-flight check (dockerManager) that surfaces "Vulkan device not
+#   available on this host".
+# TODO(GH-62-followup #C): the healthcheck shells out to ``curl``, which is
+#   present on the current ``ghcr.io/ggml-org/whisper.cpp:main-vulkan``
+#   image but not guaranteed across rebuilds. Replace with a tool-agnostic
+#   probe (e.g. ``bash -c 'exec 3<>/dev/tcp/localhost/8080'``) or pin the
+#   image digest.
+# TODO(GH-62-followup #D): the model-wait retry loop sleeps 10s × 180 =
+#   30 min and exits 1, after which ``restart: unless-stopped`` restarts
+#   it immediately. On a permanently-missing model this floods logs.
+#   Add exponential backoff, or switch ``depends_on`` to
+#   ``condition: service_healthy`` so the main container waits properly.
+# TODO(GH-62-followup #E): the ``huggingface-models`` volume is mounted
+#   read-only on the sidecar but writable from the main container, and the
+#   sidecar loads the GGML file without hash verification — a compromised
+#   main container could swap the model. Add SHA-256 verification either
+#   at download time (dockerManager) or at load time (sidecar entrypoint).
+# TODO(GH-62-followup #F): ``WHISPER_MODEL`` env is fixed at container
+#   start but the dashboard lets the user switch models via the Python
+#   ``/load`` endpoint — some whisper.cpp versions ignore the POST and keep
+#   serving the env-selected model. Verify the served model matches the
+#   requested one and restart the sidecar on mismatch.
 
 services:
   whisper-server:

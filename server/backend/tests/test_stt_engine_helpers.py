@@ -98,6 +98,7 @@ with (
         SAMPLE_RATE,
         AudioToTextRecorder,
         TranscriptionResult,
+        _model_not_loaded_message,
     )
 
 
@@ -110,6 +111,116 @@ class TestConstants:
 
     def test_int16_max(self):
         assert INT16_MAX_ABS_VALUE == 32768.0
+
+
+# ── _model_not_loaded_message ─────────────────────────────────────────────
+
+
+class TestModelNotLoadedMessage:
+    """Issue #62 follow-up: make the backend-missing error actionable.
+
+    The previous message — ``"STT model is not loaded"`` — told users nothing
+    about *why* the backend was missing or what to do next. The new message
+    must: (a) name the configured model, (b) point at the download / reload
+    flow, and (c) call out the whisper.cpp sidecar dependency for GGML
+    models.
+    """
+
+    def test_names_the_configured_model(self):
+        msg = _model_not_loaded_message("ggml-large-v3-turbo-q8_0.bin")
+        assert "ggml-large-v3-turbo-q8_0.bin" in msg
+
+    def test_handles_unset_model(self):
+        assert "<unset>" in _model_not_loaded_message(None)
+        assert "<unset>" in _model_not_loaded_message("")
+
+    def test_mentions_download_or_downloaded(self):
+        """User must see a recovery hint referencing the model-download flow."""
+        msg = _model_not_loaded_message("anything.bin").lower()
+        # A bare "download" without context would pass a looser OR-gate. Pin
+        # the phrase that tells the user what to do with the download.
+        assert "still downloading" in msg or "is downloaded" in msg
+
+    def test_mentions_settings_and_reload_by_name(self):
+        """Recovery must reference BOTH the location (Settings) and the action (Reload)."""
+        msg = _model_not_loaded_message("anything.bin").lower()
+        assert "settings" in msg, "user must be told where to go"
+        assert "reload" in msg, "user must be told what action to take"
+
+    def test_mentions_sidecar_for_whispercpp_users(self):
+        msg = _model_not_loaded_message("ggml-base.bin")
+        # Users running a GGML model need the whisper-server sidecar up.
+        assert "whisper-server" in msg or "sidecar" in msg
+
+    def test_format_string_metachars_in_model_name_are_safe(self):
+        """A model name containing ``{}`` must not trigger f-string evaluation.
+
+        Defence-in-depth: the helper uses ``repr()`` which adds quotes, and
+        f-strings do not re-interpret already-built strings, so there is no
+        injection path today. But pin it so a refactor to ``%``-formatting
+        or ``.format()`` cannot regress.
+        """
+        msg = _model_not_loaded_message("{evil}")
+        assert "{evil}" in msg
+        # Must not have raised KeyError or swapped in a variable value.
+
+
+class TestTranscribeGuardsRaiseActionableError:
+    """Integration: confirm the engine *actually* raises with the new message.
+
+    ``TestModelNotLoadedMessage`` pins the formatter. This pins the glue —
+    if a refactor accidentally reverts one of the guard sites back to the
+    bare ``"STT model is not loaded"`` literal, the message-text assertions
+    above would still pass but the user experience would regress.
+    """
+
+    @staticmethod
+    def _bare_recorder(model_name: str = "ggml-base.bin"):
+        import threading
+
+        rec = object.__new__(AudioToTextRecorder)
+        rec.transcription_lock = threading.Lock()
+        rec.model_name = model_name
+        rec.language = "en"
+        rec.task = "transcribe"
+        rec.translation_target_language = None
+        rec.initial_prompt = None
+        rec.beam_size = 5
+        rec.suppress_tokens = None
+        rec.faster_whisper_vad_filter = True
+        rec.normalize_audio = False
+        rec._backend = None
+        # ``_perform_transcription``'s except/finally uses ``_set_state`` which
+        # reads ``self.state`` — set it so the guard can raise cleanly without
+        # cascading into an unrelated AttributeError.
+        rec.state = "transcribing"
+        rec.on_transcription_start = None
+        return rec
+
+    def test_perform_transcription_raises_with_actionable_message(self):
+        rec = self._bare_recorder()
+        audio = np.ones(16000, dtype=np.float32) * 0.1
+        with pytest.raises(RuntimeError) as excinfo:
+            rec._perform_transcription(audio=audio)
+        msg = str(excinfo.value)
+        assert "ggml-base.bin" in msg
+        # Use ``and`` so a mutation that dropped the whisper-server line
+        # while keeping "sidecar" would fail loudly. The helper's contract
+        # is to mention BOTH hints.
+        assert "sidecar" in msg, "must mention the sidecar dependency"
+        assert "whisper-server" in msg, "must name the whisper-server container"
+
+    def test_transcribe_audio_raises_with_actionable_message(self):
+        """The other guard site (batch ``transcribe_audio``) uses the same helper."""
+        rec = self._bare_recorder(model_name="tiny.en")
+        audio = np.ones(16000, dtype=np.float32) * 0.1
+        with pytest.raises(RuntimeError) as excinfo:
+            rec.transcribe_audio(audio, sample_rate=16000)
+        msg = str(excinfo.value)
+        assert "tiny.en" in msg
+        # ``and`` not ``or`` — the helper contract is that BOTH words appear.
+        assert "Reload" in msg, "must tell the user the action"
+        assert "Settings" in msg, "must tell the user where"
 
 
 # ── TranscriptionResult ──────────────────────────────────────────────────

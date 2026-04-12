@@ -11,7 +11,12 @@ if TYPE_CHECKING:
 _PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
 _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
 _VIBEVOICE_ASR_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
-_WHISPERCPP_PATTERN = re.compile(r"((?:^|/)ggml-.*\.bin$|\.gguf$)", re.IGNORECASE)
+# whisper.cpp / GGML models: match only the BASENAME so a crafted
+# ``../ggml-evil.bin`` or ``models/subdir/ggml-fake.bin`` cannot force
+# whisper.cpp routing via ``re.search``. The old ``search()`` pattern
+# allowed any substring match, which silently re-routed whisper-family
+# repos whose path happened to contain ``/ggml-*.bin`` or ``.gguf``.
+_WHISPERCPP_BASENAME_RE = re.compile(r"^ggml-[^/]+\.bin$|^[^/]+\.gguf$", re.IGNORECASE)
 # MLX Parakeet and MLX Canary must be checked before the general mlx-community prefix.
 _MLX_PARAKEET_PATTERN = re.compile(r"^mlx-community/parakeet", re.IGNORECASE)
 # Matches community Canary MLX ports: eelcor/canary-1b-v2-mlx, Mediform/canary-1b-v2-mlx-q8, qfuxa/canary-mlx, etc.
@@ -19,6 +24,25 @@ _MLX_CANARY_PATTERN = re.compile(r"^[^/]+/canary[^/]*-mlx", re.IGNORECASE)
 # MLX VibeVoice must be checked before the generic VibeVoice pattern.
 _MLX_VIBEVOICE_PATTERN = re.compile(r"^mlx-community/vibevoice-asr", re.IGNORECASE)
 _MLX_PATTERN = re.compile(r"^mlx-community/", re.IGNORECASE)
+
+
+def _looks_like_whispercpp(name: str) -> bool:
+    """Return True iff *name* resolves to a GGML file safe to route to the sidecar.
+
+    Normalises separator (``\\`` → ``/``), rejects traversal segments, and
+    only matches the final path component against the GGML basename regex.
+    """
+    # Normalise Windows-style path separators so a Windows-hosted cache path
+    # like ``models\\ggml-tiny.bin`` routes the same as its POSIX twin.
+    normalised = name.replace("\\", "/")
+    parts = normalised.split("/")
+    # Path traversal: ``..`` segments anywhere in the name are suspicious —
+    # the sidecar's ``/models/`` root is read-only but a traversal still
+    # lets a malicious caller reference unintended files inside the container.
+    if any(p == ".." for p in parts):
+        return False
+    basename = parts[-1] if parts else normalised
+    return bool(_WHISPERCPP_BASENAME_RE.match(basename))
 
 
 def detect_backend_type(model_name: str) -> str:
@@ -33,7 +57,7 @@ def detect_backend_type(model_name: str) -> str:
         return "mlx_vibevoice"
     if _VIBEVOICE_ASR_PATTERN.match(name):
         return "vibevoice_asr"
-    if _WHISPERCPP_PATTERN.search(name):
+    if _looks_like_whispercpp(name):
         return "whispercpp"
     if _MLX_PARAKEET_PATTERN.match(name):
         return "mlx_parakeet"

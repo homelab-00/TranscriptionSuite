@@ -49,8 +49,13 @@ def supports_english_translation(model_name: str | None) -> bool:
     if "turbo" in name:
         return False
 
-    # English-only Whisper variants.
-    if name.endswith(".en") or "/whisper-" in name and name.endswith(".en"):
+    # English-only Whisper variants. The original check only matched names
+    # ending literally with ".en" (e.g. OpenAI HF IDs like
+    # ``openai/whisper-base.en``), but GGML filenames use the ``.en.bin`` /
+    # ``.en.gguf`` convention (``ggml-base.en.bin``) which ends with the
+    # extension, not with ``.en``. Match ``.en`` at end-of-string OR followed
+    # by a ``.`` so both forms are recognised.
+    if re.search(r"\.en($|\.)", name):
         return False
 
     return True

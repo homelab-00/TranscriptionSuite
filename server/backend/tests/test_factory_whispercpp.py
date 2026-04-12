@@ -64,3 +64,55 @@ def test_empty_string_falls_through_to_whisper():
 
 def test_whitespace_only_falls_through_to_whisper():
     assert detect_backend_type("   ") == "whisper"
+
+
+# ---------------------------------------------------------------------------
+# Regex-anchor regression guards (iteration-4 review finding)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # Basenames that contain ``ggml-*.bin`` but do not *start* with it must
+        # not route to whisper.cpp. The previous ``search()``-based regex would
+        # happily match these.
+        "notggml-x.bin",
+        "fooggml-tiny.bin",
+        "myorg/repo/weights.with.ggml-inside.bin",
+        # Traversal segments must be rejected regardless of the basename.
+        "../ggml-tiny.bin",
+        "subdir/../ggml-tiny.bin",
+        "models/../../ggml-evil.bin",
+        # ``.gguf`` in a middle path component, not a basename, must not match.
+        "subdir/repo.gguf/weights.bin",
+    ],
+)
+def test_non_matching_names_do_not_route_to_whispercpp(name: str):
+    assert is_whispercpp_model(name) is False, (
+        f"Expected {name!r} to NOT route to whispercpp — search-based matching "
+        f"would let this through"
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # Bare basename — the happy path.
+        "ggml-tiny.bin",
+        # Absolute POSIX path.
+        "/models/ggml-small.bin",
+        # Relative POSIX path with subdirs.
+        "subdir/ggml-medium.bin",
+        # Windows-style separator — should route like POSIX.
+        "models\\ggml-tiny.bin",
+        "C:\\Users\\Bob\\ggml-base.bin",
+        # ``.gguf`` basenames.
+        "model.gguf",
+        "/models/whisper.gguf",
+    ],
+)
+def test_legitimate_paths_still_route_to_whispercpp(name: str):
+    assert is_whispercpp_model(name) is True, (
+        f"Expected {name!r} to route to whispercpp — anchoring must not be over-tightened"
+    )

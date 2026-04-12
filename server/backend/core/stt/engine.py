@@ -47,6 +47,25 @@ SAMPLE_RATE = 16000
 logger = logging.getLogger(__name__)
 
 
+def _model_not_loaded_message(model_name: str | None) -> str:
+    """Return the actionable error surfaced when no backend is attached.
+
+    The previous bare ``"STT model is not loaded"`` left users guessing
+    whether the download was still in progress, whether the sidecar crashed,
+    or whether they needed to click a button. This message names the
+    configured model and points at the concrete recovery steps.
+    """
+    model_repr = repr(model_name) if model_name else "<unset>"
+    return (
+        f"STT model is not loaded (configured: {model_repr}). "
+        "The server has not finished attaching the transcription backend. "
+        "If the model is still downloading, wait for it to finish and retry. "
+        "Otherwise open Settings → Models, confirm a model is selected and "
+        "downloaded, and click 'Reload Model'. For whisper.cpp (Vulkan) "
+        "models, also confirm the whisper-server sidecar container is running."
+    )
+
+
 @dataclass
 class TranscriptionResult:
     """Result of a transcription operation."""
@@ -675,7 +694,7 @@ class AudioToTextRecorder:
                 start_time = time.time()
 
                 if self._backend is None:
-                    raise RuntimeError("STT model is not loaded")
+                    raise RuntimeError(_model_not_loaded_message(self.model_name))
 
                 # Transcribe via backend
                 backend_segments, backend_info = self._backend.transcribe(
@@ -882,7 +901,7 @@ class AudioToTextRecorder:
                 start_time = time.time()
 
                 if self._backend is None:
-                    raise RuntimeError("STT model is not loaded")
+                    raise RuntimeError(_model_not_loaded_message(self.model_name))
 
                 effective_target = (
                     translation_target_language

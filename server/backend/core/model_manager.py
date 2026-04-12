@@ -399,14 +399,47 @@ class ModelManager:
         self._vibevoice_asr_feature_error = None
 
     def _initialize_whispercpp_feature_status(self) -> None:
-        """Initialize whisper.cpp sidecar feature availability."""
-        server_url = os.environ.get("WHISPERCPP_SERVER_URL", "").strip()
-        self._whispercpp_feature_available = bool(server_url)
-        self._whispercpp_server_url = server_url or None
-        if server_url:
-            logger.info("whisper.cpp sidecar configured at %s", server_url)
+        """Initialize whisper.cpp sidecar feature availability.
+
+        Source of truth is ``WhisperCppBackend._resolve_server_url()`` so the
+        UI's feature-status reflects the same URL resolution the backend will
+        actually use at load time. Previously this only consulted the env
+        var, which reported ``available=False`` for users who configured
+        ``whisper_cpp.server_url`` in YAML even though the backend would have
+        succeeded.
+
+        TODO(GH-62-followup): this is a one-shot check at startup. The
+        sidecar container can crash or restart after initialisation, at
+        which point ``available`` becomes stale. A periodic
+        ``GET /health`` poll would keep the flag honest but adds ambient
+        latency on every status query; punting until the UI is ready to
+        render a "degraded" state.
+        """
+        from server.core.stt.backends.whispercpp_backend import _resolve_server_url
+
+        resolved_url = _resolve_server_url()
+        # ``_resolve_server_url`` falls back to the built-in default even when
+        # nothing is configured. Only treat an *explicit* configuration (env
+        # or config) as "available" — otherwise every user would see the
+        # feature light on whether or not a sidecar exists.
+        env_configured = bool(os.environ.get("WHISPERCPP_SERVER_URL", "").strip())
+        config_configured = False
+        try:
+            from server.config import get_config
+
+            cfg = get_config()
+            config_configured = bool((cfg.get("whisper_cpp", "server_url") or "").strip())
+        except Exception as _exc:
+            logger.debug("Could not read whisper_cpp.server_url from config: %s", repr(_exc))
+        self._whispercpp_feature_available = env_configured or config_configured
+        self._whispercpp_server_url = resolved_url if self._whispercpp_feature_available else None
+        if self._whispercpp_feature_available:
+            logger.info("whisper.cpp sidecar configured at %s", resolved_url)
         else:
-            logger.debug("whisper.cpp sidecar not configured (WHISPERCPP_SERVER_URL empty)")
+            logger.debug(
+                "whisper.cpp sidecar not configured "
+                "(set WHISPERCPP_SERVER_URL or whisper_cpp.server_url in config)"
+            )
 
     def get_whispercpp_feature_status(self) -> dict[str, Any]:
         """Return whisper.cpp sidecar feature status."""

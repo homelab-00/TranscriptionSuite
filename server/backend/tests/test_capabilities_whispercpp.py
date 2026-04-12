@@ -13,28 +13,57 @@ from server.core.stt.capabilities import (
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# GGML models: which support translation and which don't.
+#
+# The previous version of this file used a parametrized class with an
+# ``if ".en" not in model_name and "turbo" not in model_name:`` guard inside
+# the test body — for .en / turbo cases the test asserted *nothing*, which
+# silently passed any mutation affecting those models. Explicit positive and
+# negative cases below close that gap.
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.parametrize(
     "model_name",
     [
         "ggml-large-v3.bin",
-        "ggml-base.en.bin",
         "large-v3.gguf",
         "/models/ggml-medium.bin",
     ],
 )
-class TestGgmlTranslationSupport:
-    def test_supports_translation(self, model_name: str):
-        # GGML names without ".en" or "turbo" in them should support translation
-        if ".en" not in model_name and "turbo" not in model_name:
-            assert supports_english_translation(model_name) is True
+def test_ggml_multilingual_supports_translation(model_name: str):
+    assert supports_english_translation(model_name) is True
 
-    def test_validate_allows_english_target(self, model_name: str):
-        result = validate_translation_request(
-            model_name=model_name,
-            task="translate",
-            translation_target_language="en",
-        )
-        assert result == "en"
+
+@pytest.mark.parametrize(
+    "model_name",
+    [
+        "ggml-base.en.bin",  # English-only variant
+        "ggml-large-v3-turbo.bin",  # turbo variant
+        "ggml-large-v3-turbo-q8_0.bin",  # turbo quantised
+        "ggml-tiny.en.bin",
+    ],
+)
+def test_ggml_en_or_turbo_does_not_support_translation(model_name: str):
+    assert supports_english_translation(model_name) is False
+
+
+@pytest.mark.parametrize(
+    "model_name",
+    [
+        "ggml-large-v3.bin",
+        "large-v3.gguf",
+        "/models/ggml-medium.bin",
+    ],
+)
+def test_validate_allows_english_target_for_multilingual(model_name: str):
+    result = validate_translation_request(
+        model_name=model_name,
+        task="translate",
+        translation_target_language="en",
+    )
+    assert result == "en"
 
 
 # ---------------------------------------------------------------------------
@@ -49,15 +78,6 @@ def test_ggml_rejects_non_english_target():
             task="translate",
             translation_target_language="fr",
         )
-
-
-# ---------------------------------------------------------------------------
-# GGML turbo model — no translation (matches "turbo" guard)
-# ---------------------------------------------------------------------------
-
-
-def test_ggml_turbo_no_translation():
-    assert supports_english_translation("ggml-large-v3-turbo.bin") is False
 
 
 # ---------------------------------------------------------------------------
