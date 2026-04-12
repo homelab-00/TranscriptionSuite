@@ -551,3 +551,244 @@ class TestPostPersistGuarantees:
         assert result["num_speakers"] == 2
         repo_mocks.save_result.assert_called_once()
         repo_mocks.mark_delivered.assert_not_called()
+
+
+# ── Integrated-diarization fallback narrowing ───────────────────────────────
+
+
+def _install_fake_engine_module(monkeypatch) -> None:
+    """Inject a stub `server.core.stt.engine` module so the inline
+    `from server.core.stt.engine import TranscriptionResult` in the integrated
+    diarization path doesn't pull in torch/webrtcvad."""
+    import sys
+    import types as _types
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class _FakeTranscriptionResult:
+        text: str = ""
+        segments: list = field(default_factory=list)
+        words: list = field(default_factory=list)
+        language: str | None = None
+        language_probability: float = 0.0
+        duration: float = 0.0
+        num_speakers: int = 0
+
+        def to_dict(self) -> dict:
+            return {
+                "text": self.text,
+                "segments": self.segments,
+                "words": self.words,
+                "language": self.language,
+                "language_probability": self.language_probability,
+                "duration": self.duration,
+                "num_speakers": self.num_speakers,
+            }
+
+    fake_engine_mod = _types.ModuleType("server.core.stt.engine")
+    fake_engine_mod.TranscriptionResult = _FakeTranscriptionResult  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "server.core.stt.engine", fake_engine_mod)
+
+
+def _run_integrated_diarization_with_raise(
+    monkeypatch, exc_to_raise: Exception, *, fallback_result=None
+):
+    """Exercise the /audio integrated-diarization path with a backend whose
+    `transcribe_with_diarization` raises `exc_to_raise`.
+
+    If `fallback_result` is provided, install it on `engine.transcribe_file`
+    so the fallback-to-standard path (when not narrowed) completes successfully
+    and returns. Otherwise, `transcribe_file` is a MagicMock that raises to
+    surface any accidental fallthrough.
+    """
+    _install_fake_engine_module(monkeypatch)
+
+    from server.core.stt.backends.base import STTBackend
+
+    class _RaisingDiarBackend:
+        preferred_input_sample_rate_hz = 16000
+        backend_name = "fake-whisperx"
+
+        def transcribe_with_diarization(self, audio_data, *, audio_sample_rate, **kwargs):
+            raise exc_to_raise
+
+    assert (
+        _RaisingDiarBackend.transcribe_with_diarization
+        is not STTBackend.transcribe_with_diarization
+    )
+
+    from server.core import audio_utils
+
+    monkeypatch.setattr(audio_utils, "load_audio", lambda *a, **kw: ([0.0] * 16000, 16000))
+
+    engine_kwargs: dict = {
+        "_backend": _RaisingDiarBackend(),
+        "beam_size": 5,
+        "initial_prompt": None,
+        "suppress_tokens": None,
+        "faster_whisper_vad_filter": False,
+    }
+    if fallback_result is not None:
+        engine_kwargs["transcribe_file"] = lambda *a, **kw: fallback_result
+    else:
+
+        def _should_not_be_called(*_a, **_kw):
+            raise AssertionError(
+                "engine.transcribe_file must NOT be called — cancellation/"
+                "validation errors should propagate instead of falling through"
+            )
+
+        engine_kwargs["transcribe_file"] = _should_not_be_called
+
+    engine = SimpleNamespace(**engine_kwargs)
+    req = _request_with_engine(engine)
+
+    return asyncio.run(
+        transcription.transcribe_audio(
+            request=req,
+            file=_UploadStub(),
+            language=None,
+            translation_enabled=False,
+            translation_target_language=None,
+            word_timestamps=None,
+            diarization=True,
+            expected_speakers=None,
+            parallel_diarization=None,
+            multitrack=False,
+        )
+    )
+
+
+class TestIntegratedDiarizationFallback:
+    """The fallback `except Exception:` in the integrated diarization path must
+    NOT swallow cancellations or input-validation errors — those propagate to
+    the outer exception handlers (HTTP 499 / HTTP 400 + mark_failed).
+
+    Other failures (CUDA OOM, missing optional deps, etc.) still trigger the
+    graceful "fall back to standard transcription" degradation."""
+
+    def test_cancellation_in_integrated_path_propagates_to_499(self, repo_mocks, monkeypatch):
+        with pytest.raises(HTTPException) as exc:
+            _run_integrated_diarization_with_raise(monkeypatch, TranscriptionCancelledError())
+
+        assert exc.value.status_code == 499
+        repo_mocks.mark_failed.assert_called_once_with("job-abc", "Transcription cancelled by user")
+
+    def test_value_error_in_integrated_path_propagates_to_400(self, repo_mocks, monkeypatch):
+        with pytest.raises(HTTPException) as exc:
+            _run_integrated_diarization_with_raise(monkeypatch, ValueError("corrupted audio"))
+
+        assert exc.value.status_code == 400
+        repo_mocks.mark_failed.assert_called_once_with("job-abc", "corrupted audio")
+
+    def test_generic_runtime_error_still_falls_through(self, repo_mocks, monkeypatch):
+        """Preserve the existing degradation: a CUDA OOM or other non-cancel,
+        non-validation error should fall back to standard transcription so the
+        user still gets a (non-diarized) transcript."""
+        fallback = _ResultStub(text="standard-path transcript", num_speakers=0)
+
+        result = _run_integrated_diarization_with_raise(
+            monkeypatch,
+            RuntimeError("CUDA OOM"),
+            fallback_result=fallback,
+        )
+
+        # Client got the non-diarized result via the fallback path.
+        assert result["text"] == "standard-path transcript"
+        # The standard (non-diarized) flow persisted + delivered normally.
+        assert repo_mocks.order == ["create_job", "save_result", "mark_delivered"]
+
+    def test_import_route_cancellation_propagates_to_outer_handler(self, monkeypatch):
+        """Symmetric guard for /import: a TranscriptionCancelledError raised by
+        backend.transcribe_with_diarization must reach _run_file_import's outer
+        `except TranscriptionCancelledError:` handler — NOT be swallowed by the
+        integrated-block's fallback `except Exception:` and silently retried via
+        the standard path."""
+        _install_fake_engine_module(monkeypatch)
+
+        from server.core.stt.backends.base import STTBackend
+
+        class _CancellingDiarBackend:
+            preferred_input_sample_rate_hz = 16000
+            backend_name = "fake-whisperx"
+
+            def transcribe_with_diarization(self, audio_data, *, audio_sample_rate, **kwargs):
+                raise TranscriptionCancelledError()
+
+        assert (
+            _CancellingDiarBackend.transcribe_with_diarization
+            is not STTBackend.transcribe_with_diarization
+        )
+
+        from server.core import audio_utils
+
+        monkeypatch.setattr(audio_utils, "load_audio", lambda *a, **kw: ([0.0] * 16000, 16000))
+
+        # Engine has the integrated backend plus a transcribe_file that MUST NOT
+        # be called — if the cancellation were swallowed, the standard path
+        # would invoke transcribe_file, which this test asserts against.
+        def _should_not_fallthrough(*_a, **_kw):
+            raise AssertionError(
+                "engine.transcribe_file must NOT run — cancellation should "
+                "propagate to _run_file_import's outer handler instead"
+            )
+
+        engine = SimpleNamespace(
+            _backend=_CancellingDiarBackend(),
+            beam_size=5,
+            initial_prompt=None,
+            suppress_tokens=None,
+            faster_whisper_vad_filter=False,
+            transcribe_file=_should_not_fallthrough,
+        )
+
+        # Job tracker spy: _run_file_import's outer cancellation handler calls
+        # end_job with result={"job_id": ..., "error": "Transcription cancelled by user"}.
+        end_job_calls: list[dict] = []
+
+        class _FakeTracker:
+            def update_progress(self, current, total):
+                pass
+
+            def is_cancelled(self):
+                return False  # the check via callback is irrelevant; backend raises directly
+
+            def end_job(self, job_id, result=None):
+                end_job_calls.append({"job_id": job_id, "result": result})
+
+        model_manager = SimpleNamespace(
+            transcription_engine=engine,
+            job_tracker=_FakeTracker(),
+            get_diarization_feature_status=lambda: {"reason": "ready"},
+        )
+
+        # Patch diarization config fallback (not used on this path, but safe).
+        from pathlib import Path
+
+        # _run_file_import requires a tmp_path but never reads it in this flow
+        # (the backend raises before any file access); using /tmp/foo is fine
+        # because the finally block's unlink is wrapped in try/except.
+        transcription._run_file_import(
+            model_manager=model_manager,
+            tmp_path=Path("/tmp/nonexistent-for-test.wav"),
+            filename="test.wav",
+            language=None,
+            translation_enabled=False,
+            translation_target_language=None,
+            enable_diarization=True,
+            enable_word_timestamps=True,
+            expected_speakers=None,
+            parallel_diarization=None,
+            use_parallel_default=False,
+            multitrack=False,
+            job_id="import-job-abc",
+            event_loop=None,
+        )
+
+        # The outer cancellation handler was reached — end_job was called with
+        # the cancel error message, not the generic "str(e)" from the general
+        # Exception handler.
+        assert len(end_job_calls) == 1
+        call = end_job_calls[0]
+        assert call["job_id"] == "import-job-abc"
+        assert call["result"]["error"] == "Transcription cancelled by user"

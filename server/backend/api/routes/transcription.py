@@ -333,6 +333,16 @@ async def transcribe_audio(
 
                 return result_dict
 
+            except TranscriptionCancelledError:
+                # User cancellation must not be silently converted to "fallback to
+                # standard transcription" — propagate to the outer handler so the
+                # 499 response + mark_failed fire as the durability spec intends.
+                raise
+            except ValueError:
+                # Input-validation failures from the integrated path should surface
+                # as HTTP 400 via the outer handler — not silently retried via the
+                # non-diarized standard path.
+                raise
             except Exception:
                 logger.warning(
                     "Integrated backend diarization failed (returning transcript without speakers)",
@@ -809,6 +819,11 @@ def _run_file_import(
                     diar_result.num_speakers,
                 )
 
+            except TranscriptionCancelledError:
+                # User cancellation must propagate — otherwise we'd silently fall
+                # through to the standard path and waste GPU time re-transcribing
+                # a file the user already cancelled.
+                raise
             except ValueError as e:
                 logger.error("File import: diarization requires HuggingFace token: %s", e)
                 diarization_outcome["reason"] = model_manager.get_diarization_feature_status().get(
