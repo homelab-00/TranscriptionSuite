@@ -581,6 +581,130 @@ describe('UpdateInstaller cache hook integration (M6)', () => {
     expect(updater.quitAndInstall).not.toHaveBeenCalled();
   });
 
+  // ─── M7: platform-strategy short-circuit ────────────────────────────
+
+  describe('M7: platformStrategy', () => {
+    it('manual-download strategy short-circuits before checkForUpdates', async () => {
+      const platformStrategy = vi.fn(async () => ({
+        strategy: 'manual-download' as const,
+        reason: 'macos-unsigned',
+        version: '1.3.3',
+        downloadUrl: 'https://github.com/homelab-00/TranscriptionSuite/releases/tag/v1.3.3',
+      }));
+      const m7Inst = new UpdateInstaller(silentLogger(), updater, { platformStrategy });
+      const history = statusHistory(m7Inst);
+
+      const result = await m7Inst.startDownload();
+
+      expect(platformStrategy).toHaveBeenCalledOnce();
+      expect(updater.checkForUpdates).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        ok: false,
+        reason: 'manual-download-required',
+        downloadUrl: 'https://github.com/homelab-00/TranscriptionSuite/releases/tag/v1.3.3',
+      });
+      expect(m7Inst.getStatus()).toEqual({
+        state: 'manual-download-required',
+        version: '1.3.3',
+        downloadUrl: 'https://github.com/homelab-00/TranscriptionSuite/releases/tag/v1.3.3',
+        reason: 'macos-unsigned',
+      });
+      // No 'checking' transition — went straight from idle → manual-download-required
+      expect(history.map((s) => s.state)).toEqual(['manual-download-required']);
+    });
+
+    it('electron-updater strategy preserves M1 behavior (checkForUpdates IS invoked)', async () => {
+      const platformStrategy = vi.fn(async () => ({
+        strategy: 'electron-updater' as const,
+      }));
+      const m7Inst = new UpdateInstaller(silentLogger(), updater, { platformStrategy });
+
+      updater.__checkResult = null; // no update available
+      const result = await m7Inst.startDownload();
+
+      expect(platformStrategy).toHaveBeenCalledOnce();
+      expect(updater.checkForUpdates).toHaveBeenCalledOnce();
+      expect(result).toEqual({ ok: false, reason: 'no-update-available' });
+    });
+
+    it('absent platformStrategy preserves M1 behavior (no resolver call)', async () => {
+      // Default constructor (no platformStrategy dep) — should never short-circuit.
+      const m1Inst = new UpdateInstaller(silentLogger(), updater);
+      updater.__checkResult = null;
+      await m1Inst.startDownload();
+      expect(updater.checkForUpdates).toHaveBeenCalledOnce();
+    });
+
+    it('manual-download with null version uses the URL as-is', async () => {
+      const platformStrategy = vi.fn(async () => ({
+        strategy: 'manual-download' as const,
+        reason: 'appimage-missing',
+        version: null,
+        downloadUrl: 'https://github.com/homelab-00/TranscriptionSuite/releases/latest',
+      }));
+      const m7Inst = new UpdateInstaller(silentLogger(), updater, { platformStrategy });
+
+      const result = await m7Inst.startDownload();
+
+      expect(result).toEqual({
+        ok: false,
+        reason: 'manual-download-required',
+        downloadUrl: 'https://github.com/homelab-00/TranscriptionSuite/releases/latest',
+      });
+      const status = m7Inst.getStatus();
+      expect(status.state).toBe('manual-download-required');
+      if (status.state === 'manual-download-required') {
+        expect(status.version).toBeNull();
+        expect(status.reason).toBe('appimage-missing');
+      }
+    });
+
+    it('platformStrategy throwing falls open to electron-updater (no stuck UI)', async () => {
+      const platformStrategy = vi.fn(async () => {
+        throw new Error('fs blew up');
+      });
+      const m7Inst = new UpdateInstaller(silentLogger(), updater, { platformStrategy });
+
+      updater.__checkResult = null;
+      const result = await m7Inst.startDownload();
+
+      expect(updater.checkForUpdates).toHaveBeenCalledOnce();
+      expect(result).toEqual({ ok: false, reason: 'no-update-available' });
+    });
+
+    it('cancelDownload from manual-download-required transitions to cancelled', async () => {
+      const platformStrategy = vi.fn(async () => ({
+        strategy: 'manual-download' as const,
+        reason: 'macos-unsigned',
+        version: '1.3.3',
+        downloadUrl: 'https://github.com/homelab-00/TranscriptionSuite/releases/tag/v1.3.3',
+      }));
+      const m7Inst = new UpdateInstaller(silentLogger(), updater, { platformStrategy });
+      await m7Inst.startDownload();
+      expect(m7Inst.getStatus().state).toBe('manual-download-required');
+
+      const result = m7Inst.cancelDownload();
+
+      expect(result).toEqual({ ok: true });
+      expect(m7Inst.getStatus()).toEqual({ state: 'cancelled' });
+    });
+
+    it('manual-download omits downloadUrl → status carries empty string fallback', async () => {
+      const platformStrategy = vi.fn(async () => ({
+        strategy: 'manual-download' as const,
+        reason: 'unsupported-platform',
+      }));
+      const m7Inst = new UpdateInstaller(silentLogger(), updater, { platformStrategy });
+
+      const result = await m7Inst.startDownload();
+      expect(result).toEqual({
+        ok: false,
+        reason: 'manual-download-required',
+        downloadUrl: '',
+      });
+    });
+  });
+
   it('install rejects with no-version when currentVersion was never captured', async () => {
     // Force the installer into a 'downloaded' state without going through
     // startDownload (which is what normally populates currentVersion).

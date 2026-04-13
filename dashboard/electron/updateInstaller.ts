@@ -34,7 +34,28 @@ import type { InstallerStatus } from './updateManager.js';
 
 export type StartDownloadResult =
   | { ok: true; reason?: 'already-downloading' }
-  | { ok: false; reason: 'no-update-available' | 'error'; message?: string };
+  | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
+  | { ok: false; reason: 'manual-download-required'; downloadUrl: string };
+
+/**
+ * Platform-strategy resolver wired in M7. Called BEFORE
+ * `autoUpdater.checkForUpdates()` so the manual-download branch never
+ * triggers Squirrel/Mac's misleading error event. Returns:
+ *   • strategy 'electron-updater' → continue M1 path
+ *   • strategy 'manual-download'  → short-circuit; transition to
+ *     `manual-download-required` carrying the GitHub release URL the
+ *     banner exposes via `[Download from GitHub]`.
+ *
+ * `version` is whatever updateManager's poll already knows; null is
+ * tolerated and the resolver should fall back to `/releases/latest` for
+ * the URL.
+ */
+export type PlatformStrategyFn = () => Promise<{
+  strategy: 'electron-updater' | 'manual-download';
+  reason?: string;
+  downloadUrl?: string;
+  version?: string | null;
+}>;
 
 /**
  * Verifier callback invoked after `update-downloaded`. Returns `ok: true`
@@ -106,6 +127,7 @@ export interface UpdateInstallerDeps {
   updater?: AutoUpdaterLike;
   verifier?: VerifierFn;
   cacheHook?: CacheHookFn;
+  platformStrategy?: PlatformStrategyFn;
 }
 
 export class UpdateInstaller {
@@ -114,6 +136,7 @@ export class UpdateInstaller {
   private readonly logger: UpdateInstallerLogger;
   private readonly verifier: VerifierFn | null;
   private readonly cacheHook: CacheHookFn | null;
+  private readonly platformStrategy: PlatformStrategyFn | null;
   private status: InstallerStatus = { state: 'idle' };
   private cancellationToken: CancellationToken | null = null;
   private currentVersion: string | null = null;
@@ -123,12 +146,17 @@ export class UpdateInstaller {
   constructor(
     logger: UpdateInstallerLogger = defaultLogger,
     updater: AutoUpdaterLike = autoUpdater as unknown as AutoUpdaterLike,
-    deps: { verifier?: VerifierFn; cacheHook?: CacheHookFn } = {},
+    deps: {
+      verifier?: VerifierFn;
+      cacheHook?: CacheHookFn;
+      platformStrategy?: PlatformStrategyFn;
+    } = {},
   ) {
     this.logger = logger;
     this.updater = updater;
     this.verifier = deps.verifier ?? null;
     this.cacheHook = deps.cacheHook ?? null;
+    this.platformStrategy = deps.platformStrategy ?? null;
     this.configureUpdater();
     this.bindEvents();
   }
@@ -155,6 +183,27 @@ export class UpdateInstaller {
   async startDownload(): Promise<StartDownloadResult> {
     if (this.status.state === 'downloading') {
       return { ok: true, reason: 'already-downloading' };
+    }
+
+    // M7: resolve the install strategy BEFORE touching autoUpdater. macOS
+    // is always unsigned in v1 and Squirrel will emit a misleading error
+    // event during checkForUpdates(), permanently poisoning the installer
+    // status. Re-resolved per call so a user who chmods their AppImage
+    // between attempts gets the right path on the next try.
+    if (this.platformStrategy) {
+      const strategyResult = await this.resolveStrategySafely();
+      if (strategyResult.strategy === 'manual-download') {
+        const downloadUrl = strategyResult.downloadUrl ?? '';
+        const reason = strategyResult.reason ?? 'unsupported-platform';
+        const version = strategyResult.version ?? null;
+        this.setStatus({
+          state: 'manual-download-required',
+          version,
+          downloadUrl,
+          reason,
+        });
+        return { ok: false, reason: 'manual-download-required', downloadUrl };
+      }
     }
 
     this.setStatus({ state: 'checking' });
@@ -259,7 +308,11 @@ export class UpdateInstaller {
    * idle or already in a terminal state.
    */
   cancelDownload(): { ok: boolean } {
-    if (this.status.state !== 'downloading' && this.status.state !== 'verifying') {
+    if (
+      this.status.state !== 'downloading' &&
+      this.status.state !== 'verifying' &&
+      this.status.state !== 'manual-download-required'
+    ) {
       return { ok: true };
     }
     if (this.cancellationToken && !this.cancellationToken.cancelled) {
@@ -372,6 +425,27 @@ export class UpdateInstaller {
   private setStatus(next: InstallerStatus): void {
     this.status = next;
     this.emitter.emit('status', next);
+  }
+
+  /**
+   * Wrap platformStrategy() so a thrown resolver never crashes the install
+   * path. Fail-open to electron-updater on resolver error: a stuck UI is
+   * worse than a misleading autoUpdater error the user can retry past.
+   */
+  private async resolveStrategySafely(): Promise<{
+    strategy: 'electron-updater' | 'manual-download';
+    reason?: string;
+    downloadUrl?: string;
+    version?: string | null;
+  }> {
+    if (!this.platformStrategy) return { strategy: 'electron-updater' };
+    try {
+      return await this.platformStrategy();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn('platformStrategy threw, falling open to electron-updater:', message);
+      return { strategy: 'electron-updater' };
+    }
   }
 
   /**

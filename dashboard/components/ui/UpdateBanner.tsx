@@ -1,12 +1,15 @@
 /**
  * UpdateBanner — persistent banner surfacing in-app Dashboard updates.
  *
- * Four visual states driven by InstallerStatus + UpdateStatus:
- *   • available      — "v{x} available — [Download] [Later]"
- *   • downloading    — "Downloading v{x} — {n}%"  (progress bar, no buttons)
- *   • ready          — "v{x} ready — [Quit & Install] [Later]"
- *   • ready_blocked  — "v{x} ready — will install when jobs finish"
- *                      (install disabled, no Later)
+ * Five visual states driven by InstallerStatus + UpdateStatus:
+ *   • available        — "v{x} available — [Download] [Later]"
+ *   • downloading      — "Downloading v{x} — {n}%"  (progress bar, no buttons)
+ *   • ready            — "v{x} ready — [Quit & Install] [Later]"
+ *   • ready_blocked    — "v{x} ready — will install when jobs finish"
+ *                        (install disabled, no Later)
+ *   • manual-download  — "v{x} available — auto-update unavailable on this
+ *                        platform [Download from GitHub] [Later]"
+ *                        (M7: read-only AppImage on Linux, macOS until signing)
  *
  * Hidden when no update is available or when the user snoozed the banner
  * within the last 4 hours. Snooze is persisted under
@@ -38,12 +41,42 @@ const SNOOZE_MS = 4 * 60 * 60 * 1000;
 const STATUS_POLL_MS = 60_000;
 const NOW_TICK_MS = 30_000;
 
-export type BannerVisualState = 'hidden' | 'available' | 'downloading' | 'ready' | 'ready_blocked';
+export type BannerVisualState =
+  | 'hidden'
+  | 'available'
+  | 'downloading'
+  | 'ready'
+  | 'ready_blocked'
+  | 'manual-download';
 
 export interface DerivedBanner {
   state: BannerVisualState;
   version: string | null;
   percent?: number;
+  /** M7: GitHub release URL surfaced via [Download from GitHub] in the manual-download state. */
+  downloadUrl?: string;
+  /** M7: strategy reason ('macos-unsigned', 'appimage-not-writable', etc.) — drives tooltip copy. */
+  reason?: string;
+}
+
+/**
+ * M7: human-readable tooltip for the [Download from GitHub] button per
+ * the strategy reason. Falls back to a generic "Auto-update unavailable"
+ * label when the reason is unknown.
+ */
+export function manualDownloadTooltip(reason: string | undefined): string {
+  switch (reason) {
+    case 'macos-unsigned':
+      return 'macOS auto-update unavailable until code signing is set up';
+    case 'appimage-not-writable':
+      return 'AppImage location is read-only — install requires writing to disk';
+    case 'appimage-missing':
+      return 'Auto-update requires the AppImage build of TranscriptionSuite';
+    case 'unsupported-platform':
+      return 'Platform not supported by auto-update';
+    default:
+      return 'Auto-update unavailable on this platform';
+  }
 }
 
 /**
@@ -82,6 +115,17 @@ export function deriveBannerState(
       return {
         state: isBusy ? 'ready_blocked' : 'ready',
         version: installer.version,
+      };
+    case 'manual-download-required':
+      // M7: snoozed banner stays hidden even with an installer signal —
+      // a snoozed manual-download is functionally identical to a snoozed
+      // available, and the user explicitly chose Later.
+      if (snoozed) return { state: 'hidden', version: null };
+      return {
+        state: 'manual-download',
+        version: installer.version,
+        downloadUrl: installer.downloadUrl,
+        reason: installer.reason,
       };
     case 'idle':
     case 'cancelled':
@@ -261,6 +305,21 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
     }
   }, []);
 
+  // M7: open the GitHub release page for the manual-download fallback.
+  // The URL was supplied by the main-process strategy resolver; we just
+  // pass it through. Failures are logged but not toasted — the user can
+  // retry the click and there is no recovery action beyond opening the
+  // page manually.
+  const handleOpenReleasePage = useCallback(async (url: string) => {
+    const api = window.electronAPI?.updates;
+    if (!api || !url) return;
+    try {
+      await api.openReleasePage(url);
+    } catch (err) {
+      console.error('UpdateBanner: openReleasePage invocation failed', err);
+    }
+  }, []);
+
   const derived = deriveBannerState(installer, updateStatus, isBusy, now, snoozedUntil);
 
   // Reset modal-open flag when state leaves `available`. Without this, the
@@ -369,6 +428,38 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
         </div>
       );
       break;
+
+    case 'manual-download': {
+      const versionLabel = derived.version ?? 'latest';
+      const tooltip = manualDownloadTooltip(derived.reason);
+      const url = derived.downloadUrl ?? '';
+      bannerContent = (
+        <div
+          role="status"
+          aria-label="Update available, manual download required"
+          className={`flex items-center justify-between gap-3 border ${accent} px-4 py-2 text-sm`}
+        >
+          <span>{versionLabel} available — auto-update unavailable on this platform</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                void handleOpenReleasePage(url);
+              }}
+              title={tooltip}
+              disabled={!url}
+              className={url ? primaryBtn : disabledBtn}
+            >
+              Download from GitHub
+            </button>
+            <button type="button" onClick={handleSnooze} className={laterBtn}>
+              Later
+            </button>
+          </div>
+        </div>
+      );
+      break;
+    }
 
     default:
       bannerContent = null;

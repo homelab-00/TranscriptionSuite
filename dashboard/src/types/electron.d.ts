@@ -186,6 +186,7 @@ interface ElectronAPI {
     download: () => Promise<
       | { ok: true; reason?: 'already-downloading' }
       | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
+      | { ok: false; reason: 'manual-download-required'; downloadUrl: string }
       | {
           ok: false;
           reason: 'incompatible-server';
@@ -203,6 +204,13 @@ interface ElectronAPI {
     getInstallerStatus: () => Promise<InstallerStatus>;
     onInstallerStatus: (callback: (status: InstallerStatus) => void) => () => void;
     onInstallReady: (callback: () => void) => () => void;
+    openReleasePage: (
+      url: string,
+    ) => Promise<
+      | { ok: true }
+      | { ok: false; reason: 'untrusted-url' }
+      | { ok: false; reason: 'open-failed'; message: string }
+    >;
   };
   clipboard: {
     writeText: (text: string) => Promise<void>;
@@ -258,7 +266,13 @@ type InstallerStatus =
   | { state: 'verifying'; version: string }
   | { state: 'downloaded'; version: string }
   | { state: 'cancelled' }
-  | { state: 'error'; message: string };
+  | { state: 'error'; message: string }
+  | {
+      state: 'manual-download-required';
+      version: string | null;
+      downloadUrl: string;
+      reason: string;
+    };
 
 interface Manifest {
   version: string;

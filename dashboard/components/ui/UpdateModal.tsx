@@ -26,6 +26,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   HelpCircle,
+  Info,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -178,6 +179,21 @@ export function UpdateModal({
   const [releaseNotes, setReleaseNotes] = useState<string | null>(null);
   const [serverLatest, setServerLatest] = useState<string | null>(null);
   const [pullInProgress, setPullInProgress] = useState(false);
+  // M7: read the host platform once for the Windows-only SmartScreen
+  // callout. `getPlatform()` is a synchronous bridge call (preload returns
+  // `process.platform` directly). Default 'unknown' so non-electron renders
+  // (jsdom tests without electronAPI mocks, future web embed) don't crash.
+  const [platform, setPlatform] = useState<string>('unknown');
+  useEffect(() => {
+    const getPlatformFn = window.electronAPI?.app?.getPlatform;
+    if (typeof getPlatformFn !== 'function') return;
+    try {
+      const p = getPlatformFn();
+      if (typeof p === 'string' && p) setPlatform(p);
+    } catch {
+      // Best-effort; default 'unknown' suppresses the callout.
+    }
+  }, []);
   // Guard against setState after unmount (modal closed while pullImage is
   // in-flight). Set to false in the cleanup; every async continuation checks
   // before touching state or firing user-visible side effects.
@@ -407,6 +423,27 @@ export function UpdateModal({
               <p className="text-sm text-slate-400 italic">{RELEASE_NOTES_FALLBACK}</p>
             )}
           </div>
+
+          {/* M7: Windows-only SmartScreen heads-up. Unsigned NSIS triggers
+              "Windows protected your PC" on first install; the user must
+              click through "More info" → "Run anyway". Hidden on Linux/
+              macOS where the dialog never appears. */}
+          {platform === 'win32' && (
+            <div
+              role="note"
+              data-testid="smartscreen-callout"
+              aria-label="Windows SmartScreen heads-up"
+              className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${BADGE_CLASSES.slate}`}
+            >
+              <span className="mt-0.5 flex-shrink-0">
+                <Info size={14} />
+              </span>
+              <span className="leading-snug">
+                First-time install on Windows: SmartScreen may show "Windows protected your PC".
+                Click "More info" → "Run anyway" to proceed.
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Footer */}

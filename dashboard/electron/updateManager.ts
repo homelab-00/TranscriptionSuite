@@ -71,7 +71,13 @@ export type InstallerStatus =
   | { state: 'verifying'; version: string }
   | { state: 'downloaded'; version: string }
   | { state: 'cancelled' }
-  | { state: 'error'; message: string };
+  | { state: 'error'; message: string }
+  | {
+      state: 'manual-download-required';
+      version: string | null;
+      downloadUrl: string;
+      reason: string;
+    };
 
 export interface UpdateStatus {
   lastChecked: string; // ISO timestamp

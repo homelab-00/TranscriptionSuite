@@ -37,7 +37,7 @@ vi.mock('sonner', () => ({
 
 // ── Import after mocks ──────────────────────────────────────────────────────
 
-import { UpdateBanner, deriveBannerState } from '../UpdateBanner';
+import { UpdateBanner, deriveBannerState, manualDownloadTooltip } from '../UpdateBanner';
 
 // ── Test electronAPI harness ────────────────────────────────────────────────
 
@@ -55,6 +55,7 @@ interface TestHarness {
   cancelDownload: ReturnType<typeof vi.fn>;
   checkCompatibility: ReturnType<typeof vi.fn>;
   getVersion: ReturnType<typeof vi.fn>;
+  openReleasePage: ReturnType<typeof vi.fn>;
   emit: (status: InstallerStatus) => void;
 }
 
@@ -78,6 +79,7 @@ function buildHarness(
       .fn()
       .mockResolvedValue({ result: 'unknown', reason: 'manifest-fetch-failed' }),
     getVersion: vi.fn().mockResolvedValue('1.3.2'),
+    openReleasePage: vi.fn().mockResolvedValue({ ok: true }),
     emit: (s: InstallerStatus) => {
       h.currentInstaller = s;
       for (const cb of h.listeners) cb(s);
@@ -109,6 +111,7 @@ function installHarness(h: TestHarness): void {
       install: h.install,
       cancelDownload: h.cancelDownload,
       checkCompatibility: h.checkCompatibility,
+      openReleasePage: h.openReleasePage,
     },
     app: { getVersion: h.getVersion },
     docker: { pullImage: vi.fn().mockResolvedValue('') },
@@ -682,5 +685,177 @@ describe('UpdateBanner M6 error toasts', () => {
     });
 
     expect(toastErrorMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── M7: manual-download visual state ────────────────────────────────────────
+
+describe('M7: manual-download state', () => {
+  function manualDownloadStatus(
+    overrides: Partial<{
+      version: string | null;
+      downloadUrl: string;
+      reason: string;
+    }> = {},
+  ): InstallerStatus {
+    // Respect explicit `null` overrides (don't coerce via `??`).
+    const version = 'version' in overrides ? (overrides.version as string | null) : '1.3.3';
+    return {
+      state: 'manual-download-required',
+      version,
+      downloadUrl:
+        overrides.downloadUrl ??
+        'https://github.com/homelab-00/TranscriptionSuite/releases/tag/v1.3.3',
+      reason: overrides.reason ?? 'macos-unsigned',
+    };
+  }
+
+  describe('deriveBannerState', () => {
+    const now = 1_000_000;
+
+    it('maps manual-download-required to manual-download with version + URL + reason', () => {
+      const out = deriveBannerState(manualDownloadStatus(), null, false, now, 0);
+      expect(out).toEqual({
+        state: 'manual-download',
+        version: '1.3.3',
+        downloadUrl: 'https://github.com/homelab-00/TranscriptionSuite/releases/tag/v1.3.3',
+        reason: 'macos-unsigned',
+      });
+    });
+
+    it('hides manual-download when snoozed', () => {
+      const out = deriveBannerState(manualDownloadStatus(), null, false, now, now + 1000);
+      expect(out.state).toBe('hidden');
+    });
+
+    it('preserves null version (latest fallback)', () => {
+      const out = deriveBannerState(
+        manualDownloadStatus({
+          version: null,
+          downloadUrl: 'https://github.com/homelab-00/TranscriptionSuite/releases/latest',
+        }),
+        null,
+        false,
+        now,
+        0,
+      );
+      expect(out.version).toBeNull();
+      expect(out.downloadUrl).toMatch(/releases\/latest$/);
+    });
+  });
+
+  describe('manualDownloadTooltip', () => {
+    it('returns macOS copy for macos-unsigned', () => {
+      expect(manualDownloadTooltip('macos-unsigned')).toMatch(/macOS/);
+    });
+
+    it('returns read-only copy for appimage-not-writable', () => {
+      expect(manualDownloadTooltip('appimage-not-writable')).toMatch(/read-only/);
+    });
+
+    it('returns AppImage-required copy for appimage-missing', () => {
+      expect(manualDownloadTooltip('appimage-missing')).toMatch(/AppImage/);
+    });
+
+    it('returns generic fallback for unknown reason', () => {
+      expect(manualDownloadTooltip('unknown-reason')).toMatch(/unavailable/);
+      expect(manualDownloadTooltip(undefined)).toMatch(/unavailable/);
+    });
+  });
+
+  describe('rendered banner', () => {
+    it('renders the manual-download visual block with version + button', async () => {
+      const h = buildHarness({ installer: manualDownloadStatus() });
+      installHarness(h);
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      // The version label is in the body text
+      expect(screen.getByText(/1\.3\.3 available/)).toBeInTheDocument();
+      // The CTA button
+      const button = screen.getByRole('button', { name: /Download from GitHub/i });
+      expect(button).toBeInTheDocument();
+      expect(button).not.toBeDisabled();
+    });
+
+    it('Download from GitHub click dispatches openReleasePage IPC with the URL', async () => {
+      const h = buildHarness({ installer: manualDownloadStatus() });
+      installHarness(h);
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      const button = screen.getByRole('button', { name: /Download from GitHub/i });
+      await act(async () => {
+        fireEvent.click(button);
+        await Promise.resolve();
+      });
+
+      expect(h.openReleasePage).toHaveBeenCalledWith(
+        'https://github.com/homelab-00/TranscriptionSuite/releases/tag/v1.3.3',
+      );
+    });
+
+    it('button is disabled when downloadUrl is empty', async () => {
+      const h = buildHarness({ installer: manualDownloadStatus({ downloadUrl: '' }) });
+      installHarness(h);
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      const button = screen.getByRole('button', { name: /Download from GitHub/i });
+      expect(button).toBeDisabled();
+    });
+
+    it('renders "latest available" when version is null', async () => {
+      const h = buildHarness({
+        installer: manualDownloadStatus({
+          version: null,
+          downloadUrl: 'https://github.com/homelab-00/TranscriptionSuite/releases/latest',
+        }),
+      });
+      installHarness(h);
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      expect(screen.getByText(/latest available/)).toBeInTheDocument();
+    });
+
+    it('reason-tailored tooltip on the button (macos-unsigned)', async () => {
+      const h = buildHarness({
+        installer: manualDownloadStatus({ reason: 'macos-unsigned' }),
+      });
+      installHarness(h);
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      const button = screen.getByRole('button', { name: /Download from GitHub/i });
+      expect(button.getAttribute('title')).toMatch(/macOS/);
+    });
+
+    it('reason-tailored tooltip (appimage-not-writable)', async () => {
+      const h = buildHarness({
+        installer: manualDownloadStatus({ reason: 'appimage-not-writable' }),
+      });
+      installHarness(h);
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      const button = screen.getByRole('button', { name: /Download from GitHub/i });
+      expect(button.getAttribute('title')).toMatch(/read-only/);
+    });
+
+    it('snooze "Later" hides the banner on next render', async () => {
+      const h = buildHarness({ installer: manualDownloadStatus() });
+      installHarness(h);
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      const laterBtn = screen.getByRole('button', { name: /Later/i });
+      await act(async () => {
+        fireEvent.click(laterBtn);
+        await Promise.resolve();
+      });
+
+      expect(setConfigMock).toHaveBeenCalledWith('updates.bannerSnoozedUntil', expect.any(Number));
+    });
   });
 });

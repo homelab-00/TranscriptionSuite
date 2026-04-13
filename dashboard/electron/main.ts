@@ -36,6 +36,7 @@ import {
   type CachedInstaller,
 } from './installerCache.js';
 import { LaunchWatchdog } from './launchWatchdog.js';
+import { resolveInstallStrategy } from './platformGate.js';
 import {
   registerShortcuts,
   unregisterShortcuts,
@@ -534,7 +535,93 @@ const updateInstaller = new UpdateInstaller(undefined, undefined, {
       );
     }
   },
+  // M7: resolve platform install strategy on every startDownload(). On
+  // macOS (always unsigned in v1) and on Linux when the AppImage lives in
+  // a read-only location, we short-circuit to a manual-download UX so the
+  // banner can route the user to the GitHub release page instead of
+  // letting Squirrel/electron-updater emit a misleading error.
+  platformStrategy: () => resolveStrategyForUpdater(),
 });
+
+const PLATFORM_STRATEGY_TIMEOUT_MS = 5_000;
+
+/**
+ * Wrap `resolveInstallStrategy` with a wall-clock timeout and reusable
+ * version+URL augmentation. A hung NFS mount could otherwise stall
+ * `fsp.access` indefinitely, blocking the IPC handler. On timeout we
+ * fail-CLOSED to manual-download (fail-OPEN to electron-updater would
+ * defeat the very purpose of the gate on macOS).
+ */
+async function resolveStrategyForUpdater(): Promise<{
+  strategy: 'electron-updater' | 'manual-download';
+  reason?: string;
+  version: string | null;
+  downloadUrl: string;
+}> {
+  const latest = updateManager.getStatus()?.app?.latest ?? null;
+  const downloadUrl = buildReleaseUrl(latest);
+  let result: { strategy: 'electron-updater' | 'manual-download'; reason?: string };
+  try {
+    result = await Promise.race([
+      resolveInstallStrategy({
+        platform: process.platform,
+        appImagePath: process.env.APPIMAGE ?? null,
+      }),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error('platformStrategy timed out')),
+          PLATFORM_STRATEGY_TIMEOUT_MS,
+        ),
+      ),
+    ]);
+  } catch (err) {
+    console.warn(
+      '[platformStrategy] resolution failed, falling closed to manual-download:',
+      err instanceof Error ? err.message : String(err),
+    );
+    result = { strategy: 'manual-download', reason: 'unsupported-platform' };
+  }
+  return { strategy: result.strategy, reason: result.reason, version: latest, downloadUrl };
+}
+
+/**
+ * Construct the GitHub release URL the manual-download banner exposes via
+ * `[Download from GitHub]`. When `version` is known, link directly to the
+ * tagged release; otherwise fall back to `/releases/latest`. Strips a
+ * leading `v` from `version` to defend against `vv1.3.3` if `app.latest`
+ * is ever stored with the tag prefix already attached.
+ */
+function buildReleaseUrl(version: string | null): string {
+  const base = 'https://github.com/homelab-00/TranscriptionSuite/releases';
+  if (version && version.length > 0) {
+    const stripped = version.replace(/^v/i, '');
+    return `${base}/tag/v${stripped}`;
+  }
+  return `${base}/latest`;
+}
+
+/**
+ * Strict allow-list for `updates:openReleasePage`. The renderer-supplied
+ * URL is treated as untrusted: must be `https://github.com` (origin),
+ * MUST NOT carry userinfo (defeats `https://x:y@github.com/...` bypass —
+ * `origin` ignores userinfo), MUST NOT contain percent-encoded segments
+ * in the path (defeats `%2e%2e` traversal that survives WHATWG
+ * normalization), and the path must match exactly one of the known
+ * release shapes: `/releases/latest`, `/releases`, or `/releases/tag/v…`.
+ */
+const RELEASE_PATH_RE =
+  /^\/homelab-00\/TranscriptionSuite\/releases(\/(latest|tag\/v[A-Za-z0-9._-]+))?\/?$/;
+function isTrustedReleaseUrl(raw: string): boolean {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.origin !== 'https://github.com') return false;
+    if (parsed.username !== '' || parsed.password !== '') return false;
+    if (parsed.pathname.includes('%')) return false;
+    return RELEASE_PATH_RE.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Resolve the expected SHA-256 for a downloaded installer file. The manifest
@@ -1388,6 +1475,24 @@ ipcMain.handle('updates:checkNow', async () => {
 });
 
 ipcMain.handle('updates:download', async () => {
+  // M7: resolve platform strategy BEFORE the M4 compat check. On macOS
+  // (always manual-download) or a read-only AppImage, compat is moot —
+  // the user is going to GitHub regardless of whether the server matches.
+  // Doing compat first would mask the manual-download UX behind a noisy
+  // `incompatible-server` envelope. Directly delegating to startDownload
+  // here lets the strategy short-circuit fire its `manual-download-required`
+  // status broadcast, then the banner takes over.
+  let strategy;
+  try {
+    strategy = await resolveStrategyForUpdater();
+  } catch (err) {
+    console.warn('[updates:download] strategy resolution failed, proceeding:', err);
+    strategy = { strategy: 'electron-updater' as const };
+  }
+  if (strategy.strategy === 'manual-download') {
+    return updateInstaller.startDownload();
+  }
+
   // Fail-open defense: if the compat guard itself throws (network bug,
   // semver library crash, store corruption), we must still let the user
   // download. Blocking every update on an internal compat-guard error
@@ -1441,6 +1546,25 @@ ipcMain.handle('updates:cancelDownload', async () => {
 
 ipcMain.handle('updates:getInstallerStatus', async () => {
   return updateInstaller.getStatus();
+});
+
+// M7: open the GitHub release page for the manual-download fallback path
+// (read-only AppImage on Linux, macOS without code signing, etc.). The URL
+// is renderer-supplied so we strictly allow-list github.com paths under
+// the project's releases tree before handing anything to shell.openExternal.
+ipcMain.handle('updates:openReleasePage', async (_event, url: string) => {
+  if (typeof url !== 'string' || !isTrustedReleaseUrl(url)) {
+    console.warn('[updates:openReleasePage] rejected untrusted url:', url);
+    return { ok: false as const, reason: 'untrusted-url' as const };
+  }
+  try {
+    await shell.openExternal(url);
+    return { ok: true as const };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[updates:openReleasePage] shell.openExternal failed:', message);
+    return { ok: false as const, reason: 'open-failed' as const, message };
+  }
 });
 
 // ─── Server Connection Probe IPC ────────────────────────────────────────────

@@ -51,7 +51,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-13T08:03:01.538Z
+    generated_at: 2026-04-13T08:47:13.296Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -561,7 +561,6 @@ utility_allowlist:
     - flex-none
     - flex-nowrap
     - flex-row-reverse
-    - flex-shrink-0
     - flex-wrap
     - font-bold
     - font-light
@@ -699,7 +698,6 @@ utility_allowlist:
     - max-h-48
     - max-h-60
     - max-h-72
-    - max-h-80
     - max-w-20
     - max-w-2xl
     - max-w-3xl

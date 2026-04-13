@@ -42,7 +42,13 @@ function buildHarness(): ModalHarness {
 
 function install(
   h: ModalHarness,
-  options: { appVersion?: string; releaseNotes?: string | null; serverLatest?: string | null } = {},
+  options: {
+    appVersion?: string;
+    releaseNotes?: string | null;
+    serverLatest?: string | null;
+    /** M7: when provided, exposes `app.getPlatform()` returning this value. Default omitted (renders as 'unknown'). */
+    platform?: string;
+  } = {},
 ): void {
   const appVersion = options.appVersion ?? '1.3.2';
   const releaseNotes = options.releaseNotes === undefined ? null : options.releaseNotes;
@@ -65,13 +71,17 @@ function install(
     },
   };
   h.getStatus.mockResolvedValue(status);
+  const appBridge: Record<string, unknown> = { openExternal: h.openExternal };
+  if (options.platform !== undefined) {
+    appBridge.getPlatform = () => options.platform as string;
+  }
   (window as unknown as { electronAPI: Record<string, unknown> }).electronAPI = {
     updates: {
       checkCompatibility: h.checkCompatibility,
       getStatus: h.getStatus,
     },
     docker: { pullImage: h.pullImage },
-    app: { openExternal: h.openExternal },
+    app: appBridge,
   };
 }
 
@@ -735,5 +745,62 @@ describe('<UpdateModal>', () => {
     fireEvent.click(backdrop as Element);
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // ── M7: Windows SmartScreen heads-up callout ─────────────────────────────
+
+  describe('M7: SmartScreen callout', () => {
+    function renderCompatible(platform?: string) {
+      const h = buildHarness();
+      h.checkCompatibility.mockResolvedValue({
+        result: 'compatible',
+        manifest: {
+          version: '1.3.3',
+          compatibleServerRange: '>=1.0.0',
+          sha256: {},
+          releaseType: 'stable',
+        },
+        serverVersion: '1.4.2',
+      });
+      install(h, { platform });
+      render(
+        <UpdateModal
+          isOpen
+          targetVersion="1.3.3"
+          currentVersion="1.3.2"
+          onClose={() => {}}
+          onConfirmInstall={() => {}}
+        />,
+      );
+      return h;
+    }
+
+    it('renders the SmartScreen callout when getPlatform() returns "win32"', async () => {
+      renderCompatible('win32');
+      await flush();
+      const callout = screen.getByTestId('smartscreen-callout');
+      expect(callout).toBeInTheDocument();
+      expect(callout.textContent).toMatch(/SmartScreen/);
+      expect(callout.textContent).toMatch(/More info/);
+      expect(callout.textContent).toMatch(/Run anyway/);
+    });
+
+    it('does NOT render the callout on linux', async () => {
+      renderCompatible('linux');
+      await flush();
+      expect(screen.queryByTestId('smartscreen-callout')).not.toBeInTheDocument();
+    });
+
+    it('does NOT render the callout on darwin', async () => {
+      renderCompatible('darwin');
+      await flush();
+      expect(screen.queryByTestId('smartscreen-callout')).not.toBeInTheDocument();
+    });
+
+    it('does NOT render the callout when getPlatform is not exposed (defaults to unknown)', async () => {
+      renderCompatible(undefined);
+      await flush();
+      expect(screen.queryByTestId('smartscreen-callout')).not.toBeInTheDocument();
+    });
   });
 });

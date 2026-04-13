@@ -43,7 +43,13 @@ export type InstallerStatus =
   | { state: 'verifying'; version: string }
   | { state: 'downloaded'; version: string }
   | { state: 'cancelled' }
-  | { state: 'error'; message: string };
+  | { state: 'error'; message: string }
+  | {
+      state: 'manual-download-required';
+      version: string | null;
+      downloadUrl: string;
+      reason: string;
+    };
 
 /** Per-release manifest shape (M4). Kept in sync with compatGuard.ts. */
 export interface Manifest {
@@ -239,6 +245,7 @@ export interface ElectronAPI {
     download: () => Promise<
       | { ok: true; reason?: 'already-downloading' }
       | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
+      | { ok: false; reason: 'manual-download-required'; downloadUrl: string }
       | {
           ok: false;
           reason: 'incompatible-server';
@@ -271,6 +278,20 @@ export interface ElectronAPI {
     onInstallerStatus: (callback: (status: InstallerStatus) => void) => () => void;
     /** Fires when a deferred install transitions to actionable (server idle). */
     onInstallReady: (callback: () => void) => () => void;
+    /**
+     * M7: open the GitHub release page in the user's default browser. Used
+     * by the manual-download banner state (read-only AppImage on Linux,
+     * macOS without code signing, etc.). The URL is allow-listed
+     * server-side to `https://github.com/homelab-00/TranscriptionSuite/
+     * releases/...` only.
+     */
+    openReleasePage: (
+      url: string,
+    ) => Promise<
+      | { ok: true }
+      | { ok: false; reason: 'untrusted-url' }
+      | { ok: false; reason: 'open-failed'; message: string }
+    >;
   };
   clipboard: {
     writeText: (text: string) => Promise<void>;
@@ -566,6 +587,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('updates:installReady', handler);
       return () => ipcRenderer.removeListener('updates:installReady', handler);
     },
+    openReleasePage: (url: string) => ipcRenderer.invoke('updates:openReleasePage', url),
   },
   clipboard: {
     writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
