@@ -37,6 +37,7 @@ import {
 } from './installerCache.js';
 import { LaunchWatchdog } from './launchWatchdog.js';
 import { resolveInstallStrategy } from './platformGate.js';
+import { buildReleaseUrl, isTrustedReleaseUrl } from './releaseUrl.js';
 import {
   registerShortcuts,
   unregisterShortcuts,
@@ -584,44 +585,8 @@ async function resolveStrategyForUpdater(): Promise<{
   return { strategy: result.strategy, reason: result.reason, version: latest, downloadUrl };
 }
 
-/**
- * Construct the GitHub release URL the manual-download banner exposes via
- * `[Download from GitHub]`. When `version` is known, link directly to the
- * tagged release; otherwise fall back to `/releases/latest`. Strips a
- * leading `v` from `version` to defend against `vv1.3.3` if `app.latest`
- * is ever stored with the tag prefix already attached.
- */
-function buildReleaseUrl(version: string | null): string {
-  const base = 'https://github.com/homelab-00/TranscriptionSuite/releases';
-  if (version && version.length > 0) {
-    const stripped = version.replace(/^v/i, '');
-    return `${base}/tag/v${stripped}`;
-  }
-  return `${base}/latest`;
-}
-
-/**
- * Strict allow-list for `updates:openReleasePage`. The renderer-supplied
- * URL is treated as untrusted: must be `https://github.com` (origin),
- * MUST NOT carry userinfo (defeats `https://x:y@github.com/...` bypass —
- * `origin` ignores userinfo), MUST NOT contain percent-encoded segments
- * in the path (defeats `%2e%2e` traversal that survives WHATWG
- * normalization), and the path must match exactly one of the known
- * release shapes: `/releases/latest`, `/releases`, or `/releases/tag/v…`.
- */
-const RELEASE_PATH_RE =
-  /^\/homelab-00\/TranscriptionSuite\/releases(\/(latest|tag\/v[A-Za-z0-9._-]+))?\/?$/;
-function isTrustedReleaseUrl(raw: string): boolean {
-  try {
-    const parsed = new URL(raw);
-    if (parsed.origin !== 'https://github.com') return false;
-    if (parsed.username !== '' || parsed.password !== '') return false;
-    if (parsed.pathname.includes('%')) return false;
-    return RELEASE_PATH_RE.test(parsed.pathname);
-  } catch {
-    return false;
-  }
-}
+// Release URL helpers (buildReleaseUrl, isTrustedReleaseUrl) extracted to
+// `./releaseUrl.ts` so the security guards have direct unit-test coverage.
 
 /**
  * Resolve the expected SHA-256 for a downloaded installer file. The manifest

@@ -1373,3 +1373,171 @@ describe('UpdateBanner invocation-failure toasts', () => {
     expect(screen.queryByText('1.3.3 available')).toBeNull();
   });
 });
+
+// ── Spec: in-app-update-test-coverage-closeout ────────────────────────
+//
+// Closes the four M2-review-item-10 sub-points (handleRetry catch arm,
+// snooze resurface past 4h, 60s status poll, unmount cleanup).
+// Pure-additive; all production-code paths exist already.
+
+describe('Deferred coverage closeout', () => {
+  it('handleRetry catch arm: api.download() throw → toast surfaces Download failed: <message>', async () => {
+    // Sonner's `toast.error` is mocked (toastErrorMock). The Retry action
+    // is captured as `options.action.onClick` on the first toast call.
+    // Invoking it with `api.download` mocked to reject reaches
+    // handleRetry's catch arm, which calls toastInvocationError(
+    // 'download-error', `Download failed: ${msg}`) — surfacing as a
+    // SECOND toastError call.
+    const h = buildHarness({ installer: { state: 'idle' } });
+    h.download.mockRejectedValue(new Error('boom'));
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    // First emit drives the banner into 'error' state → first toast.
+    await act(async () => {
+      h.emit({ state: 'error', message: 'flaky' });
+    });
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [, options] = toastErrorMock.mock.calls[0] as [
+      string,
+      { action: { label: string; onClick: () => void } },
+    ];
+    expect(options.action.label).toBe('Retry');
+
+    // User clicks Retry — handleRetry runs api.download() which rejects.
+    // The catch arm fires the invocation-error toast.
+    await act(async () => {
+      options.action.onClick();
+      // Allow the rejected Promise + catch arm to settle.
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(h.download).toHaveBeenCalledTimes(1);
+    // Second toast: the catch-arm invocation-error toast. Pin the
+    // shape so a stray dedup/emit regression that produces an
+    // unrelated second toast cannot pass spuriously: invocation-error
+    // toasts have NO action property (the user can't retry an
+    // already-failed retry).
+    expect(toastErrorMock).toHaveBeenCalledTimes(2);
+    const [secondMessage, secondOptions] = toastErrorMock.mock.calls[1] as [
+      string,
+      { action?: unknown } | undefined,
+    ];
+    expect(secondMessage).toBe('Download failed: boom');
+    expect(secondOptions?.action).toBeUndefined();
+  });
+
+  it('snooze resurface: banner re-appears after fake-timer advance past SNOOZE_MS', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(2026, 3, 12, 12, 0, 0));
+
+      const h = buildHarness({
+        installer: { state: 'idle' },
+        updateStatus: availableStatus(),
+      });
+      installHarness(h);
+
+      const { unmount } = render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      // Snooze.
+      fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+      await flush();
+      expect(screen.queryByText('1.3.3 available')).toBeNull();
+
+      unmount();
+      cleanup();
+
+      // Advance past the 4h snooze window. The banner's nowTimer fires
+      // every 30s and re-evaluates `snoozed = snoozedUntil > now`; once
+      // we cross the boundary the banner re-derives to `available`.
+      vi.setSystemTime(Date.now() + 4 * 60 * 60 * 1000 + 60 * 1000);
+
+      const h2 = buildHarness({
+        installer: { state: 'idle' },
+        updateStatus: availableStatus(),
+      });
+      installHarness(h2);
+
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      // Past the snooze window → banner re-appears.
+      expect(screen.queryByText('1.3.3 available')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('60s status poll: getStatus call count increments after vi.advanceTimersByTime(60_000)', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = buildHarness({ installer: { state: 'idle' } });
+      installHarness(h);
+
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      const mountCalls = h.getStatus.mock.calls.length;
+      expect(mountCalls).toBeGreaterThanOrEqual(1);
+
+      // Advance one full 60s poll tick. Pin to EXACTLY +1 (not just
+      // "more than mount") so a double-fire regression (e.g. strict-
+      // mode artifact, duplicate effect registration) is caught.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+
+      expect(h.getStatus.mock.calls.length).toBe(mountCalls + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('unmount cleanup: clearInterval halts the poll AND onInstallerStatus unsubscribe fires', async () => {
+    vi.useFakeTimers();
+    try {
+      // Capture the unsubscribe spy returned by onInstallerStatus.
+      const unsubscribe = vi.fn();
+      const h = buildHarness({ installer: { state: 'idle' } });
+      h.onInstallerStatus.mockImplementation((cb: InstallerListener) => {
+        h.listeners.push(cb);
+        return () => {
+          unsubscribe();
+          h.listeners = h.listeners.filter((x) => x !== cb);
+        };
+      });
+      installHarness(h);
+
+      const { unmount } = render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      const callsAtMount = h.getStatus.mock.calls.length;
+      // While mounted there are TWO setIntervals running — `statusTimer`
+      // (60s poll) and `nowTimer` (30s snooze re-eval). Both must be
+      // cleared on unmount; counting active timers post-unmount catches
+      // a missed clearInterval that the call-count assertion alone
+      // would miss for the nowTimer (which has no observable side
+      // effect besides the timer itself).
+      const timersWhileMounted = vi.getTimerCount();
+      expect(timersWhileMounted).toBeGreaterThanOrEqual(2);
+
+      unmount();
+
+      // After unmount: advance 60s and confirm NO new getStatus poll fires.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      expect(h.getStatus.mock.calls.length).toBe(callsAtMount);
+      // No leaked intervals: the component cleared BOTH setIntervals.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -996,3 +996,115 @@ describe('cachePreviousInstaller error classification', () => {
     ]);
   });
 });
+
+// ── Spec: in-app-update-test-coverage-closeout ────────────────────────
+//
+// Pure regression-prevention tests. No production-code changes; if any of
+// these fail after a refactor, the surfaced behavior already drifted.
+
+describe('MIN_CACHED_INSTALLER_BYTES write-side / read-side invariant', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'installer-cache-min-invariant-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('write-side rejects exactly one byte under MIN; read-side filters identically', async () => {
+    // The constant lives in installerCache.ts and is consumed by both
+    // cachePreviousInstaller (pre-copy guard) and getCachedInstaller
+    // (post-readdir filter). A future refactor that introduces a
+    // separate read-side threshold would silently leak truncated cache
+    // writes that fail to read back. This test locks both sides to
+    // the same constant.
+
+    // Write side: one byte under MIN → source-too-small.
+    const userData = path.join(tmp, 'userData');
+    const underSrc = path.join(tmp, 'under.AppImage');
+    writeFileSync(underSrc, Buffer.alloc(MIN_CACHED_INSTALLER_BYTES - 1, 'a'));
+    const underWrite = await cachePreviousInstaller({
+      sourcePath: underSrc,
+      version: '1.0.0',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+    expect(underWrite.ok).toBe(false);
+    expect(underWrite.reason).toBe('source-too-small');
+
+    // Write side: exactly MIN → accepted.
+    const atSrc = path.join(tmp, 'at.AppImage');
+    writeFileSync(atSrc, Buffer.alloc(MIN_CACHED_INSTALLER_BYTES, 'b'));
+    const atWrite = await cachePreviousInstaller({
+      sourcePath: atSrc,
+      version: '1.3.3',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+    expect(atWrite.ok).toBe(true);
+
+    // Read side: manually replace the cached file with one byte under MIN.
+    // getCachedInstaller's size filter must reject (returns null even
+    // though the filename matches the parseable pattern).
+    const cacheFile = atWrite.cachedPath as string;
+    writeFileSync(cacheFile, Buffer.alloc(MIN_CACHED_INSTALLER_BYTES - 1, 'c'));
+    expect(await getCachedInstaller(userData)).toBeNull();
+
+    // Read side: replace with exactly MIN → accepted again.
+    writeFileSync(cacheFile, Buffer.alloc(MIN_CACHED_INSTALLER_BYTES, 'd'));
+    const cached = await getCachedInstaller(userData);
+    expect(cached).not.toBeNull();
+    expect(cached?.version).toBe('1.3.3');
+  });
+});
+
+describe('symlink-collision rejection: nested userData survival', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'installer-cache-nested-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('preserves arbitrary nested userData state across an equality-case symlink rejection', async () => {
+    // Equality-case = `previous-installer/` symlinks to userData itself.
+    // The unlink loop runs only against `parseVersionFromFileName` matches,
+    // BUT a future refactor that recursed via readdir could silently wipe
+    // deep state. This test pins the contract: ANY untracked state in
+    // userData must survive a rejected cache write.
+    const userData = path.join(tmp, 'userData');
+    const nested = path.join(userData, 'nested', 'dir');
+    await fsp.mkdir(nested, { recursive: true });
+    const keepFile = path.join(nested, 'keep.txt');
+    const keepBytes = Buffer.alloc(1024, 'k');
+    writeFileSync(keepFile, keepBytes);
+    // Pathological setup: previous-installer symlinks to userData itself.
+    await fsp.symlink(userData, path.join(userData, 'previous-installer'));
+
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.3',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    // The current implementation accepts the equality case (cache dir
+    // realpath === userData realpath) — the unlink loop's pattern
+    // filter (now extended with `lstat → skip directories`) prevents
+    // wiping unrelated content. The MAIN regression floor is the
+    // nested file surviving byte-identical; the `result.ok === true`
+    // assertion pins the current "equality allowed" behavior so a
+    // future tightening that flips equality to ok:false fails this
+    // test loudly rather than passing silently.
+    expect(readFileSync(keepFile)).toEqual(keepBytes);
+    expect(result.ok).toBe(true);
+  });
+});
