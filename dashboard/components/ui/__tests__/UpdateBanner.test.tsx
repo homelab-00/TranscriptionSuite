@@ -39,6 +39,7 @@ vi.mock('sonner', () => ({
 
 import {
   UpdateBanner,
+  __resetErrorToastDedup,
   clampSnooze,
   deriveBannerState,
   manualDownloadTooltip,
@@ -152,6 +153,9 @@ beforeEach(() => {
   setConfigMock.mockClear();
   toastErrorMock.mockClear();
   toastSuccessMock.mockClear();
+  // Module-level error-toast dedup state persists across renders by design;
+  // reset between tests to prevent leaks.
+  __resetErrorToastDedup();
 });
 
 afterEach(() => {
@@ -705,6 +709,168 @@ describe('UpdateBanner M6 error toasts', () => {
     });
 
     expect(toastErrorMock).toHaveBeenCalledTimes(2);
+  });
+
+  // ── Dedup hardening: module-level state + 5 s window + extended clear ──────
+
+  it('time window: same key re-toasts after 5001 ms', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(1_000_000));
+      const h = buildHarness();
+      installHarness(h);
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      await act(async () => {
+        h.emit({ state: 'error', message: 'flaky' });
+      });
+      expect(toastErrorMock).toHaveBeenCalledTimes(1);
+
+      // Advance past the 5 s dedup window without any installer transition
+      // that would clear state — pure time-based re-toast.
+      vi.setSystemTime(new Date(1_000_000 + 5_001));
+      await act(async () => {
+        h.emit({ state: 'error', message: 'flaky' });
+      });
+
+      expect(toastErrorMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('time window: same key back-to-back dedups', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(1_000_000));
+      const h = buildHarness();
+      installHarness(h);
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      await act(async () => {
+        h.emit({ state: 'error', message: 'flaky' });
+      });
+      // Advance well under the window — identical key must dedup.
+      vi.setSystemTime(new Date(1_000_000 + 200));
+      await act(async () => {
+        h.emit({ state: 'error', message: 'flaky' });
+      });
+      vi.setSystemTime(new Date(1_000_000 + 400));
+      await act(async () => {
+        h.emit({ state: 'error', message: 'flaky' });
+      });
+
+      expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('idle transition clears dedup state', async () => {
+    const h = buildHarness();
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    await act(async () => {
+      h.emit({ state: 'error', message: 'flaky' });
+    });
+    await act(async () => {
+      h.emit({ state: 'idle' });
+    });
+    await act(async () => {
+      h.emit({ state: 'error', message: 'flaky' });
+    });
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancelled transition clears dedup state', async () => {
+    const h = buildHarness();
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    await act(async () => {
+      h.emit({ state: 'error', message: 'flaky' });
+    });
+    await act(async () => {
+      h.emit({ state: 'cancelled' });
+    });
+    await act(async () => {
+      h.emit({ state: 'error', message: 'flaky' });
+    });
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('two rapid handleRetry calls with identical failure yield a single toast', async () => {
+    const h = buildHarness();
+    // Both retries resolve with the same {ok:false, reason:'error', message:'X'}
+    // — second retry's failure must be absorbed by the 5 s time-window guard.
+    h.download.mockResolvedValue({ ok: false, reason: 'error', message: 'flaky' });
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    // Emit the initial error so the Retry action is rendered on the toast.
+    await act(async () => {
+      h.emit({ state: 'error', message: 'initial' });
+    });
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+
+    const [, options] = toastErrorMock.mock.calls[0] as [
+      string,
+      { action: { onClick: () => void } },
+    ];
+
+    // Fire Retry twice without waiting between — simulates the overlapping-
+    // retry race the deferred-work item describes.
+    await act(async () => {
+      options.action.onClick();
+      options.action.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(h.download).toHaveBeenCalledTimes(2);
+    // Initial 'initial' toast + first retry-failure toast ('download-error' key).
+    // Second retry-failure dedups on the shared 'download-error' key within
+    // the window → total 2 toasts, not 3.
+    expect(toastErrorMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('dedup state survives unmount + remount within 5 s', async () => {
+    // Module-level dedupState is intentionally outside the React tree so a
+    // remount (StrictMode, parent re-key, future navigation refactor) does
+    // NOT wipe the dedup memory. This test locks that contract.
+    const h1 = buildHarness();
+    installHarness(h1);
+    const first = render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    await act(async () => {
+      h1.emit({ state: 'error', message: 'flaky' });
+    });
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+
+    first.unmount();
+
+    // Remount with a fresh harness. Note we do NOT call __resetErrorToastDedup
+    // here — the assertion is that module state carries across the remount.
+    const h2 = buildHarness();
+    installHarness(h2);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    await act(async () => {
+      h2.emit({ state: 'error', message: 'flaky' });
+    });
+
+    // Still 1 — same key still in the 5 s window.
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
   });
 });
 

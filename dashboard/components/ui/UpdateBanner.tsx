@@ -21,7 +21,7 @@
  * next transition. See _bmad-output/implementation-artifacts/deferred-work.md.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { getConfig, setConfig } from '../../src/config/store';
 import { UpdateModal } from './UpdateModal';
@@ -55,6 +55,40 @@ export function clampSnooze(stored: number, now: number): number {
   if (!Number.isFinite(stored) || !Number.isFinite(now) || stored <= 0) return 0;
   const ceiling = now + SNOOZE_MS;
   return stored > ceiling ? ceiling : stored;
+}
+
+// Module-level error-toast dedup.
+//
+// Hoisted out of the component so that a React remount (StrictMode double-render,
+// parent re-key, future navigation refactor) cannot wipe the dedup memory and
+// re-toast a still-active error. The banner is always single-mounted under
+// MainApp, so a module-scope singleton is safe.
+//
+// Dedup contract: skip `toast.error` when the incoming event's stable semantic
+// KEY matches the last-toasted key AND the time delta is below DEDUP_WINDOW_MS.
+// Keys are string literals assigned per call site (see Design Notes in
+// spec-update-banner-dedup-hardening.md) — NOT the user-visible message string,
+// which can vary across paths for the same semantic event.
+const DEDUP_WINDOW_MS = 5_000;
+const dedupState: { key: string | null; timestamp: number } = { key: null, timestamp: 0 };
+
+function tryToastDedup(key: string, now: number): boolean {
+  if (dedupState.key === key && now - dedupState.timestamp < DEDUP_WINDOW_MS) {
+    return false;
+  }
+  dedupState.key = key;
+  dedupState.timestamp = now;
+  return true;
+}
+
+function resetToastDedup(): void {
+  dedupState.key = null;
+  dedupState.timestamp = 0;
+}
+
+/** test-only — reset module-level dedup state between tests to prevent leaks. */
+export function __resetErrorToastDedup(): void {
+  resetToastDedup();
 }
 
 // Mirrors the `updates.download()` IPC return union in `src/types/electron.d.ts`.
@@ -199,21 +233,14 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
   const [now, setNow] = useState<number>(() => Date.now());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
-  // M6: track the last error message we toasted so repeated error broadcasts
-  // with the same message do not spam the user. Also shared with invocation-
-  // failure toasts (download/install/setConfig throws and {ok:false} returns)
-  // so a triple-click producing identical 'install-already-requested' messages
-  // coalesces to a single toast. Initialized to null on mount so the first
-  // error of a fresh session always toasts.
-  const lastErrorMessageRef = useRef<string | null>(null);
 
-  // Invocation-failure toaster: consults the shared identity-dedup ref and
-  // skips if the same message was already toasted. Used by handleConfirmInstall,
-  // handleRetry, handleInstall, and handleSnooze — distinct from the installer-
-  // 'error' branch below which also adds a Retry action.
-  const toastInvocationError = useCallback((message: string): void => {
-    if (lastErrorMessageRef.current === message) return;
-    lastErrorMessageRef.current = message;
+  // Invocation-failure toaster: consults the module-level dedup state (see
+  // tryToastDedup above). Used by handleConfirmInstall, handleRetry,
+  // handleInstall, and handleSnooze — plus the installer-'error' branch below.
+  // Callers pass a stable semantic KEY, not the user-visible message, so that
+  // cross-path events with different copy still dedup together.
+  const toastInvocationError = useCallback((key: string, message: string): void => {
+    if (!tryToastDedup(key, Date.now())) return;
     toast.error(message);
   }, []);
 
@@ -282,12 +309,18 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
       setInstaller(s);
 
       // M6: surface installer errors as a sonner toast with a [Retry] action.
-      // Dedup on the message string so repeated broadcasts (e.g. electron-
-      // updater re-emitting error on every internal retry) do not spam.
+      // Dedup via the module-level state — skip when the same semantic key
+      // recurs inside DEDUP_WINDOW_MS (e.g. electron-updater internal retries
+      // that re-emit error events every 1–2 s).
+      //
+      // Key derivation: prefer a future `reason` classifier on the error state
+      // (main-side change tracked in deferred-work.md) and fall back to the
+      // message string. When `reason` lands, cross-path dedup with handleInstall
+      // activates automatically.
       if (s.state === 'error') {
         const message = s.message ?? 'unknown error';
-        if (lastErrorMessageRef.current === message) return;
-        lastErrorMessageRef.current = message;
+        const key = message;
+        if (!tryToastDedup(key, Date.now())) return;
         const copy = errorToastCopy(message) ?? `Update failed: ${message}`;
         toast.error(copy, {
           action: {
@@ -297,10 +330,16 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
             },
           },
         });
-      } else if (s.state === 'downloading' || s.state === 'downloaded') {
-        // Successful path — reset the dedup so a future error after a fresh
-        // retry cycle can toast again.
-        lastErrorMessageRef.current = null;
+      } else if (
+        s.state === 'downloading' ||
+        s.state === 'downloaded' ||
+        s.state === 'idle' ||
+        s.state === 'cancelled'
+      ) {
+        // Non-error installer transitions clear dedup so a future same-key
+        // error — post-cancel, post-success, or after the installer settles
+        // back to idle — toasts again instead of being silently suppressed.
+        resetToastDedup();
       }
     });
 
@@ -331,7 +370,7 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
       // In-memory state is already updated above — the banner hides on this
       // same tick regardless of persistence success. The toast tells the
       // user the preference won't survive a restart.
-      toastInvocationError('Could not save snooze preference.');
+      toastInvocationError('snooze-save-failed', 'Could not save snooze preference.');
     }
   }, [toastInvocationError]);
 
@@ -364,15 +403,19 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
         case 'incompatible-server': {
           const { serverVersion, compatibleRange } = result.detail;
           toastInvocationError(
+            'download-incompatible',
             `Server v${serverVersion} is not compatible with this Dashboard (requires ${compatibleRange}).`,
           );
           return;
         }
         case 'no-update-available':
-          toastInvocationError('No update available to download.');
+          toastInvocationError('no-update-available', 'No update available to download.');
           return;
         case 'error':
-          toastInvocationError(`Download failed: ${result.message ?? 'unknown error'}`);
+          toastInvocationError(
+            'download-error',
+            `Download failed: ${result.message ?? 'unknown error'}`,
+          );
           return;
         default: {
           // Runtime fallback for the (impossible per types) case where a
@@ -380,7 +423,7 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
           // switch is updated.
           const _exhaustive: never = result;
           console.warn('UpdateBanner: unhandled download-failure variant', _exhaustive);
-          toastInvocationError('Download failed: unexpected error.');
+          toastInvocationError('download-error', 'Download failed: unexpected error.');
           return;
         }
       }
@@ -397,23 +440,23 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
     } catch (err) {
       console.error('UpdateBanner: download invocation failed', err);
       const msg = err instanceof Error ? err.message : 'unknown error';
-      toastInvocationError(`Download failed: ${msg}`);
+      toastInvocationError('download-error', `Download failed: ${msg}`);
     }
   }, [reportDownloadFailure, toastInvocationError]);
 
-  // M6: [Retry] action on error toasts — re-runs the download. We clear the
-  // dedup ref so a subsequent error of the same message still toasts.
+  // M6: [Retry] action on error toasts — re-runs the download.
+  // Dedup state clears on installer's post-retry transition; the 5 s window
+  // absorbs overlapping retry clicks.
   const handleRetry = useCallback(async () => {
     const api = window.electronAPI?.updates;
     if (!api) return;
-    lastErrorMessageRef.current = null;
     try {
       const result = await api.download();
       reportDownloadFailure(result);
     } catch (err) {
       console.error('UpdateBanner: retry download invocation failed', err);
       const msg = err instanceof Error ? err.message : 'unknown error';
-      toastInvocationError(`Download failed: ${msg}`);
+      toastInvocationError('download-error', `Download failed: ${msg}`);
     }
   }, [reportDownloadFailure, toastInvocationError]);
 
@@ -427,23 +470,28 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
       if (result.ok) return;
       switch (result.reason) {
         case 'install-already-requested':
-          // A fast double-click lands here on the second click. The identity
-          // dedup inside toastInvocationError suppresses any further clicks
-          // in the same session with the same copy.
-          toastInvocationError('Install already in progress.');
+          // A fast double-click lands here on the second click. The shared
+          // semantic key 'install-already-requested' dedups any further
+          // clicks within DEDUP_WINDOW_MS — and matches forward-compat if a
+          // main-side installer-error path ever emits the same key with
+          // different user-visible copy.
+          toastInvocationError('install-already-requested', 'Install already in progress.');
           return;
         case 'no-update-ready':
         case 'no-version':
-          toastInvocationError('No update is ready to install.');
+          toastInvocationError('no-update-ready', 'No update is ready to install.');
           return;
         default:
-          toastInvocationError(`Install failed: ${result.reason ?? 'unknown error'}`);
+          toastInvocationError(
+            'install-error',
+            `Install failed: ${result.reason ?? 'unknown error'}`,
+          );
           return;
       }
     } catch (err) {
       console.error('UpdateBanner: install invocation failed', err);
       const msg = err instanceof Error ? err.message : 'unknown error';
-      toastInvocationError(`Install failed: ${msg}`);
+      toastInvocationError('install-error', `Install failed: ${msg}`);
     }
   }, [toastInvocationError]);
 
