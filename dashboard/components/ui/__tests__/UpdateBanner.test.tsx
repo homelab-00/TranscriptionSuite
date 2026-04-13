@@ -37,7 +37,12 @@ vi.mock('sonner', () => ({
 
 // ── Import after mocks ──────────────────────────────────────────────────────
 
-import { UpdateBanner, deriveBannerState, manualDownloadTooltip } from '../UpdateBanner';
+import {
+  UpdateBanner,
+  clampSnooze,
+  deriveBannerState,
+  manualDownloadTooltip,
+} from '../UpdateBanner';
 
 // ── Test electronAPI harness ────────────────────────────────────────────────
 
@@ -259,6 +264,21 @@ describe('deriveBannerState', () => {
     const malformed = { lastChecked: new Date(now).toISOString() } as unknown as UpdateStatus;
     const out = deriveBannerState({ state: 'idle' }, malformed, false, now, 0);
     expect(out.state).toBe('hidden');
+  });
+
+  // ── Deferred bug: M7 review surfaced a missing case in the switch ─────
+  it('maps verifying to downloading visual (no [Download] surface)', () => {
+    // Without this case the switch falls through to availableFromPoll,
+    // re-enabling [Download] mid-verify; a fast double-click can re-enter
+    // UpdateInstaller.startDownload (which only guards 'downloading').
+    const out = deriveBannerState(
+      { state: 'verifying', version: '1.3.3' },
+      availableStatus('1.3.3'),
+      false,
+      now,
+      0,
+    );
+    expect(out).toEqual({ state: 'downloading', version: '1.3.3' });
   });
 });
 
@@ -857,5 +877,108 @@ describe('M7: manual-download state', () => {
 
       expect(setConfigMock).toHaveBeenCalledWith('updates.bannerSnoozedUntil', expect.any(Number));
     });
+  });
+});
+
+// ── Deferred bugs: verifying-state render + snooze clamp ───────────────────
+
+describe('Deferred bug fixes (M1-M7 review)', () => {
+  it('verifying installer state renders no [Download] button in the DOM', async () => {
+    // Verify the rendered output, not just the pure mapper. A switch fallthrough
+    // would re-enable [Download] mid-verify and let a double-click re-enter
+    // startDownload(). Render-side regression test pairs with the deriveBannerState
+    // unit test to lock both ends.
+    const h = buildHarness({
+      installer: { state: 'verifying', version: '1.3.3' },
+      updateStatus: availableStatus('1.3.3'),
+    });
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    expect(screen.queryByRole('button', { name: /^Download$/ })).toBeNull();
+    expect(screen.getByText(/Downloading 1\.3\.3/)).toBeTruthy();
+  });
+
+  it('clampSnooze caps a bogus far-future stored value at now + SNOOZE_MS', () => {
+    // Direct unit test: NTP-correction, VM suspend, manual clock-forward — any
+    // store write that left a value far past the legitimate ceiling must be
+    // clamped to the freshest possible 4h horizon, not honored as-is.
+    const SNOOZE_MS = 4 * 60 * 60 * 1000;
+    const now = 1_000_000_000;
+    const bogusFuture = now + 30 * 24 * 3600 * 1000;
+    expect(clampSnooze(bogusFuture, now)).toBe(now + SNOOZE_MS);
+    // Legitimate value passes through unchanged.
+    expect(clampSnooze(now + 3 * 60 * 60 * 1000, now)).toBe(now + 3 * 60 * 60 * 1000);
+    // Zero / not-snoozed fast-paths through.
+    expect(clampSnooze(0, now)).toBe(0);
+  });
+
+  it('clampSnooze rejects non-finite inputs as bogus (returns 0)', () => {
+    // NaN passes both `<= 0` and `> ceiling` comparisons silently; without
+    // an explicit Number.isFinite guard it would propagate to React state and
+    // permanently un-snooze the banner. Defensive against corrupt config or
+    // upstream NaN propagation.
+    const now = 1_000_000_000;
+    expect(clampSnooze(Number.NaN, now)).toBe(0);
+    expect(clampSnooze(Number.POSITIVE_INFINITY, now)).toBe(0);
+    expect(clampSnooze(Number.NEGATIVE_INFINITY, now)).toBe(0);
+    // Defensive on the `now` side too — exported contract is loose.
+    expect(clampSnooze(now + 1000, Number.NaN)).toBe(0);
+    expect(clampSnooze(now + 1000, Number.POSITIVE_INFINITY)).toBe(0);
+  });
+
+  it('snooze load applies clampSnooze before the banner renders', async () => {
+    // End-to-end: a stored bogus epoch should NOT survive a mount cycle to
+    // setConfig — the load handler clamps it before calling setSnoozedUntil,
+    // so the banner's effective snooze is always sane.
+    const SNOOZE_MS = 4 * 60 * 60 * 1000;
+    const bogusFuture = Date.now() + 30 * 24 * 3600 * 1000;
+    configStore.set('updates.bannerSnoozedUntil', bogusFuture);
+
+    const h = buildHarness({ updateStatus: availableStatus('1.3.3') });
+    installHarness(h);
+    const before = Date.now();
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    // Banner is hidden because we ARE within the clamped 4h window — but the
+    // window is tied to "now" (≤ before + SNOOZE_MS), not to bogusFuture.
+    expect(screen.queryByText(/1\.3\.3 available/)).toBeNull();
+
+    // Verify deriveBannerState would re-surface the banner if we time-traveled
+    // 4h+1m forward (using "now" param directly — no real-timer dependency).
+    const futureNow = before + SNOOZE_MS + 60_000;
+    const clamped = clampSnooze(bogusFuture, before);
+    const derived = deriveBannerState(
+      { state: 'idle' },
+      availableStatus('1.3.3'),
+      false,
+      futureNow,
+      clamped,
+    );
+    expect(derived).toEqual({ state: 'available', version: '1.3.3' });
+  });
+
+  it('snooze write goes through the same clamp (no bogus epoch ever persisted)', async () => {
+    const SNOOZE_MS = 4 * 60 * 60 * 1000;
+    const h = buildHarness({ updateStatus: availableStatus('1.3.3') });
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    const before = Date.now();
+    const laterBtn = screen.getByRole('button', { name: /Later/i });
+    await act(async () => {
+      fireEvent.click(laterBtn);
+      await Promise.resolve();
+    });
+
+    expect(setConfigMock).toHaveBeenCalled();
+    const persistedValue = setConfigMock.mock.calls.at(-1)?.[1] as number;
+    // A correctly-clamped write is at most `now + SNOOZE_MS` (with a small
+    // slack for the time elapsed between Date.now() captures).
+    expect(persistedValue).toBeGreaterThan(before);
+    expect(persistedValue).toBeLessThanOrEqual(Date.now() + SNOOZE_MS + 100);
   });
 });

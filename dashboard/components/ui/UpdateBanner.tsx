@@ -41,6 +41,22 @@ const SNOOZE_MS = 4 * 60 * 60 * 1000;
 const STATUS_POLL_MS = 60_000;
 const NOW_TICK_MS = 30_000;
 
+/**
+ * Clamp a stored snooze epoch against clock skew. NTP correction, VM suspend/
+ * resume, or a manual clock-forward can leave a persisted `bannerSnoozedUntil`
+ * far in the future, stretching the 4 h window to days. Anything beyond
+ * `now + SNOOZE_MS` is treated as bogus and reset to a fresh-snooze ceiling.
+ *
+ * Non-finite inputs (NaN/±Infinity) on EITHER argument are rejected as bogus.
+ * Without this guard, a NaN store value (corrupt config, upstream bug) would
+ * silently un-snooze: NaN passes both `<= 0` and `> ceiling` comparisons.
+ */
+export function clampSnooze(stored: number, now: number): number {
+  if (!Number.isFinite(stored) || !Number.isFinite(now) || stored <= 0) return 0;
+  const ceiling = now + SNOOZE_MS;
+  return stored > ceiling ? ceiling : stored;
+}
+
 export type BannerVisualState =
   | 'hidden'
   | 'available'
@@ -111,6 +127,11 @@ export function deriveBannerState(
       };
     case 'checking':
       return { state: 'downloading', version: latestVersion, percent: 0 };
+    case 'verifying':
+      // Hashing a downloaded AppImage is in-flight work from the user's POV —
+      // map to the downloading visual so [Download] stays out of the DOM and
+      // a fast double-click cannot re-enter UpdateInstaller.startDownload().
+      return { state: 'downloading', version: installer.version };
     case 'downloaded':
       return {
         state: isBusy ? 'ready_blocked' : 'ready',
@@ -203,10 +224,13 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
     pollStatus();
     const statusTimer = setInterval(pollStatus, STATUS_POLL_MS);
 
-    // Read persisted snooze.
+    // Read persisted snooze. Clamp against bogus-future values that can
+    // arise from clock skew (NTP correction, VM suspend, manual clock-forward).
     getConfig<number>('updates.bannerSnoozedUntil')
       .then((v) => {
-        if (!cancelled) setSnoozedUntil(typeof v === 'number' ? v : 0);
+        if (cancelled) return;
+        const raw = typeof v === 'number' ? v : 0;
+        setSnoozedUntil(clampSnooze(raw, Date.now()));
       })
       .catch((err: unknown) => {
         console.error('UpdateBanner: getConfig snooze failed', err);
@@ -254,7 +278,10 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
   }, []);
 
   const handleSnooze = useCallback(async () => {
-    const until = Date.now() + SNOOZE_MS;
+    // Defense in depth: write through the same clamp the loader applies, so a
+    // future loader that drops the clamp can't be surprised by a stored bogus
+    // value, and a current loader still sees a sane epoch on next mount.
+    const until = clampSnooze(Date.now() + SNOOZE_MS, Date.now());
     setSnoozedUntil(until);
     try {
       await setConfig('updates.bannerSnoozedUntil', until);

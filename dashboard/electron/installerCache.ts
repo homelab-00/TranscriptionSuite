@@ -25,9 +25,11 @@ export interface CacheArgs {
 export interface CacheResult {
   ok: boolean;
   cachedPath?: string;
-  reason?: 'platform-not-supported' | 'source-missing' | 'write-error';
+  reason?: 'platform-not-supported' | 'source-missing' | 'write-error' | 'cache-collision';
   message?: string;
 }
+
+const MIN_CACHED_INSTALLER_BYTES = 1_000_000;
 
 export interface CachedInstaller {
   path: string;
@@ -50,12 +52,26 @@ function cacheFileName(version: string): string {
   return `TranscriptionSuite-${safe}${APPIMAGE_SUFFIX}`;
 }
 
-function parseVersionFromFileName(name: string): string | null {
+// Allow only characters that legitimate semver-ish version strings use. Rejects
+// path-traversal attempts like `TranscriptionSuite-../../evil.AppImage` whose
+// inner would otherwise parse as `../../evil` and surface in the rollback dialog.
+const SAFE_VERSION_RE = /^[A-Za-z0-9._-]+$/;
+
+// Pure-dot inners like `..` / `.` / `...` pass SAFE_VERSION_RE but are
+// nonsensical as "version" strings. On disk they can't be `../..` traversal
+// (no slash), but the bare dots would surface in the rollback dialog and
+// store payload. Reject them explicitly.
+const DOT_ONLY_RE = /^\.+$/;
+
+export function parseVersionFromFileName(name: string): string | null {
   if (!name.startsWith('TranscriptionSuite-') || !name.endsWith(APPIMAGE_SUFFIX)) {
     return null;
   }
   const inner = name.slice('TranscriptionSuite-'.length, -APPIMAGE_SUFFIX.length);
-  return inner.length > 0 ? inner : null;
+  if (inner.length === 0 || !SAFE_VERSION_RE.test(inner) || DOT_ONLY_RE.test(inner)) {
+    return null;
+  }
+  return inner;
 }
 
 export async function cachePreviousInstaller(args: CacheArgs): Promise<CacheResult> {
@@ -71,6 +87,36 @@ export async function cachePreviousInstaller(args: CacheArgs): Promise<CacheResu
   }
 
   const dir = cacheDir(args.userDataDir);
+
+  // Symlink-collision defense: if `previous-installer/` resolves to the same
+  // canonical path as the AppImage's parent dir (a pathological dotfiles-rig
+  // setup), the unlink loop below would delete the running binary. Compare
+  // realpaths BEFORE any disk mutation; on match OR on either side throwing
+  // for unexpected reasons (EACCES/ELOOP), abort with `cache-collision`.
+  // ENOENT on the dir realpath is the legitimate first-run case — fall
+  // through to mkdir.
+  try {
+    const sourceParentReal = await fsp.realpath(path.dirname(args.sourcePath));
+    let dirReal: string | null;
+    try {
+      dirReal = await fsp.realpath(dir);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        dirReal = null;
+      } else {
+        return { ok: false, reason: 'cache-collision' };
+      }
+    }
+    if (dirReal !== null && dirReal === sourceParentReal) {
+      return { ok: false, reason: 'cache-collision' };
+    }
+  } catch {
+    // Source-parent realpath failed (already passed access on sourcePath, so
+    // this is a very narrow race). Treat conservatively as a collision.
+    return { ok: false, reason: 'cache-collision' };
+  }
+
   try {
     await fsp.mkdir(dir, { recursive: true });
 
@@ -114,6 +160,15 @@ export async function getCachedInstaller(userDataDir: string): Promise<CachedIns
     const full = path.join(dir, name);
     try {
       await fsp.access(full);
+    } catch {
+      continue;
+    }
+    // Size filter: 0-byte / truncated files would hand the user a corrupt
+    // AppImage that doesn't execute. Minimum 1 MB is well below any healthy
+    // Electron bundle (~60 MB+) and well above common truncation artifacts.
+    try {
+      const st = await fsp.stat(full);
+      if (st.size < MIN_CACHED_INSTALLER_BYTES) continue;
     } catch {
       continue;
     }
