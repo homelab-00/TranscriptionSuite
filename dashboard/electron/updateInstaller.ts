@@ -91,6 +91,20 @@ const defaultLogger: UpdateInstallerLogger = {
   error: (...args) => console.error('[UpdateInstaller]', ...args),
 };
 
+// Upper bound on the cacheHook copy. Healthy ~150 MB copies complete well
+// under 10s on realistic storage (NVMe/SATA SSD/slow HDD/USB 2.0). Hung or
+// failing media never complete, so we bound the wait to cap the time a
+// user's "Install" click can hang before quitAndInstall() runs — at the
+// cost of the rollback slot on that one install. The invariant at the
+// install() docstring ("losing the rollback slot is preferable to blocking")
+// is the authority for this tradeoff.
+const CACHE_HOOK_TIMEOUT_MS = 30_000;
+
+// Sentinel that lets Promise.race distinguish "hook timed out" from "hook
+// resolved with undefined". A plain `symbol` (not `unique symbol`) is
+// sufficient — identity comparison via `=== CACHE_HOOK_TIMEOUT` is stable.
+const CACHE_HOOK_TIMEOUT: symbol = Symbol('cache-hook-timeout');
+
 /**
  * Minimal shape we consume from an UpdateInfo. electron-updater provides a
  * larger type with many optional/required fields (files, path, sha512, …)
@@ -289,13 +303,39 @@ export class UpdateInstaller {
     if (this.cacheHook) {
       // Await the cache hook BEFORE quitAndInstall so a slow copyFile
       // cannot be truncated by Electron shutting the process down. A
-      // cache-hook rejection is logged but never blocks the install —
-      // losing the rollback slot is preferable to blocking the user.
+      // cache-hook rejection OR timeout is logged but never blocks the
+      // install — losing the rollback slot is preferable to blocking the
+      // user.
+      //
+      // Promise.race with a sentinel: hung storage (USB stick / failing
+      // SSD / NFS mount) would otherwise block here indefinitely, turning
+      // a user's "Install" click into a frozen UI for as long as the OS
+      // keeps the syscall open. CACHE_HOOK_TIMEOUT_MS bounds that wait;
+      // the sentinel lets us tell a timeout from a hook that legitimately
+      // resolved with `undefined`.
+      //
+      // `finally` MUST clearTimeout — on the fast path (hook resolves
+      // before the bound) the setTimeout would otherwise fire ~30s later
+      // and keep Node's event loop alive past the install, interfering
+      // with Electron's shutdown sequence on quitAndInstall.
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
-        await this.cacheHook({ version });
+        const raceResult: unknown = await Promise.race([
+          this.cacheHook({ version }),
+          new Promise<symbol>((resolve) => {
+            timeoutId = setTimeout(() => resolve(CACHE_HOOK_TIMEOUT), CACHE_HOOK_TIMEOUT_MS);
+          }),
+        ]);
+        if (raceResult === CACHE_HOOK_TIMEOUT) {
+          this.logger.warn(
+            `cache-hook timed out after ${CACHE_HOOK_TIMEOUT_MS}ms; install proceeding without rollback slot`,
+          );
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn('cache-hook rejected (install still proceeds):', message);
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
     }
 

@@ -581,6 +581,75 @@ describe('UpdateInstaller cache hook integration (M6)', () => {
     expect(updater.quitAndInstall).not.toHaveBeenCalled();
   });
 
+  // ─── cacheHook timeout (spec: in-app-update-cache-write-hardening) ──
+
+  describe('cacheHook timeout', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('falls through to quitAndInstall after 30s when cacheHook never resolves', async () => {
+      // Hook that never resolves — simulates a hung copyFile on failing
+      // storage. Without the Promise.race bound, install() would block
+      // indefinitely here, freezing the user's "Install" click.
+      const neverResolves = new Promise<void>(() => {});
+      const cacheHook = vi.fn(() => neverResolves);
+      const logger = silentLogger();
+      const inst = new UpdateInstaller(logger, updater, { cacheHook });
+
+      // Use REAL timers for downloadReady — it awaits setImmediate and
+      // would deadlock under fake timers. Switch to fake AFTER setup so
+      // only install()'s timeout bound is under our control.
+      await downloadReady(inst);
+      vi.useFakeTimers();
+
+      // Detach install() — its Promise is still pending at this point
+      // because cacheHook hasn't resolved.
+      const installPromise = inst.install();
+
+      // Flush microtasks so install()'s await reaches the Promise.race.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(updater.quitAndInstall).not.toHaveBeenCalled();
+
+      // Advance past the 30s timeout. The sentinel-Promise resolves and
+      // install() continues to quitAndInstall.
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      const result = await installPromise;
+      expect(result).toEqual({ ok: true });
+      expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
+      expect(cacheHook).toHaveBeenCalledWith({ version: '1.3.3' });
+
+      // Warn-log fired with the timeout marker. Use a substring so the
+      // exact millisecond string in the message isn't hard-coded here.
+      const warnCalls = (logger.warn as ReturnType<typeof vi.fn>).mock.calls;
+      const timedOutCall = warnCalls.find((call) =>
+        call.some((arg) => typeof arg === 'string' && arg.includes('cache-hook timed out')),
+      );
+      expect(timedOutCall).toBeDefined();
+    });
+
+    it('does not log timeout when cacheHook resolves before the bound', async () => {
+      // Real timers: the hook resolves immediately, so the race ends on
+      // the hook side. No sentinel fire, no timeout log.
+      const cacheHook = vi.fn(async () => {});
+      const logger = silentLogger();
+      const inst = new UpdateInstaller(logger, updater, { cacheHook });
+
+      await downloadReady(inst);
+      const result = await inst.install();
+
+      expect(result).toEqual({ ok: true });
+      expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
+
+      const warnCalls = (logger.warn as ReturnType<typeof vi.fn>).mock.calls;
+      const timedOutCall = warnCalls.find((call) =>
+        call.some((arg) => typeof arg === 'string' && arg.includes('cache-hook timed out')),
+      );
+      expect(timedOutCall).toBeUndefined();
+    });
+  });
+
   // ─── M7: platform-strategy short-circuit ────────────────────────────
 
   describe('M7: platformStrategy', () => {

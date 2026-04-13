@@ -85,8 +85,18 @@ export async function cachePreviousInstaller(args: CacheArgs): Promise<CacheResu
     return { ok: false, reason: 'platform-not-supported' };
   }
 
+  // Resolve the source's realpath ONCE, then route both stat and copyFile
+  // through the same resolved path. Closes the TOCTOU window where a
+  // symlink `sourcePath` is retargeted between the pre-copy size check
+  // and the later copyFile — without this, a retarget could land an
+  // unrelated file in the cache despite the size guard succeeding.
+  //
+  // ENOENT (source missing / dangling symlink) maps to source-missing.
+  // Other errno values (EACCES/ELOOP/EIO) currently fold into the same
+  // bucket; Group B will split them when it lands.
+  let sourceReal: string;
   try {
-    await fsp.access(args.sourcePath);
+    sourceReal = await fsp.realpath(args.sourcePath);
   } catch {
     return { ok: false, reason: 'source-missing' };
   }
@@ -97,7 +107,7 @@ export async function cachePreviousInstaller(args: CacheArgs): Promise<CacheResu
   // hides the real fault (bad source) as "no cache available." Pre-copy
   // surfaces the failure mode in main-process logs as `'source-too-small'`.
   try {
-    const sourceStat = await fsp.stat(args.sourcePath);
+    const sourceStat = await fsp.stat(sourceReal);
     if (sourceStat.size < MIN_CACHED_INSTALLER_BYTES) {
       return { ok: false, reason: 'source-too-small' };
     }
@@ -169,31 +179,74 @@ export async function cachePreviousInstaller(args: CacheArgs): Promise<CacheResu
       return { ok: false, reason: 'cache-collision' };
     }
 
-    // Delete any prior cache entries (we keep exactly one). Filter by the
-    // same `parseVersionFromFileName` gate the read side uses — only our own
-    // `TranscriptionSuite-<version>.AppImage` files are eligible. This is
-    // defense-in-depth for the equality branch of the allow-list above: if a
-    // hostile symlink loop makes `dir` resolve to the userData root itself,
-    // the loop only touches our own files and unrelated userData contents
-    // survive intact.
+    // Atomic write: copy source into `<destPath>.tmp`, then POSIX-rename
+    // it to destPath. Because tmp shares `dir` (same filesystem by
+    // construction, both under userDataDir), the rename is atomic. On
+    // any failure before the rename the prior cache entry is untouched —
+    // we haven't run the unlink loop yet, so a mid-write failure degrades
+    // to "prior cache still usable" rather than "no cache at all".
+    //
+    // The `.tmp` suffix is invisible to `parseVersionFromFileName` (it
+    // bails at the `.AppImage` suffix check), so `getCachedInstaller`
+    // will never surface an orphan tmp as a rollback candidate. The
+    // unlink-priors loop below DOES sweep orphan `.tmp` files from
+    // prior crashed writes — see `isSweepable` comment below.
+    const destPath = path.join(dir, cacheFileName(args.version));
+    const tmpPath = destPath + '.tmp';
+    try {
+      await fsp.copyFile(sourceReal, tmpPath);
+      await fsp.rename(tmpPath, destPath);
+    } catch (err) {
+      // Best-effort cleanup of our OWN in-flight tmp. If copyFile failed
+      // before writing anything the unlink hits ENOENT — swallow. Any
+      // surviving tmp residue is swept by the next successful write's
+      // sweep loop below.
+      await fsp.unlink(tmpPath).catch(() => {});
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, reason: 'write-error', message };
+    }
+
+    // Delete any prior cache entries AFTER the rename succeeds (we keep
+    // exactly one). Sweep:
+    //  (a) completed `TranscriptionSuite-<version>.AppImage` files from
+    //      previous cache generations — the single-slot invariant;
+    //  (b) orphan `.tmp` files from timed-out / crashed prior writes —
+    //      without this the timeout path in UpdateInstaller.install()
+    //      would leak ~150 MB per hang since parseVersionFromFileName
+    //      alone rejects the `.tmp` suffix.
+    // The `full === destPath` skip prevents us from self-unlinking the
+    // file we just successfully renamed into place.
+    //
+    // Defense-in-depth: this loop runs under the symlink-collision allow
+    // list above, so even if `dir` resolves to an unexpected descendant
+    // of userData, only our own filename patterns (version-parseable
+    // name, with or without trailing `.tmp`) are eligible.
     let entries: string[] = [];
     try {
       entries = await fsp.readdir(dir);
     } catch {
       entries = [];
     }
+    const isSweepable = (name: string): boolean => {
+      if (parseVersionFromFileName(name) !== null) return true;
+      if (name.endsWith('.tmp')) {
+        const inner = name.slice(0, -'.tmp'.length);
+        return parseVersionFromFileName(inner) !== null;
+      }
+      return false;
+    };
     for (const name of entries) {
-      if (parseVersionFromFileName(name) === null) continue;
+      if (!isSweepable(name)) continue;
+      const full = path.join(dir, name);
+      if (full === destPath) continue;
       try {
-        await fsp.unlink(path.join(dir, name));
+        await fsp.unlink(full);
       } catch {
-        // Ignore individual unlink failures; the next copyFile will either
-        // succeed on its new filename or surface a real write error below.
+        // Ignore individual unlink failures; worst case is a stale prior
+        // entry that the NEXT successful write will sweep.
       }
     }
 
-    const destPath = path.join(dir, cacheFileName(args.version));
-    await fsp.copyFile(args.sourcePath, destPath);
     return { ok: true, cachedPath: destPath };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -5,7 +5,7 @@
  * I/O matrix.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'fs';
 import { promises as fsp } from 'fs';
 import { tmpdir } from 'os';
@@ -571,5 +571,153 @@ describe('cachePreviousInstaller pre-copy source-size guard', () => {
 
     expect(result.ok).toBe(true);
     expect(result.cachedPath).toBeDefined();
+  });
+});
+
+// ── Spec: in-app-update-cache-write-hardening — atomic copy-then-rename ──
+//
+// Defends against the "delete-then-copy loses cache on copyFile failure"
+// failure mode (M6 review #2). Write sequence is now:
+//   copyFile(sourceReal, destPath.tmp) → rename(tmpPath, destPath) → unlink
+//   priors. On any failure before the rename, prior cache survives.
+
+describe('cachePreviousInstaller atomic-write', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'installer-cache-atomic-'));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('preserves the prior cache entry when copyFile fails with ENOSPC mid-write', async () => {
+    const userData = path.join(tmp, 'userData');
+    const dir = path.join(userData, 'previous-installer');
+    await fsp.mkdir(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'TranscriptionSuite-1.3.2.AppImage'), HEALTHY_BYTES);
+
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+
+    vi.spyOn(fsp, 'copyFile').mockRejectedValueOnce(
+      Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }),
+    );
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.3',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('write-error');
+
+    // The PRE-EXISTING cache entry must survive — that's the whole point.
+    // No new `-1.3.3.AppImage`, and no `.tmp` residue either.
+    expect(readdirSync(dir)).toEqual(['TranscriptionSuite-1.3.2.AppImage']);
+  });
+
+  it('sweeps orphan .tmp files from prior crashed / timed-out writes', async () => {
+    const userData = path.join(tmp, 'userData');
+    const dir = path.join(userData, 'previous-installer');
+    await fsp.mkdir(dir, { recursive: true });
+    // Two orphan tmps that look like crashed prior writes. Without the
+    // .tmp-sweep patch these would accumulate indefinitely — the old
+    // parseVersionFromFileName filter skipped them.
+    writeFileSync(path.join(dir, 'TranscriptionSuite-1.3.0.AppImage.tmp'), HEALTHY_BYTES);
+    writeFileSync(path.join(dir, 'TranscriptionSuite-1.3.1.AppImage.tmp'), HEALTHY_BYTES);
+    // A non-sweepable orphan (wrong prefix) — must survive (not ours).
+    writeFileSync(path.join(dir, 'unrelated-file.tmp'), 'keep');
+
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.3',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(true);
+    const remaining = readdirSync(dir).sort();
+    expect(remaining).toEqual(['TranscriptionSuite-1.3.3.AppImage', 'unrelated-file.tmp']);
+  });
+
+  it('preserves the prior cache entry when rename fails (EXDEV)', async () => {
+    const userData = path.join(tmp, 'userData');
+    const dir = path.join(userData, 'previous-installer');
+    await fsp.mkdir(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'TranscriptionSuite-1.3.2.AppImage'), HEALTHY_BYTES);
+
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+
+    // rename fails: cross-filesystem rename (hypothetical) or a permissions
+    // glitch on the tmp-to-dest rename step. copyFile ran, wrote the tmp;
+    // our catch arm must unlink the orphan tmp, leaving only the prior.
+    vi.spyOn(fsp, 'rename').mockRejectedValueOnce(
+      Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' }),
+    );
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.3',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('write-error');
+    expect(readdirSync(dir)).toEqual(['TranscriptionSuite-1.3.2.AppImage']);
+  });
+});
+
+// ── Spec: in-app-update-cache-write-hardening — source realpath parity ──
+//
+// Witnesses that both the pre-copy stat and the copyFile go through the
+// same resolved path. Defends against a symlink-retarget race on
+// process.env.APPIMAGE between stat and copy.
+
+describe('cachePreviousInstaller source realpath parity', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'installer-cache-realpath-'));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('copyFile is invoked with the realpath of a symlinked sourcePath', async () => {
+    const realTarget = path.join(tmp, 'real-v1.3.2.AppImage');
+    writeFileSync(realTarget, HEALTHY_BYTES);
+    const link = path.join(tmp, 'link.AppImage');
+    await fsp.symlink(realTarget, link);
+    const expectedReal = await fsp.realpath(link);
+    const userData = path.join(tmp, 'userData');
+
+    const copyFileSpy = vi.spyOn(fsp, 'copyFile');
+
+    const result = await cachePreviousInstaller({
+      sourcePath: link,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(true);
+    // The first argument of the FIRST copyFile call must be the
+    // resolved realpath, not the symlink we were handed.
+    expect(copyFileSpy).toHaveBeenCalled();
+    const firstCallArgs = copyFileSpy.mock.calls[0];
+    expect(firstCallArgs[0]).toBe(expectedReal);
+    expect(firstCallArgs[0]).not.toBe(link);
   });
 });
