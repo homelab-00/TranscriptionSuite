@@ -286,7 +286,7 @@ describe('cachePreviousInstaller symlink-collision defense', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('aborts with cache-collision when previous-installer symlinks to source parent', async () => {
+  it('aborts with cache-symlink-outside-userdata when previous-installer symlinks to source parent', async () => {
     // Pathological dotfiles-rig setup: previous-installer/ → AppImage parent dir.
     // Without the realpath check, the unlink loop would delete the running binary.
     const userData = path.join(tmp, 'userData');
@@ -308,7 +308,7 @@ describe('cachePreviousInstaller symlink-collision defense', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.reason).toBe('cache-collision');
+    expect(result.reason).toBe('cache-symlink-outside-userdata');
     // No filesystem mutation: source dir contents unchanged.
     expect(readdirSync(sourceDir)).toEqual(sourceContentsBefore);
     // Source AppImage still intact.
@@ -452,7 +452,7 @@ describe('cachePreviousInstaller userData allow-list defense', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.reason).toBe('cache-collision');
+    expect(result.reason).toBe('cache-symlink-outside-userdata');
     expect(readdirSync(siblingDir).sort()).toEqual(before);
   });
 
@@ -719,5 +719,280 @@ describe('cachePreviousInstaller source realpath parity', () => {
     const firstCallArgs = copyFileSpy.mock.calls[0];
     expect(firstCallArgs[0]).toBe(expectedReal);
     expect(firstCallArgs[0]).not.toBe(link);
+  });
+});
+
+// ── Spec: in-app-update-installer-cache-error-classification ──
+//
+// Splits the legacy `source-missing` and `cache-collision` reason buckets
+// into narrower classifications so operators can distinguish file-absent
+// from permission-denied, hostile-symlink from static-FS-issue, and
+// pre-mkdir misconfiguration from post-mkdir race.
+
+describe('cachePreviousInstaller error classification', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'installer-cache-classify-'));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('rejects a non-AppImage sourcePath with source-not-appimage (no FS access)', async () => {
+    // Future-caller hazard guard: a caller passing /etc/shadow or any
+    // other readable file should be stopped at the basename gate.
+    const src = path.join(tmp, 'plain.txt');
+    writeFileSync(src, 'not an AppImage');
+    const userData = path.join(tmp, 'userData');
+    // mkdir spy will fail this if the function progresses past the gate.
+    const mkdirSpy = vi.spyOn(fsp, 'mkdir');
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('source-not-appimage');
+    expect(mkdirSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns source-stat-failed (with err.message) on a non-ENOENT realpath error', async () => {
+    // EACCES on the source's path traversal — file exists but the
+    // calling process can't reach it. Distinct from ENOENT (file truly
+    // absent) so operators can tell the two apart in logs.
+    const src = path.join(tmp, 'unreadable.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+    const userData = path.join(tmp, 'userData');
+    vi.spyOn(fsp, 'realpath').mockRejectedValueOnce(
+      Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }),
+    );
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('source-stat-failed');
+    expect(result.message).toContain('EACCES');
+  });
+
+  it('returns userdata-unreadable when realpath of userData throws EACCES', async () => {
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+    const userData = path.join(tmp, 'userData');
+    await fsp.mkdir(userData, { recursive: true });
+    // First realpath call (source) succeeds via the unmocked fsp.realpath;
+    // the SECOND call (userData) is the one we want to fail. Use a
+    // call-counting spy so the source resolution stays real.
+    const realRealpath = fsp.realpath.bind(fsp);
+    let calls = 0;
+    vi.spyOn(fsp, 'realpath').mockImplementation(((...args: unknown[]) => {
+      calls += 1;
+      const target = args[0] as string;
+      if (calls === 2 && target === userData) {
+        return Promise.reject(
+          Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }),
+        );
+      }
+      return realRealpath(target);
+    }) as typeof fsp.realpath);
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('userdata-unreadable');
+    expect(result.message).toContain('EACCES');
+  });
+
+  it('returns cache-toctou-detected when post-mkdir userData realpath fails (race surrogate)', async () => {
+    // Surrogate for: process A passes the pre-mkdir allow-list, mkdir
+    // succeeds, then process B swaps the cache dir for a dangling
+    // symlink before A's post-mkdir realpath. Capture realMkdir BEFORE
+    // the spy so the inner mkdir call doesn't re-enter the spy (which
+    // would couple this test to vitest's mockImplementationOnce
+    // fallthrough semantics).
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+    const userData = path.join(tmp, 'userData');
+    await fsp.mkdir(userData, { recursive: true });
+
+    const realRealpath = fsp.realpath.bind(fsp);
+    const realMkdir = fsp.mkdir.bind(fsp);
+    let mkdirSeen = false;
+    vi.spyOn(fsp, 'mkdir').mockImplementationOnce(async (...args) => {
+      const result = await realMkdir(...(args as Parameters<typeof realMkdir>));
+      mkdirSeen = true;
+      return result;
+    });
+    vi.spyOn(fsp, 'realpath').mockImplementation(((...args: unknown[]) => {
+      const target = args[0] as string;
+      if (mkdirSeen) {
+        mkdirSeen = false; // fail the FIRST post-mkdir call (userDataDir)
+        return Promise.reject(
+          Object.assign(new Error('ELOOP: too many symlinks'), { code: 'ELOOP' }),
+        );
+      }
+      return realRealpath(target);
+    }) as typeof fsp.realpath);
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('cache-toctou-detected');
+    // Defense-in-depth: the err.message rides through to the result so
+    // operators have a per-incident discriminator. A regression that
+    // dropped the message would otherwise pass on reason alone.
+    expect(result.message).toContain('ELOOP');
+  });
+
+  it('returns cache-toctou-detected when post-mkdir cache-dir realpath fails (second call)', async () => {
+    // Same race surrogate as above, but skip the first post-mkdir
+    // realpath (userDataDir) and reject the SECOND (cache dir). The
+    // production code calls realpath(userDataDir) then realpath(dir)
+    // back-to-back inside one try; either rejection should land in
+    // cache-toctou-detected. Without this test the second branch is
+    // covered only by code review.
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+    const userData = path.join(tmp, 'userData');
+    await fsp.mkdir(userData, { recursive: true });
+
+    const realRealpath = fsp.realpath.bind(fsp);
+    const realMkdir = fsp.mkdir.bind(fsp);
+    let postMkdirCalls = 0;
+    let mkdirDone = false;
+    vi.spyOn(fsp, 'mkdir').mockImplementationOnce(async (...args) => {
+      const result = await realMkdir(...(args as Parameters<typeof realMkdir>));
+      mkdirDone = true;
+      return result;
+    });
+    vi.spyOn(fsp, 'realpath').mockImplementation(((...args: unknown[]) => {
+      const target = args[0] as string;
+      if (mkdirDone) {
+        postMkdirCalls += 1;
+        if (postMkdirCalls === 2) {
+          return Promise.reject(
+            Object.assign(new Error('ELOOP: too many symlinks'), { code: 'ELOOP' }),
+          );
+        }
+      }
+      return realRealpath(target);
+    }) as typeof fsp.realpath);
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('cache-toctou-detected');
+  });
+
+  it('returns source-stat-failed when fsp.stat (not realpath) throws non-ENOENT', async () => {
+    // Coverage parity: the catch arm at the second try block (around
+    // the size guard) has identical classification code as the first
+    // try block. Without a dedicated test, drift between the two would
+    // go unnoticed.
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+    const userData = path.join(tmp, 'userData');
+
+    vi.spyOn(fsp, 'stat').mockRejectedValueOnce(
+      Object.assign(new Error('EIO: i/o error'), { code: 'EIO' }),
+    );
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('source-stat-failed');
+    expect(result.message).toContain('EIO');
+  });
+
+  it('skips a hostile .tmp-suffixed directory matching the cache filename pattern', async () => {
+    // `TranscriptionSuite-1.0.0.AppImage.tmp/` is also `isSweepable` (via
+    // the .tmp-orphan branch added in the cache-write-hardening spec)
+    // AND is a directory, so it MUST also fall through the lstat skip
+    // path. Without this test, a refactor that narrowed isDirectory()
+    // skipping to only the non-.tmp case would silently regress.
+    const userData = path.join(tmp, 'userData');
+    const dir = path.join(userData, 'previous-installer');
+    await fsp.mkdir(dir, { recursive: true });
+    const hostileTmpDir = path.join(dir, 'TranscriptionSuite-1.0.0.AppImage.tmp');
+    await fsp.mkdir(hostileTmpDir);
+    writeFileSync(path.join(hostileTmpDir, 'unrelated.txt'), 'must survive');
+
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.3',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(true);
+    const hostileEntries = readdirSync(hostileTmpDir);
+    expect(hostileEntries).toEqual(['unrelated.txt']);
+  });
+
+  it('skips a hostile directory matching the cache filename pattern (no recursive delete)', async () => {
+    // Operator/attacker has pre-planted `previous-installer/TranscriptionSuite-1.0.0.AppImage/`
+    // as a real directory containing arbitrary files. The sweep MUST NOT
+    // recursively delete it; the new write should still succeed and the
+    // hostile directory + its contents survive.
+    const userData = path.join(tmp, 'userData');
+    const dir = path.join(userData, 'previous-installer');
+    await fsp.mkdir(dir, { recursive: true });
+    const hostileDir = path.join(dir, 'TranscriptionSuite-1.0.0.AppImage');
+    await fsp.mkdir(hostileDir);
+    writeFileSync(path.join(hostileDir, 'unrelated.txt'), 'must survive');
+
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.3',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(true);
+    // Hostile directory + its inner file both survive.
+    const hostileEntries = readdirSync(hostileDir);
+    expect(hostileEntries).toEqual(['unrelated.txt']);
+    expect(readFileSync(path.join(hostileDir, 'unrelated.txt'), 'utf-8')).toBe('must survive');
+    // The new cache file IS in place.
+    expect(readdirSync(dir).sort()).toEqual([
+      'TranscriptionSuite-1.0.0.AppImage',
+      'TranscriptionSuite-1.3.3.AppImage',
+    ]);
   });
 });
