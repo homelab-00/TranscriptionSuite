@@ -8,7 +8,7 @@
  * via a fake AutoUpdater that mimics electron-updater's EventEmitter surface.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────
@@ -212,8 +212,8 @@ describe('UpdateInstaller', () => {
     expect(inst.getStatus()).toEqual({ state: 'error', message: 'disk full' });
   });
 
-  it('install: not downloaded returns no-update-ready without throwing', () => {
-    const result = inst.install();
+  it('install: not downloaded returns no-update-ready without throwing', async () => {
+    const result = await inst.install();
     expect(result).toEqual({ ok: false, reason: 'no-update-ready' });
     expect(updater.quitAndInstall).not.toHaveBeenCalled();
   });
@@ -229,7 +229,7 @@ describe('UpdateInstaller', () => {
     updater.__downloadResolver();
     await downloadPromise;
 
-    const result = inst.install();
+    const result = await inst.install();
     expect(result).toEqual({ ok: true });
     expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true);
   });
@@ -351,10 +351,10 @@ describe('UpdateInstaller', () => {
     updater.__downloadResolver();
     await downloadPromise;
 
-    const first = inst.install();
+    const first = await inst.install();
     expect(first).toEqual({ ok: true });
 
-    const second = inst.install();
+    const second = await inst.install();
     expect(second).toEqual({ ok: false, reason: 'install-already-requested' });
     expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
   });
@@ -364,5 +364,248 @@ describe('UpdateInstaller', () => {
     const b = inst.getStatus();
     expect(a).not.toBe(b);
     expect(a).toEqual(b);
+  });
+});
+
+// ─── M6: verifier + cacheHook ────────────────────────────────────────────
+
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import path from 'path';
+import { existsSync } from 'fs';
+
+describe('UpdateInstaller verifier integration (M6)', () => {
+  let updater: FakeAutoUpdater;
+  let tmp: string;
+
+  beforeEach(() => {
+    updater = makeFakeUpdater();
+    tmp = mkdtempSync(path.join(tmpdir(), 'verifier-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  async function driveDownload(inst: UpdateInstaller, downloadedFile: string): Promise<void> {
+    const token = new FakeCancellationToken();
+    updater.__checkResult = { updateInfo: { version: '1.3.3' }, cancellationToken: token };
+    const downloadPromise = inst.startDownload();
+    await new Promise((r) => setImmediate(r));
+    updater.emit('update-downloaded', { version: '1.3.3', downloadedFile });
+    updater.__downloadResolver();
+    await downloadPromise;
+  }
+
+  it('passes through to downloaded when verifier returns ok', async () => {
+    const file = path.join(tmp, 'bin.AppImage');
+    writeFileSync(file, 'ok');
+    const verifier = vi.fn(async () => ({ ok: true as const }));
+    const inst = new UpdateInstaller(silentLogger(), updater, { verifier });
+    const history = statusHistory(inst);
+
+    await driveDownload(inst, file);
+    await new Promise((r) => setImmediate(r));
+
+    const states = history.map((s) => s.state);
+    expect(states).toContain('verifying');
+    expect(inst.getStatus()).toEqual({ state: 'downloaded', version: '1.3.3' });
+    expect(verifier).toHaveBeenCalledWith(file, '1.3.3');
+  });
+
+  it('unlinks the file and flips to error when verifier returns ok:false', async () => {
+    const file = path.join(tmp, 'bad.AppImage');
+    writeFileSync(file, 'tampered');
+    const verifier = vi.fn(async () => ({ ok: false as const, reason: 'checksum-mismatch' }));
+    const inst = new UpdateInstaller(silentLogger(), updater, { verifier });
+
+    await driveDownload(inst, file);
+    // Allow the verifier promise + the unlink I/O to settle. Real fsp.unlink
+    // is a native-bound async op, so we need more than one microtask tick.
+    for (let i = 0; i < 10 && inst.getStatus().state !== 'error'; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+
+    expect(inst.getStatus()).toEqual({ state: 'error', message: 'checksum-mismatch' });
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('surfaces a rejected verifier as error{verifier-threw:...}', async () => {
+    const file = path.join(tmp, 'throws.AppImage');
+    writeFileSync(file, 'x');
+    const verifier = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const inst = new UpdateInstaller(silentLogger(), updater, { verifier });
+
+    await driveDownload(inst, file);
+    await new Promise((r) => setImmediate(r));
+
+    const status = inst.getStatus();
+    expect(status.state).toBe('error');
+    if (status.state === 'error') {
+      expect(status.message).toContain('boom');
+    }
+  });
+
+  it('skips verification and goes to downloaded when downloadedFile is absent', async () => {
+    const verifier = vi.fn(async () => ({ ok: true as const }));
+    const inst = new UpdateInstaller(silentLogger(), updater, { verifier });
+
+    const token = new FakeCancellationToken();
+    updater.__checkResult = { updateInfo: { version: '1.3.3' }, cancellationToken: token };
+    const downloadPromise = inst.startDownload();
+    await new Promise((r) => setImmediate(r));
+    // Emit event without downloadedFile
+    updater.emit('update-downloaded', { version: '1.3.3' });
+    updater.__downloadResolver();
+    await downloadPromise;
+    await new Promise((r) => setImmediate(r));
+
+    expect(verifier).not.toHaveBeenCalled();
+    expect(inst.getStatus()).toEqual({ state: 'downloaded', version: '1.3.3' });
+  });
+
+  it('when no verifier is wired, behaves exactly like M1 (no verifying state)', async () => {
+    const inst = new UpdateInstaller(silentLogger(), updater);
+    const history = statusHistory(inst);
+
+    const token = new FakeCancellationToken();
+    updater.__checkResult = { updateInfo: { version: '1.3.3' }, cancellationToken: token };
+    const downloadPromise = inst.startDownload();
+    await new Promise((r) => setImmediate(r));
+    updater.emit('update-downloaded', { version: '1.3.3' });
+    updater.__downloadResolver();
+    await downloadPromise;
+
+    expect(history.map((s) => s.state)).not.toContain('verifying');
+    expect(inst.getStatus()).toEqual({ state: 'downloaded', version: '1.3.3' });
+  });
+
+  it('does not regress a cancelled state if verifier resolves late', async () => {
+    let resolveVerifier: (v: { ok: true } | { ok: false; reason: string }) => void = () => {};
+    const verifier = vi.fn(
+      () =>
+        new Promise<{ ok: true } | { ok: false; reason: string }>((r) => {
+          resolveVerifier = r;
+        }),
+    );
+    const file = path.join(tmp, 'bin.AppImage');
+    writeFileSync(file, 'x');
+    const inst = new UpdateInstaller(silentLogger(), updater, { verifier });
+
+    const token = new FakeCancellationToken();
+    updater.__checkResult = { updateInfo: { version: '1.3.3' }, cancellationToken: token };
+    const downloadPromise = inst.startDownload();
+    await new Promise((r) => setImmediate(r));
+    updater.emit('update-downloaded', { version: '1.3.3', downloadedFile: file });
+    updater.__downloadResolver();
+    await downloadPromise;
+    // Wait for the verifying state to settle (setStatus fires after the
+    // verifier Promise is awaited — needs a microtask tick).
+    for (let i = 0; i < 10 && inst.getStatus().state !== 'verifying'; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(inst.getStatus().state).toBe('verifying');
+
+    // User cancels mid-verify
+    inst.cancelDownload();
+    expect(inst.getStatus()).toEqual({ state: 'cancelled' });
+
+    // Verifier resolves late — must not regress cancelled → downloaded
+    resolveVerifier({ ok: true });
+    await new Promise((r) => setImmediate(r));
+
+    expect(inst.getStatus()).toEqual({ state: 'cancelled' });
+  });
+});
+
+describe('UpdateInstaller cache hook integration (M6)', () => {
+  let updater: FakeAutoUpdater;
+
+  beforeEach(() => {
+    updater = makeFakeUpdater();
+  });
+
+  async function downloadReady(inst: UpdateInstaller): Promise<void> {
+    const token = new FakeCancellationToken();
+    updater.__checkResult = { updateInfo: { version: '1.3.3' }, cancellationToken: token };
+    const downloadPromise = inst.startDownload();
+    await new Promise((r) => setImmediate(r));
+    updater.emit('update-downloaded', { version: '1.3.3' });
+    updater.__downloadResolver();
+    await downloadPromise;
+  }
+
+  it('invokes the cache hook before quitAndInstall', async () => {
+    const events: string[] = [];
+    const cacheHook = vi.fn(async (ctx: { version: string }) => {
+      events.push(`cached:${ctx.version}`);
+    });
+    const inst = new UpdateInstaller(silentLogger(), updater, { cacheHook });
+    (updater.quitAndInstall as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      events.push('quitAndInstall');
+    });
+
+    await downloadReady(inst);
+    await inst.install();
+
+    expect(cacheHook).toHaveBeenCalledWith({ version: '1.3.3' });
+    expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
+    // Cache hook must complete BEFORE quitAndInstall — electron can
+    // kill the process mid-copy otherwise.
+    expect(events).toEqual(['cached:1.3.3', 'quitAndInstall']);
+  });
+
+  it('still calls quitAndInstall when the cache hook rejects', async () => {
+    const cacheHook = vi.fn(async () => {
+      throw new Error('disk full');
+    });
+    const inst = new UpdateInstaller(silentLogger(), updater, { cacheHook });
+
+    await downloadReady(inst);
+    const result = await inst.install();
+
+    expect(result).toEqual({ ok: true });
+    expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true);
+  });
+
+  it('does not invoke the cache hook when install returns no-update-ready', async () => {
+    const cacheHook = vi.fn(async () => {});
+    const inst = new UpdateInstaller(silentLogger(), updater, { cacheHook });
+
+    const result = await inst.install();
+
+    expect(result).toEqual({ ok: false, reason: 'no-update-ready' });
+    expect(cacheHook).not.toHaveBeenCalled();
+    expect(updater.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('install rejects with no-version when currentVersion was never captured', async () => {
+    // Force the installer into a 'downloaded' state without going through
+    // startDownload (which is what normally populates currentVersion).
+    // Manually emit update-downloaded to exercise the guard.
+    const inst = new UpdateInstaller(silentLogger(), updater, {});
+    const token = new FakeCancellationToken();
+    updater.__checkResult = { updateInfo: { version: '' }, cancellationToken: token };
+    const downloadPromise = inst.startDownload();
+    await new Promise((r) => setImmediate(r));
+    updater.emit('update-downloaded', { version: '' });
+    updater.__downloadResolver();
+    await downloadPromise;
+
+    // Clear currentVersion via construction quirk: replace with a fresh
+    // instance where no download ever happened but state is faked.
+    // Simpler: bypass via direct manipulation to simulate a race — we
+    // assert the guard works regardless of how the state got there.
+    (inst as unknown as { currentVersion: string | null }).currentVersion = null;
+    (inst as unknown as { status: InstallerStatus }).status = {
+      state: 'downloaded',
+      version: '1.3.3',
+    };
+
+    const result = await inst.install();
+    expect(result).toEqual({ ok: false, reason: 'no-version' });
+    expect(updater.quitAndInstall).not.toHaveBeenCalled();
   });
 });

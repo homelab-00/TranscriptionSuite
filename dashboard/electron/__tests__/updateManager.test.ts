@@ -1,13 +1,27 @@
 /**
- * updateManager — focused tests for the release-notes sanitizer.
- *
- * The function is the only new logic added to updateManager.ts in M5;
- * UpdateManager's GitHub/GHCR network paths and notification dedup are
- * already exercised indirectly via the UpdateBanner suite.
+ * updateManager — focused tests for the release-notes sanitizer and
+ * the M6 single-shot failure-retry timer.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
-import { sanitizeReleaseBody } from '../updateManager';
+// electron must be mocked at module-resolution time because updateManager
+// imports Notification + app for the notification path.
+vi.mock('electron', () => ({
+  Notification: class {
+    show() {}
+  },
+  app: {
+    getVersion: () => '1.0.0',
+  },
+}));
+
+vi.mock('../dockerManager.js', () => ({
+  dockerManager: {
+    listImages: async () => [],
+  },
+}));
+
+import { sanitizeReleaseBody, UpdateManager, FAILURE_RETRY_MS } from '../updateManager';
 
 const MAX = 50_000;
 
@@ -59,5 +73,144 @@ describe('sanitizeReleaseBody', () => {
 
   it('trims only leading/trailing whitespace, not internal', () => {
     expect(sanitizeReleaseBody('  line 1\nline 2  ')).toBe('line 1\nline 2');
+  });
+});
+
+// ─── M6: failure retry timer ───────────────────────────────────────────────
+
+function makeFakeStore(): {
+  get: (k: string) => unknown;
+  set: (k: string, v: unknown) => void;
+  data: Record<string, unknown>;
+} {
+  const data: Record<string, unknown> = {
+    'app.showNotifications': false, // suppress notification path during tests
+  };
+  return {
+    data,
+    get: (k: string) => data[k],
+    set: (k: string, v: unknown) => {
+      data[k] = v;
+    },
+  };
+}
+
+describe('UpdateManager failure-retry timer', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let manager: UpdateManager;
+  let store: ReturnType<typeof makeFakeStore>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    store = makeFakeStore();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    manager = new UpdateManager(store as any);
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+  });
+
+  afterEach(() => {
+    manager.destroy();
+    fetchSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('arms a 1h retry when both components error', async () => {
+    fetchSpy.mockRejectedValue(new Error('network down'));
+
+    await manager.check();
+
+    expect(manager.hasFailureRetry()).toBe(true);
+  });
+
+  it('clears the retry when the next check succeeds cleanly', async () => {
+    // First call: fail on both channels.
+    fetchSpy.mockRejectedValueOnce(new Error('app fail'));
+    fetchSpy.mockRejectedValueOnce(new Error('token fail'));
+    await manager.check();
+    expect(manager.hasFailureRetry()).toBe(true);
+
+    // Second call: both channels succeed. GitHub returns a release; GHCR
+    // returns a token then tags.
+    fetchSpy.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes('api.github.com')) {
+        return new Response(JSON.stringify({ tag_name: 'v1.0.0', body: '' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('ghcr.io/token')) {
+        return new Response(JSON.stringify({ token: 'fake' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('ghcr.io/v2')) {
+        return new Response(JSON.stringify({ tags: ['1.0.0'] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch url: ${url}`);
+    });
+
+    await manager.check();
+    expect(manager.hasFailureRetry()).toBe(false);
+  });
+
+  it('destroy() clears any armed retry', async () => {
+    fetchSpy.mockRejectedValue(new Error('fail'));
+    await manager.check();
+    expect(manager.hasFailureRetry()).toBe(true);
+
+    manager.destroy();
+    expect(manager.hasFailureRetry()).toBe(false);
+  });
+
+  it('arms retry after only one component errors (app channel down, server channel ok)', async () => {
+    fetchSpy.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes('api.github.com')) {
+        throw new Error('github down');
+      }
+      if (url.includes('ghcr.io/token')) {
+        return new Response(JSON.stringify({ token: 'fake' }), { status: 200 });
+      }
+      if (url.includes('ghcr.io/v2')) {
+        return new Response(JSON.stringify({ tags: ['1.0.0'] }), { status: 200 });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    });
+
+    await manager.check();
+    expect(manager.hasFailureRetry()).toBe(true);
+  });
+
+  it('scheduled retry fires after FAILURE_RETRY_MS', async () => {
+    fetchSpy.mockRejectedValue(new Error('fail'));
+    await manager.check();
+    expect(fetchSpy).toHaveBeenCalled();
+    const firstCallCount = fetchSpy.mock.calls.length;
+
+    // Advance to just before the retry and confirm no re-check.
+    await vi.advanceTimersByTimeAsync(FAILURE_RETRY_MS - 1);
+    expect(fetchSpy.mock.calls.length).toBe(firstCallCount);
+
+    // Cross the boundary — the single-shot timer fires.
+    await vi.advanceTimersByTimeAsync(2);
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(firstCallCount);
+  });
+
+  it('check() short-circuits after destroy() without touching the store', async () => {
+    manager.destroy();
+    // Spy on store.set AFTER destroy so we only capture post-destroy writes.
+    const setSpy = vi.spyOn(store, 'set');
+
+    fetchSpy.mockRejectedValue(new Error('fail'));
+    const result = await manager.check();
+
+    expect(result.app.error).toBe('destroyed');
+    expect(result.server.error).toBe('destroyed');
+    expect(setSpy).not.toHaveBeenCalledWith('updates.lastStatus', expect.anything());
   });
 });

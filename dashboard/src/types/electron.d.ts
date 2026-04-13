@@ -255,6 +255,7 @@ type InstallerStatus =
       transferred: number;
       total: number;
     }
+  | { state: 'verifying'; version: string }
   | { state: 'downloaded'; version: string }
   | { state: 'cancelled' }
   | { state: 'error'; message: string };

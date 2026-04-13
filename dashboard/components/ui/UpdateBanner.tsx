@@ -18,9 +18,21 @@
  * next transition. See _bmad-output/implementation-artifacts/deferred-work.md.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { getConfig, setConfig } from '../../src/config/store';
 import { UpdateModal } from './UpdateModal';
+
+/**
+ * Tailored copy for known error messages coming out of `UpdateInstaller`.
+ * Returns null to fall back to the generic "Update failed: <msg>" pattern.
+ */
+function errorToastCopy(message: string): string | null {
+  if (message === 'checksum-mismatch') {
+    return 'Downloaded update failed integrity check. Retry to download again.';
+  }
+  return null;
+}
 
 const SNOOZE_MS = 4 * 60 * 60 * 1000;
 const STATUS_POLL_MS = 60_000;
@@ -95,6 +107,10 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
   const [now, setNow] = useState<number>(() => Date.now());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
+  // M6: track the last error message we toasted so repeated error broadcasts
+  // with the same message do not spam the user. Initialized to null on mount
+  // so the first error transition always toasts.
+  const lastErrorMessageRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isElectron()) return;
@@ -154,7 +170,30 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
 
     // Live installer transitions.
     const unsubscribe = api.onInstallerStatus((s) => {
-      if (!cancelled) setInstaller(s);
+      if (cancelled) return;
+      setInstaller(s);
+
+      // M6: surface installer errors as a sonner toast with a [Retry] action.
+      // Dedup on the message string so repeated broadcasts (e.g. electron-
+      // updater re-emitting error on every internal retry) do not spam.
+      if (s.state === 'error') {
+        const message = s.message ?? 'unknown error';
+        if (lastErrorMessageRef.current === message) return;
+        lastErrorMessageRef.current = message;
+        const copy = errorToastCopy(message) ?? `Update failed: ${message}`;
+        toast.error(copy, {
+          action: {
+            label: 'Retry',
+            onClick: () => {
+              void handleRetry();
+            },
+          },
+        });
+      } else if (s.state === 'downloading' || s.state === 'downloaded') {
+        // Successful path — reset the dedup so a future error after a fresh
+        // retry cycle can toast again.
+        lastErrorMessageRef.current = null;
+      }
     });
 
     // Track current time so the snoozed banner re-appears after expiry.
@@ -194,6 +233,19 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
       await api.download();
     } catch (err) {
       console.error('UpdateBanner: download invocation failed', err);
+    }
+  }, []);
+
+  // M6: [Retry] action on error toasts — re-runs the download. We clear the
+  // dedup ref so a subsequent error of the same message still toasts.
+  const handleRetry = useCallback(async () => {
+    const api = window.electronAPI?.updates;
+    if (!api) return;
+    lastErrorMessageRef.current = null;
+    try {
+      await api.download();
+    } catch (err) {
+      console.error('UpdateBanner: retry download invocation failed', err);
     }
   }, []);
 

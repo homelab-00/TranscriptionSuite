@@ -23,6 +23,18 @@ vi.mock('../../../src/config/store', () => ({
   setConfig: (key: string, value: unknown) => setConfigMock(key, value),
 }));
 
+// ── Mock sonner (M6 error toast) ────────────────────────────────────────────
+
+const toastErrorMock = vi.fn();
+const toastSuccessMock = vi.fn();
+
+vi.mock('sonner', () => ({
+  toast: {
+    error: (...args: unknown[]) => toastErrorMock(...args),
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+  },
+}));
+
 // ── Import after mocks ──────────────────────────────────────────────────────
 
 import { UpdateBanner, deriveBannerState } from '../UpdateBanner';
@@ -130,6 +142,8 @@ beforeEach(() => {
   configStore.clear();
   getConfigMock.mockClear();
   setConfigMock.mockClear();
+  toastErrorMock.mockClear();
+  toastSuccessMock.mockClear();
 });
 
 afterEach(() => {
@@ -547,5 +561,126 @@ describe('UpdateBanner component', () => {
     });
 
     expect(screen.getByText('1.3.3 ready')).toBeTruthy();
+  });
+});
+
+// ── M6: installer-error toasts ──────────────────────────────────────────────
+
+describe('UpdateBanner M6 error toasts', () => {
+  it('toasts when the installer transitions to error and includes a Retry action', async () => {
+    const h = buildHarness();
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    await act(async () => {
+      h.emit({ state: 'error', message: 'disk full' });
+    });
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message, options] = toastErrorMock.mock.calls[0] as [string, { action?: unknown }];
+    expect(message).toBe('Update failed: disk full');
+    expect(options.action).toBeDefined();
+  });
+
+  it('uses tailored copy for checksum-mismatch errors', async () => {
+    const h = buildHarness();
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    await act(async () => {
+      h.emit({ state: 'error', message: 'checksum-mismatch' });
+    });
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message] = toastErrorMock.mock.calls[0] as [string, unknown];
+    expect(message).toBe('Downloaded update failed integrity check. Retry to download again.');
+  });
+
+  it('dedups repeated error broadcasts with the same message', async () => {
+    const h = buildHarness();
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    await act(async () => {
+      h.emit({ state: 'error', message: 'network down' });
+    });
+    await act(async () => {
+      h.emit({ state: 'error', message: 'network down' });
+    });
+    await act(async () => {
+      h.emit({ state: 'error', message: 'network down' });
+    });
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('toasts again when a different error message is broadcast', async () => {
+    const h = buildHarness();
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    await act(async () => {
+      h.emit({ state: 'error', message: 'first error' });
+    });
+    await act(async () => {
+      h.emit({ state: 'error', message: 'second error' });
+    });
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retry action invokes api.download()', async () => {
+    const h = buildHarness();
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    await act(async () => {
+      h.emit({ state: 'error', message: 'disk full' });
+    });
+
+    const [, options] = toastErrorMock.mock.calls[0] as [
+      string,
+      { action: { label: string; onClick: () => void } },
+    ];
+    expect(options.action.label).toBe('Retry');
+    await act(async () => {
+      options.action.onClick();
+      await Promise.resolve();
+    });
+
+    expect(h.download).toHaveBeenCalledTimes(1);
+  });
+
+  it('resets the dedup ref after a successful downloading/downloaded transition', async () => {
+    const h = buildHarness();
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    await act(async () => {
+      h.emit({ state: 'error', message: 'flaky' });
+    });
+    // Successful retry clears the dedup ref.
+    await act(async () => {
+      h.emit({
+        state: 'downloading',
+        version: '1.3.3',
+        percent: 10,
+        bytesPerSecond: 0,
+        transferred: 0,
+        total: 100,
+      });
+    });
+    // A later error with the same message should toast again.
+    await act(async () => {
+      h.emit({ state: 'error', message: 'flaky' });
+    });
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(2);
   });
 });

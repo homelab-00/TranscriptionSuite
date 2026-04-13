@@ -27,6 +27,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { promises as fsp } from 'fs';
 import { CancellationToken, autoUpdater } from 'electron-updater';
 import type { ProgressInfo } from 'electron-updater';
 import type { InstallerStatus } from './updateManager.js';
@@ -34,6 +35,27 @@ import type { InstallerStatus } from './updateManager.js';
 export type StartDownloadResult =
   | { ok: true; reason?: 'already-downloading' }
   | { ok: false; reason: 'no-update-available' | 'error'; message?: string };
+
+/**
+ * Verifier callback invoked after `update-downloaded`. Returns `ok: true`
+ * to proceed, or `ok: false` to abort and place the installer in the
+ * `error` state. If omitted entirely, verification is skipped (used in
+ * tests and during migration before CompatGuard's manifest is persisted).
+ */
+export type VerifierFn = (
+  downloadedFile: string,
+  version: string,
+) => Promise<{ ok: true } | { ok: false; reason: string }>;
+
+/**
+ * Cache-hook invoked once just before `quitAndInstall()`. Used by main.ts
+ * to copy the running AppImage to `userData/previous-installer/` so the
+ * M6 launch watchdog can offer a rollback on repeated launch failure.
+ *
+ * Any rejection is logged but does NOT block the install — losing the
+ * rollback slot is preferable to blocking a user-initiated update.
+ */
+export type CacheHookFn = (ctx: { version: string }) => Promise<void>;
 
 export interface UpdateInstallerLogger {
   info: (...args: unknown[]) => void;
@@ -52,9 +74,13 @@ const defaultLogger: UpdateInstallerLogger = {
  * Minimal shape we consume from an UpdateInfo. electron-updater provides a
  * larger type with many optional/required fields (files, path, sha512, …)
  * we don't touch; keeping the seam narrow lets tests fake it ergonomically.
+ *
+ * `downloadedFile` is added by the `update-downloaded` event payload. Older
+ * `update-available`/progress events don't carry it, so it is optional.
  */
 export interface UpdateInfoLike {
   version: string;
+  downloadedFile?: string;
 }
 
 /**
@@ -75,10 +101,19 @@ export interface AutoUpdaterLike extends EventEmitter {
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
 }
 
+export interface UpdateInstallerDeps {
+  logger?: UpdateInstallerLogger;
+  updater?: AutoUpdaterLike;
+  verifier?: VerifierFn;
+  cacheHook?: CacheHookFn;
+}
+
 export class UpdateInstaller {
   private readonly emitter = new EventEmitter();
   private readonly updater: AutoUpdaterLike;
   private readonly logger: UpdateInstallerLogger;
+  private readonly verifier: VerifierFn | null;
+  private readonly cacheHook: CacheHookFn | null;
   private status: InstallerStatus = { state: 'idle' };
   private cancellationToken: CancellationToken | null = null;
   private currentVersion: string | null = null;
@@ -88,9 +123,12 @@ export class UpdateInstaller {
   constructor(
     logger: UpdateInstallerLogger = defaultLogger,
     updater: AutoUpdaterLike = autoUpdater as unknown as AutoUpdaterLike,
+    deps: { verifier?: VerifierFn; cacheHook?: CacheHookFn } = {},
   ) {
     this.logger = logger;
     this.updater = updater;
+    this.verifier = deps.verifier ?? null;
+    this.cacheHook = deps.cacheHook ?? null;
     this.configureUpdater();
     this.bindEvents();
   }
@@ -169,13 +207,19 @@ export class UpdateInstaller {
 
   /**
    * Quit the app and install the downloaded update. No-op when no update
-   * is ready. M3 will wrap this in the active-transcription safety gate.
+   * is ready. M3's installGate and M6's cache hook both wrap this path.
    *
    * M1 assumption: the AppImage lives in a writable location on Linux.
    * When it doesn't, autoUpdater emits an error long before install()
    * is reachable, and the status already reflects that.
+   *
+   * M6: if a cacheHook was wired, it runs once BEFORE quitAndInstall() so
+   * the running AppImage can be copied to userData/previous-installer/
+   * for the launch watchdog to use on rollback. A cache-hook rejection is
+   * logged but never blocks the install — losing the rollback slot is
+   * strictly preferable to blocking a user-initiated update.
    */
-  install(): { ok: boolean; reason?: string } {
+  async install(): Promise<{ ok: boolean; reason?: string }> {
     if (this.status.state !== 'downloaded') {
       return { ok: false, reason: 'no-update-ready' };
     }
@@ -184,16 +228,38 @@ export class UpdateInstaller {
       // invoked call while that's in flight is undefined behavior.
       return { ok: false, reason: 'install-already-requested' };
     }
+    if (!this.currentVersion) {
+      // Defensive: an install without a known version would write a
+      // bogus 'unknown' cache file that the launch watchdog would
+      // indefinitely offer as a rollback target.
+      return { ok: false, reason: 'no-version' };
+    }
     this.installRequested = true;
+    const version = this.currentVersion;
+
+    if (this.cacheHook) {
+      // Await the cache hook BEFORE quitAndInstall so a slow copyFile
+      // cannot be truncated by Electron shutting the process down. A
+      // cache-hook rejection is logged but never blocks the install —
+      // losing the rollback slot is preferable to blocking the user.
+      try {
+        await this.cacheHook({ version });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn('cache-hook rejected (install still proceeds):', message);
+      }
+    }
+
     this.updater.quitAndInstall(false, true);
     return { ok: true };
   }
 
   /**
-   * Cancel any active download. No-op when idle or not downloading.
+   * Cancel any active download (or in-progress verification). No-op when
+   * idle or already in a terminal state.
    */
   cancelDownload(): { ok: boolean } {
-    if (this.status.state !== 'downloading') {
+    if (this.status.state !== 'downloading' && this.status.state !== 'verifying') {
       return { ok: true };
     }
     if (this.cancellationToken && !this.cancellationToken.cancelled) {
@@ -276,7 +342,14 @@ export class UpdateInstaller {
         return;
       }
       const info = args[0] as UpdateInfoLike;
-      this.setStatus({ state: 'downloaded', version: info.version });
+      this.runVerification(info).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error('verifier threw unexpectedly:', message);
+        // If we haven't already moved to a terminal state, flip to error.
+        if (this.status.state === 'verifying' || this.status.state === 'downloading') {
+          this.setStatus({ state: 'error', message: `verifier-threw: ${message}` });
+        }
+      });
     });
 
     bind('error', (...args) => {
@@ -299,5 +372,73 @@ export class UpdateInstaller {
   private setStatus(next: InstallerStatus): void {
     this.status = next;
     this.emitter.emit('status', next);
+  }
+
+  /**
+   * Post-download verification path. When no verifier is wired, behaves
+   * exactly like M1 (flip straight to `downloaded`). When a verifier is
+   * wired, transitions through an intermediate `verifying` state and
+   * only flips to `downloaded` when verification succeeds. On failure,
+   * unlinks the downloaded file and flips to `error` with the reason
+   * bubbled up from the verifier.
+   */
+  private async runVerification(info: UpdateInfoLike): Promise<void> {
+    if (!this.verifier) {
+      this.setStatus({ state: 'downloaded', version: info.version });
+      return;
+    }
+
+    this.setStatus({ state: 'verifying', version: info.version });
+
+    const downloadedFile = info.downloadedFile;
+    if (!downloadedFile) {
+      this.logger.warn('update-downloaded event missing downloadedFile path — skipping verify');
+      this.setStatus({ state: 'downloaded', version: info.version });
+      return;
+    }
+
+    let verdict: { ok: true } | { ok: false; reason: string };
+    try {
+      verdict = await this.verifier(downloadedFile, info.version);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error('verifier threw:', message);
+      this.setStatus({ state: 'error', message: `verifier-threw: ${message}` });
+      return;
+    }
+
+    // Guard: if the user cancelled or a late error fired while we were
+    // awaiting the verifier, don't regress that terminal state.
+    if (this.status.state !== 'verifying') {
+      this.logger.info('verifier completed after terminal state; dropping result');
+      return;
+    }
+
+    if (verdict.ok) {
+      this.setStatus({ state: 'downloaded', version: info.version });
+      return;
+    }
+
+    // Checksum mismatch (or other verifier failure). Use an `in` type
+    // guard — TypeScript sometimes loses the `verdict.ok === false`
+    // narrowing across subsequent statements when `verdict` was assigned
+    // inside an enclosing try/catch that used await.
+    const failureReason = 'reason' in verdict ? verdict.reason : 'unknown';
+
+    // Unlink the downloaded file so electron-updater doesn't reuse it on
+    // the next launch's "resume from cache" path.
+    try {
+      await fsp.unlink(downloadedFile);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn('failed to unlink un-verified downloaded file:', message);
+    }
+    // Re-check state: the fsp.unlink await gave cancelDownload() a
+    // chance to flip us to 'cancelled'. Don't regress a terminal state.
+    if (this.status.state !== 'verifying') {
+      this.logger.info('state changed during unlink; dropping error transition');
+      return;
+    }
+    this.setStatus({ state: 'error', message: failureReason });
   }
 }

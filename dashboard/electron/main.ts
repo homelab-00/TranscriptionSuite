@@ -29,6 +29,13 @@ import { UpdateManager } from './updateManager.js';
 import { UpdateInstaller } from './updateInstaller.js';
 import { createAppState, InstallGate } from './appState.js';
 import { CompatGuard } from './compatGuard.js';
+import { verifyChecksum } from './checksumVerifier.js';
+import {
+  cachePreviousInstaller,
+  getCachedInstaller,
+  type CachedInstaller,
+} from './installerCache.js';
+import { LaunchWatchdog } from './launchWatchdog.js';
 import {
   registerShortcuts,
   unregisterShortcuts,
@@ -469,9 +476,90 @@ const updateManager = new UpdateManager(store);
 // ─── Update Installer ───────────────────────────────────────────────────────
 
 // Wraps electron-updater's autoUpdater with an explicit state machine for
-// the in-app update flow. M1 scope is wiring only — UI (M2), safety gate
-// (M3), compat guard (M4), and platform hardening (M7) arrive later.
-const updateInstaller = new UpdateInstaller();
+// the in-app update flow. M6 wires the post-download SHA-256 verifier
+// against CompatGuard's persisted manifest and a Linux AppImage cache hook
+// so the LaunchWatchdog can offer a rollback after repeated launch failure.
+const updateInstaller = new UpdateInstaller(undefined, undefined, {
+  verifier: async (downloadedFile, version) => {
+    const manifest = compatGuard.getLastManifest();
+    if (!manifest) {
+      console.warn(
+        `[UpdateInstaller] no manifest persisted for v${version}; skipping sha256 verification`,
+      );
+      return { ok: true };
+    }
+    if (manifest.version !== version) {
+      // Stale manifest for a different version — using its hashes would
+      // produce false mismatches. Fail-open consistent with the missing-
+      // manifest path; CompatGuard is expected to refresh on next check.
+      console.warn(
+        `[UpdateInstaller] persisted manifest is for v${manifest.version} but downloaded v${version}; skipping verification`,
+      );
+      return { ok: true };
+    }
+    const expected = resolveExpectedSha256(manifest.sha256, downloadedFile);
+    if (!expected) {
+      console.warn(
+        `[UpdateInstaller] no manifest entry for ${path.basename(downloadedFile)}; skipping verification`,
+      );
+      return { ok: true };
+    }
+    const result = await verifyChecksum(downloadedFile, expected);
+    if (result.ok) {
+      return { ok: true };
+    }
+    if (result.reason === 'mismatch') {
+      console.error(
+        `[UpdateInstaller] SHA-256 mismatch for v${version}: expected ${expected}, actual ${result.actual}`,
+      );
+    } else {
+      console.error(
+        `[UpdateInstaller] SHA-256 verification failed (${result.reason}): ${result.message ?? '<no message>'}`,
+      );
+    }
+    return { ok: false, reason: 'checksum-mismatch' };
+  },
+  cacheHook: async (ctx) => {
+    if (process.platform !== 'linux' || !process.env.APPIMAGE) {
+      return;
+    }
+    const result = await cachePreviousInstaller({
+      sourcePath: process.env.APPIMAGE,
+      version: ctx.version,
+      userDataDir: app.getPath('userData'),
+    });
+    if (!result.ok) {
+      console.warn(
+        `[UpdateInstaller] installer cache skipped: ${result.reason}${result.message ? ` (${result.message})` : ''}`,
+      );
+    }
+  },
+});
+
+/**
+ * Resolve the expected SHA-256 for a downloaded installer file. The manifest
+ * publishes canonical asset names (e.g. `TranscriptionSuite.AppImage`), but
+ * electron-builder's default artifactName embeds the version
+ * (`TranscriptionSuite-1.3.3.AppImage`). Match on exact filename first, then
+ * fall back to a same-extension lookup.
+ */
+function resolveExpectedSha256(
+  sha256Map: Record<string, string>,
+  downloadedFile: string,
+): string | null {
+  const basename = path.basename(downloadedFile);
+  if (Object.prototype.hasOwnProperty.call(sha256Map, basename)) {
+    return sha256Map[basename];
+  }
+  const ext = path.extname(basename);
+  if (!ext) return null;
+  for (const key of Object.keys(sha256Map)) {
+    if (key.endsWith(ext)) {
+      return sha256Map[key];
+    }
+  }
+  return null;
+}
 
 updateInstaller.on('status', (status) => {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -508,6 +596,15 @@ const installGate = new InstallGate({
 // incompatibilities, and exposed via `updates:checkCompatibility` for M5's
 // pre-install modal. Fail-open on any unknown outcome.
 const compatGuard = new CompatGuard({ store });
+
+// ─── Launch Watchdog (M6) ───────────────────────────────────────────────
+// Increments a per-version launch-attempt counter at app.whenReady() and
+// offers a rollback dialog when the same version crashes 3 times in a
+// row. Reset to 0 once the main window has been stable for 10 s past
+// ready-to-show.
+const launchWatchdog = new LaunchWatchdog(store);
+let stableLaunchTimer: ReturnType<typeof setTimeout> | null = null;
+const STABLE_LAUNCH_CONFIRM_MS = 10_000;
 
 // Wire tray context-menu actions → IPC messages to the renderer
 trayManager.setActions({
@@ -646,8 +743,30 @@ function createWindow(): void {
     flushEarlyLogBuffer();
   });
 
+  // ─── M6: stable-launch confirmation ─────────────────────────────────
+  // Reset the launch-attempt counter to 0 once the main window has been
+  // up for STABLE_LAUNCH_CONFIRM_MS past ready-to-show without a quit.
+  // Runs via `once` so a show/hide cycle doesn't re-arm it.
+  mainWindow.once('ready-to-show', () => {
+    if (stableLaunchTimer) {
+      clearTimeout(stableLaunchTimer);
+    }
+    stableLaunchTimer = setTimeout(() => {
+      stableLaunchTimer = null;
+      try {
+        launchWatchdog.confirmLaunchStable();
+      } catch (err) {
+        console.warn('[LaunchWatchdog] confirmLaunchStable failed:', err);
+      }
+    }, STABLE_LAUNCH_CONFIRM_MS);
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
+    if (stableLaunchTimer) {
+      clearTimeout(stableLaunchTimer);
+      stableLaunchTimer = null;
+    }
   });
 }
 
@@ -1847,6 +1966,11 @@ function gracefulShutdown(): Promise<void> {
     installGate.destroy();
     compatGuard.destroy();
     updateInstaller.destroy();
+    launchWatchdog.destroy();
+    if (stableLaunchTimer) {
+      clearTimeout(stableLaunchTimer);
+      stableLaunchTimer = null;
+    }
     await mlxServerManager.destroy();
     await watcherManager.destroyAll();
     shutdownLog('[Shutdown] Cleanup complete.');
@@ -1889,7 +2013,7 @@ if (!gotLock) {
   app.quit();
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // ─── Certificate Error Handler (LAN profile) ────────────────────────────
   // Tailscale certs only cover *.ts.net FQDNs, not IP addresses. LAN
   // connections will always fail TLS hostname validation. Accept the cert
@@ -1907,6 +2031,40 @@ app.whenReady().then(() => {
 
   trayManager.create();
   updateManager.start();
+
+  // ─── M6: launch watchdog ─────────────────────────────────────────────
+  // Record a launch attempt for the running version and, if the counter
+  // has crossed the restore threshold AND a different-version installer
+  // is cached on disk, offer the rollback dialog BEFORE creating the
+  // main window so a renderer that crashes on init can't race us.
+  try {
+    const cached: CachedInstaller | null = await getCachedInstaller(app.getPath('userData'));
+    const { count, shouldPromptRestore } = launchWatchdog.recordLaunchAttempt(
+      app.getVersion(),
+      cached,
+    );
+    if (shouldPromptRestore && cached) {
+      const choice = dialog.showMessageBoxSync({
+        type: 'warning',
+        title: 'TranscriptionSuite — repeated launch failures',
+        message: `Dashboard v${app.getVersion()} has failed to launch ${count} times in a row.`,
+        detail:
+          `A cached copy of v${cached.version} is available.\n\n` +
+          `Click "Show cached installer" to open the folder containing the previous ` +
+          `AppImage. Quit this app, overwrite the current AppImage with the cached one, ` +
+          `then relaunch.\n\nClick "Continue" to keep trying v${app.getVersion()}.`,
+        buttons: ['Show cached installer', 'Continue'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (choice === 0) {
+        void shell.openPath(path.dirname(cached.path));
+      }
+    }
+  } catch (err) {
+    console.warn('[LaunchWatchdog] record attempt failed:', err);
+  }
+
   createWindow();
 
   // If the container is already running (app restarted while server was up),

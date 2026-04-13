@@ -68,6 +68,7 @@ export type InstallerStatus =
       transferred: number;
       total: number;
     }
+  | { state: 'verifying'; version: string }
   | { state: 'downloaded'; version: string }
   | { state: 'cancelled' }
   | { state: 'error'; message: string };
@@ -98,6 +99,13 @@ const INTERVAL_MS: Record<string, number> = {
   '7d': 7 * 24 * 60 * 60 * 1000,
   '28d': 28 * 24 * 60 * 60 * 1000,
 };
+
+/**
+ * On a failed `check()` we schedule a single-shot retry at this interval
+ * (in addition to the regular `setInterval` cadence). Brainstorming D:
+ * "Network failure — silent retry every 1h, no user notification."
+ */
+export const FAILURE_RETRY_MS = 60 * 60 * 1000;
 
 // ─── Semver helpers ─────────────────────────────────────────────────────────
 
@@ -149,6 +157,8 @@ function highestSemVer(tags: string[]): string | null {
 export class UpdateManager {
   private store: AnyStore;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private failureRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
 
   constructor(store: AnyStore) {
     this.store = store;
@@ -181,6 +191,29 @@ export class UpdateManager {
    * Persists the result and optionally shows a notification.
    */
   async check(): Promise<UpdateStatus> {
+    if (this.destroyed) {
+      // Defensive: an in-flight failureRetryTimer that fires right as
+      // destroy() runs, or a check() that was awaiting fetch across
+      // teardown, would otherwise write to the store post-shutdown.
+      const current = app.getVersion();
+      return {
+        lastChecked: new Date().toISOString(),
+        app: {
+          current,
+          latest: null,
+          updateAvailable: false,
+          error: 'destroyed',
+          releaseNotes: null,
+        },
+        server: {
+          current: null,
+          latest: null,
+          updateAvailable: false,
+          error: 'destroyed',
+          releaseNotes: null,
+        },
+      };
+    }
     const [appResult, serverResult] = await Promise.allSettled([
       this.checkApp(),
       this.checkServer(),
@@ -214,8 +247,23 @@ export class UpdateManager {
       server: serverStatus,
     };
 
+    // Guard against a late in-flight check completing after destroy().
+    if (this.destroyed) {
+      return status;
+    }
+
     this.store.set('updates.lastStatus', status);
     this.maybeNotify(status);
+
+    // M6: single-shot retry in 1 h when either component errored, cleared
+    // on the next fully-green check. The regular setInterval is untouched
+    // so this only shortens the next probe — it never extends it.
+    if (appStatus.error !== null || serverStatus.error !== null) {
+      this.scheduleFailureRetry();
+    } else {
+      this.clearFailureRetry();
+    }
+
     return status;
   }
 
@@ -226,7 +274,9 @@ export class UpdateManager {
 
   /** Stop the timer (called on app quit). */
   destroy(): void {
+    this.destroyed = true;
     this.clearTimer();
+    this.clearFailureRetry();
   }
 
   // ─── Private ────────────────────────────────────────────────────────────
@@ -257,6 +307,28 @@ export class UpdateManager {
       clearInterval(this.timer);
       this.timer = null;
     }
+  }
+
+  private scheduleFailureRetry(): void {
+    this.clearFailureRetry();
+    if (this.destroyed) return;
+    this.failureRetryTimer = setTimeout(() => {
+      this.failureRetryTimer = null;
+      if (this.destroyed) return;
+      this.check().catch((err) => console.error('UpdateManager: failure-retry check failed', err));
+    }, FAILURE_RETRY_MS);
+  }
+
+  private clearFailureRetry(): void {
+    if (this.failureRetryTimer) {
+      clearTimeout(this.failureRetryTimer);
+      this.failureRetryTimer = null;
+    }
+  }
+
+  /** Test-only hook — expose timer presence so unit tests can assert arm/clear. */
+  hasFailureRetry(): boolean {
+    return this.failureRetryTimer !== null;
   }
 
   // ─── App version check (GitHub Releases) ────────────────────────────────
