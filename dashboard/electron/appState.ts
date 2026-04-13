@@ -14,9 +14,17 @@ export function getServerUrl(store: AnyStore): string {
     (store.get('connection.localHost') as string) ??
     (store.get('server.host') as string) ??
     'localhost';
-  const host = useRemote
-    ? (remoteProfile === 'lan' ? lanHost : remoteHost) || 'localhost'
-    : localHost;
+  // No silent fallback to 'localhost' when useRemote is true with a blank
+  // remote host. The install path (isAppIdle below) short-circuits via
+  // isServerUrlConfigured() before calling getServerUrl, so the malformed
+  // `http://:<port>` is unreachable there. The compat path (compatGuard's
+  // fetchServerVersion) deliberately does NOT short-circuit per M4's
+  // fail-open design — the malformed URL there produces a fetch TypeError
+  // which is caught and mapped to `server-version-unavailable`, same as
+  // any other probe failure. Keeping the fallback would let any future
+  // caller that forgets the predicate silently probe localhost on a pure-
+  // remote machine (the exact defect the predicate exists to close).
+  const host = useRemote ? (remoteProfile === 'lan' ? lanHost : remoteHost) : localHost;
   const port =
     (store.get('connection.port') as number) ?? (store.get('server.port') as number) ?? 9786;
   const https =
@@ -25,6 +33,24 @@ export function getServerUrl(store: AnyStore): string {
     false;
   const protocol = https ? 'https' : 'http';
   return `${protocol}://${host}:${port}`;
+}
+
+// Returns false when useRemote=true AND the host for the active remoteProfile
+// is blank after trim(); true for local mode and any configured remote. The
+// install-gate and shutdown paths call this first to short-circuit with a
+// diagnostic `remote-host-not-configured` reason instead of probing the
+// localhost fallback and reporting the misleading `server-unreachable`.
+export function isServerUrlConfigured(store: AnyStore): boolean {
+  const useRemote = (store.get('connection.useRemote') as boolean) ?? false;
+  if (!useRemote) return true;
+  const remoteProfile =
+    (store.get('connection.remoteProfile') as 'tailscale' | 'lan') ?? 'tailscale';
+  const host = (
+    remoteProfile === 'lan'
+      ? ((store.get('connection.lanHost') as string) ?? '')
+      : ((store.get('connection.remoteHost') as string) ?? '')
+  ).trim();
+  return host.length > 0;
 }
 
 export function getAuthToken(store: AnyStore): string | null {
@@ -39,6 +65,14 @@ export interface AppStateModule {
 export function createAppState(store: AnyStore): AppStateModule {
   return {
     async isAppIdle(timeoutMs = 5000): Promise<IdleResult> {
+      // Short-circuit before constructing the URL so misconfigured remote
+      // (useRemote=true with blank host) surfaces a diagnostic reason
+      // instead of silently probing localhost and reporting the misleading
+      // `server-unreachable`. Both consumers (install-gate, gracefulShutdown)
+      // treat the new reason as "can't probe" — parity with server-unreachable.
+      if (!isServerUrlConfigured(store)) {
+        return { idle: false, reason: 'remote-host-not-configured' };
+      }
       const url = `${getServerUrl(store)}/api/admin/status`;
       const token = getAuthToken(store);
       const headers: Record<string, string> = { Accept: 'application/json' };

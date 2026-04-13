@@ -1988,16 +1988,18 @@ function gracefulShutdown(): Promise<void> {
       try {
         // M3: pre-check active-transcription guard. Fixes the data-loss risk
         // where force-stop killed an in-flight job without asking.
-        // `server-unreachable`, `auth-error`, and `unknown` all skip the dialog
-        // (we can't verify busy state — blocking quit is worse UX than
-        // force-stopping). Signal-path teardown also skips the dialog.
+        // `server-unreachable`, `auth-error`, `unknown`, and
+        // `remote-host-not-configured` all skip the dialog (we can't verify
+        // busy state — blocking quit is worse UX than force-stopping).
+        // Signal-path teardown also skips the dialog.
         const idle = await appState.isAppIdle(2000);
         const canDialog =
           idle.idle === false &&
           !signalShutdown &&
           idle.reason !== 'server-unreachable' &&
           idle.reason !== 'auth-error' &&
-          idle.reason !== 'unknown';
+          idle.reason !== 'unknown' &&
+          idle.reason !== 'remote-host-not-configured';
         if (idle.idle === false && !canDialog) {
           shutdownLog(
             `[Shutdown] Skipping busy-dialog: signal=${signalShutdown}, reason=${idle.reason}`,
@@ -2018,7 +2020,12 @@ function gracefulShutdown(): Promise<void> {
             const deadline = Date.now() + 120_000;
             while (Date.now() < deadline) {
               const poll = await appState.isAppIdle(2000);
-              if (poll.idle === true || poll.reason === 'server-unreachable') break;
+              if (
+                poll.idle === true ||
+                poll.reason === 'server-unreachable' ||
+                poll.reason === 'remote-host-not-configured'
+              )
+                break;
               await new Promise((r) => setTimeout(r, 5_000));
             }
             if (Date.now() >= deadline) {

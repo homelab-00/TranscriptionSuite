@@ -11,7 +11,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type Store from 'electron-store';
 
-import { createAppState, InstallGate, type IdleResult } from '../appState.js';
+import {
+  createAppState,
+  getServerUrl,
+  InstallGate,
+  isServerUrlConfigured,
+  type IdleResult,
+} from '../appState.js';
 
 // ─── Fake electron-store ────────────────────────────────────────────────
 
@@ -196,6 +202,155 @@ describe('isAppIdle', () => {
   });
 });
 
+// ─── isServerUrlConfigured ──────────────────────────────────────────────
+
+describe('isServerUrlConfigured', () => {
+  it('returns true for local mode regardless of blank remote fields', () => {
+    expect(
+      isServerUrlConfigured(
+        makeStore({
+          'connection.useRemote': false,
+          'connection.remoteHost': '',
+          'connection.lanHost': '',
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('returns false for Tailscale remote with blank remoteHost', () => {
+    expect(
+      isServerUrlConfigured(
+        makeStore({
+          'connection.useRemote': true,
+          'connection.remoteProfile': 'tailscale',
+          'connection.remoteHost': '',
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('returns false for LAN remote with blank lanHost', () => {
+    expect(
+      isServerUrlConfigured(
+        makeStore({
+          'connection.useRemote': true,
+          'connection.remoteProfile': 'lan',
+          'connection.lanHost': '',
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('treats whitespace-only host as blank (trim-aware)', () => {
+    expect(
+      isServerUrlConfigured(
+        makeStore({
+          'connection.useRemote': true,
+          'connection.remoteProfile': 'tailscale',
+          'connection.remoteHost': '   ',
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('returns true for configured Tailscale remote', () => {
+    expect(
+      isServerUrlConfigured(
+        makeStore({
+          'connection.useRemote': true,
+          'connection.remoteProfile': 'tailscale',
+          'connection.remoteHost': 'host.ts.net',
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('returns true for configured LAN remote', () => {
+    expect(
+      isServerUrlConfigured(
+        makeStore({
+          'connection.useRemote': true,
+          'connection.remoteProfile': 'lan',
+          'connection.lanHost': '192.168.1.42',
+        }),
+      ),
+    ).toBe(true);
+  });
+});
+
+// ─── getServerUrl — no-localhost-coercion regression lock ──────────────
+
+describe('getServerUrl — blank-remote non-coercion', () => {
+  it('does NOT coerce blank Tailscale remote to localhost', () => {
+    // Locks the invariant: removing the `|| 'localhost'` fallback is the
+    // entire point of the predicate-first design. If a future refactor
+    // reintroduces the fallback, this test catches it before the deadlock
+    // defect it enables can re-ship.
+    const url = getServerUrl(
+      makeStore({
+        'connection.useRemote': true,
+        'connection.remoteProfile': 'tailscale',
+        'connection.remoteHost': '',
+      }),
+    );
+    expect(url).not.toContain('localhost');
+    expect(url).toBe('http://:9786');
+  });
+
+  it('does NOT coerce blank LAN remote to localhost', () => {
+    const url = getServerUrl(
+      makeStore({
+        'connection.useRemote': true,
+        'connection.remoteProfile': 'lan',
+        'connection.lanHost': '',
+      }),
+    );
+    expect(url).not.toContain('localhost');
+    expect(url).toBe('http://:9786');
+  });
+});
+
+// ─── isAppIdle short-circuit on misconfigured remote ────────────────────
+
+describe('isAppIdle — remote-host-not-configured short-circuit', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns remote-host-not-configured without invoking fetch (Tailscale blank)', async () => {
+    const { isAppIdle } = createAppState(
+      makeStore({
+        'connection.useRemote': true,
+        'connection.remoteProfile': 'tailscale',
+        'connection.remoteHost': '',
+      }),
+    );
+    const result = await isAppIdle();
+    expect(result).toEqual({ idle: false, reason: 'remote-host-not-configured' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns remote-host-not-configured without invoking fetch (LAN blank)', async () => {
+    const { isAppIdle } = createAppState(
+      makeStore({
+        'connection.useRemote': true,
+        'connection.remoteProfile': 'lan',
+        'connection.lanHost': '',
+      }),
+    );
+    const result = await isAppIdle();
+    expect(result).toEqual({ idle: false, reason: 'remote-host-not-configured' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 // ─── InstallGate ────────────────────────────────────────────────────────
 
 describe('InstallGate', () => {
@@ -240,6 +395,28 @@ describe('InstallGate', () => {
       ok: false,
       reason: 'deferred-until-idle',
       detail: 'active transcription (tester)',
+    });
+    expect(gate.isPending()).toBe(true);
+
+    gate.destroy();
+  });
+
+  it('propagates remote-host-not-configured as detail on deferred-until-idle', async () => {
+    // Verifies the new diagnostic reason surfaces through the same
+    // channel the renderer already consumes — no new IPC shape required.
+    idleCheck.mockResolvedValue({
+      idle: false,
+      reason: 'remote-host-not-configured',
+    });
+    const gate = new InstallGate({ idleCheck, onReady, doInstall, pollMs: 30_000 });
+
+    const result = await gate.requestInstall();
+
+    expect(doInstall).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      ok: false,
+      reason: 'deferred-until-idle',
+      detail: 'remote-host-not-configured',
     });
     expect(gate.isPending()).toBe(true);
 
