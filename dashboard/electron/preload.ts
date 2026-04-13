@@ -44,6 +44,32 @@ export type InstallerStatus =
   | { state: 'cancelled' }
   | { state: 'error'; message: string };
 
+/** Per-release manifest shape (M4). Kept in sync with compatGuard.ts. */
+export interface Manifest {
+  version: string;
+  compatibleServerRange: string;
+  sha256: Record<string, string>;
+  releaseType: string;
+}
+
+export type CompatUnknownReason =
+  | 'no-manifest'
+  | 'manifest-fetch-failed'
+  | 'manifest-parse-error'
+  | 'server-version-unavailable'
+  | 'invalid-range';
+
+export type CompatResult =
+  | { result: 'compatible'; manifest: Manifest; serverVersion: string }
+  | {
+      result: 'incompatible';
+      manifest: Manifest;
+      serverVersion: string;
+      compatibleRange: string;
+      deployment: 'local' | 'remote';
+    }
+  | { result: 'unknown'; reason: CompatUnknownReason; detail?: string };
+
 // Keep in sync with src/types/runtime.ts (canonical) and src/types/electron.d.ts
 export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
@@ -203,11 +229,30 @@ export interface ElectronAPI {
   updates: {
     getStatus: () => Promise<UpdateStatus | null>;
     checkNow: () => Promise<UpdateStatus>;
-    /** Begin download. Guards against concurrent calls. */
+    /**
+     * Begin download. Guards against concurrent calls. On incompatible
+     * server (M4 pre-flight compat check) returns `{ok:false,
+     * reason:'incompatible-server', detail:{...}}` and does NOT invoke the
+     * underlying UpdateInstaller.
+     */
     download: () => Promise<
       | { ok: true; reason?: 'already-downloading' }
       | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
+      | {
+          ok: false;
+          reason: 'incompatible-server';
+          detail: {
+            serverVersion: string;
+            compatibleRange: string;
+            deployment: 'local' | 'remote';
+          };
+        }
     >;
+    /**
+     * Run the M4 compat guard without starting a download. Used by M5's
+     * pre-install modal to render compat status before the user commits.
+     */
+    checkCompatibility: () => Promise<CompatResult>;
     /**
      * Request install. When the server is busy the install is deferred and
      * the caller receives `{ok:false, reason:'deferred-until-idle', detail}`.
@@ -503,6 +548,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getStatus: () => ipcRenderer.invoke('updates:getStatus'),
     checkNow: () => ipcRenderer.invoke('updates:checkNow'),
     download: () => ipcRenderer.invoke('updates:download'),
+    checkCompatibility: () => ipcRenderer.invoke('updates:checkCompatibility'),
     install: () => ipcRenderer.invoke('updates:install'),
     cancelDownload: () => ipcRenderer.invoke('updates:cancelDownload'),
     cancelPendingInstall: () => ipcRenderer.invoke('updates:cancelPendingInstall'),

@@ -186,7 +186,17 @@ interface ElectronAPI {
     download: () => Promise<
       | { ok: true; reason?: 'already-downloading' }
       | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
+      | {
+          ok: false;
+          reason: 'incompatible-server';
+          detail: {
+            serverVersion: string;
+            compatibleRange: string;
+            deployment: 'local' | 'remote';
+          };
+        }
     >;
+    checkCompatibility: () => Promise<CompatResult>;
     install: () => Promise<{ ok: boolean; reason?: string; detail?: string }>;
     cancelDownload: () => Promise<{ ok: boolean }>;
     cancelPendingInstall: () => Promise<{ ok: true }>;
@@ -242,6 +252,31 @@ type InstallerStatus =
   | { state: 'downloaded'; version: string }
   | { state: 'cancelled' }
   | { state: 'error'; message: string };
+
+interface Manifest {
+  version: string;
+  compatibleServerRange: string;
+  sha256: Record<string, string>;
+  releaseType: string;
+}
+
+type CompatUnknownReason =
+  | 'no-manifest'
+  | 'manifest-fetch-failed'
+  | 'manifest-parse-error'
+  | 'server-version-unavailable'
+  | 'invalid-range';
+
+type CompatResult =
+  | { result: 'compatible'; manifest: Manifest; serverVersion: string }
+  | {
+      result: 'incompatible';
+      manifest: Manifest;
+      serverVersion: string;
+      compatibleRange: string;
+      deployment: 'local' | 'remote';
+    }
+  | { result: 'unknown'; reason: CompatUnknownReason; detail?: string };
 
 interface UpdateStatus {
   lastChecked: string;

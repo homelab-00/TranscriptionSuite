@@ -44,6 +44,7 @@
     "react-error-boundary": "5.0.0",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
+    "semver": "^7.7.4",
     "sonner": "2.0.7",
     "xxhash-wasm": "^1.1.0",
     "zustand": "^5.0.12"
@@ -57,6 +58,7 @@
     "@types/node": "25.3.5",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "@types/semver": "^7.7.1",
     "@vitejs/plugin-react": "5.1.4",
     "ajv": "8.18.0",
     "autoprefixer": "10.4.27",

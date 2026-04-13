@@ -4,7 +4,7 @@ type AnyStore = Store<any>;
 
 export type IdleResult = { idle: true } | { idle: false; reason: string };
 
-function getServerUrl(store: AnyStore): string {
+export function getServerUrl(store: AnyStore): string {
   const useRemote = (store.get('connection.useRemote') as boolean) ?? false;
   const remoteProfile =
     (store.get('connection.remoteProfile') as 'tailscale' | 'lan') ?? 'tailscale';
@@ -27,7 +27,7 @@ function getServerUrl(store: AnyStore): string {
   return `${protocol}://${host}:${port}`;
 }
 
-function getAuthToken(store: AnyStore): string | null {
+export function getAuthToken(store: AnyStore): string | null {
   const token = (store.get('connection.authToken') as string) ?? '';
   return token || null;
 }

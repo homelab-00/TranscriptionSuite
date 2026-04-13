@@ -26,6 +26,8 @@ from server.api.routes.utils import (
 )
 from server.config import resolve_live_transcriber_model, resolve_main_transcriber_model
 
+from server import __version__
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -58,6 +60,7 @@ async def get_admin_status(request: Request) -> dict[str, Any]:
 
         return {
             "status": "running",
+            "version": __version__,
             "models": model_manager.get_status(),
             "config": {
                 "server": config.server,

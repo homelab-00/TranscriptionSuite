@@ -28,6 +28,7 @@ import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
 import { UpdateInstaller } from './updateInstaller.js';
 import { createAppState, InstallGate } from './appState.js';
+import { CompatGuard } from './compatGuard.js';
 import {
   registerShortcuts,
   unregisterShortcuts,
@@ -498,6 +499,15 @@ const installGate = new InstallGate({
   },
   doInstall: async () => updateInstaller.install(),
 });
+
+// ─── Compatibility Guard (M4) ──────────────────────────────────────────
+// Fetches manifest.json from GitHub's releases/latest asset list, reads
+// the server's running version from /api/admin/status.version, and
+// evaluates the manifest's `compatibleServerRange` semver against it.
+// Used as a pre-flight check on `updates:download` to short-circuit known
+// incompatibilities, and exposed via `updates:checkCompatibility` for M5's
+// pre-install modal. Fail-open on any unknown outcome.
+const compatGuard = new CompatGuard({ store });
 
 // Wire tray context-menu actions → IPC messages to the renderer
 trayManager.setActions({
@@ -1259,7 +1269,43 @@ ipcMain.handle('updates:checkNow', async () => {
 });
 
 ipcMain.handle('updates:download', async () => {
+  // Fail-open defense: if the compat guard itself throws (network bug,
+  // semver library crash, store corruption), we must still let the user
+  // download. Blocking every update on an internal compat-guard error
+  // would negate the "fail-open on unknown" principle.
+  let compat;
+  try {
+    compat = await compatGuard.check();
+  } catch (err) {
+    console.warn('[updates:download] compat check threw, falling open:', err);
+    return updateInstaller.startDownload();
+  }
+  if (compat.result === 'incompatible') {
+    return {
+      ok: false as const,
+      reason: 'incompatible-server' as const,
+      detail: {
+        serverVersion: compat.serverVersion,
+        compatibleRange: compat.compatibleRange,
+        deployment: compat.deployment,
+      },
+    };
+  }
+  // `compatible` and every `unknown` branch fall through (fail-open).
   return updateInstaller.startDownload();
+});
+
+ipcMain.handle('updates:checkCompatibility', async () => {
+  try {
+    return await compatGuard.check();
+  } catch (err) {
+    console.warn('[updates:checkCompatibility] threw, returning unknown:', err);
+    return {
+      result: 'unknown' as const,
+      reason: 'manifest-fetch-failed' as const,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
 });
 
 ipcMain.handle('updates:install', async () => {
@@ -1799,6 +1845,7 @@ function gracefulShutdown(): Promise<void> {
     trayManager.destroy();
     updateManager.destroy();
     installGate.destroy();
+    compatGuard.destroy();
     updateInstaller.destroy();
     await mlxServerManager.destroy();
     await watcherManager.destroyAll();
