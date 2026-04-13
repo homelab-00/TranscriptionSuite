@@ -23,6 +23,32 @@ export interface ComponentUpdateStatus {
   latest: string | null;
   updateAvailable: boolean;
   error: string | null;
+  /**
+   * Markdown body from the GitHub release (app channel only). Trimmed to
+   * 50 000 chars at capture time. `null` when absent, empty, or when the
+   * source is not a GitHub release (e.g., the `server` channel on GHCR).
+   */
+  releaseNotes: string | null;
+}
+
+const RELEASE_NOTES_MAX_CHARS = 50_000;
+
+/**
+ * Truncate a string to at most `max` code points (not UTF-16 units). Plain
+ * `.slice(0, N)` splits astral characters (emoji, CJK outside BMP) at the
+ * surrogate-pair boundary and produces a lone surrogate, which `remark-gfm`
+ * either replaces with U+FFFD or throws on. Iterating via `Array.from` is
+ * O(n) in N — acceptable for the 50 000-cap hot path — and produces a well-
+ * formed string on every input.
+ */
+export function sanitizeReleaseBody(body: unknown): string | null {
+  if (typeof body !== 'string') return null;
+  const trimmed = body.trim();
+  if (!trimmed) return null;
+  if (trimmed.length <= RELEASE_NOTES_MAX_CHARS) return trimmed;
+  const codepoints = Array.from(trimmed);
+  if (codepoints.length <= RELEASE_NOTES_MAX_CHARS) return trimmed;
+  return codepoints.slice(0, RELEASE_NOTES_MAX_CHARS).join('');
 }
 
 /**
@@ -168,6 +194,7 @@ export class UpdateManager {
             latest: null,
             updateAvailable: false,
             error: String(appResult.reason),
+            releaseNotes: null,
           };
 
     const serverStatus: ComponentUpdateStatus =
@@ -178,6 +205,7 @@ export class UpdateManager {
             latest: null,
             updateAvailable: false,
             error: String(serverResult.reason),
+            releaseNotes: null,
           };
 
     const status: UpdateStatus = {
@@ -246,8 +274,9 @@ export class UpdateManager {
         throw new Error(`GitHub API returned ${res.status}`);
       }
 
-      const data = (await res.json()) as { tag_name?: string };
+      const data = (await res.json()) as { tag_name?: string; body?: string };
       const latestTag = data.tag_name ?? '';
+      const releaseNotes = sanitizeReleaseBody(data.body);
       const latestSv = parseSemVer(latestTag);
       const currentSv = parseSemVer(currentVersion);
 
@@ -257,6 +286,7 @@ export class UpdateManager {
           latest: latestTag || null,
           updateAvailable: false,
           error: `Could not parse latest tag: ${latestTag}`,
+          releaseNotes,
         };
       }
 
@@ -267,6 +297,7 @@ export class UpdateManager {
         latest: latestSv ? `${latestSv.major}.${latestSv.minor}.${latestSv.patch}` : null,
         updateAvailable,
         error: null,
+        releaseNotes,
       };
     } catch (err) {
       return {
@@ -274,6 +305,7 @@ export class UpdateManager {
         latest: null,
         updateAvailable: false,
         error: err instanceof Error ? err.message : String(err),
+        releaseNotes: null,
       };
     }
   }
@@ -328,6 +360,7 @@ export class UpdateManager {
         latest: remoteVersion,
         updateAvailable,
         error: null,
+        releaseNotes: null,
       };
     } catch (err) {
       return {
@@ -335,6 +368,7 @@ export class UpdateManager {
         latest: null,
         updateAvailable: false,
         error: err instanceof Error ? err.message : String(err),
+        releaseNotes: null,
       };
     }
   }

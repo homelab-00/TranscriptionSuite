@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { getConfig, setConfig } from '../../src/config/store';
+import { UpdateModal } from './UpdateModal';
 
 const SNOOZE_MS = 4 * 60 * 60 * 1000;
 const STATUS_POLL_MS = 60_000;
@@ -92,6 +93,8 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [snoozedUntil, setSnoozedUntil] = useState<number>(0);
   const [now, setNow] = useState<number>(() => Date.now());
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('');
 
   useEffect(() => {
     if (!isElectron()) return;
@@ -111,6 +114,20 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
       .catch((err: unknown) => {
         console.error('UpdateBanner: getInstallerStatus failed', err);
       });
+
+    // Resolve current app version for the modal's "current → target" header.
+    // Best-effort — if it fails, the modal falls back to "latest" without the arrow.
+    // Extracted local to avoid `.then()` on an undefined optional-chain result.
+    const getVersionFn = window.electronAPI?.app?.getVersion;
+    if (typeof getVersionFn === 'function') {
+      getVersionFn()
+        .then((v) => {
+          if (!cancelled && typeof v === 'string' && v) setAppVersion(v);
+        })
+        .catch((err: unknown) => {
+          console.error('UpdateBanner: getVersion failed', err);
+        });
+    }
 
     // Initial UpdateStatus read + 60s poll to surface newly-scheduled checks.
     const pollStatus = () => {
@@ -163,7 +180,14 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
     }
   }, []);
 
-  const handleDownload = useCallback(async () => {
+  const handleDownload = useCallback(() => {
+    // Pre-install modal (M5) intercepts [Download] so the user sees release
+    // notes + compat verdict + recovery path before any network work starts.
+    // The actual `api.download()` call now lives in handleConfirmInstall.
+    setIsModalOpen(true);
+  }, []);
+
+  const handleConfirmInstall = useCallback(async () => {
     const api = window.electronAPI?.updates;
     if (!api) return;
     try {
@@ -172,6 +196,8 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
       console.error('UpdateBanner: download invocation failed', err);
     }
   }, []);
+
+  const handleModalClose = useCallback(() => setIsModalOpen(false), []);
 
   const handleInstall = useCallback(async () => {
     const api = window.electronAPI?.updates;
@@ -185,7 +211,15 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
 
   const derived = deriveBannerState(installer, updateStatus, isBusy, now, snoozedUntil);
 
-  if (derived.state === 'hidden') return null;
+  // Reset modal-open flag when state leaves `available`. Without this, the
+  // flag leaks across state transitions (available → downloading → available
+  // after a cancelled download would silently re-open the modal). The
+  // dependency on derived.state keeps the effect cheap.
+  useEffect(() => {
+    if (derived.state !== 'available' && isModalOpen) {
+      setIsModalOpen(false);
+    }
+  }, [derived.state, isModalOpen]);
 
   const accent = 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200';
   const primaryBtn =
@@ -195,9 +229,10 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
   const laterBtn =
     'rounded bg-white/5 px-3 py-1 text-xs font-medium text-slate-300 transition-colors hover:bg-white/10';
 
+  let bannerContent: React.ReactNode = null;
   switch (derived.state) {
     case 'available':
-      return (
+      bannerContent = (
         <div
           role="status"
           aria-label="Update available"
@@ -214,6 +249,7 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
           </div>
         </div>
       );
+      break;
 
     case 'downloading': {
       // Nullish coalescing doesn't defend against NaN (electron-updater can emit
@@ -222,7 +258,7 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
       const percent = Number.isFinite(rawPercent)
         ? Math.max(0, Math.min(100, rawPercent as number))
         : 0;
-      return (
+      bannerContent = (
         <div
           role="status"
           aria-label="Update downloading"
@@ -239,10 +275,11 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
           </div>
         </div>
       );
+      break;
     }
 
     case 'ready':
-      return (
+      bannerContent = (
         <div
           role="status"
           aria-label="Update ready"
@@ -259,9 +296,10 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
           </div>
         </div>
       );
+      break;
 
     case 'ready_blocked':
-      return (
+      bannerContent = (
         <div
           role="status"
           aria-label="Update ready, queued"
@@ -278,8 +316,29 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
           </button>
         </div>
       );
+      break;
 
     default:
-      return null;
+      bannerContent = null;
   }
+
+  // The modal belongs to the `available` state only — no other state has a
+  // [Download] button to intercept. When state flips away, the modal closes
+  // naturally on the next render.
+  const showModal = isModalOpen && derived.state === 'available';
+
+  if (!bannerContent && !showModal) return null;
+
+  return (
+    <>
+      {bannerContent}
+      <UpdateModal
+        isOpen={showModal}
+        targetVersion={derived.version}
+        currentVersion={appVersion}
+        onClose={handleModalClose}
+        onConfirmInstall={handleConfirmInstall}
+      />
+    </>
+  );
 }

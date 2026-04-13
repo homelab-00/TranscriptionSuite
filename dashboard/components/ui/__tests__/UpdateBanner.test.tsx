@@ -41,6 +41,8 @@ interface TestHarness {
   download: ReturnType<typeof vi.fn>;
   install: ReturnType<typeof vi.fn>;
   cancelDownload: ReturnType<typeof vi.fn>;
+  checkCompatibility: ReturnType<typeof vi.fn>;
+  getVersion: ReturnType<typeof vi.fn>;
   emit: (status: InstallerStatus) => void;
 }
 
@@ -60,6 +62,10 @@ function buildHarness(
     download: vi.fn().mockResolvedValue({ ok: true }),
     install: vi.fn().mockResolvedValue({ ok: true }),
     cancelDownload: vi.fn().mockResolvedValue({ ok: true }),
+    checkCompatibility: vi
+      .fn()
+      .mockResolvedValue({ result: 'unknown', reason: 'manifest-fetch-failed' }),
+    getVersion: vi.fn().mockResolvedValue('1.3.2'),
     emit: (s: InstallerStatus) => {
       h.currentInstaller = s;
       for (const cb of h.listeners) cb(s);
@@ -77,7 +83,11 @@ function buildHarness(
 }
 
 function installHarness(h: TestHarness): void {
-  (window as unknown as { electronAPI: { updates: unknown } }).electronAPI = {
+  (
+    window as unknown as {
+      electronAPI: { updates: unknown; app: unknown; docker: unknown };
+    }
+  ).electronAPI = {
     updates: {
       getStatus: h.getStatus,
       checkNow: vi.fn(),
@@ -86,15 +96,24 @@ function installHarness(h: TestHarness): void {
       download: h.download,
       install: h.install,
       cancelDownload: h.cancelDownload,
+      checkCompatibility: h.checkCompatibility,
     },
+    app: { getVersion: h.getVersion },
+    docker: { pullImage: vi.fn().mockResolvedValue('') },
   };
 }
 
 function availableStatus(latest = '1.3.3'): UpdateStatus {
   return {
     lastChecked: new Date().toISOString(),
-    app: { current: '1.3.2', latest, updateAvailable: true, error: null },
-    server: { current: null, latest: null, updateAvailable: false, error: null },
+    app: { current: '1.3.2', latest, updateAvailable: true, error: null, releaseNotes: null },
+    server: {
+      current: null,
+      latest: null,
+      updateAvailable: false,
+      error: null,
+      releaseNotes: null,
+    },
   };
 }
 
@@ -194,8 +213,20 @@ describe('deriveBannerState', () => {
   it('hides when updateAvailable is true but latest is null or empty string', () => {
     const statusNull: UpdateStatus = {
       lastChecked: new Date(now).toISOString(),
-      app: { current: '1.3.2', latest: null, updateAvailable: true, error: null },
-      server: { current: null, latest: null, updateAvailable: false, error: null },
+      app: {
+        current: '1.3.2',
+        latest: null,
+        updateAvailable: true,
+        error: null,
+        releaseNotes: null,
+      },
+      server: {
+        current: null,
+        latest: null,
+        updateAvailable: false,
+        error: null,
+        releaseNotes: null,
+      },
     };
     expect(deriveBannerState({ state: 'idle' }, statusNull, false, now, 0).state).toBe('hidden');
 
@@ -313,7 +344,10 @@ describe('UpdateBanner component', () => {
     expect(screen.queryByRole('button', { name: 'Later' })).toBeNull();
   });
 
-  it('Download click invokes updates.download()', async () => {
+  // M5: [Download] no longer calls api.download() directly — it opens the
+  // pre-install modal. The actual download fires from the modal's
+  // [Install Dashboard] button (covered below).
+  it('Download click opens the pre-install modal and does NOT call updates.download()', async () => {
     const h = buildHarness({
       installer: { state: 'idle' },
       updateStatus: availableStatus(),
@@ -324,6 +358,39 @@ describe('UpdateBanner component', () => {
     await flush();
 
     fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    await flush();
+
+    expect(h.download).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('dialog', { name: /dashboard update.*install confirmation/i }),
+    ).toBeTruthy();
+  });
+
+  it('Install Dashboard (modal footer) invokes updates.download()', async () => {
+    const h = buildHarness({
+      installer: { state: 'idle' },
+      updateStatus: availableStatus(),
+    });
+    // Compatible verdict so the [Install Dashboard] button is enabled.
+    h.checkCompatibility.mockResolvedValue({
+      result: 'compatible',
+      manifest: {
+        version: '1.3.3',
+        compatibleServerRange: '>=1.0.0',
+        sha256: {},
+        releaseType: 'stable',
+      },
+      serverVersion: '1.4.2',
+    });
+    installHarness(h);
+
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: /install dashboard/i }));
     await flush();
 
     expect(h.download).toHaveBeenCalledTimes(1);

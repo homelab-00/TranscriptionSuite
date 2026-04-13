@@ -236,6 +236,12 @@ interface ComponentUpdateStatus {
   latest: string | null;
   updateAvailable: boolean;
   error: string | null;
+  /**
+   * Markdown body from the GitHub release (app channel only). Trimmed to
+   * 50 000 chars at capture time. `null` when absent, empty, or when the
+   * source is not a GitHub release (e.g., the `server` channel on GHCR).
+   */
+  releaseNotes: string | null;
 }
 
 type InstallerStatus =

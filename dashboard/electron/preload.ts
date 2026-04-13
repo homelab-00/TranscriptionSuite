@@ -359,6 +359,7 @@ export interface ComponentUpdateStatus {
   latest: string | null;
   updateAvailable: boolean;
   error: string | null;
+  releaseNotes: string | null;
 }
 
 export interface UpdateStatus {
