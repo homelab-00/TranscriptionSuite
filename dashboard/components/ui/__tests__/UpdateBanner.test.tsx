@@ -989,3 +989,221 @@ describe('Deferred bug fixes (M1-M7 review)', () => {
     expect(Math.abs(persistedValue - expected)).toBeLessThan(500);
   });
 });
+
+// ── Invocation-failure toasts (split-spec: banner resilience) ──────────────
+
+describe('UpdateBanner invocation-failure toasts', () => {
+  async function openModalAndConfirm(h: TestHarness): Promise<void> {
+    // Compatible verdict so the [Install Dashboard] button is enabled.
+    h.checkCompatibility.mockResolvedValue({
+      result: 'compatible',
+      manifest: {
+        version: '1.3.3',
+        compatibleServerRange: '>=1.0.0',
+        sha256: {},
+        releaseType: 'stable',
+      },
+      serverVersion: '1.4.2',
+    });
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: /install dashboard/i }));
+    await flush();
+  }
+
+  it('download throw → toast surfaces raw Error.message with "Download failed:" prefix', async () => {
+    const h = buildHarness({
+      installer: { state: 'idle' },
+      updateStatus: availableStatus('1.3.3'),
+    });
+    h.download.mockRejectedValueOnce(new Error('net down'));
+    await openModalAndConfirm(h);
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message] = toastErrorMock.mock.calls[0] as [string, unknown?];
+    expect(message).toMatch(/download failed/i);
+    expect(message).toMatch(/net down/);
+  });
+
+  it('download returns {ok:false, reason:"error", message} → toast surfaces message', async () => {
+    const h = buildHarness({
+      installer: { state: 'idle' },
+      updateStatus: availableStatus('1.3.3'),
+    });
+    h.download.mockResolvedValueOnce({ ok: false, reason: 'error', message: 'disk full' });
+    await openModalAndConfirm(h);
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message] = toastErrorMock.mock.calls[0] as [string, unknown?];
+    expect(message).toBe('Download failed: disk full');
+  });
+
+  it('download returns {ok:false, reason:"manual-download-required"} → NO toast (installer status drives UI)', async () => {
+    const h = buildHarness({
+      installer: { state: 'idle' },
+      updateStatus: availableStatus('1.3.3'),
+    });
+    h.download.mockResolvedValueOnce({
+      ok: false,
+      reason: 'manual-download-required',
+      downloadUrl: 'https://github.com/homelab-00/TranscriptionSuite/releases/tag/v1.3.3',
+    });
+    await openModalAndConfirm(h);
+
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('download returns {ok:false, reason:"incompatible-server", detail} → toast includes server version and range', async () => {
+    const h = buildHarness({
+      installer: { state: 'idle' },
+      updateStatus: availableStatus('1.3.3'),
+    });
+    h.download.mockResolvedValueOnce({
+      ok: false,
+      reason: 'incompatible-server',
+      detail: {
+        serverVersion: '2.0.0',
+        compatibleRange: '>=1.0.0 <2.0.0',
+        deployment: 'local',
+      },
+    });
+    await openModalAndConfirm(h);
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message] = toastErrorMock.mock.calls[0] as [string, unknown?];
+    expect(message).toContain('2.0.0');
+    expect(message).toContain('>=1.0.0 <2.0.0');
+  });
+
+  it('download returns {ok:false, reason:"no-update-available"} → tailored toast copy', async () => {
+    const h = buildHarness({
+      installer: { state: 'idle' },
+      updateStatus: availableStatus('1.3.3'),
+    });
+    h.download.mockResolvedValueOnce({ ok: false, reason: 'no-update-available' });
+    await openModalAndConfirm(h);
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message] = toastErrorMock.mock.calls[0] as [string, unknown?];
+    expect(message).toBe('No update available to download.');
+  });
+
+  it('install throw → toast surfaces raw Error.message with "Install failed:" prefix', async () => {
+    const h = buildHarness({ installer: { state: 'downloaded', version: '1.3.3' } });
+    h.install.mockRejectedValueOnce(new Error('boom'));
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quit & Install' }));
+    await flush();
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message] = toastErrorMock.mock.calls[0] as [string, unknown?];
+    expect(message).toMatch(/install failed/i);
+    expect(message).toMatch(/boom/);
+  });
+
+  it('install "install-already-requested" dedups: triple-click yields one toast', async () => {
+    // Simulate the real IPC contract: first click succeeds (quitAndInstall begins),
+    // subsequent clicks land in the `installRequested` guard and return ok:false.
+    const h = buildHarness({ installer: { state: 'downloaded', version: '1.3.3' } });
+    h.install
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: false, reason: 'install-already-requested' })
+      .mockResolvedValueOnce({ ok: false, reason: 'install-already-requested' });
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    const btn = screen.getByRole('button', { name: 'Quit & Install' });
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        fireEvent.click(btn);
+        await Promise.resolve();
+      });
+    }
+    await flush();
+
+    expect(h.install).toHaveBeenCalledTimes(3);
+    // First click: ok:true → no toast. Second: ok:false → toast. Third: dedup skip.
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message] = toastErrorMock.mock.calls[0] as [string, unknown?];
+    expect(message).toBe('Install already in progress.');
+  });
+
+  it('install "no-update-ready" → tailored toast copy', async () => {
+    const h = buildHarness({ installer: { state: 'downloaded', version: '1.3.3' } });
+    h.install.mockResolvedValueOnce({ ok: false, reason: 'no-update-ready' });
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quit & Install' }));
+    await flush();
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message] = toastErrorMock.mock.calls[0] as [string, unknown?];
+    expect(message).toBe('No update is ready to install.');
+  });
+
+  it('install "no-version" → same tailored copy as no-update-ready', async () => {
+    const h = buildHarness({ installer: { state: 'downloaded', version: '1.3.3' } });
+    h.install.mockResolvedValueOnce({ ok: false, reason: 'no-version' });
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quit & Install' }));
+    await flush();
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message] = toastErrorMock.mock.calls[0] as [string, unknown?];
+    expect(message).toBe('No update is ready to install.');
+  });
+
+  it('install unknown reason → generic toast with the reason embedded', async () => {
+    const h = buildHarness({ installer: { state: 'downloaded', version: '1.3.3' } });
+    h.install.mockResolvedValueOnce({ ok: false, reason: 'unforeseen-future-case' });
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quit & Install' }));
+    await flush();
+
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message] = toastErrorMock.mock.calls[0] as [string, unknown?];
+    expect(message).toContain('Install failed');
+    expect(message).toContain('unforeseen-future-case');
+  });
+
+  it('snooze setConfig throw → toast fires AND in-memory state still hides banner', async () => {
+    const h = buildHarness({
+      installer: { state: 'idle' },
+      updateStatus: availableStatus('1.3.3'),
+    });
+    // Force the setConfig call from handleSnooze to reject on the next invocation.
+    setConfigMock.mockRejectedValueOnce(new Error('disk full'));
+    installHarness(h);
+    render(<UpdateBanner isBusy={false} />);
+    await flush();
+
+    // Banner visible before click.
+    expect(screen.getByText('1.3.3 available')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+    await flush();
+
+    // Toast surfaces the persistence failure to the user.
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+    const [message] = toastErrorMock.mock.calls[0] as [string, unknown?];
+    expect(message).toBe('Could not save snooze preference.');
+
+    // In-memory snoozedUntil was still updated → banner hidden on same tick.
+    expect(screen.queryByText('1.3.3 available')).toBeNull();
+  });
+});

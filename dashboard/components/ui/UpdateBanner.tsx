@@ -57,6 +57,33 @@ export function clampSnooze(stored: number, now: number): number {
   return stored > ceiling ? ceiling : stored;
 }
 
+// Mirrors the `updates.download()` IPC return union in `src/types/electron.d.ts`.
+// Kept local so this component does not depend on a shared types module; the
+// shape is small and changes are front-end-only.
+type DownloadResult =
+  | { ok: true; reason?: 'already-downloading' }
+  | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
+  | { ok: false; reason: 'manual-download-required'; downloadUrl: string }
+  | {
+      ok: false;
+      reason: 'incompatible-server';
+      detail: {
+        serverVersion: string;
+        compatibleRange: string;
+        deployment: 'local' | 'remote';
+      };
+    };
+
+// Predicate narrows `DownloadResult` to the ok:false subset. TS's built-in
+// narrowing via `if (r.ok) return;` is unreliable here because variant A
+// (`{ ok: true; reason?: 'already-downloading' }`) has an optional
+// discriminant that defeats auto-narrowing through subsequent positive
+// `if (r.reason === ...)` checks. A predicate function with an explicit
+// `r is <union>` return type sidesteps that limitation.
+function isFailedDownload(r: DownloadResult): r is Extract<DownloadResult, { ok: false }> {
+  return !r.ok;
+}
+
 export type BannerVisualState =
   | 'hidden'
   | 'available'
@@ -173,9 +200,22 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
   // M6: track the last error message we toasted so repeated error broadcasts
-  // with the same message do not spam the user. Initialized to null on mount
-  // so the first error transition always toasts.
+  // with the same message do not spam the user. Also shared with invocation-
+  // failure toasts (download/install/setConfig throws and {ok:false} returns)
+  // so a triple-click producing identical 'install-already-requested' messages
+  // coalesces to a single toast. Initialized to null on mount so the first
+  // error of a fresh session always toasts.
   const lastErrorMessageRef = useRef<string | null>(null);
+
+  // Invocation-failure toaster: consults the shared identity-dedup ref and
+  // skips if the same message was already toasted. Used by handleConfirmInstall,
+  // handleRetry, handleInstall, and handleSnooze — distinct from the installer-
+  // 'error' branch below which also adds a Retry action.
+  const toastInvocationError = useCallback((message: string): void => {
+    if (lastErrorMessageRef.current === message) return;
+    lastErrorMessageRef.current = message;
+    toast.error(message);
+  }, []);
 
   useEffect(() => {
     if (!isElectron()) return;
@@ -288,8 +328,12 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
       await setConfig('updates.bannerSnoozedUntil', until);
     } catch (err) {
       console.error('UpdateBanner: setConfig snooze failed', err);
+      // In-memory state is already updated above — the banner hides on this
+      // same tick regardless of persistence success. The toast tells the
+      // user the preference won't survive a restart.
+      toastInvocationError('Could not save snooze preference.');
     }
-  }, []);
+  }, [toastInvocationError]);
 
   const handleDownload = useCallback(() => {
     // Pre-install modal (M5) intercepts [Download] so the user sees release
@@ -298,15 +342,64 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
     setIsModalOpen(true);
   }, []);
 
+  // Inspects an api.download() result and surfaces any user-facing failure
+  // as a toast. Shared by handleConfirmInstall and handleRetry so both paths
+  // branch identically on the discriminated union from electron.d.ts.
+  //
+  // Uses a type-guard predicate (`isFailedDownload`) to narrow the union
+  // before the switch — TS's auto-narrowing across multiple positive `if`
+  // branches is unreliable when one variant has an optional discriminant
+  // (`ok: true; reason?: 'already-downloading'`). The explicit guard lets
+  // the `default` case narrow to `never`, making this function compile-time
+  // exhaustive: any new `DownloadResult` variant that lacks a `case` label
+  // here will fail the build.
+  const reportDownloadFailure = useCallback(
+    (result: DownloadResult): void => {
+      if (!isFailedDownload(result)) return;
+      switch (result.reason) {
+        case 'manual-download-required':
+          // M7 gate — installer status drives the banner's manual-download
+          // visual; no toast needed.
+          return;
+        case 'incompatible-server': {
+          const { serverVersion, compatibleRange } = result.detail;
+          toastInvocationError(
+            `Server v${serverVersion} is not compatible with this Dashboard (requires ${compatibleRange}).`,
+          );
+          return;
+        }
+        case 'no-update-available':
+          toastInvocationError('No update available to download.');
+          return;
+        case 'error':
+          toastInvocationError(`Download failed: ${result.message ?? 'unknown error'}`);
+          return;
+        default: {
+          // Runtime fallback for the (impossible per types) case where a
+          // new variant is introduced at the IPC boundary before this
+          // switch is updated.
+          const _exhaustive: never = result;
+          console.warn('UpdateBanner: unhandled download-failure variant', _exhaustive);
+          toastInvocationError('Download failed: unexpected error.');
+          return;
+        }
+      }
+    },
+    [toastInvocationError],
+  );
+
   const handleConfirmInstall = useCallback(async () => {
     const api = window.electronAPI?.updates;
     if (!api) return;
     try {
-      await api.download();
+      const result = await api.download();
+      reportDownloadFailure(result);
     } catch (err) {
       console.error('UpdateBanner: download invocation failed', err);
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      toastInvocationError(`Download failed: ${msg}`);
     }
-  }, []);
+  }, [reportDownloadFailure, toastInvocationError]);
 
   // M6: [Retry] action on error toasts — re-runs the download. We clear the
   // dedup ref so a subsequent error of the same message still toasts.
@@ -315,11 +408,14 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
     if (!api) return;
     lastErrorMessageRef.current = null;
     try {
-      await api.download();
+      const result = await api.download();
+      reportDownloadFailure(result);
     } catch (err) {
       console.error('UpdateBanner: retry download invocation failed', err);
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      toastInvocationError(`Download failed: ${msg}`);
     }
-  }, []);
+  }, [reportDownloadFailure, toastInvocationError]);
 
   const handleModalClose = useCallback(() => setIsModalOpen(false), []);
 
@@ -327,11 +423,29 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
     const api = window.electronAPI?.updates;
     if (!api) return;
     try {
-      await api.install();
+      const result = await api.install();
+      if (result.ok) return;
+      switch (result.reason) {
+        case 'install-already-requested':
+          // A fast double-click lands here on the second click. The identity
+          // dedup inside toastInvocationError suppresses any further clicks
+          // in the same session with the same copy.
+          toastInvocationError('Install already in progress.');
+          return;
+        case 'no-update-ready':
+        case 'no-version':
+          toastInvocationError('No update is ready to install.');
+          return;
+        default:
+          toastInvocationError(`Install failed: ${result.reason ?? 'unknown error'}`);
+          return;
+      }
     } catch (err) {
       console.error('UpdateBanner: install invocation failed', err);
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      toastInvocationError(`Install failed: ${msg}`);
     }
-  }, []);
+  }, [toastInvocationError]);
 
   // M7: open the GitHub release page for the manual-download fallback.
   // The URL was supplied by the main-process strategy resolver; we just
