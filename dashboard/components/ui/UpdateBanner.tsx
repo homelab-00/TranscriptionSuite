@@ -278,10 +278,11 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
   }, []);
 
   const handleSnooze = useCallback(async () => {
-    // Defense in depth: write through the same clamp the loader applies, so a
-    // future loader that drops the clamp can't be surprised by a stored bogus
-    // value, and a current loader still sees a sane epoch on next mount.
-    const until = clampSnooze(Date.now() + SNOOZE_MS, Date.now());
+    // Write-side can't produce a bogus epoch by construction (Date.now() is
+    // the current wall clock, ceiling is Date.now() + SNOOZE_MS). The
+    // canonical defense against stored bogus values lives in the load-side
+    // clampSnooze call in the mount-effect; do not re-wrap here.
+    const until = Date.now() + SNOOZE_MS;
     setSnoozedUntil(until);
     try {
       await setConfig('updates.bannerSnoozedUntil', until);

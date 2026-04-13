@@ -25,11 +25,16 @@ export interface CacheArgs {
 export interface CacheResult {
   ok: boolean;
   cachedPath?: string;
-  reason?: 'platform-not-supported' | 'source-missing' | 'write-error' | 'cache-collision';
+  reason?:
+    | 'platform-not-supported'
+    | 'source-missing'
+    | 'source-too-small'
+    | 'write-error'
+    | 'cache-collision';
   message?: string;
 }
 
-const MIN_CACHED_INSTALLER_BYTES = 1_000_000;
+export const MIN_CACHED_INSTALLER_BYTES = 1_000_000;
 
 export interface CachedInstaller {
   path: string;
@@ -86,41 +91,91 @@ export async function cachePreviousInstaller(args: CacheArgs): Promise<CacheResu
     return { ok: false, reason: 'source-missing' };
   }
 
+  // Pre-copy size guard: validate the source AppImage is at least
+  // MIN_CACHED_INSTALLER_BYTES BEFORE copying. Without this, a truncated
+  // download writes through; the read-side `getCachedInstaller` filter then
+  // hides the real fault (bad source) as "no cache available." Pre-copy
+  // surfaces the failure mode in main-process logs as `'source-too-small'`.
+  try {
+    const sourceStat = await fsp.stat(args.sourcePath);
+    if (sourceStat.size < MIN_CACHED_INSTALLER_BYTES) {
+      return { ok: false, reason: 'source-too-small' };
+    }
+  } catch {
+    return { ok: false, reason: 'source-missing' };
+  }
+
   const dir = cacheDir(args.userDataDir);
 
-  // Symlink-collision defense: if `previous-installer/` resolves to the same
-  // canonical path as the AppImage's parent dir (a pathological dotfiles-rig
-  // setup), the unlink loop below would delete the running binary. Compare
-  // realpaths BEFORE any disk mutation; on match OR on either side throwing
-  // for unexpected reasons (EACCES/ELOOP), abort with `cache-collision`.
-  // ENOENT on the dir realpath is the legitimate first-run case — fall
-  // through to mkdir.
+  // Symlink-collision defense: cache dir's realpath MUST descend from
+  // userData's realpath (or equal it). Closes both the exact-parent
+  // collision (`previous-installer/` → AppImage parent) and the broader
+  // sibling-symlink hole (`previous-installer/` → any directory outside
+  // userData where the unlink loop would wipe arbitrary files).
+  //
+  // Legitimate first-run: if either userData or the cache dir doesn't exist
+  // yet (ENOENT), no symlink can possibly resolve under either path, so the
+  // allow-list check is vacuously satisfied — fall through to mkdir.
+  // Fail-CLOSED on any other realpath error (EACCES/ELOOP/etc.).
+  let userDataReal: string | null = null;
   try {
-    const sourceParentReal = await fsp.realpath(path.dirname(args.sourcePath));
-    let dirReal: string | null;
+    userDataReal = await fsp.realpath(args.userDataDir);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      return { ok: false, reason: 'cache-collision' };
+    }
+  }
+  if (userDataReal !== null) {
+    let dirReal: string | null = null;
     try {
       dirReal = await fsp.realpath(dir);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') {
-        dirReal = null;
-      } else {
+      if (code !== 'ENOENT') {
         return { ok: false, reason: 'cache-collision' };
       }
     }
-    if (dirReal !== null && dirReal === sourceParentReal) {
-      return { ok: false, reason: 'cache-collision' };
+    if (dirReal !== null) {
+      const allowed = dirReal === userDataReal || dirReal.startsWith(userDataReal + path.sep);
+      if (!allowed) {
+        return { ok: false, reason: 'cache-collision' };
+      }
     }
-  } catch {
-    // Source-parent realpath failed (already passed access on sourcePath, so
-    // this is a very narrow race). Treat conservatively as a collision.
-    return { ok: false, reason: 'cache-collision' };
   }
 
   try {
     await fsp.mkdir(dir, { recursive: true });
 
-    // Delete any prior cache entries (we keep exactly one).
+    // Post-mkdir invariant re-check (canonical TOCTOU defense + first-run
+    // closure). Covers (a) a concurrent process swapping `dir` for a symlink
+    // between the initial allow-list check and the unlink loop below, and
+    // (b) the first-run case where `userData` was ENOENT initially — mkdir
+    // recursive may have just materialized it (or a dangling symlink may
+    // have been followed). Re-realpath BOTH paths and re-verify the
+    // descendant invariant unconditionally. Fail-CLOSED on any realpath
+    // error here — a real cache write must have a resolvable path pair.
+    let userDataRealNow: string;
+    let dirRealNow: string;
+    try {
+      userDataRealNow = await fsp.realpath(args.userDataDir);
+      dirRealNow = await fsp.realpath(dir);
+    } catch {
+      return { ok: false, reason: 'cache-collision' };
+    }
+    const stillAllowed =
+      dirRealNow === userDataRealNow || dirRealNow.startsWith(userDataRealNow + path.sep);
+    if (!stillAllowed) {
+      return { ok: false, reason: 'cache-collision' };
+    }
+
+    // Delete any prior cache entries (we keep exactly one). Filter by the
+    // same `parseVersionFromFileName` gate the read side uses — only our own
+    // `TranscriptionSuite-<version>.AppImage` files are eligible. This is
+    // defense-in-depth for the equality branch of the allow-list above: if a
+    // hostile symlink loop makes `dir` resolve to the userData root itself,
+    // the loop only touches our own files and unrelated userData contents
+    // survive intact.
     let entries: string[] = [];
     try {
       entries = await fsp.readdir(dir);
@@ -128,6 +183,7 @@ export async function cachePreviousInstaller(args: CacheArgs): Promise<CacheResu
       entries = [];
     }
     for (const name of entries) {
+      if (parseVersionFromFileName(name) === null) continue;
       try {
         await fsp.unlink(path.join(dir, name));
       } catch {

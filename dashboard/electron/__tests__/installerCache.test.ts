@@ -14,6 +14,7 @@ import path from 'path';
 import {
   cachePreviousInstaller,
   getCachedInstaller,
+  MIN_CACHED_INSTALLER_BYTES,
   parseVersionFromFileName,
   restoreCachedInstaller,
 } from '../installerCache.js';
@@ -21,7 +22,7 @@ import {
 // Real cached AppImages are ~60-200 MB; the size filter rejects anything below
 // 1 MB to keep truncated-write artifacts out of the rollback path. Tests that
 // expect the happy-path return must therefore write at least 1 MB of bytes.
-const HEALTHY_BYTES = Buffer.alloc(1_000_000, 'a');
+const HEALTHY_BYTES = Buffer.alloc(MIN_CACHED_INSTALLER_BYTES, 'a');
 
 describe('cachePreviousInstaller', () => {
   let tmp: string;
@@ -36,7 +37,7 @@ describe('cachePreviousInstaller', () => {
 
   it('copies the source AppImage into the cache dir on Linux', async () => {
     const src = path.join(tmp, 'running.AppImage');
-    writeFileSync(src, Buffer.from('binary-v1'));
+    writeFileSync(src, HEALTHY_BYTES);
     const userData = path.join(tmp, 'userData');
 
     const result = await cachePreviousInstaller({
@@ -48,7 +49,7 @@ describe('cachePreviousInstaller', () => {
 
     expect(result.ok).toBe(true);
     expect(result.cachedPath).toBeDefined();
-    expect(readFileSync(result.cachedPath as string)).toEqual(Buffer.from('binary-v1'));
+    expect(readFileSync(result.cachedPath as string)).toEqual(HEALTHY_BYTES);
     expect(readdirSync(path.join(userData, 'previous-installer'))).toHaveLength(1);
   });
 
@@ -60,7 +61,7 @@ describe('cachePreviousInstaller', () => {
     writeFileSync(path.join(dir, 'TranscriptionSuite-1.3.1.AppImage'), 'older');
 
     const src = path.join(tmp, 'running.AppImage');
-    writeFileSync(src, Buffer.from('binary-v2'));
+    writeFileSync(src, HEALTHY_BYTES);
 
     const result = await cachePreviousInstaller({
       sourcePath: src,
@@ -119,7 +120,7 @@ describe('cachePreviousInstaller', () => {
 
   it('sanitizes version strings for use as a filename', async () => {
     const src = path.join(tmp, 'running.AppImage');
-    writeFileSync(src, 'x');
+    writeFileSync(src, HEALTHY_BYTES);
     const userData = path.join(tmp, 'userData');
 
     const result = await cachePreviousInstaller({
@@ -387,5 +388,188 @@ describe('getCachedInstaller size filter', () => {
     const result = await getCachedInstaller(tmp);
 
     expect(result?.version).toBe('1.3.2');
+  });
+
+  it('accepts a cache entry of exactly MIN_CACHED_INSTALLER_BYTES (inclusive lower bound)', async () => {
+    // Boundary lock: the read-side filter uses `<` which makes
+    // MIN_CACHED_INSTALLER_BYTES the inclusive lower bound. A future refactor
+    // flipping `<` to `<=` would silently reject entries at exactly the
+    // threshold; this test would fail and surface the regression.
+    const dir = path.join(tmp, 'previous-installer');
+    await fsp.mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'TranscriptionSuite-1.3.2.AppImage');
+    writeFileSync(file, Buffer.alloc(MIN_CACHED_INSTALLER_BYTES, 'b'));
+
+    const result = await getCachedInstaller(tmp);
+
+    expect(result).toEqual({ path: file, version: '1.3.2' });
+  });
+});
+
+// ── Deferred bug: userData-descendant allow-list defense (broader than the
+// exact-parent equality check from the prior spec) ────────────────────────
+
+describe('cachePreviousInstaller userData allow-list defense', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'installer-cache-allowlist-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('rejects when previous-installer symlinks to a sibling-of-source dir outside userData', async () => {
+    // Setup: source in `tmp/apps/current/`, sibling target dir at
+    // `tmp/apps/backups/`, cache symlinked to backups. The narrow exact-parent
+    // check would have passed (backups != current), but the broader allow-list
+    // rejects because backups does not descend from userData.
+    const userData = path.join(tmp, 'userData');
+    await fsp.mkdir(userData, { recursive: true });
+    const sourceDir = path.join(tmp, 'apps', 'current');
+    await fsp.mkdir(sourceDir, { recursive: true });
+    const siblingDir = path.join(tmp, 'apps', 'backups');
+    await fsp.mkdir(siblingDir, { recursive: true });
+    // Pre-seed the sibling with files that match the cache name pattern; the
+    // filename-filter unlink loop would otherwise be the last line of defense.
+    // The allow-list catches it earlier — neither the bystander nor the
+    // pattern-matching files should be touched.
+    writeFileSync(path.join(siblingDir, 'bystander.txt'), 'should survive');
+    writeFileSync(path.join(siblingDir, 'TranscriptionSuite-9.9.9.AppImage'), HEALTHY_BYTES);
+
+    const src = path.join(sourceDir, 'TranscriptionSuite.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+    await fsp.symlink(siblingDir, path.join(userData, 'previous-installer'));
+
+    const before = readdirSync(siblingDir).sort();
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('cache-collision');
+    expect(readdirSync(siblingDir).sort()).toEqual(before);
+  });
+
+  it('proceeds when previous-installer symlinks to a userData descendant', async () => {
+    const userData = path.join(tmp, 'userData');
+    const legitTarget = path.join(userData, 'legit-subfolder');
+    await fsp.mkdir(legitTarget, { recursive: true });
+    await fsp.symlink(legitTarget, path.join(userData, 'previous-installer'));
+
+    const src = path.join(tmp, 'TranscriptionSuite.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.cachedPath).toBeDefined();
+    // The cache file lands inside the symlink target.
+    expect(readdirSync(legitTarget)).toContain('TranscriptionSuite-1.3.2.AppImage');
+  });
+
+  it('accepts the equality case but only unlinks our own filename pattern', async () => {
+    // Pathological symlink-loop: previous-installer/ → userData/. Realpath
+    // equality is allowed (frozen-spec invariant), so the unlink loop runs
+    // against userData itself. The filename-pattern filter is the safety net:
+    // only `TranscriptionSuite-*.AppImage` files get unlinked; unrelated
+    // userData contents survive.
+    const userData = path.join(tmp, 'userData');
+    await fsp.mkdir(userData, { recursive: true });
+    writeFileSync(path.join(userData, 'electron-store.json'), '{"k":"v"}');
+    writeFileSync(path.join(userData, 'TranscriptionSuite-9.9.9.AppImage'), HEALTHY_BYTES);
+    // Symlink-loop: previous-installer points to userData itself.
+    await fsp.symlink(userData, path.join(userData, 'previous-installer'));
+
+    const src = path.join(tmp, 'TranscriptionSuite.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(true);
+    // Unrelated userData file survives — filename filter prevented wipe.
+    expect(readFileSync(path.join(userData, 'electron-store.json'), 'utf8')).toBe('{"k":"v"}');
+    // Pre-existing cache-pattern file was unlinked (replaced by the new one).
+    const remaining = readdirSync(userData).filter((n) => n.endsWith('.AppImage'));
+    expect(remaining).toEqual(['TranscriptionSuite-1.3.2.AppImage']);
+  });
+});
+
+// ── Deferred bug: pre-copy source-size guard ──────────────────────────────
+
+describe('cachePreviousInstaller pre-copy source-size guard', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'installer-cache-srcsize-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('rejects a 0-byte source AppImage with source-too-small (no cache write)', async () => {
+    const src = path.join(tmp, 'truncated.AppImage');
+    writeFileSync(src, Buffer.alloc(0));
+    const userData = path.join(tmp, 'userData');
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('source-too-small');
+    // No cache dir created — the guard fires before mkdir.
+    expect(() => readdirSync(path.join(userData, 'previous-installer'))).toThrow();
+  });
+
+  it('rejects a source AppImage of MIN_CACHED_INSTALLER_BYTES - 1 (just under threshold)', async () => {
+    const src = path.join(tmp, 'almost.AppImage');
+    writeFileSync(src, Buffer.alloc(MIN_CACHED_INSTALLER_BYTES - 1, 'a'));
+    const userData = path.join(tmp, 'userData');
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('source-too-small');
+  });
+
+  it('accepts a source AppImage of exactly MIN_CACHED_INSTALLER_BYTES (inclusive lower bound)', async () => {
+    const src = path.join(tmp, 'exactly-min.AppImage');
+    writeFileSync(src, Buffer.alloc(MIN_CACHED_INSTALLER_BYTES, 'a'));
+    const userData = path.join(tmp, 'userData');
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.2',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.cachedPath).toBeDefined();
   });
 });

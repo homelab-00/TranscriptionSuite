@@ -960,14 +960,19 @@ describe('Deferred bug fixes (M1-M7 review)', () => {
     expect(derived).toEqual({ state: 'available', version: '1.3.3' });
   });
 
-  it('snooze write goes through the same clamp (no bogus epoch ever persisted)', async () => {
+  it('snooze write persists exactly Date.now() + SNOOZE_MS (no wrapper subtraction)', async () => {
+    // Lock the no-wrapper invariant: `handleSnooze` writes `Date.now() + SNOOZE_MS`
+    // directly, not `clampSnooze(...)` which is structurally inert at the write
+    // site. ±50 ms tolerance absorbs the wall-clock drift between the click and
+    // the assertion. Would fail if a future change re-introduces clampSnooze with
+    // a subtractive branch (e.g. "subtract a safety margin"), since the persisted
+    // value would no longer equal `Date.now() + SNOOZE_MS` within tolerance.
     const SNOOZE_MS = 4 * 60 * 60 * 1000;
     const h = buildHarness({ updateStatus: availableStatus('1.3.3') });
     installHarness(h);
     render(<UpdateBanner isBusy={false} />);
     await flush();
 
-    const before = Date.now();
     const laterBtn = screen.getByRole('button', { name: /Later/i });
     await act(async () => {
       fireEvent.click(laterBtn);
@@ -976,9 +981,11 @@ describe('Deferred bug fixes (M1-M7 review)', () => {
 
     expect(setConfigMock).toHaveBeenCalled();
     const persistedValue = setConfigMock.mock.calls.at(-1)?.[1] as number;
-    // A correctly-clamped write is at most `now + SNOOZE_MS` (with a small
-    // slack for the time elapsed between Date.now() captures).
-    expect(persistedValue).toBeGreaterThan(before);
-    expect(persistedValue).toBeLessThanOrEqual(Date.now() + SNOOZE_MS + 100);
+    const expected = Date.now() + SNOOZE_MS;
+    // 500 ms tolerance: tight enough to catch a subtractive clamp branch
+    // (would diverge by hours), loose enough to absorb GC / event-loop
+    // jitter on slow CI runners. Tightened from an initial 50 ms guess
+    // after review flagged CI-flakiness risk.
+    expect(Math.abs(persistedValue - expected)).toBeLessThan(500);
   });
 });
