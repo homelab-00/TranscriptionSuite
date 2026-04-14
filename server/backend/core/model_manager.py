@@ -208,6 +208,10 @@ class ModelManager:
 
         self.config = config
         self._transcription_engine: AudioToTextRecorder | None = None
+        # Serializes ensure_transcription_loaded() so concurrent routes can't
+        # both trigger load_transcription_model() on the same detached state
+        # and double-allocate GPU memory (Issue #76).
+        self._transcription_load_lock = threading.Lock()
         self._diarization_engine: Any | None = None  # Will be DiarizationEngine
         self._realtime_engines: dict[str, RealtimeTranscriptionEngine] = {}
         self._diarization_feature_available: bool = False
@@ -706,6 +710,52 @@ class ModelManager:
         """Unload the transcription model to free memory."""
         if self._transcription_engine is not None:
             self._transcription_engine.unload_model()
+
+    def ensure_transcription_loaded(self) -> "AudioToTextRecorder":
+        """Return the transcription engine, lazily reloading the model if detached.
+
+        The main backend can end up detached (``_backend is None``) after a
+        Live Mode session whose restore step failed silently, after a sequential
+        diarization pass that could not reload, or after any preload hiccup that
+        was logged-and-continued.  Routes that call ``engine.transcribe_file()``
+        used to crash with a bare "STT model is not loaded" runtime error in
+        those cases.  This helper re-attaches on demand so the next request
+        self-heals instead of failing forever.
+
+        Thread safety: wrapped in ``_transcription_load_lock`` so concurrent
+        route handlers can't both trigger ``load_transcription_model()`` on the
+        same detached state (which would double-allocate GPU memory). Callers
+        already run in worker threads via ``asyncio.to_thread``, so a plain
+        ``threading.Lock`` is sufficient.
+
+        Raises:
+            BackendDependencyError: When the backend's optional dependency is
+                missing (e.g. NeMo for Parakeet).  Callers should map this to
+                HTTP 503 with the ``remedy`` text surfaced to the user.
+            RuntimeError: When the reload appears to succeed but the backend
+                is still detached (``_model_loaded`` lied) — callers should
+                treat this the same as a generic reload failure.
+            Exception: Any other load failure (transient CUDA OOM, corrupt
+                weights, etc.) propagates unchanged for the caller to handle.
+        """
+        with self._transcription_load_lock:
+            engine = self._transcription_engine
+            if engine is not None and engine.is_loaded() and engine._backend is not None:
+                return engine
+            # Either never created, or created-then-unloaded — both paths route
+            # through load_transcription_model() which calls the property +
+            # load_model().
+            self.load_transcription_model()
+            engine = self.transcription_engine
+            # Defense-in-depth: if the load appeared to succeed but the backend
+            # is still None (internal state desync), raise a clear error rather
+            # than returning a stale engine that will crash at transcribe_file.
+            if engine._backend is None:
+                raise RuntimeError(
+                    "Transcription backend is still detached after reload — "
+                    "internal state desync. Restart the server."
+                )
+            return engine
 
     @property
     def diarization_engine(self) -> "DiarizationEngine | Any":

@@ -49,6 +49,9 @@ def _request_with_engine(engine: object, *, config: object | None = None) -> Sim
     model_manager = SimpleNamespace(
         job_tracker=job_tracker,
         transcription_engine=engine,
+        # Issue #76: routes now go through ensure_transcription_loaded() —
+        # mock returns the same engine to preserve pre-#76 test behavior.
+        ensure_transcription_loaded=lambda: engine,
     )
     state_attrs: dict[str, object] = {"model_manager": model_manager}
     if config is not None:
@@ -758,6 +761,9 @@ class TestIntegratedDiarizationFallback:
 
         model_manager = SimpleNamespace(
             transcription_engine=engine,
+            # Issue #76: _run_file_import now calls ensure_transcription_loaded()
+            # — mock returns the same engine to preserve pre-#76 test behavior.
+            ensure_transcription_loaded=lambda: engine,
             job_tracker=_FakeTracker(),
             get_diarization_feature_status=lambda: {"reason": "ready"},
         )

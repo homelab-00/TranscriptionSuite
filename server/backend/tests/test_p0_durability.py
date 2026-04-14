@@ -88,6 +88,10 @@ class _BaseProcessTranscription:
         engine.transcribe_file = MagicMock(return_value=self._transcribe_result)
         mm = MagicMock()
         mm.transcription_engine = engine
+        # Issue #76: WS route now calls ensure_transcription_loaded() — return
+        # the same configured engine so the existing test scenarios still hit
+        # the patched transcribe_file.
+        mm.ensure_transcription_loaded = MagicMock(return_value=engine)
         mm.job_tracker = SimpleNamespace(
             update_progress=lambda *a: None,
         )

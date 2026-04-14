@@ -23,7 +23,7 @@ from server.api.routes.utils import get_client_name
 from server.config import resolve_main_transcriber_model
 from server.core.json_utils import sanitize_for_json
 from server.core.model_manager import TranscriptionCancelledError
-from server.core.stt.backends.base import STTBackend
+from server.core.stt.backends.base import BackendDependencyError, STTBackend
 from server.database.job_repository import (
     create_job,
     mark_delivered,
@@ -121,6 +121,18 @@ async def transcribe_audio(
     model_manager = request.app.state.model_manager
     client_name = get_client_name(request)
 
+    # Ensure the transcription model is loaded BEFORE acquiring a job slot
+    # (Issue #76) — a failed reload must not hold the single-slot tracker or
+    # leave an orphan DB row. BackendDependencyError surfaces HTTP 503 with
+    # the remedy; any other reload failure propagates to the generic handler.
+    try:
+        await asyncio.to_thread(model_manager.ensure_transcription_loaded)
+    except BackendDependencyError as dep_err:
+        remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
+        detail_message = f"Backend dependency missing: {dep_err}{remedy_suffix}"
+        logger.warning("Transcription pre-check failed — %s", detail_message)
+        raise HTTPException(status_code=503, detail=detail_message) from dep_err
+
     # Try to acquire a job slot
     success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
     if not success:
@@ -212,7 +224,8 @@ async def transcribe_audio(
             tmp.write(content)
             tmp_path = tmp.name
 
-        # Get transcription engine
+        # ensure_transcription_loaded() ran at route entry (before
+        # try_start_job) — the engine is guaranteed attached here (Issue #76).
         engine = model_manager.transcription_engine
 
         # --- Multitrack path: split channels, transcribe each, merge ---
@@ -505,6 +518,24 @@ async def transcribe_audio(
                 )
         raise HTTPException(status_code=499, detail="Transcription cancelled by user") from None
 
+    except BackendDependencyError as dep_err:
+        # Surface the actionable remedy (e.g. "Set INSTALL_NEMO=true") so the
+        # dashboard can show a recovery hint instead of a generic 500 (Issue #76).
+        # Matches the 503 contract at admin.py:233-236.
+        remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
+        detail_message = f"Backend dependency missing: {dep_err}{remedy_suffix}"
+        logger.warning("Transcription failed — %s", detail_message)
+        if not _persisted and db_job_id is not None:
+            try:
+                mark_failed(db_job_id, detail_message)
+            except Exception as _mf_err:
+                logger.warning(
+                    "Failed to mark job %s as failed: %s",
+                    sanitize_log_value(db_job_id),
+                    _mf_err,
+                )
+        raise HTTPException(status_code=503, detail=detail_message) from dep_err
+
     except Exception as e:
         logger.error("Transcription failed", exc_info=True)
         if not _persisted and db_job_id is not None:
@@ -554,6 +585,16 @@ async def transcribe_quick(
     model_manager = request.app.state.model_manager
     client_name = get_client_name(request)
 
+    # Ensure the transcription model is loaded BEFORE acquiring a job slot
+    # (Issue #76) — see transcribe_audio for rationale.
+    try:
+        await asyncio.to_thread(model_manager.ensure_transcription_loaded)
+    except BackendDependencyError as dep_err:
+        remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
+        detail_message = f"Backend dependency missing: {dep_err}{remedy_suffix}"
+        logger.warning("Quick transcription pre-check failed — %s", detail_message)
+        raise HTTPException(status_code=503, detail=detail_message) from dep_err
+
     # Try to acquire a job slot
     success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
     if not success:
@@ -570,7 +611,8 @@ async def transcribe_quick(
         tmp_path = tmp.name
 
     try:
-        # Get transcription engine
+        # ensure_transcription_loaded() ran at route entry — the engine is
+        # guaranteed attached here (Issue #76).
         engine = model_manager.transcription_engine
 
         # Transcribe without word timestamps for speed, with cancellation support
@@ -614,6 +656,15 @@ async def transcribe_quick(
     except TranscriptionCancelledError:
         logger.info("Quick transcription cancelled by user")
         raise HTTPException(status_code=499, detail="Transcription cancelled by user") from None
+
+    except BackendDependencyError as dep_err:
+        # Surface the actionable remedy so the dashboard can show a recovery
+        # hint instead of a generic 500 (Issue #76). Matches 503 contract at
+        # admin.py:233-236.
+        remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
+        detail_message = f"Backend dependency missing: {dep_err}{remedy_suffix}"
+        logger.warning("Quick transcription failed — %s", detail_message)
+        raise HTTPException(status_code=503, detail=detail_message) from dep_err
 
     except Exception as e:
         logger.error("Quick transcription failed", exc_info=True)
@@ -702,8 +753,9 @@ def _run_file_import(
         def on_progress(current: int, total: int) -> None:
             model_manager.job_tracker.update_progress(current, total)
 
-        # Get transcription engine
-        engine = model_manager.transcription_engine
+        # Get transcription engine, lazily reloading the model if a prior
+        # Live-Mode restore left it detached (Issue #76).
+        engine = model_manager.ensure_transcription_loaded()
 
         # --- Multitrack path: split channels, transcribe each, merge ---
         if multitrack:
@@ -968,12 +1020,24 @@ def _run_file_import(
 
     except Exception as e:
         logger.error("File import job %s failed: %s", job_id[:8], e, exc_info=True)
+        # Surface BackendDependencyError remedy so the dashboard can render an
+        # actionable hint instead of just the bare error string (Issue #76).
+        # BackendDependencyError is imported at module top.
+        dep_error: BackendDependencyError | None = None
+        if isinstance(e, BackendDependencyError):
+            dep_error = e
+        elif isinstance(e.__cause__, BackendDependencyError):
+            dep_error = e.__cause__
+        error_payload: dict[str, Any] = {
+            "job_id": job_id[:8],
+            "error": str(e),
+        }
+        if dep_error is not None:
+            error_payload["remedy"] = dep_error.remedy
+            error_payload["backend_type"] = dep_error.backend_type
         model_manager.job_tracker.end_job(
             job_id,
-            result={
-                "job_id": job_id[:8],
-                "error": str(e),
-            },
+            result=error_payload,
         )
 
     finally:
@@ -1217,7 +1281,9 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
         return
 
     try:
-        engine = model_manager.transcription_engine
+        # Lazily reload the model if a prior Live-Mode restore left it
+        # detached (Issue #76).
+        engine = await asyncio.to_thread(model_manager.ensure_transcription_loaded)
 
         result = await asyncio.to_thread(
             engine.transcribe_file,
@@ -1247,6 +1313,25 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
         # Leave delivered=0 so the result surfaces in the recovery banner.
         # The client calls GET /result/{job_id} to retrieve it, which marks delivered.
         logger.info("Retry transcription complete for job %s", sanitize_log_value(job_id))
+
+    except BackendDependencyError as dep_err:
+        # Surface the actionable remedy so the dashboard shows a recovery hint
+        # instead of a bare error string (Issue #76).
+        logger.warning(
+            "Retry failed for job %s — backend dependency missing: %s. %s",
+            sanitize_log_value(job_id),
+            dep_err,
+            dep_err.remedy,
+        )
+        try:
+            mark_failed(job_id, f"{dep_err}. {dep_err.remedy}")
+        except Exception as _mf_err:
+            logger.warning(
+                "Failed to mark retry job %s as failed: %s",
+                sanitize_log_value(job_id),
+                _mf_err,
+            )
+        return
 
     except FileNotFoundError:
         logger.warning(

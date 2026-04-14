@@ -383,15 +383,23 @@ class LiveModeSession:
                     )
 
     async def _reload_main_model(self) -> None:
-        """Reload the main transcription model after Live Mode ends."""
+        """Reload the main transcription model after Live Mode ends.
+
+        BackendDependencyError is treated as a recoverable warning (the user
+        can install the missing dep and restart). Any OTHER reload failure is
+        logged with full traceback, surfaced to the dashboard via emit_event,
+        and re-raised so the caller's try/except sees the original error
+        instead of the engine silently staying detached (Issue #76).
+        """
+        from server.core.startup_events import emit_event
+        from server.core.stt.backends.base import BackendDependencyError
+
         try:
             model_manager = get_model_manager()
             # Load in background thread to not block
             await asyncio.to_thread(model_manager.load_transcription_model)
             logger.info("Reloaded main transcription model after Live Mode")
         except Exception as e:
-            from server.core.stt.backends.base import BackendDependencyError
-
             if isinstance(e, BackendDependencyError) or (
                 e.__cause__ and isinstance(e.__cause__, BackendDependencyError)
             ):
@@ -401,8 +409,37 @@ class LiveModeSession:
                     dep,
                     getattr(dep, "remedy", ""),
                 )
-            else:
-                logger.error(f"Failed to reload main transcription model: {e}")
+                # Surface to the dashboard so the user knows the main model
+                # is unavailable and what to do about it.
+                try:
+                    emit_event(
+                        "warn-stt-main",
+                        "warning",
+                        f"Main transcription model unavailable: {dep}. "
+                        f"{getattr(dep, 'remedy', '')}".strip(),
+                        persistent=True,
+                    )
+                except Exception:
+                    logger.warning("emit_event failed for warn-stt-main", exc_info=True)
+                # Recoverable: do not raise — file routes auto-reload on demand
+                # via ensure_transcription_loaded() and produce the same warning.
+                return
+
+            logger.error("Failed to reload main transcription model after Live Mode: %s", e)
+            try:
+                emit_event(
+                    "warn-stt-main",
+                    "warning",
+                    f"Main transcription model failed to reload: {e}. "
+                    "Open Settings → Models and click 'Reload Model'.",
+                    persistent=True,
+                )
+            except Exception:
+                logger.debug("emit_event failed for warn-stt-main", exc_info=True)
+            # Non-dependency failures are unexpected — re-raise so the caller's
+            # try/except (start_engine finally / stop_engine) records the full
+            # traceback and the engine is not silently left detached forever.
+            raise
 
     async def _restore_or_reload_main_model(self) -> None:
         """Return the shared backend to the main engine, or reload from scratch."""
@@ -432,7 +469,19 @@ class LiveModeSession:
                 await self.send_message("status", {"message": "Restoring main model (shared)..."})
             else:
                 await self.send_message("status", {"message": "Reloading main model..."})
-            await self._restore_or_reload_main_model()
+            # Reload failures are surfaced via emit_event in _reload_main_model
+            # and recovered on demand by ensure_transcription_loaded() (Issue
+            # #76). Catch here so the STOPPED state still reaches the client
+            # and session cleanup proceeds. Also catch CancelledError so a
+            # WS cancel mid-reload doesn't skip the STOPPED state notification.
+            try:
+                await self._restore_or_reload_main_model()
+            except (Exception, asyncio.CancelledError) as restore_err:
+                logger.error(
+                    "Failed to restore main model after Live Mode stop (client=%s): %s",
+                    self.client_name,
+                    restore_err,
+                )
 
         await self.send_message("state", {"state": "STOPPED"})
 

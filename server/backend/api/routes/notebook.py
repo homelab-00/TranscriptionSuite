@@ -433,8 +433,11 @@ def _run_transcription(
         def on_progress(current: int, total: int) -> None:
             model_manager.job_tracker.update_progress(current, total)
 
-        # Get transcription engine
-        engine = model_manager.transcription_engine
+        # Get transcription engine, lazily reloading the model if a prior
+        # Live-Mode restore or sequential-diarization swap left it detached.
+        # See ModelManager.ensure_transcription_loaded() for the full rationale
+        # (Issue #76).
+        engine = model_manager.ensure_transcription_loaded()
 
         # Check if the backend supports single-pass diarization (WhisperX)
         from server.core.stt.backends.base import STTBackend
@@ -697,13 +700,26 @@ def _run_transcription(
 
     except Exception as e:
         logger.error(f"Background transcription job {job_id[:8]} failed: {e}", exc_info=True)
+        # Surface the BackendDependencyError remedy so the dashboard can render
+        # an actionable hint instead of just the bare error string (Issue #76).
+        from server.core.stt.backends.base import BackendDependencyError
+
+        dep_error: BackendDependencyError | None = None
+        if isinstance(e, BackendDependencyError):
+            dep_error = e
+        elif isinstance(e.__cause__, BackendDependencyError):
+            dep_error = e.__cause__
+        error_payload: dict[str, Any] = {
+            "job_id": job_id[:8],
+            "error": str(e),
+        }
+        if dep_error is not None:
+            error_payload["remedy"] = dep_error.remedy
+            error_payload["backend_type"] = dep_error.backend_type
         # Store error result for client polling
         model_manager.job_tracker.end_job(
             job_id,
-            result={
-                "job_id": job_id[:8],
-                "error": str(e),
-            },
+            result=error_payload,
         )
 
     finally:

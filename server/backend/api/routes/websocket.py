@@ -203,11 +203,13 @@ class TranscriptionSession:
                 f"samples={len(audio_float)})"
             )
 
-            # Get transcription engine (lazy import to avoid startup delay)
+            # Get transcription engine (lazy import to avoid startup delay).
+            # ensure_transcription_loaded() lazily reloads the model if a
+            # prior Live-Mode restore left it detached (Issue #76).
             from server.core.model_manager import get_model_manager
 
             model_manager = get_model_manager()
-            engine = model_manager.transcription_engine
+            engine = await asyncio.to_thread(model_manager.ensure_transcription_loaded)
 
             # Transcribe — run in a thread so the event loop stays responsive.
             # Without this, the synchronous transcribe_file() blocks the entire
@@ -360,6 +362,7 @@ class TranscriptionSession:
         except Exception as e:
             # Import lazily to avoid circular imports at module load time.
             from server.core.model_manager import TranscriptionCancelledError
+            from server.core.stt.backends.base import BackendDependencyError
 
             if isinstance(e, TranscriptionCancelledError):
                 logger.info(f"Transcription cancelled (client disconnected) for {self.client_name}")
@@ -371,15 +374,27 @@ class TranscriptionSession:
                             "Failed to mark job %s as failed: %s", self._current_job_id, _mf_err
                         )
             else:
+                # Surface BackendDependencyError remedy so the dashboard
+                # can render an actionable hint (Issue #76).
+                dep_error: BackendDependencyError | None = None
+                if isinstance(e, BackendDependencyError):
+                    dep_error = e
+                elif isinstance(e.__cause__, BackendDependencyError):
+                    dep_error = e.__cause__  # type: ignore[assignment]
                 logger.error(f"Transcription error: {e}", exc_info=True)
+                error_message = (
+                    f"Transcription failed: {e}. {dep_error.remedy}"
+                    if dep_error is not None
+                    else f"Transcription failed: {e}"
+                )
                 if self._current_job_id:
                     try:
-                        _mark_failed(self._current_job_id, str(e))
+                        _mark_failed(self._current_job_id, error_message)
                     except Exception as _mf_err:
                         logger.warning(
                             "Failed to mark job %s as failed: %s", self._current_job_id, _mf_err
                         )
-                await self.send_message("error", {"message": f"Transcription failed: {e}"})
+                await self.send_message("error", {"message": error_message})
 
         finally:
             # Only delete files in /tmp — persistent audio in recordings_dir must survive
