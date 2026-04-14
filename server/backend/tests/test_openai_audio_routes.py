@@ -60,8 +60,13 @@ def openai_client():
     mock_engine = MagicMock()
     mock_engine.transcribe_file.return_value = _make_result()
 
+    # `ensure_transcription_loaded` is the canonical self-heal entry point
+    # (Issue #76); routes now call it before try_start_job and read the engine
+    # via `transcription_engine`. The previous stub exposed a nonexistent
+    # `engine` attribute that production code never reached.
     app.state.model_manager = SimpleNamespace(
-        engine=mock_engine,
+        ensure_transcription_loaded=lambda: mock_engine,
+        transcription_engine=mock_engine,
         job_tracker=SimpleNamespace(
             try_start_job=lambda client_name: (True, "job-1", None),
             end_job=lambda job_id: None,
@@ -244,8 +249,10 @@ def test_no_model_loaded_returns_503():
 
     app = FastAPI()
     app.include_router(openai_audio.router, prefix="/v1/audio")
+    fake_engine = MagicMock()
     app.state.model_manager = SimpleNamespace(
-        engine=MagicMock(),
+        ensure_transcription_loaded=lambda: fake_engine,
+        transcription_engine=fake_engine,
         job_tracker=SimpleNamespace(
             try_start_job=lambda cn: (True, "j", None),
             end_job=lambda j: None,
@@ -268,8 +275,10 @@ def test_job_busy_returns_429():
 
     app = FastAPI()
     app.include_router(openai_audio.router, prefix="/v1/audio")
+    fake_engine = MagicMock()
     app.state.model_manager = SimpleNamespace(
-        engine=MagicMock(),
+        ensure_transcription_loaded=lambda: fake_engine,
+        transcription_engine=fake_engine,
         job_tracker=SimpleNamespace(
             try_start_job=lambda cn: (False, None, "other-user"),
             end_job=lambda j: None,
@@ -467,3 +476,186 @@ class TestOpenaiEdgeCases:
         resp = _upload(client, files=files)
         assert resp.status_code == 200
         assert resp.json() == {"text": ""}
+
+
+# ------------------------------------------------------------------
+# model_manager.engine AttributeError regression + ensure_transcription_loaded
+# integration (Issue #76 pattern mirror)
+# ------------------------------------------------------------------
+
+
+class TestEnsureTranscriptionLoadedIntegration:
+    """The OpenAI-compat routes used to read `model_manager.engine` — a typo
+    for a nonexistent attribute. They now call ensure_transcription_loaded()
+    before try_start_job() and read the engine via `transcription_engine`.
+    These tests lock in the fix and its error-handling shape.
+    """
+
+    def _build_app(self, *, ensure_loaded, transcription_engine, try_start_job_result):
+        """Mount the router with a model_manager stub whose hooks are parameterized."""
+        from server.api.routes import openai_audio
+
+        app = FastAPI()
+        app.include_router(openai_audio.router, prefix="/v1/audio")
+
+        end_job = MagicMock()
+        app.state.model_manager = SimpleNamespace(
+            ensure_transcription_loaded=ensure_loaded,
+            transcription_engine=transcription_engine,
+            job_tracker=SimpleNamespace(
+                try_start_job=lambda cn: try_start_job_result,
+                end_job=end_job,
+            ),
+        )
+        app.state.config = SimpleNamespace(
+            transcription={"model": "test-model"},
+            get=lambda *a, default=None, **kw: default,
+        )
+        return app, end_job
+
+    def test_ensure_transcription_loaded_is_called_on_transcription_success(self):
+        """Success path: ensure_transcription_loaded runs BEFORE engine.transcribe_file."""
+        fake_engine = MagicMock()
+        fake_engine.transcribe_file.return_value = _make_result()
+        ensure = MagicMock(return_value=fake_engine)
+
+        app, _ = self._build_app(
+            ensure_loaded=ensure,
+            transcription_engine=fake_engine,
+            try_start_job_result=(True, "job-1", None),
+        )
+        with patch(
+            "server.api.routes.openai_audio.resolve_main_transcriber_model",
+            return_value="test-model",
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = _upload(client)
+
+        assert resp.status_code == 200
+        ensure.assert_called_once()
+        # Proves the typo is gone: no AttributeError surfaces as a 500.
+        assert resp.json() == {"text": "Hello world"}
+
+    def test_ensure_transcription_loaded_is_called_on_translation_success(self):
+        """Translation endpoint uses the same pattern as transcription."""
+        fake_engine = MagicMock()
+        fake_engine.transcribe_file.return_value = _make_result()
+        ensure = MagicMock(return_value=fake_engine)
+
+        app, _ = self._build_app(
+            ensure_loaded=ensure,
+            transcription_engine=fake_engine,
+            try_start_job_result=(True, "job-1", None),
+        )
+        with patch(
+            "server.api.routes.openai_audio.resolve_main_transcriber_model",
+            return_value="test-model",
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = _upload(client, path="/v1/audio/translations")
+
+        assert resp.status_code == 200
+        ensure.assert_called_once()
+
+    def test_backend_dependency_error_returns_503_with_remedy_in_openai_envelope(self):
+        """NeMo missing → 503 with OpenAI-shaped body containing the remedy."""
+        from server.core.stt.backends.base import BackendDependencyError
+
+        def _raise_missing_nemo() -> None:
+            raise BackendDependencyError(
+                "nemo-toolkit is not installed",
+                backend_type="nemo",
+                remedy="Set INSTALL_NEMO=true and rebuild the container",
+            )
+
+        fake_engine = MagicMock()
+        try_start_job = MagicMock(return_value=(True, "job-1", None))
+        app, end_job = self._build_app(
+            ensure_loaded=_raise_missing_nemo,
+            transcription_engine=fake_engine,
+            try_start_job_result=(True, "job-1", None),
+        )
+        # Overwrite try_start_job with an explicit Mock so we can assert it
+        # was never reached.
+        app.state.model_manager.job_tracker.try_start_job = try_start_job
+
+        with patch(
+            "server.api.routes.openai_audio.resolve_main_transcriber_model",
+            return_value="test-model",
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = _upload(client)
+
+        assert resp.status_code == 503
+        body = resp.json()
+        # OpenAI envelope shape preserved.
+        assert body["error"]["type"] == "server_error"
+        msg = body["error"]["message"]
+        # Both the original error text AND the remedy must be in the message
+        # so external clients surface an actionable diagnostic to the user.
+        assert "nemo-toolkit is not installed" in msg
+        assert "Set INSTALL_NEMO=true" in msg
+        # try_start_job MUST NOT have been reached — the slot stays free for
+        # the next request once the operator fixes the dep.
+        try_start_job.assert_not_called()
+        end_job.assert_not_called()
+        fake_engine.transcribe_file.assert_not_called()
+
+    def test_backend_dependency_error_on_translation_returns_503(self):
+        """Symmetric coverage for the translation handler."""
+        from server.core.stt.backends.base import BackendDependencyError
+
+        def _raise_missing_nemo() -> None:
+            raise BackendDependencyError(
+                "nemo-toolkit missing",
+                backend_type="nemo",
+                remedy="Install nemo",
+            )
+
+        fake_engine = MagicMock()
+        app, _ = self._build_app(
+            ensure_loaded=_raise_missing_nemo,
+            transcription_engine=fake_engine,
+            try_start_job_result=(True, "job-1", None),
+        )
+        with patch(
+            "server.api.routes.openai_audio.resolve_main_transcriber_model",
+            return_value="test-model",
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = _upload(client, path="/v1/audio/translations")
+
+        assert resp.status_code == 503
+        body = resp.json()
+        assert body["error"]["type"] == "server_error"
+        assert "Install nemo" in body["error"]["message"]
+
+    def test_ensure_runs_before_try_start_job(self):
+        """Call-order lock: ensure_transcription_loaded must execute before
+        try_start_job so a failed reload doesn't occupy the single job slot."""
+        call_order: list[str] = []
+
+        def _ensure() -> None:
+            call_order.append("ensure")
+
+        def _try_start_job(_cn):
+            call_order.append("try_start_job")
+            return (True, "job-1", None)
+
+        fake_engine = MagicMock()
+        fake_engine.transcribe_file.return_value = _make_result()
+        app, _ = self._build_app(
+            ensure_loaded=_ensure,
+            transcription_engine=fake_engine,
+            try_start_job_result=(True, "job-1", None),
+        )
+        app.state.model_manager.job_tracker.try_start_job = _try_start_job
+        with patch(
+            "server.api.routes.openai_audio.resolve_main_transcriber_model",
+            return_value="test-model",
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = _upload(client)
+
+        assert resp.status_code == 200
+        assert call_order == ["ensure", "try_start_job"]

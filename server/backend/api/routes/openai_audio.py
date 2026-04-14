@@ -7,6 +7,7 @@ following the OpenAI Audio API spec so that any OpenAI-compatible client
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import tempfile
 from pathlib import Path
@@ -24,6 +25,7 @@ from server.core.formatters import (
     format_vtt,
 )
 from server.core.model_manager import TranscriptionCancelledError
+from server.core.stt.backends.base import BackendDependencyError
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +116,19 @@ async def create_transcription(
     model_manager = request.app.state.model_manager
     client_name = get_client_name(request)
 
+    # Lazy-reload the backend BEFORE acquiring a job slot (Issue #76 pattern
+    # mirrored from routes/transcription.py:128-134) so a failed reload doesn't
+    # occupy the single-slot tracker. `model_manager.engine` was a typo — the
+    # attribute does not exist; ensure_transcription_loaded() is the canonical
+    # self-heal path and returns the attached engine.
+    try:
+        await asyncio.to_thread(model_manager.ensure_transcription_loaded)
+    except BackendDependencyError as dep_err:
+        remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
+        detail_message = f"Backend dependency missing: {dep_err}{remedy_suffix}"
+        logger.warning("OpenAI transcription pre-check failed — %s", detail_message)
+        return _openai_error(503, detail_message, error_type="server_error")
+
     success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
     if not success:
         return _openai_error(
@@ -135,7 +150,7 @@ async def create_transcription(
             content = await file.read()
             tmp.write(content)
 
-        engine = model_manager.engine
+        engine = model_manager.transcription_engine
         result = engine.transcribe_file(
             tmp_path,
             language=language,
@@ -214,6 +229,16 @@ async def create_translation(
     model_manager = request.app.state.model_manager
     client_name = get_client_name(request)
 
+    # Lazy-reload BEFORE try_start_job (Issue #76 pattern); see the
+    # transcription handler above for the full rationale.
+    try:
+        await asyncio.to_thread(model_manager.ensure_transcription_loaded)
+    except BackendDependencyError as dep_err:
+        remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
+        detail_message = f"Backend dependency missing: {dep_err}{remedy_suffix}"
+        logger.warning("OpenAI translation pre-check failed — %s", detail_message)
+        return _openai_error(503, detail_message, error_type="server_error")
+
     success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
     if not success:
         return _openai_error(
@@ -235,7 +260,7 @@ async def create_translation(
             content = await file.read()
             tmp.write(content)
 
-        engine = model_manager.engine
+        engine = model_manager.transcription_engine
         result = engine.transcribe_file(
             tmp_path,
             task="translate",
