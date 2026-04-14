@@ -431,6 +431,16 @@ export class TranscriptionSocket {
     return raw || 'Authentication failed';
   }
 
+  /**
+   * Public state read for external rearm logic. The config-changed listener
+   * in useTranscription / useLiveMode reads this to decide whether a fresh
+   * connect() is warranted (only `error` qualifies — any other state is
+   * either healthy or already-transitioning).
+   */
+  getState(): ConnectionState {
+    return this.state;
+  }
+
   private setState(s: ConnectionState): void {
     if (this.state !== s) {
       const previous = this.state;

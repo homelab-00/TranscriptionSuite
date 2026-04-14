@@ -116,6 +116,22 @@ export function useTranscription(): TranscriptionState {
     };
   }, []);
 
+  // Rearm a dead-ended socket after the user fixes Settings mid-session.
+  // doReconnect() short-circuits to state=`error` when isBaseUrlConfigured()
+  // is false, then never retries on its own. When syncFromConfig() runs after
+  // a Settings save, this listener triggers a fresh connect() — but ONLY when
+  // (a) the socket is in `error` AND (b) the gate is now usable. The gate
+  // check prevents a redundant connect() when the sync itself failed (IPC
+  // throw leaves synced=false; a rearm in that state would just hit the
+  // getWsUrl() null-guard and immediately re-enter `error`).
+  useEffect(() => {
+    return apiClient.onConfigChanged(() => {
+      if (socketRef.current?.getState() === 'error' && apiClient.isBaseUrlConfigured()) {
+        socketRef.current.connect();
+      }
+    });
+  }, []);
+
   const handleMessage = useCallback(
     (msg: ServerMessage) => {
       switch (msg.type) {

@@ -2,6 +2,7 @@ import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 
 import { useLiveMode } from './useLiveMode';
+import { apiClient } from '../api/client';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 
@@ -13,6 +14,7 @@ let lastSocket: {
   sendJSON: Mock;
   sendAudio: Mock;
   setAudioSampleRate: Mock;
+  getState: Mock;
 };
 let lastSocketCbs: {
   onMessage?: (msg: { type: string; data?: Record<string, unknown> }) => void;
@@ -29,6 +31,7 @@ vi.mock('../services/websocket', () => ({
       sendJSON: vi.fn(),
       sendAudio: vi.fn(),
       setAudioSampleRate: vi.fn(),
+      getState: vi.fn().mockReturnValue('disconnected'),
     };
     return lastSocket;
   }),
@@ -472,6 +475,99 @@ describe('[P1] useLiveMode', () => {
       });
 
       expect(result.current.sentences).toEqual([]);
+    });
+  });
+
+  // ── Install-gate rearm: socket.connect() is triggered by config-changed
+  //   ONLY when the socket is in error state. Prevents churn in healthy
+  //   sessions while closing the WS-reconnect dead-end regression.
+  describe('install-gate rearm on config-changed', () => {
+    beforeEach(() => {
+      (window as any).electronAPI = {
+        config: {
+          get: vi.fn(async (key: string) => {
+            const seed: Record<string, unknown> = { 'connection.useRemote': false };
+            return seed[key];
+          }),
+          set: vi.fn(),
+        },
+      };
+    });
+
+    it('calls socket.connect() when config-changed fires AND socket is in error state', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+
+      // One connect() call happened at start(); reset so we isolate the rearm.
+      lastSocket.connect.mockClear();
+      lastSocket.getState.mockReturnValue('error');
+
+      await act(async () => {
+        await apiClient.syncFromConfig();
+      });
+
+      expect(lastSocket.connect).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT call socket.connect() when socket is in a healthy state', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+
+      lastSocket.connect.mockClear();
+      lastSocket.getState.mockReturnValue('ready');
+
+      await act(async () => {
+        await apiClient.syncFromConfig();
+      });
+
+      expect(lastSocket.connect).not.toHaveBeenCalled();
+    });
+
+    it('does NOT throw when config-changed fires before any session has started (null socketRef)', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      // No start() call — socketRef.current is null. The handler's optional
+      // chain (`socketRef.current?.getState()`) must short-circuit cleanly;
+      // if it didn't, the act() below would surface the throw.
+
+      await act(async () => {
+        await apiClient.syncFromConfig();
+      });
+
+      expect(result.current.status).toBe('idle');
+    });
+
+    it('does NOT rearm when the gate is still closed (sync threw — synced stays false)', async () => {
+      // Prove that rearm is double-gated: socket=error is necessary but not
+      // sufficient. If syncFromConfig threw (IPC reject), isBaseUrlConfigured
+      // stays false and rearm must NOT fire — otherwise we'd loop between
+      // rearm → connect → getWsUrl-null → error → rearm on every sync.
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+
+      lastSocket.connect.mockClear();
+      lastSocket.getState.mockReturnValue('error');
+
+      // Swap the bridge to reject so this sync throws internally.
+      (window as any).electronAPI = {
+        config: {
+          get: vi.fn(async () => {
+            throw new Error('IPC down');
+          }),
+          set: vi.fn(),
+        },
+      };
+      // Suppress the expected warn noise.
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      // Reset the apiClient singleton's synced state so the throw path
+      // actually flips isBaseUrlConfigured to false.
+      (apiClient as any).synced = false;
+
+      await act(async () => {
+        await apiClient.syncFromConfig();
+      });
+
+      expect(lastSocket.connect).not.toHaveBeenCalled();
     });
   });
 });

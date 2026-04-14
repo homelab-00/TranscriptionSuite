@@ -13,6 +13,7 @@ let lastSocket: {
   sendJSON: Mock;
   sendAudio: Mock;
   setAudioSampleRate: Mock;
+  getState: Mock;
 };
 let lastSocketCbs: {
   onMessage?: (msg: { type: string; data?: Record<string, unknown> }) => void;
@@ -29,6 +30,7 @@ vi.mock('../services/websocket', () => ({
       sendJSON: vi.fn(),
       sendAudio: vi.fn(),
       setAudioSampleRate: vi.fn(),
+      getState: vi.fn().mockReturnValue('disconnected'),
     };
     return lastSocket;
   }),
@@ -59,10 +61,29 @@ vi.mock('../services/audioCapture', () => ({
   }),
 }));
 
+// Minimal in-memory emitter so the hook's useEffect subscription resolves
+// (apiClient is mocked; need to provide onConfigChanged and expose the
+// emit surface for the rearm test below).
+const configChangedListeners = new Set<() => void>();
+function emitConfigChangedFromTest(): void {
+  for (const fn of configChangedListeners) fn();
+}
+
+// Tests control this flag to simulate the install-gate predicate state.
+// Defaulted to true so existing tests see a configured gate.
+let mockGateConfigured = true;
+
 vi.mock('../api/client', () => ({
   apiClient: {
     getAuthToken: vi.fn().mockReturnValue('test-token'),
     getBaseUrl: vi.fn().mockReturnValue('http://localhost:9786'),
+    isBaseUrlConfigured: vi.fn(() => mockGateConfigured),
+    onConfigChanged: vi.fn((listener: () => void) => {
+      configChangedListeners.add(listener);
+      return () => {
+        configChangedListeners.delete(listener);
+      };
+    }),
   },
 }));
 
@@ -397,6 +418,80 @@ describe('[P1] useTranscription', () => {
       });
       expect(result.current.muted).toBe(false);
       expect(lastCapture.unmute).toHaveBeenCalled();
+    });
+  });
+
+  // ── Install-gate rearm: socket.connect() fires on config-changed ONLY
+  //   when the underlying socket is in error state AND the gate is usable.
+  //   Avoids churn in healthy sessions AND avoids a redundant connect when
+  //   the sync itself failed (IPC throw leaves the gate closed).
+  describe('install-gate rearm on config-changed', () => {
+    beforeEach(() => {
+      configChangedListeners.clear();
+      mockGateConfigured = true;
+    });
+
+    it('calls socket.connect() when config-changed fires AND socket is in error state', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      lastSocket.connect.mockClear();
+      lastSocket.getState.mockReturnValue('error');
+
+      act(() => {
+        emitConfigChangedFromTest();
+      });
+
+      expect(lastSocket.connect).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT call socket.connect() when socket is in a healthy state', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      lastSocket.connect.mockClear();
+      lastSocket.getState.mockReturnValue('ready');
+
+      act(() => {
+        emitConfigChangedFromTest();
+      });
+
+      expect(lastSocket.connect).not.toHaveBeenCalled();
+    });
+
+    it('does NOT rearm when the gate is still closed (sync failed — isBaseUrlConfigured false)', async () => {
+      // Prove double-gating: socket=error alone is insufficient. If the
+      // sync that fired the event actually failed (IPC reject → synced stays
+      // false → gate closed), rearm must skip to avoid a redundant connect
+      // that would immediately re-enter error.
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      lastSocket.connect.mockClear();
+      lastSocket.getState.mockReturnValue('error');
+      mockGateConfigured = false;
+
+      act(() => {
+        emitConfigChangedFromTest();
+      });
+
+      expect(lastSocket.connect).not.toHaveBeenCalled();
+    });
+
+    it('unsubscribes on unmount; emit after unmount does not call connect', async () => {
+      const { result, unmount } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      lastSocket.connect.mockClear();
+      lastSocket.getState.mockReturnValue('error');
+
+      unmount();
+
+      act(() => {
+        emitConfigChangedFromTest();
+      });
+
+      expect(lastSocket.connect).not.toHaveBeenCalled();
     });
   });
 });

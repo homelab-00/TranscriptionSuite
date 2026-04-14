@@ -52,9 +52,43 @@ export class APIClient {
   private baseUrl: string;
   private authToken: string | null = null;
   private synced: boolean = false;
+  // Listeners notified after any syncFromConfig() attempt — success OR failure.
+  // Consumers (socket-owning hooks) re-check predicate state on event because
+  // a failed sync still mutates the gate from "pre-sync" to "post-sync-failed".
+  private configChangedListeners = new Set<() => void>();
 
   constructor(baseUrl: string = `http://localhost:${DEFAULT_SERVER_PORT}`) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
+  }
+
+  /**
+   * Subscribe to config-changed events fired after every `syncFromConfig()`
+   * attempt (both success and failure paths). Returns an unsubscribe function
+   * suitable as a React `useEffect` cleanup. Used by `useTranscription` and
+   * `useLiveMode` to rearm WebSockets stuck in `error` state after the user
+   * fixes Settings mid-session.
+   */
+  onConfigChanged(listener: () => void): () => void {
+    this.configChangedListeners.add(listener);
+    return () => {
+      this.configChangedListeners.delete(listener);
+    };
+  }
+
+  private emitConfigChanged(): void {
+    // Snapshot the Set before iteration so a listener that unsubscribes a
+    // not-yet-visited sibling (directly or transitively) doesn't silently
+    // drop that sibling from this emit cycle. Set.prototype iteration is
+    // otherwise safe against deletion of the CURRENT item, but deletion of
+    // a later-scheduled item WILL skip it.
+    for (const listener of [...this.configChangedListeners]) {
+      try {
+        listener();
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        console.warn('[APIClient] config-changed listener threw:', detail);
+      }
+    }
   }
 
   // ─── Configuration ────────────────────────────────────────────────────────
@@ -83,11 +117,29 @@ export class APIClient {
    * Sync base URL from config store.
    * Call this on app startup and whenever server config changes.
    * Sets the `synced` flag — a precondition for isBaseUrlConfigured().
+   *
+   * Throw-safety: catches any throw from `getServerBaseUrl()` (preload-bridge
+   * rejection, localStorage QuotaExceededError, etc.). On throw, `synced`
+   * stays false so the existing `isBaseUrlConfigured()` gate stays closed and
+   * downstream network paths short-circuit safely. Always emits
+   * `config-changed` so subscribers can re-check gate state regardless of
+   * whether the sync succeeded.
    */
   async syncFromConfig(): Promise<void> {
-    const url = await getServerBaseUrl();
-    this.setBaseUrl(url);
-    this.synced = true;
+    try {
+      const url = await getServerBaseUrl();
+      this.setBaseUrl(url);
+      this.synced = true;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.warn('[APIClient] syncFromConfig failed:', detail);
+      // synced stays false on throw — isBaseUrlConfigured() returns false,
+      // network paths gate via `'remote-host-not-configured'`. Caller is
+      // shielded from the unhandled rejection that previously crashed
+      // App.tsx's fire-and-forget initApiClient and the SessionView /
+      // SettingsModal callbacks.
+    }
+    this.emitConfigChanged();
   }
 
   /**
@@ -1017,8 +1069,28 @@ export const apiClient = new APIClient();
 /**
  * Initialize the API client from stored config.
  * Call once at app startup (e.g. in App.tsx useEffect).
+ *
+ * Bootstrap diagnostic: when `!isBaseUrlConfigured()` after the sync,
+ * emits one `console.warn` so support traces can distinguish "host not
+ * configured" from "fetch transport error". Covers both (a) `useRemote=true`
+ * + blank host persisted from a prior session and (b) syncFromConfig threw.
+ * No blocking dialog — Settings UX handles fix-forward.
  */
 export async function initApiClient(): Promise<void> {
   await apiClient.syncFromConfig();
-  apiClient.setAuthToken(await getAuthToken());
+  // getAuthToken() reads via the same preload-bridge chain as syncFromConfig
+  // and is just as susceptible to IPC rejection. Wrapping here keeps
+  // initApiClient throw-safe so App.tsx's fire-and-forget invocation never
+  // produces an unhandled rejection.
+  try {
+    apiClient.setAuthToken(await getAuthToken());
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.warn('[APIClient] auth-token read failed at bootstrap:', detail);
+  }
+  if (!apiClient.isBaseUrlConfigured()) {
+    console.warn(
+      '[APIClient] bootstrap: remote host not configured — Settings must be saved before network paths activate',
+    );
+  }
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-import { APIClient, apiClient } from './client';
+import { APIClient, apiClient, initApiClient } from './client';
 
 // Renderer-side install-gate mirror: when useRemote=true with a blank active-
 // profile host, checkConnection must return `'remote-host-not-configured'`
@@ -443,5 +443,218 @@ describe('APIClient.getAudioUrl / getExportUrl — return null when not configur
     const url = client.getAudioUrl(42);
     expect(url).not.toBeNull();
     expect(url).toMatch(/\/api\/notebook\/recordings\/42\/audio/);
+  });
+});
+
+// Install-gate hardening: syncFromConfig is now throw-safe (catches IPC
+// rejection internally) and emits config-changed on BOTH success and
+// failure paths so socket-rearm subscribers can re-check predicate state.
+describe('APIClient.syncFromConfig — throw-safety + config-changed event', () => {
+  beforeEach(() => {
+    delete (window as any).electronAPI;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (window as any).electronAPI;
+  });
+
+  it('does not throw when getServerBaseUrl rejects; leaves synced=false; logs warning', async () => {
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn(async () => {
+          throw new Error('preload bridge rejected');
+        }),
+        set: vi.fn(),
+      },
+    };
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = new APIClient();
+
+    await expect(client.syncFromConfig()).resolves.toBeUndefined();
+
+    expect(client.isBaseUrlConfigured()).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[APIClient] syncFromConfig failed:',
+      expect.stringContaining('preload bridge rejected'),
+    );
+  });
+
+  it('fires config-changed listeners exactly once per syncFromConfig success', async () => {
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn(async (key: string) => {
+          const seed: Record<string, unknown> = { 'connection.useRemote': false };
+          return seed[key];
+        }),
+        set: vi.fn(),
+      },
+    };
+    const client = new APIClient();
+    const listener = vi.fn();
+    client.onConfigChanged(listener);
+
+    await client.syncFromConfig();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(client.isBaseUrlConfigured()).toBe(true);
+  });
+
+  it('fires config-changed listeners exactly once even when the sync THROWS internally', async () => {
+    // Critical for socket rearm: a failed sync still mutates state from
+    // pre-sync (synced=false, gate closed) to post-sync-failed (synced still
+    // false, gate still closed) — but more importantly, if the user retries
+    // by saving Settings again, that next sync would not fire any event if
+    // we only emitted on success. So emit on both paths and let subscribers
+    // re-check predicate state.
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn(async () => {
+          throw new Error('IPC bridge unavailable');
+        }),
+        set: vi.fn(),
+      },
+    };
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = new APIClient();
+    const listener = vi.fn();
+    client.onConfigChanged(listener);
+
+    await client.syncFromConfig();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns an unsubscribe function from onConfigChanged that detaches the listener', async () => {
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn(async (key: string) => {
+          const seed: Record<string, unknown> = { 'connection.useRemote': false };
+          return seed[key];
+        }),
+        set: vi.fn(),
+      },
+    };
+    const client = new APIClient();
+    const listener = vi.fn();
+    const unsub = client.onConfigChanged(listener);
+
+    await client.syncFromConfig();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsub();
+    await client.syncFromConfig();
+    expect(listener).toHaveBeenCalledTimes(1); // not called again
+  });
+
+  it('a throwing listener does not break sibling listeners or the sync flow', async () => {
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn(async (key: string) => {
+          const seed: Record<string, unknown> = { 'connection.useRemote': false };
+          return seed[key];
+        }),
+        set: vi.fn(),
+      },
+    };
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = new APIClient();
+    const goodListener = vi.fn();
+    client.onConfigChanged(() => {
+      throw new Error('listener exploded');
+    });
+    client.onConfigChanged(goodListener);
+
+    await expect(client.syncFromConfig()).resolves.toBeUndefined();
+
+    expect(goodListener).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[APIClient] config-changed listener threw:',
+      expect.stringContaining('listener exploded'),
+    );
+  });
+});
+
+// Bootstrap diagnostic: initApiClient logs a single warning when the
+// post-sync gate predicate is false. Covers (a) useRemote=true + persisted
+// blank host AND (b) sync threw internally.
+describe('initApiClient — bootstrap diagnostic for unconfigured gate', () => {
+  beforeEach(() => {
+    delete (window as any).electronAPI;
+    // Reset singleton state polluted by earlier test blocks. initApiClient
+    // operates on the module-level apiClient whose `synced` flag carries over
+    // between tests; without this the IPC-throw branch of this suite is
+    // shadowed by a prior successful sync.
+    (apiClient as any).synced = false;
+    (apiClient as any).baseUrl = 'http://localhost:9786';
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (window as any).electronAPI;
+  });
+
+  it('logs the bootstrap diagnostic when post-sync isBaseUrlConfigured is false (blank-remote persisted)', async () => {
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn(async (key: string) => {
+          const seed: Record<string, unknown> = {
+            'connection.useRemote': true,
+            'connection.remoteProfile': 'tailscale',
+            'connection.remoteHost': '',
+          };
+          return seed[key];
+        }),
+        set: vi.fn(),
+      },
+    };
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await initApiClient();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[APIClient] bootstrap: remote host not configured'),
+    );
+  });
+
+  it('does NOT log the bootstrap diagnostic in healthy local mode', async () => {
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn(async (key: string) => {
+          const seed: Record<string, unknown> = { 'connection.useRemote': false };
+          return seed[key];
+        }),
+        set: vi.fn(),
+      },
+    };
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await initApiClient();
+
+    const bootstrapWarnings = warnSpy.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].includes('[APIClient] bootstrap:'),
+    );
+    expect(bootstrapWarnings).toHaveLength(0);
+  });
+
+  it('logs the bootstrap diagnostic when syncFromConfig threw internally', async () => {
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn(async () => {
+          throw new Error('IPC unavailable at startup');
+        }),
+        set: vi.fn(),
+      },
+    };
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await initApiClient();
+
+    // Two warnings expected: the syncFromConfig failure log AND the bootstrap
+    // diagnostic. The diagnostic must fire even on the IPC-throw branch.
+    const bootstrapWarnings = warnSpy.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].includes('[APIClient] bootstrap:'),
+    );
+    expect(bootstrapWarnings).toHaveLength(1);
   });
 });
