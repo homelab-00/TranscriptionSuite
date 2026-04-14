@@ -114,6 +114,7 @@ export interface ElectronAPI {
     getVersion: () => Promise<string>;
     getPlatform: () => string;
     getArch: () => string;
+    reportRendererReady: () => void;
     getSessionType: () => string;
     openExternal: (url: string) => Promise<void>;
     openPath: (filePath: string) => Promise<string>;
@@ -401,6 +402,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => process.platform,
     getArch: () => process.arch,
+    // M6: one-way signal fired by <App> after initial React mount. Main
+    // calls LaunchWatchdog.confirmLaunchStable in response, resetting the
+    // per-version launch-attempt counter. A broken renderer that never
+    // mounts will never emit, so the counter accumulates and triggers
+    // rollback on the 3rd failed launch. Idempotent on main side.
+    reportRendererReady: () => ipcRenderer.send('updates:rendererReady'),
     getSessionType: () =>
       process.env.XDG_SESSION_TYPE ?? (process.env.WAYLAND_DISPLAY ? 'wayland' : 'x11'),
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),

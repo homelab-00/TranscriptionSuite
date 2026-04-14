@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type Store from 'electron-store';
 
-import { CompatGuard, type Manifest } from '../compatGuard.js';
+import { CompatGuard, MANIFEST_TTL_MS, type Manifest } from '../compatGuard.js';
 
 // ─── Fakes ──────────────────────────────────────────────────────────────
 
@@ -128,7 +128,10 @@ describe('CompatGuard', () => {
       manifest: STABLE_MANIFEST,
       serverVersion: '1.4.2',
     });
-    expect(setSpy).toHaveBeenCalledWith('updates.lastManifest', STABLE_MANIFEST);
+    expect(setSpy).toHaveBeenCalledWith(
+      'updates.lastManifest',
+      expect.objectContaining({ ...STABLE_MANIFEST, fetchedAt: expect.any(Number) }),
+    );
   });
 
   it('returns incompatible with deployment=local when server is behind range', async () => {
@@ -148,7 +151,10 @@ describe('CompatGuard', () => {
       compatibleRange: '>=99.0.0',
       deployment: 'local',
     });
-    expect(setSpy).toHaveBeenCalledWith('updates.lastManifest', strictManifest);
+    expect(setSpy).toHaveBeenCalledWith(
+      'updates.lastManifest',
+      expect.objectContaining({ ...strictManifest, fetchedAt: expect.any(Number) }),
+    );
   });
 
   it('returns incompatible with deployment=remote when useRemote=true', async () => {
@@ -259,7 +265,10 @@ describe('CompatGuard', () => {
     const result = await guard.check();
     expect(result.result).toBe('unknown');
     if (result.result === 'unknown') expect(result.reason).toBe('server-version-unavailable');
-    expect(setSpy).toHaveBeenCalledWith('updates.lastManifest', STABLE_MANIFEST);
+    expect(setSpy).toHaveBeenCalledWith(
+      'updates.lastManifest',
+      expect.objectContaining({ ...STABLE_MANIFEST, fetchedAt: expect.any(Number) }),
+    );
   });
 
   it('returns unknown/server-version-unavailable when admin/status omits .version', async () => {
@@ -303,7 +312,10 @@ describe('CompatGuard', () => {
       expect(result.reason).toBe('invalid-range');
       expect(result.detail).toBe('not-a-range');
     }
-    expect(setSpy).toHaveBeenCalledWith('updates.lastManifest', brokenManifest);
+    expect(setSpy).toHaveBeenCalledWith(
+      'updates.lastManifest',
+      expect.objectContaining({ ...brokenManifest, fetchedAt: expect.any(Number) }),
+    );
   });
 
   it('single-flights concurrent check() calls (one pair of fetches)', async () => {
@@ -365,7 +377,7 @@ describe('CompatGuard', () => {
     expect(setSpy).not.toHaveBeenCalled();
   });
 
-  it('getLastManifest returns persisted manifest from store', async () => {
+  it('getLastManifest returns persisted manifest from store (with fetchedAt)', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(releasesPayloadWithManifest()))
       .mockResolvedValueOnce(jsonResponse(STABLE_MANIFEST))
@@ -373,7 +385,9 @@ describe('CompatGuard', () => {
 
     const { guard } = buildGuard();
     await guard.check();
-    expect(guard.getLastManifest()).toEqual(STABLE_MANIFEST);
+    const returned = guard.getLastManifest();
+    expect(returned).toMatchObject(STABLE_MANIFEST);
+    expect(returned?.fetchedAt).toEqual(expect.any(Number));
   });
 
   it('getLastManifest returns null when store has no manifest', () => {
@@ -383,6 +397,67 @@ describe('CompatGuard', () => {
 
   it('getLastManifest returns null when stored value has wrong shape', () => {
     const { guard } = buildGuard({ 'updates.lastManifest': { version: 'x' } });
+    expect(guard.getLastManifest()).toBeNull();
+  });
+
+  // ─── Manifest staleness TTL (M6 safety hardening) ────────────────────
+
+  it('check() stamps fetchedAt to Date.now() immediately before persist', async () => {
+    const nowBefore = Date.now();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(releasesPayloadWithManifest()))
+      .mockResolvedValueOnce(jsonResponse(STABLE_MANIFEST))
+      .mockResolvedValueOnce(jsonResponse({ status: 'running', version: '1.4.2' }));
+    const { guard, setSpy } = buildGuard();
+    await guard.check();
+    const nowAfter = Date.now();
+    const setCall = setSpy.mock.calls.find(([k]) => k === 'updates.lastManifest');
+    expect(setCall).toBeDefined();
+    const persisted = setCall![1] as { fetchedAt: number };
+    expect(persisted.fetchedAt).toBeGreaterThanOrEqual(nowBefore);
+    expect(persisted.fetchedAt).toBeLessThanOrEqual(nowAfter);
+  });
+
+  it('getLastManifest returns null when persisted manifest lacks fetchedAt (legacy pre-hardening shape)', () => {
+    // Simulates an electron-store persisted by a pre-hardening build —
+    // the shape is otherwise valid but fetchedAt is absent. Treat as
+    // stale and force the verifier to skip until the next check() can
+    // re-persist with a fresh timestamp.
+    const { guard } = buildGuard({ 'updates.lastManifest': STABLE_MANIFEST });
+    expect(guard.getLastManifest()).toBeNull();
+  });
+
+  it('getLastManifest returns null when fetchedAt is older than MANIFEST_TTL_MS (14 days)', () => {
+    const stale = { ...STABLE_MANIFEST, fetchedAt: Date.now() - MANIFEST_TTL_MS - 1000 };
+    const { guard } = buildGuard({ 'updates.lastManifest': stale });
+    expect(guard.getLastManifest()).toBeNull();
+  });
+
+  it('getLastManifest returns null when ageMs is negative (clock rolled backward)', () => {
+    // Defense against wall-clock regression: if the user's system clock
+    // rolls back (NTP correction, manual change, dual-boot with broken
+    // RTC, DST anomaly) OR fetchedAt is stamped in the future via store
+    // corruption, the age becomes negative and the `>` comparison would
+    // silently treat the manifest as fresh indefinitely. Reject.
+    const futureStamp = Date.now() + 60 * 60 * 1000; // 1h in the future
+    const corrupt = { ...STABLE_MANIFEST, fetchedAt: futureStamp };
+    const { guard } = buildGuard({ 'updates.lastManifest': corrupt });
+    expect(guard.getLastManifest()).toBeNull();
+  });
+
+  it('getLastManifest returns manifest when fetchedAt is within TTL', () => {
+    // Just inside the 14-day window.
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const fresh = { ...STABLE_MANIFEST, fetchedAt: oneDayAgo };
+    const { guard } = buildGuard({ 'updates.lastManifest': fresh });
+    const result = guard.getLastManifest();
+    expect(result).toMatchObject(STABLE_MANIFEST);
+    expect(result?.fetchedAt).toBe(oneDayAgo);
+  });
+
+  it('getLastManifest returns null when fetchedAt is a non-finite number (corruption defense)', () => {
+    const corrupt = { ...STABLE_MANIFEST, fetchedAt: NaN };
+    const { guard } = buildGuard({ 'updates.lastManifest': corrupt });
     expect(guard.getLastManifest()).toBeNull();
   });
 

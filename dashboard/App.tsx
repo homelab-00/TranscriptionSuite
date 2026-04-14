@@ -80,6 +80,20 @@ const AppInner: React.FC = () => {
   // Reactive cache invalidations on server state transitions
   useServerEventReactor(serverConnection);
 
+  // M6 stable-launch confirmation: signal main that the renderer has
+  // completed its initial mount so LaunchWatchdog can reset the
+  // launch-attempt counter. A broken renderer never emits, so repeated
+  // boot failures accumulate and trigger rollback on the 3rd attempt.
+  // Optional-chain guards non-Electron runtimes (browser dev mode);
+  // try/catch guards preload/main version mismatches.
+  useEffect(() => {
+    try {
+      (window as any).electronAPI?.app?.reportRendererReady?.();
+    } catch {
+      // intentionally swallowed — the IPC is best-effort
+    }
+  }, []);
+
   // Track remote mode so useAuthTokenSync re-evaluates on mode switch
   const [useRemote, setUseRemote] = useState(false);
   useEffect(() => {

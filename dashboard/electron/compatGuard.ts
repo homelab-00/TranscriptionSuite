@@ -79,7 +79,27 @@ export interface Manifest {
   compatibleServerRange: string;
   sha256: Record<string, string>;
   releaseType: string;
+  /**
+   * Persistence timestamp stamped by `check()` immediately before
+   * `store.set(MANIFEST_STORE_KEY, manifest)`. Absent on the network
+   * payload (the CI-generated manifest.json never carries it); present
+   * on every read from electron-store. `getLastManifest()` treats a
+   * missing or older-than-TTL value as "no manifest available" and
+   * returns null, so a consumer (M6 verifier) fails-open the same way
+   * it does for the never-persisted case.
+   */
+  fetchedAt?: number;
 }
+
+/**
+ * Maximum age for a persisted manifest before `getLastManifest()`
+ * returns null. 14 days accommodates: users who disable update checks
+ * temporarily (poll cadence is 24 h, so anything under 24 h thrashes);
+ * laptops offline over long weekends; CI manifest outages. A stale read
+ * costs at most one fail-open install (same as missing-manifest); an
+ * overly short TTL would produce warn-spam without functional benefit.
+ */
+export const MANIFEST_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 export type CompatUnknownReason =
   | 'no-manifest'
@@ -205,11 +225,40 @@ export class CompatGuard {
     return promise;
   }
 
-  getLastManifest(): Manifest | null {
+  getLastManifest(): (Manifest & { fetchedAt: number }) | null {
     try {
       const raw = this.store.get(MANIFEST_STORE_KEY);
       if (!isManifest(raw)) return null;
-      return raw;
+      // Enforce TTL — a manifest without fetchedAt (legacy stored shape
+      // from pre-hardening builds) OR one older than MANIFEST_TTL_MS is
+      // treated the same as no manifest. The M6 verifier's "no manifest
+      // persisted" path then warns and skips verification, exactly like
+      // the never-persisted case. Next successful check() re-persists
+      // with a fresh timestamp.
+      const fetchedAt =
+        typeof raw.fetchedAt === 'number' && Number.isFinite(raw.fetchedAt) ? raw.fetchedAt : null;
+      if (fetchedAt === null) {
+        this.logger.warn('getLastManifest: stored manifest has no fetchedAt; treating as stale', {
+          version: raw.version,
+        });
+        return null;
+      }
+      // Reject negative ageMs (clock rolled backward OR fetchedAt stamped
+      // in the future) and over-TTL positive ages. A negative age would
+      // otherwise pass `> MANIFEST_TTL_MS` and silently treat a future-
+      // stamped manifest as fresh indefinitely — defeating the TTL.
+      const ageMs = Date.now() - fetchedAt;
+      if (ageMs < 0 || ageMs > MANIFEST_TTL_MS) {
+        this.logger.warn('getLastManifest: manifest is stale', {
+          version: raw.version,
+          fetchedAt,
+          ageMs,
+          ttlMs: MANIFEST_TTL_MS,
+          reason: ageMs < 0 ? 'clock-skew-negative-age' : 'ttl-exceeded',
+        });
+        return null;
+      }
+      return { ...raw, fetchedAt };
     } catch (err) {
       // A corrupt or locked electron-store must not propagate out of a
       // read-side accessor. Treat as "no cached manifest".
@@ -242,8 +291,11 @@ export class CompatGuard {
 
     // Persist on every successful parse — even on incompatible. M6 needs
     // `sha256` regardless of the compat outcome for this specific call.
+    // Stamp fetchedAt immediately before the write so getLastManifest()
+    // can enforce the TTL and treat stale reads as no-manifest.
     try {
-      this.store.set(MANIFEST_STORE_KEY, manifest);
+      const persisted: Manifest = { ...manifest, fetchedAt: Date.now() };
+      this.store.set(MANIFEST_STORE_KEY, persisted);
     } catch (err) {
       // Persistence is best-effort; don't fail the whole check on a store
       // write error (e.g. disk full, permissions).

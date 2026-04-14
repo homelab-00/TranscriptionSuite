@@ -38,6 +38,7 @@ import {
 import { LaunchWatchdog } from './launchWatchdog.js';
 import { resolveInstallStrategy } from './platformGate.js';
 import { buildReleaseUrl, isTrustedReleaseUrl } from './releaseUrl.js';
+import { resolveExpectedSha256 } from './sha256Lookup.js';
 import {
   registerShortcuts,
   unregisterShortcuts,
@@ -499,7 +500,7 @@ const updateInstaller = new UpdateInstaller(undefined, undefined, {
       );
       return { ok: true };
     }
-    const expected = resolveExpectedSha256(manifest.sha256, downloadedFile);
+    const expected = resolveExpectedSha256(manifest.sha256, downloadedFile, console);
     if (!expected) {
       console.warn(
         `[UpdateInstaller] no manifest entry for ${path.basename(downloadedFile)}; skipping verification`,
@@ -588,31 +589,6 @@ async function resolveStrategyForUpdater(): Promise<{
 // Release URL helpers (buildReleaseUrl, isTrustedReleaseUrl) extracted to
 // `./releaseUrl.ts` so the security guards have direct unit-test coverage.
 
-/**
- * Resolve the expected SHA-256 for a downloaded installer file. The manifest
- * publishes canonical asset names (e.g. `TranscriptionSuite.AppImage`), but
- * electron-builder's default artifactName embeds the version
- * (`TranscriptionSuite-1.3.3.AppImage`). Match on exact filename first, then
- * fall back to a same-extension lookup.
- */
-function resolveExpectedSha256(
-  sha256Map: Record<string, string>,
-  downloadedFile: string,
-): string | null {
-  const basename = path.basename(downloadedFile);
-  if (Object.prototype.hasOwnProperty.call(sha256Map, basename)) {
-    return sha256Map[basename];
-  }
-  const ext = path.extname(basename);
-  if (!ext) return null;
-  for (const key of Object.keys(sha256Map)) {
-    if (key.endsWith(ext)) {
-      return sha256Map[key];
-    }
-  }
-  return null;
-}
-
 updateInstaller.on('status', (status) => {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
@@ -652,11 +628,11 @@ const compatGuard = new CompatGuard({ store });
 // ─── Launch Watchdog (M6) ───────────────────────────────────────────────
 // Increments a per-version launch-attempt counter at app.whenReady() and
 // offers a rollback dialog when the same version crashes 3 times in a
-// row. Reset to 0 once the main window has been stable for 10 s past
-// ready-to-show.
+// row. Reset to 0 once the renderer emits `updates:rendererReady` from
+// its initial mount — a truly-broken renderer never emits, so the
+// counter accumulates and triggers rollback on the third failed launch.
+// See `updates:rendererReady` IPC handler below.
 const launchWatchdog = new LaunchWatchdog(store);
-let stableLaunchTimer: ReturnType<typeof setTimeout> | null = null;
-const STABLE_LAUNCH_CONFIRM_MS = 10_000;
 
 // Wire tray context-menu actions → IPC messages to the renderer
 trayManager.setActions({
@@ -795,30 +771,14 @@ function createWindow(): void {
     flushEarlyLogBuffer();
   });
 
-  // ─── M6: stable-launch confirmation ─────────────────────────────────
-  // Reset the launch-attempt counter to 0 once the main window has been
-  // up for STABLE_LAUNCH_CONFIRM_MS past ready-to-show without a quit.
-  // Runs via `once` so a show/hide cycle doesn't re-arm it.
-  mainWindow.once('ready-to-show', () => {
-    if (stableLaunchTimer) {
-      clearTimeout(stableLaunchTimer);
-    }
-    stableLaunchTimer = setTimeout(() => {
-      stableLaunchTimer = null;
-      try {
-        launchWatchdog.confirmLaunchStable();
-      } catch (err) {
-        console.warn('[LaunchWatchdog] confirmLaunchStable failed:', err);
-      }
-    }, STABLE_LAUNCH_CONFIRM_MS);
-  });
+  // M6 stable-launch confirmation is handled by the
+  // `updates:rendererReady` ipcMain.on handler — the renderer emits the
+  // signal after its initial mount completes, which is the only signal
+  // guaranteed to reflect actual renderer health (a timer-based signal
+  // can't distinguish "mounted and stable" from "about to crash at T+N").
 
   mainWindow.on('closed', () => {
     mainWindow = null;
-    if (stableLaunchTimer) {
-      clearTimeout(stableLaunchTimer);
-      stableLaunchTimer = null;
-    }
   });
 }
 
@@ -1513,6 +1473,27 @@ ipcMain.handle('updates:getInstallerStatus', async () => {
   return updateInstaller.getStatus();
 });
 
+// M6 stable-launch confirmation — replaces the prior ready-to-show+10s
+// timer. The renderer emits this IPC after its initial React mount; main
+// calls confirmLaunchStable which resets the per-version launch-attempt
+// counter to 0. A truly-broken renderer never emits, so the counter
+// accumulates and triggers rollback on the 3rd failed launch.
+// Idempotent: confirmLaunchStable is a no-op if no record exists, and
+// repeat emits (StrictMode double-mount) are safe.
+// Sender-gate: only the mainWindow's webContents can reset the counter.
+// If a future BrowserWindow (settings dialog, secondary view) is added
+// with the same preload, its mount must not bypass the watchdog.
+ipcMain.on('updates:rendererReady', (event) => {
+  if (mainWindow && event.sender !== mainWindow.webContents) {
+    return;
+  }
+  try {
+    launchWatchdog.confirmLaunchStable();
+  } catch (err) {
+    console.warn('[LaunchWatchdog] IPC confirmLaunchStable failed:', err);
+  }
+});
+
 // M7: open the GitHub release page for the manual-download fallback path
 // (read-only AppImage on Linux, macOS without code signing, etc.). The URL
 // is renderer-supplied so we strictly allow-list github.com paths under
@@ -2063,10 +2044,6 @@ function gracefulShutdown(): Promise<void> {
     compatGuard.destroy();
     updateInstaller.destroy();
     launchWatchdog.destroy();
-    if (stableLaunchTimer) {
-      clearTimeout(stableLaunchTimer);
-      stableLaunchTimer = null;
-    }
     await mlxServerManager.destroy();
     await watcherManager.destroyAll();
     shutdownLog('[Shutdown] Cleanup complete.');
