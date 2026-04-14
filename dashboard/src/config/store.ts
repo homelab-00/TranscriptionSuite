@@ -185,11 +185,14 @@ export async function getServerBaseUrl(): Promise<string> {
     (await getConfig<string>('server.host')) ??
     DEFAULT_CONFIG.server.host;
 
-  const host = useRemote
-    ? remoteProfile === 'lan'
-      ? lanHost
-      : remoteHost || DEFAULT_CONFIG.connection.localHost
-    : localHost;
+  // Parity invariant with electron/appState.ts::getServerUrl — NO silent
+  // fallback to 'localhost' when useRemote=true with a blank active-profile
+  // host. Callers of network-probe paths (apiClient.checkConnection) must
+  // gate on isServerUrlConfigured() first; a malformed `http://:<port>`
+  // here is the deliberate loud-fail shape that prevents stealth-localhost
+  // probes on pure-remote users.
+  // Spec: _bmad-output/implementation-artifacts/spec-in-app-update-remote-host-validation-renderer.md
+  const host = useRemote ? (remoteProfile === 'lan' ? lanHost : remoteHost) : localHost;
   const port =
     (await getConfig<number>('connection.port')) ??
     (await getConfig<number>('server.port')) ??
@@ -200,6 +203,30 @@ export async function getServerBaseUrl(): Promise<string> {
     DEFAULT_CONFIG.server.https;
   const protocol = https ? 'https' : 'http';
   return `${protocol}://${host}:${port}`;
+}
+
+/**
+ * Returns false when useRemote=true AND the host for the active remoteProfile
+ * is blank after trim(); true for local mode and any configured remote.
+ *
+ * Renderer-side mirror of `electron/appState.ts::isServerUrlConfigured`. The
+ * install path short-circuits via the main-process predicate; API probe paths
+ * (apiClient.checkConnection) short-circuit via this one, returning a stable
+ * `'remote-host-not-configured'` error instead of probing the malformed
+ * `http://:<port>` URL that `getServerBaseUrl` now emits for blank-remote.
+ */
+export async function isServerUrlConfigured(): Promise<boolean> {
+  const useRemote = (await getConfig<boolean>('connection.useRemote')) ?? false;
+  if (!useRemote) return true;
+  const profile =
+    (await getConfig<'tailscale' | 'lan'>('connection.remoteProfile')) ??
+    DEFAULT_CONFIG.connection.remoteProfile;
+  const host = (
+    profile === 'lan'
+      ? ((await getConfig<string>('connection.lanHost')) ?? '')
+      : ((await getConfig<string>('connection.remoteHost')) ?? '')
+  ).trim();
+  return host.length > 0;
 }
 
 /**

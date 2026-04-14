@@ -3,7 +3,12 @@
  * Covers all REST endpoints; WebSocket connections are handled separately.
  */
 
-import { DEFAULT_SERVER_PORT, getAuthToken, getServerBaseUrl } from '../config/store';
+import {
+  DEFAULT_SERVER_PORT,
+  getAuthToken,
+  getServerBaseUrl,
+  isServerUrlConfigured,
+} from '../config/store';
 import type {
   HealthResponse,
   ReadyResponse,
@@ -189,6 +194,21 @@ export class APIClient {
     status: ServerStatus | null;
     error: string | null;
   }> {
+    // Short-circuit before any probe when useRemote=true with a blank
+    // active-profile host. Renderer parity with electron/appState.ts's
+    // isAppIdle → isServerUrlConfigured gate: surfaces a diagnostic
+    // `'remote-host-not-configured'` reason instead of probing the
+    // malformed `http://:<port>` URL that getServerBaseUrl now emits
+    // for blank-remote.
+    // Spec: _bmad-output/implementation-artifacts/spec-in-app-update-remote-host-validation-renderer.md
+    if (!(await isServerUrlConfigured())) {
+      return {
+        reachable: false,
+        ready: false,
+        status: null,
+        error: 'remote-host-not-configured',
+      };
+    }
     // In Electron, probe via main process first for specific error diagnostics.
     const electronAPI = typeof window !== 'undefined' ? (window as any).electronAPI : undefined;
     if (electronAPI?.server?.probeConnection) {
@@ -752,7 +772,10 @@ export class APIClient {
   }
 
   /** DELETE /api/llm/conversation/:id/messages-from/:msgId — truncate history */
-  async deleteMessagesFrom(conversationId: number, messageId: number): Promise<{ deleted: number }> {
+  async deleteMessagesFrom(
+    conversationId: number,
+    messageId: number,
+  ): Promise<{ deleted: number }> {
     return this.del(`/api/llm/conversation/${conversationId}/messages-from/${messageId}`);
   }
 
