@@ -27,9 +27,16 @@ const { FakeCancellationToken } = vi.hoisted(() => {
 });
 
 vi.mock('electron-updater', () => {
-  return {
+  // electron-updater is imported as a default export (see updateInstaller.ts
+  // header). The mock must expose both the default payload (for the runtime
+  // destructure) and the named shape for any type-only consumers.
+  const payload = {
     autoUpdater: new EventEmitter(),
     CancellationToken: FakeCancellationToken,
+  };
+  return {
+    default: payload,
+    ...payload,
   };
 });
 

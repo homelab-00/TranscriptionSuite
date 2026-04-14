@@ -28,8 +28,13 @@
 
 import { EventEmitter } from 'events';
 import { promises as fsp } from 'fs';
-import { CancellationToken, autoUpdater } from 'electron-updater';
-import type { ProgressInfo } from 'electron-updater';
+// electron-updater is a CommonJS package; Node's ESM loader cannot statically
+// detect its named exports, so `import { autoUpdater } from 'electron-updater'`
+// throws at runtime under Electron's ESM loader even though TypeScript accepts
+// it via the bundled .d.ts. Pull the default export and destructure instead.
+import electronUpdaterPkg from 'electron-updater';
+import type { CancellationToken, ProgressInfo } from 'electron-updater';
+const { CancellationToken: CancellationTokenCtor, autoUpdater } = electronUpdaterPkg;
 import type { InstallerStatus } from './updateManager.js';
 
 export type StartDownloadResult =
@@ -239,7 +244,7 @@ export class UpdateInstaller {
     const info = result.updateInfo;
     this.currentVersion = info.version;
 
-    const token = result.cancellationToken ?? new CancellationToken();
+    const token = result.cancellationToken ?? new CancellationTokenCtor();
     this.cancellationToken = token;
 
     this.setStatus({
