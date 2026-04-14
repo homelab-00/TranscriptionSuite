@@ -164,7 +164,10 @@ export function useDocker(): UseDockerReturn {
         ]);
         setAvailable(ok);
         setDetectionGuidance(guidance);
-        setComposeAvailable(compose);
+        // When Docker is completely absent, compose is also unavailable.
+        // getComposeAvailable() returns true for the ambiguous null state, so
+        // we must explicitly set false here to keep the Start buttons disabled.
+        setComposeAvailable(ok ? compose : false);
         if (ok) {
           docker
             .getRuntimeKind()

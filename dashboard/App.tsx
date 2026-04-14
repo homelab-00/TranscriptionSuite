@@ -419,6 +419,11 @@ const AppInner: React.FC = () => {
       // Bare-metal mode: server is managed externally (native process). Skip Docker entirely.
       if (runtimeProfile === 'metal') return;
 
+      // Docker is required for all non-metal profiles. If it is not available
+      // (e.g. bare-metal Mac with no Docker installed), bail out early instead
+      // of attempting container operations that will fail with a cryptic error.
+      if (!docker.available) return;
+
       if (startupFlowPendingRef.current || docker.operating || docker.loading) return;
 
       startupFlowPendingRef.current = true;
