@@ -995,6 +995,57 @@ describe('cachePreviousInstaller error classification', () => {
       'TranscriptionSuite-1.3.3.AppImage',
     ]);
   });
+
+  it('surfaces skipped-directory entries via result.warnings', async () => {
+    // A clean write with no hostile entries must omit the warnings array
+    // entirely; a write that skipped a hostile directory must surface it
+    // so main-process logs can flag the rollback slot for operator attention.
+    // Without this channel, `ok: true` was indistinguishable from "clean write".
+    const userData = path.join(tmp, 'userData');
+    const dir = path.join(userData, 'previous-installer');
+    await fsp.mkdir(dir, { recursive: true });
+    const hostileDir = path.join(dir, 'TranscriptionSuite-1.0.0.AppImage');
+    await fsp.mkdir(hostileDir);
+    writeFileSync(path.join(hostileDir, 'unrelated.txt'), 'must survive');
+    const hostileTmpDir = path.join(dir, 'TranscriptionSuite-0.9.0.AppImage.tmp');
+    await fsp.mkdir(hostileTmpDir);
+
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.3',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings).toHaveLength(2);
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('TranscriptionSuite-1.0.0.AppImage'),
+        expect.stringContaining('TranscriptionSuite-0.9.0.AppImage.tmp'),
+      ]),
+    );
+  });
+
+  it('omits result.warnings on a clean write (no skipped directories)', async () => {
+    const userData = path.join(tmp, 'userData');
+    const src = path.join(tmp, 'running.AppImage');
+    writeFileSync(src, HEALTHY_BYTES);
+
+    const result = await cachePreviousInstaller({
+      sourcePath: src,
+      version: '1.3.3',
+      userDataDir: userData,
+      platform: 'linux',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
 });
 
 // ── Spec: in-app-update-test-coverage-closeout ────────────────────────

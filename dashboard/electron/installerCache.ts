@@ -36,9 +36,26 @@ export interface CacheResult {
     | 'cache-symlink-outside-userdata' // allow-list failed: cache dir's realpath escapes userData.
     | 'cache-toctou-detected'; // post-mkdir invariant re-check failed — concurrent process manipulating dir.
   message?: string;
+  // Operator-visibility channel for non-fatal anomalies encountered during a
+  // successful write. Currently populated only for the `isDirectory()` skip
+  // branch in the sweep loop (a hostile/buggy directory pre-planted with a
+  // cache filename pattern). Other silent-continue paths (e.g. an lstat that
+  // failed because a concurrent process already removed the entry) are NOT
+  // surfaced here — by design, those are the expected-benign race case.
+  // Main-process callers SHOULD log these so a lurking rollback-slot occupant
+  // stays visible. Capped at MAX_WARNINGS entries to prevent unbounded log
+  // burst from mass directory pre-planting; any excess is replaced with a
+  // single truncation marker entry.
+  warnings?: string[];
 }
 
 export const MIN_CACHED_INSTALLER_BYTES = 1_000_000;
+
+// Cap on CacheResult.warnings length: prevents unbounded log burst when a
+// hostile environment pre-plants many directories matching the cache filename
+// pattern. The Nth+1 entry is replaced by a single truncation marker so the
+// operator still sees that more were skipped.
+const MAX_WARNINGS = 20;
 
 export interface CachedInstaller {
   path: string;
@@ -295,6 +312,10 @@ export async function cachePreviousInstaller(args: CacheArgs): Promise<CacheResu
       }
       return false;
     };
+    // Accumulate operator-visible warnings for skipped-directory entries so
+    // a pre-planted hostile rollback slot doesn't stay invisible when the
+    // write itself succeeds. See CacheResult.warnings.
+    const warnings: string[] = [];
     for (const name of entries) {
       if (!isSweepable(name)) continue;
       const full = path.join(dir, name);
@@ -315,7 +336,16 @@ export async function cachePreviousInstaller(args: CacheArgs): Promise<CacheResu
       } catch {
         continue;
       }
-      if (entryStat.isDirectory()) continue;
+      if (entryStat.isDirectory()) {
+        if (warnings.length < MAX_WARNINGS) {
+          warnings.push(`skipped hostile directory in cache slot: ${name}`);
+        } else if (warnings.length === MAX_WARNINGS) {
+          warnings.push(
+            `skipped hostile directory in cache slot: <truncated, >${MAX_WARNINGS} entries>`,
+          );
+        }
+        continue;
+      }
       try {
         await fsp.unlink(full);
       } catch {
@@ -324,7 +354,9 @@ export async function cachePreviousInstaller(args: CacheArgs): Promise<CacheResu
       }
     }
 
-    return { ok: true, cachedPath: destPath };
+    return warnings.length > 0
+      ? { ok: true, cachedPath: destPath, warnings }
+      : { ok: true, cachedPath: destPath };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, reason: 'write-error', message };

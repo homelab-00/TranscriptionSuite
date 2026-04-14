@@ -535,6 +535,10 @@ const updateInstaller = new UpdateInstaller(undefined, undefined, {
       console.warn(
         `[UpdateInstaller] installer cache skipped: ${result.reason}${result.message ? ` (${result.message})` : ''}`,
       );
+    } else if (result.warnings && result.warnings.length > 0) {
+      for (const warning of result.warnings) {
+        console.warn(`[UpdateInstaller] installer cache warning: ${warning}`);
+      }
     }
   },
   // M7: resolve platform install strategy on every startDownload(). On
