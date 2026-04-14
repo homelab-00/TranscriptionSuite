@@ -26,6 +26,19 @@ import { StartupEventWatcher } from './startupEventWatcher.js';
 import { MLXServerManager, type MLXStartOptions } from './mlxServerManager.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
+import { UpdateInstaller } from './updateInstaller.js';
+import { createAppState, InstallGate } from './appState.js';
+import { CompatGuard } from './compatGuard.js';
+import { verifyChecksum } from './checksumVerifier.js';
+import {
+  cachePreviousInstaller,
+  getCachedInstaller,
+  type CachedInstaller,
+} from './installerCache.js';
+import { LaunchWatchdog } from './launchWatchdog.js';
+import { resolveInstallStrategy } from './platformGate.js';
+import { buildReleaseUrl, isTrustedReleaseUrl } from './releaseUrl.js';
+import { resolveExpectedSha256 } from './sha256Lookup.js';
 import {
   registerShortcuts,
   unregisterShortcuts,
@@ -424,6 +437,7 @@ const store = new Store({
     'server.containerExistsLastSeen': false,
     'updates.lastStatus': null,
     'updates.lastNotified': { appLatest: '', serverLatest: '' },
+    'updates.bannerSnoozedUntil': 0,
     'server.runtimeProfile': 'cpu',
     'server.gpuAutoDetectDone': false,
     'server.mainModelSelection': 'nvidia/parakeet-tdt-0.6b-v3',
@@ -461,6 +475,164 @@ const mlxServerManager = new MLXServerManager(() => mainWindow ?? null);
 // ─── Update Manager ─────────────────────────────────────────────────────────
 
 const updateManager = new UpdateManager(store);
+
+// ─── Update Installer ───────────────────────────────────────────────────────
+
+// Wraps electron-updater's autoUpdater with an explicit state machine for
+// the in-app update flow. M6 wires the post-download SHA-256 verifier
+// against CompatGuard's persisted manifest and a Linux AppImage cache hook
+// so the LaunchWatchdog can offer a rollback after repeated launch failure.
+const updateInstaller = new UpdateInstaller(undefined, undefined, {
+  verifier: async (downloadedFile, version) => {
+    const manifest = compatGuard.getLastManifest();
+    if (!manifest) {
+      console.warn(
+        `[UpdateInstaller] no manifest persisted for v${version}; skipping sha256 verification`,
+      );
+      return { ok: true };
+    }
+    if (manifest.version !== version) {
+      // Stale manifest for a different version — using its hashes would
+      // produce false mismatches. Fail-open consistent with the missing-
+      // manifest path; CompatGuard is expected to refresh on next check.
+      console.warn(
+        `[UpdateInstaller] persisted manifest is for v${manifest.version} but downloaded v${version}; skipping verification`,
+      );
+      return { ok: true };
+    }
+    const expected = resolveExpectedSha256(manifest.sha256, downloadedFile, console);
+    if (!expected) {
+      console.warn(
+        `[UpdateInstaller] no manifest entry for ${path.basename(downloadedFile)}; skipping verification`,
+      );
+      return { ok: true };
+    }
+    const result = await verifyChecksum(downloadedFile, expected);
+    if (result.ok) {
+      return { ok: true };
+    }
+    if (result.reason === 'mismatch') {
+      console.error(
+        `[UpdateInstaller] SHA-256 mismatch for v${version}: expected ${expected}, actual ${result.actual}`,
+      );
+    } else {
+      console.error(
+        `[UpdateInstaller] SHA-256 verification failed (${result.reason}): ${result.message ?? '<no message>'}`,
+      );
+    }
+    return { ok: false, reason: 'checksum-mismatch' };
+  },
+  cacheHook: async (ctx) => {
+    if (process.platform !== 'linux' || !process.env.APPIMAGE) {
+      return;
+    }
+    const result = await cachePreviousInstaller({
+      sourcePath: process.env.APPIMAGE,
+      version: ctx.version,
+      userDataDir: app.getPath('userData'),
+    });
+    if (!result.ok) {
+      console.warn(
+        `[UpdateInstaller] installer cache skipped: ${result.reason}${result.message ? ` (${result.message})` : ''}`,
+      );
+    }
+  },
+  // M7: resolve platform install strategy on every startDownload(). On
+  // macOS (always unsigned in v1) and on Linux when the AppImage lives in
+  // a read-only location, we short-circuit to a manual-download UX so the
+  // banner can route the user to the GitHub release page instead of
+  // letting Squirrel/electron-updater emit a misleading error.
+  platformStrategy: () => resolveStrategyForUpdater(),
+});
+
+const PLATFORM_STRATEGY_TIMEOUT_MS = 5_000;
+
+/**
+ * Wrap `resolveInstallStrategy` with a wall-clock timeout and reusable
+ * version+URL augmentation. A hung NFS mount could otherwise stall
+ * `fsp.access` indefinitely, blocking the IPC handler. On timeout we
+ * fail-CLOSED to manual-download (fail-OPEN to electron-updater would
+ * defeat the very purpose of the gate on macOS).
+ */
+async function resolveStrategyForUpdater(): Promise<{
+  strategy: 'electron-updater' | 'manual-download';
+  reason?: string;
+  version: string | null;
+  downloadUrl: string;
+}> {
+  const latest = updateManager.getStatus()?.app?.latest ?? null;
+  const downloadUrl = buildReleaseUrl(latest);
+  let result: { strategy: 'electron-updater' | 'manual-download'; reason?: string };
+  try {
+    result = await Promise.race([
+      resolveInstallStrategy({
+        platform: process.platform,
+        appImagePath: process.env.APPIMAGE ?? null,
+      }),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error('platformStrategy timed out')),
+          PLATFORM_STRATEGY_TIMEOUT_MS,
+        ),
+      ),
+    ]);
+  } catch (err) {
+    console.warn(
+      '[platformStrategy] resolution failed, falling closed to manual-download:',
+      err instanceof Error ? err.message : String(err),
+    );
+    result = { strategy: 'manual-download', reason: 'unsupported-platform' };
+  }
+  return { strategy: result.strategy, reason: result.reason, version: latest, downloadUrl };
+}
+
+// Release URL helpers (buildReleaseUrl, isTrustedReleaseUrl) extracted to
+// `./releaseUrl.ts` so the security guards have direct unit-test coverage.
+
+updateInstaller.on('status', (status) => {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('updates:installerStatus', status);
+    }
+  }
+});
+
+// ─── App State + Install Gate ──────────────────────────────────────────
+// `isAppIdle()` queries /api/admin/status.models.job_tracker.is_busy (exposed by
+// model_manager.get_status()). Fail-closed on network error / timeout.
+// `InstallGate` defers `updates:install` when busy and fires `updates:installReady`
+// to all BrowserWindows once the server reports idle — the renderer surfaces the
+// toast; users must re-confirm via [Install now].
+const appState = createAppState(store);
+const installGate = new InstallGate({
+  idleCheck: () => appState.isAppIdle(),
+  onReady: () => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('updates:installReady');
+      }
+    }
+  },
+  doInstall: async () => updateInstaller.install(),
+});
+
+// ─── Compatibility Guard (M4) ──────────────────────────────────────────
+// Fetches manifest.json from GitHub's releases/latest asset list, reads
+// the server's running version from /api/admin/status.version, and
+// evaluates the manifest's `compatibleServerRange` semver against it.
+// Used as a pre-flight check on `updates:download` to short-circuit known
+// incompatibilities, and exposed via `updates:checkCompatibility` for M5's
+// pre-install modal. Fail-open on any unknown outcome.
+const compatGuard = new CompatGuard({ store });
+
+// ─── Launch Watchdog (M6) ───────────────────────────────────────────────
+// Increments a per-version launch-attempt counter at app.whenReady() and
+// offers a rollback dialog when the same version crashes 3 times in a
+// row. Reset to 0 once the renderer emits `updates:rendererReady` from
+// its initial mount — a truly-broken renderer never emits, so the
+// counter accumulates and triggers rollback on the third failed launch.
+// See `updates:rendererReady` IPC handler below.
+const launchWatchdog = new LaunchWatchdog(store);
 
 // Wire tray context-menu actions → IPC messages to the renderer
 trayManager.setActions({
@@ -598,6 +770,12 @@ function createWindow(): void {
   mainWindow.webContents.on('did-finish-load', () => {
     flushEarlyLogBuffer();
   });
+
+  // M6 stable-launch confirmation is handled by the
+  // `updates:rendererReady` ipcMain.on handler — the renderer emits the
+  // signal after its initial mount completes, which is the only signal
+  // guaranteed to reflect actual renderer health (a timer-based signal
+  // can't distinguish "mounted and stable" from "about to crash at T+N").
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -1221,6 +1399,120 @@ ipcMain.handle('updates:checkNow', async () => {
   return updateManager.check();
 });
 
+ipcMain.handle('updates:download', async () => {
+  // M7: resolve platform strategy BEFORE the M4 compat check. On macOS
+  // (always manual-download) or a read-only AppImage, compat is moot —
+  // the user is going to GitHub regardless of whether the server matches.
+  // Doing compat first would mask the manual-download UX behind a noisy
+  // `incompatible-server` envelope. Directly delegating to startDownload
+  // here lets the strategy short-circuit fire its `manual-download-required`
+  // status broadcast, then the banner takes over.
+  let strategy;
+  try {
+    strategy = await resolveStrategyForUpdater();
+  } catch (err) {
+    console.warn('[updates:download] strategy resolution failed, proceeding:', err);
+    strategy = { strategy: 'electron-updater' as const };
+  }
+  if (strategy.strategy === 'manual-download') {
+    return updateInstaller.startDownload();
+  }
+
+  // Fail-open defense: if the compat guard itself throws (network bug,
+  // semver library crash, store corruption), we must still let the user
+  // download. Blocking every update on an internal compat-guard error
+  // would negate the "fail-open on unknown" principle.
+  let compat;
+  try {
+    compat = await compatGuard.check();
+  } catch (err) {
+    console.warn('[updates:download] compat check threw, falling open:', err);
+    return updateInstaller.startDownload();
+  }
+  if (compat.result === 'incompatible') {
+    return {
+      ok: false as const,
+      reason: 'incompatible-server' as const,
+      detail: {
+        serverVersion: compat.serverVersion,
+        compatibleRange: compat.compatibleRange,
+        deployment: compat.deployment,
+      },
+    };
+  }
+  // `compatible` and every `unknown` branch fall through (fail-open).
+  return updateInstaller.startDownload();
+});
+
+ipcMain.handle('updates:checkCompatibility', async () => {
+  try {
+    return await compatGuard.check();
+  } catch (err) {
+    console.warn('[updates:checkCompatibility] threw, returning unknown:', err);
+    return {
+      result: 'unknown' as const,
+      reason: 'manifest-fetch-failed' as const,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+ipcMain.handle('updates:install', async () => {
+  return installGate.requestInstall();
+});
+
+ipcMain.handle('updates:cancelPendingInstall', async () => {
+  return installGate.cancelPending();
+});
+
+ipcMain.handle('updates:cancelDownload', async () => {
+  return updateInstaller.cancelDownload();
+});
+
+ipcMain.handle('updates:getInstallerStatus', async () => {
+  return updateInstaller.getStatus();
+});
+
+// M6 stable-launch confirmation — replaces the prior ready-to-show+10s
+// timer. The renderer emits this IPC after its initial React mount; main
+// calls confirmLaunchStable which resets the per-version launch-attempt
+// counter to 0. A truly-broken renderer never emits, so the counter
+// accumulates and triggers rollback on the 3rd failed launch.
+// Idempotent: confirmLaunchStable is a no-op if no record exists, and
+// repeat emits (StrictMode double-mount) are safe.
+// Sender-gate: only the mainWindow's webContents can reset the counter.
+// If a future BrowserWindow (settings dialog, secondary view) is added
+// with the same preload, its mount must not bypass the watchdog.
+ipcMain.on('updates:rendererReady', (event) => {
+  if (mainWindow && event.sender !== mainWindow.webContents) {
+    return;
+  }
+  try {
+    launchWatchdog.confirmLaunchStable();
+  } catch (err) {
+    console.warn('[LaunchWatchdog] IPC confirmLaunchStable failed:', err);
+  }
+});
+
+// M7: open the GitHub release page for the manual-download fallback path
+// (read-only AppImage on Linux, macOS without code signing, etc.). The URL
+// is renderer-supplied so we strictly allow-list github.com paths under
+// the project's releases tree before handing anything to shell.openExternal.
+ipcMain.handle('updates:openReleasePage', async (_event, url: string) => {
+  if (typeof url !== 'string' || !isTrustedReleaseUrl(url)) {
+    console.warn('[updates:openReleasePage] rejected untrusted url:', url);
+    return { ok: false as const, reason: 'untrusted-url' as const };
+  }
+  try {
+    await shell.openExternal(url);
+    return { ok: true as const };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[updates:openReleasePage] shell.openExternal failed:', message);
+    return { ok: false as const, reason: 'open-failed' as const, message };
+  }
+});
+
 // ─── Server Connection Probe IPC ────────────────────────────────────────────
 
 /**
@@ -1644,6 +1936,10 @@ function shutdownLog(message: string): void {
  * local mode), destroy tray and update manager.  Idempotent — only runs once;
  * every caller awaits the same Promise.
  */
+// Flipped to true by the SIGINT/SIGTERM/SIGHUP handlers so gracefulShutdown
+// skips its interactive dialog during non-interactive session teardown.
+let signalShutdown = false;
+
 function gracefulShutdown(): Promise<void> {
   if (shutdownPromise) return shutdownPromise;
   isQuitting = true;
@@ -1671,6 +1967,58 @@ function gracefulShutdown(): Promise<void> {
 
     if (shouldStopServer && !useRemote) {
       try {
+        // M3: pre-check active-transcription guard. Fixes the data-loss risk
+        // where force-stop killed an in-flight job without asking.
+        // `server-unreachable`, `auth-error`, `unknown`, and
+        // `remote-host-not-configured` all skip the dialog (we can't verify
+        // busy state — blocking quit is worse UX than force-stopping).
+        // Signal-path teardown also skips the dialog.
+        const idle = await appState.isAppIdle(2000);
+        const canDialog =
+          idle.idle === false &&
+          !signalShutdown &&
+          idle.reason !== 'server-unreachable' &&
+          idle.reason !== 'auth-error' &&
+          idle.reason !== 'unknown' &&
+          idle.reason !== 'remote-host-not-configured';
+        if (idle.idle === false && !canDialog) {
+          shutdownLog(
+            `[Shutdown] Skipping busy-dialog: signal=${signalShutdown}, reason=${idle.reason}`,
+          );
+        }
+        if (canDialog && idle.idle === false) {
+          const busyReason = idle.reason;
+          shutdownLog(`[Shutdown] Quit requested while busy: ${busyReason}`);
+          const { response } = await dialog.showMessageBox({
+            type: 'warning',
+            buttons: ['Wait for transcription', 'Quit anyway'],
+            defaultId: 0,
+            cancelId: 0,
+            message: 'Active transcription in progress',
+            detail: busyReason,
+          });
+          if (response === 0) {
+            const deadline = Date.now() + 120_000;
+            while (Date.now() < deadline) {
+              const poll = await appState.isAppIdle(2000);
+              if (
+                poll.idle === true ||
+                poll.reason === 'server-unreachable' ||
+                poll.reason === 'remote-host-not-configured'
+              )
+                break;
+              await new Promise((r) => setTimeout(r, 5_000));
+            }
+            if (Date.now() >= deadline) {
+              shutdownLog('[Shutdown] Idle-wait ceiling reached, forcing stop.');
+            } else {
+              shutdownLog('[Shutdown] Server idle; proceeding with container stop.');
+            }
+          } else {
+            shutdownLog('[Shutdown] User chose "Quit anyway".');
+          }
+        }
+
         shutdownLog('[Shutdown] Stopping server container (docker stop)…');
         await Promise.race([
           dockerManager.forceStopContainer(10),
@@ -1692,6 +2040,10 @@ function gracefulShutdown(): Promise<void> {
     unregisterShortcuts();
     trayManager.destroy();
     updateManager.destroy();
+    installGate.destroy();
+    compatGuard.destroy();
+    updateInstaller.destroy();
+    launchWatchdog.destroy();
     await mlxServerManager.destroy();
     await watcherManager.destroyAll();
     shutdownLog('[Shutdown] Cleanup complete.');
@@ -1706,6 +2058,10 @@ function gracefulShutdown(): Promise<void> {
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
   process.on(sig, () => {
     shutdownLog(`[Shutdown] Received ${sig}`);
+    // Signal-path shutdown: systemd / Wayland session teardown can't render
+    // a blocking dialog reliably. Skip the interactive busy-prompt and just
+    // proceed, logging the state for diagnostics.
+    signalShutdown = true;
     gracefulShutdown().finally(() => app.exit(0));
   });
 }
@@ -1730,7 +2086,7 @@ if (!gotLock) {
   app.quit();
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // ─── Certificate Error Handler (LAN profile) ────────────────────────────
   // Tailscale certs only cover *.ts.net FQDNs, not IP addresses. LAN
   // connections will always fail TLS hostname validation. Accept the cert
@@ -1748,6 +2104,40 @@ app.whenReady().then(() => {
 
   trayManager.create();
   updateManager.start();
+
+  // ─── M6: launch watchdog ─────────────────────────────────────────────
+  // Record a launch attempt for the running version and, if the counter
+  // has crossed the restore threshold AND a different-version installer
+  // is cached on disk, offer the rollback dialog BEFORE creating the
+  // main window so a renderer that crashes on init can't race us.
+  try {
+    const cached: CachedInstaller | null = await getCachedInstaller(app.getPath('userData'));
+    const { count, shouldPromptRestore } = launchWatchdog.recordLaunchAttempt(
+      app.getVersion(),
+      cached,
+    );
+    if (shouldPromptRestore && cached) {
+      const choice = dialog.showMessageBoxSync({
+        type: 'warning',
+        title: 'TranscriptionSuite — repeated launch failures',
+        message: `Dashboard v${app.getVersion()} has failed to launch ${count} times in a row.`,
+        detail:
+          `A cached copy of v${cached.version} is available.\n\n` +
+          `Click "Show cached installer" to open the folder containing the previous ` +
+          `AppImage. Quit this app, overwrite the current AppImage with the cached one, ` +
+          `then relaunch.\n\nClick "Continue" to keep trying v${app.getVersion()}.`,
+        buttons: ['Show cached installer', 'Continue'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (choice === 0) {
+        void shell.openPath(path.dirname(cached.path));
+      }
+    }
+  } catch (err) {
+    console.warn('[LaunchWatchdog] record attempt failed:', err);
+  }
+
   createWindow();
 
   // If the container is already running (app restarted while server was up),

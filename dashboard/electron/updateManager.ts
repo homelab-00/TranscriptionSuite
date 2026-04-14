@@ -23,12 +23,71 @@ export interface ComponentUpdateStatus {
   latest: string | null;
   updateAvailable: boolean;
   error: string | null;
+  /**
+   * Markdown body from the GitHub release (app channel only). Trimmed to
+   * 50 000 chars at capture time. `null` when absent, empty, or when the
+   * source is not a GitHub release (e.g., the `server` channel on GHCR).
+   */
+  releaseNotes: string | null;
 }
+
+const RELEASE_NOTES_MAX_CHARS = 50_000;
+
+/**
+ * Truncate a string to at most `max` code points (not UTF-16 units). Plain
+ * `.slice(0, N)` splits astral characters (emoji, CJK outside BMP) at the
+ * surrogate-pair boundary and produces a lone surrogate, which `remark-gfm`
+ * either replaces with U+FFFD or throws on. Iterating via `Array.from` is
+ * O(n) in N — acceptable for the 50 000-cap hot path — and produces a well-
+ * formed string on every input.
+ */
+export function sanitizeReleaseBody(body: unknown): string | null {
+  if (typeof body !== 'string') return null;
+  const trimmed = body.trim();
+  if (!trimmed) return null;
+  if (trimmed.length <= RELEASE_NOTES_MAX_CHARS) return trimmed;
+  const codepoints = Array.from(trimmed);
+  if (codepoints.length <= RELEASE_NOTES_MAX_CHARS) return trimmed;
+  return codepoints.slice(0, RELEASE_NOTES_MAX_CHARS).join('');
+}
+
+/**
+ * Runtime state of the UpdateInstaller (electron-updater wrapper).
+ *
+ * Ephemeral — never persisted across app launches; always starts at
+ * `{ state: 'idle' }`. M2's banner maps these 1:1 to its visual states.
+ */
+export type InstallerStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | {
+      state: 'downloading';
+      version: string;
+      percent: number;
+      bytesPerSecond: number;
+      transferred: number;
+      total: number;
+    }
+  | { state: 'verifying'; version: string }
+  | { state: 'downloaded'; version: string }
+  | { state: 'cancelled' }
+  | { state: 'error'; message: string }
+  | {
+      state: 'manual-download-required';
+      version: string | null;
+      downloadUrl: string;
+      reason: string;
+    };
 
 export interface UpdateStatus {
   lastChecked: string; // ISO timestamp
   app: ComponentUpdateStatus;
   server: ComponentUpdateStatus;
+  /**
+   * Optional — populated by UpdateInstaller on each state transition.
+   * Absent in persisted statuses from versions before M1.
+   */
+  installer?: InstallerStatus;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -46,6 +105,13 @@ const INTERVAL_MS: Record<string, number> = {
   '7d': 7 * 24 * 60 * 60 * 1000,
   '28d': 28 * 24 * 60 * 60 * 1000,
 };
+
+/**
+ * On a failed `check()` we schedule a single-shot retry at this interval
+ * (in addition to the regular `setInterval` cadence). Brainstorming D:
+ * "Network failure — silent retry every 1h, no user notification."
+ */
+export const FAILURE_RETRY_MS = 60 * 60 * 1000;
 
 // ─── Semver helpers ─────────────────────────────────────────────────────────
 
@@ -97,6 +163,8 @@ function highestSemVer(tags: string[]): string | null {
 export class UpdateManager {
   private store: AnyStore;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private failureRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
 
   constructor(store: AnyStore) {
     this.store = store;
@@ -129,6 +197,29 @@ export class UpdateManager {
    * Persists the result and optionally shows a notification.
    */
   async check(): Promise<UpdateStatus> {
+    if (this.destroyed) {
+      // Defensive: an in-flight failureRetryTimer that fires right as
+      // destroy() runs, or a check() that was awaiting fetch across
+      // teardown, would otherwise write to the store post-shutdown.
+      const current = app.getVersion();
+      return {
+        lastChecked: new Date().toISOString(),
+        app: {
+          current,
+          latest: null,
+          updateAvailable: false,
+          error: 'destroyed',
+          releaseNotes: null,
+        },
+        server: {
+          current: null,
+          latest: null,
+          updateAvailable: false,
+          error: 'destroyed',
+          releaseNotes: null,
+        },
+      };
+    }
     const [appResult, serverResult] = await Promise.allSettled([
       this.checkApp(),
       this.checkServer(),
@@ -142,6 +233,7 @@ export class UpdateManager {
             latest: null,
             updateAvailable: false,
             error: String(appResult.reason),
+            releaseNotes: null,
           };
 
     const serverStatus: ComponentUpdateStatus =
@@ -152,6 +244,7 @@ export class UpdateManager {
             latest: null,
             updateAvailable: false,
             error: String(serverResult.reason),
+            releaseNotes: null,
           };
 
     const status: UpdateStatus = {
@@ -160,8 +253,23 @@ export class UpdateManager {
       server: serverStatus,
     };
 
+    // Guard against a late in-flight check completing after destroy().
+    if (this.destroyed) {
+      return status;
+    }
+
     this.store.set('updates.lastStatus', status);
     this.maybeNotify(status);
+
+    // M6: single-shot retry in 1 h when either component errored, cleared
+    // on the next fully-green check. The regular setInterval is untouched
+    // so this only shortens the next probe — it never extends it.
+    if (appStatus.error !== null || serverStatus.error !== null) {
+      this.scheduleFailureRetry();
+    } else {
+      this.clearFailureRetry();
+    }
+
     return status;
   }
 
@@ -172,7 +280,9 @@ export class UpdateManager {
 
   /** Stop the timer (called on app quit). */
   destroy(): void {
+    this.destroyed = true;
     this.clearTimer();
+    this.clearFailureRetry();
   }
 
   // ─── Private ────────────────────────────────────────────────────────────
@@ -205,6 +315,28 @@ export class UpdateManager {
     }
   }
 
+  private scheduleFailureRetry(): void {
+    this.clearFailureRetry();
+    if (this.destroyed) return;
+    this.failureRetryTimer = setTimeout(() => {
+      this.failureRetryTimer = null;
+      if (this.destroyed) return;
+      this.check().catch((err) => console.error('UpdateManager: failure-retry check failed', err));
+    }, FAILURE_RETRY_MS);
+  }
+
+  private clearFailureRetry(): void {
+    if (this.failureRetryTimer) {
+      clearTimeout(this.failureRetryTimer);
+      this.failureRetryTimer = null;
+    }
+  }
+
+  /** Test-only hook — expose timer presence so unit tests can assert arm/clear. */
+  hasFailureRetry(): boolean {
+    return this.failureRetryTimer !== null;
+  }
+
   // ─── App version check (GitHub Releases) ────────────────────────────────
 
   private async checkApp(): Promise<ComponentUpdateStatus> {
@@ -220,8 +352,9 @@ export class UpdateManager {
         throw new Error(`GitHub API returned ${res.status}`);
       }
 
-      const data = (await res.json()) as { tag_name?: string };
+      const data = (await res.json()) as { tag_name?: string; body?: string };
       const latestTag = data.tag_name ?? '';
+      const releaseNotes = sanitizeReleaseBody(data.body);
       const latestSv = parseSemVer(latestTag);
       const currentSv = parseSemVer(currentVersion);
 
@@ -231,6 +364,7 @@ export class UpdateManager {
           latest: latestTag || null,
           updateAvailable: false,
           error: `Could not parse latest tag: ${latestTag}`,
+          releaseNotes,
         };
       }
 
@@ -241,6 +375,7 @@ export class UpdateManager {
         latest: latestSv ? `${latestSv.major}.${latestSv.minor}.${latestSv.patch}` : null,
         updateAvailable,
         error: null,
+        releaseNotes,
       };
     } catch (err) {
       return {
@@ -248,6 +383,7 @@ export class UpdateManager {
         latest: null,
         updateAvailable: false,
         error: err instanceof Error ? err.message : String(err),
+        releaseNotes: null,
       };
     }
   }
@@ -302,6 +438,7 @@ export class UpdateManager {
         latest: remoteVersion,
         updateAvailable,
         error: null,
+        releaseNotes: null,
       };
     } catch (err) {
       return {
@@ -309,6 +446,7 @@ export class UpdateManager {
         latest: null,
         updateAvailable: false,
         error: err instanceof Error ? err.message : String(err),
+        releaseNotes: null,
       };
     }
   }

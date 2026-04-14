@@ -16,16 +16,18 @@ import { CustomSelect } from './components/ui/CustomSelect';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { ErrorBoundary } from 'react-error-boundary';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
 import { ErrorFallback } from './components/ui/ErrorFallback';
 import { queryClient } from './src/queryClient';
 import { useServerStatus } from './src/hooks/useServerStatus';
+import { useAdminStatus } from './src/hooks/useAdminStatus';
 import { initApiClient } from './src/api/client';
 import { DockerProvider, useDockerContext } from './src/hooks/DockerContext';
 import { getConfig, setConfig } from './src/config/store';
 import { useLiveMode } from './src/hooks/useLiveMode';
 import { useImportQueueStore, selectIsUploading } from './src/stores/importQueueStore';
 import { QueuePausedBanner } from './components/ui/QueuePausedBanner';
+import { UpdateBanner } from './components/ui/UpdateBanner';
 import { ActivityNotifications } from './components/ui/ActivityNotifications';
 import { useStarPopup } from './src/hooks/useStarPopup';
 import { useBootstrapDownloads } from './src/hooks/useBootstrapDownloads';
@@ -78,6 +80,20 @@ const AppInner: React.FC = () => {
   // Reactive cache invalidations on server state transitions
   useServerEventReactor(serverConnection);
 
+  // M6 stable-launch confirmation: signal main that the renderer has
+  // completed its initial mount so LaunchWatchdog can reset the
+  // launch-attempt counter. A broken renderer never emits, so repeated
+  // boot failures accumulate and trigger rollback on the 3rd attempt.
+  // Optional-chain guards non-Electron runtimes (browser dev mode);
+  // try/catch guards preload/main version mismatches.
+  useEffect(() => {
+    try {
+      (window as any).electronAPI?.app?.reportRendererReady?.();
+    } catch {
+      // intentionally swallowed — the IPC is best-effort
+    }
+  }, []);
+
   // Track remote mode so useAuthTokenSync re-evaluates on mode switch
   const [useRemote, setUseRemote] = useState(false);
   useEffect(() => {
@@ -104,6 +120,49 @@ const AppInner: React.FC = () => {
 
   // Derive upload/import status from unified Zustand queue store (GH #41/#42)
   const isUploading = useImportQueueStore(selectIsUploading);
+
+  // Authoritative server-side busy signal from /api/admin/status — polls every 10s.
+  // Combined with clientRunning + isUploading for the <UpdateBanner> install gate.
+  const { status: adminStatus } = useAdminStatus();
+  const serverIsBusy = Boolean(
+    (adminStatus?.models as { job_tracker?: { is_busy?: boolean } } | undefined)?.job_tracker
+      ?.is_busy,
+  );
+
+  // Subscribe to the main-process updates:installReady IPC event — fires when
+  // a deferred install becomes actionable (server transitioned idle). Surfaces
+  // a Sonner toast with [Install now] / [Later] actions. Stable id + explicit
+  // dismiss avoid stacking infinite-duration toasts when rapid
+  // defer->idle->defer cycles fire multiple installReady events.
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.updates?.onInstallReady) return;
+    const TOAST_ID = 'update-install-ready';
+    const unsubscribe = api.updates.onInstallReady(() => {
+      toast.info('Update ready to install', {
+        id: TOAST_ID,
+        duration: Infinity,
+        action: {
+          label: 'Install now',
+          onClick: () => {
+            toast.dismiss(TOAST_ID);
+            void api.updates.install();
+          },
+        },
+        cancel: {
+          label: 'Later',
+          onClick: () => {
+            toast.dismiss(TOAST_ID);
+            void api.updates.cancelPendingInstall();
+          },
+        },
+      });
+    });
+    return () => {
+      unsubscribe();
+      toast.dismiss(TOAST_ID);
+    };
+  }, []);
 
   // 4.2 — sync server reachability to watcher store so file discovery pauses when offline
   const setWatcherServerConnected = useImportQueueStore((s) => s.setWatcherServerConnected);
@@ -684,6 +743,9 @@ const AppInner: React.FC = () => {
       <main className="relative flex min-w-0 flex-1 flex-col">
         {/* Top Gradient Fade for aesthetic scrolling */}
         <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 h-8 bg-linear-to-b from-slate-900/10 to-transparent"></div>
+
+        {/* In-app Dashboard update banner — visible across all views. */}
+        <UpdateBanner isBusy={serverIsBusy || clientRunning || isUploading} />
 
         {/* Queue paused banner — visible across all views */}
         <QueuePausedBanner />

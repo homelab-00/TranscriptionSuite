@@ -4,7 +4,7 @@ meta:
   source_scope: mockup_repo
   validation_method: static_source_scan
   generated_from:
-    repo_path: /Users/haiiro/NoSync/TranscriptionSuite/dashboard
+    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
     source_files:
       - App.tsx
       - components/__tests__/NotebookView.test.tsx
@@ -13,6 +13,8 @@ meta:
       - components/AudioVisualizer.tsx
       - components/PopOutWindow.tsx
       - components/Sidebar.tsx
+      - components/ui/__tests__/UpdateBanner.test.tsx
+      - components/ui/__tests__/UpdateModal.test.tsx
       - components/ui/ActivityNotifications.tsx
       - components/ui/AppleSwitch.tsx
       - components/ui/Button.tsx
@@ -28,6 +30,8 @@ meta:
       - components/ui/QueuePausedBanner.tsx
       - components/ui/ShortcutCapture.tsx
       - components/ui/StatusLight.tsx
+      - components/ui/UpdateBanner.tsx
+      - components/ui/UpdateModal.tsx
       - components/views/AboutModal.tsx
       - components/views/AddNoteModal.tsx
       - components/views/AudioNoteModal.tsx
@@ -47,7 +51,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-11T22:56:42.123Z
+    generated_at: 2026-04-13T08:47:13.296Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -434,6 +438,10 @@ utility_allowlist:
     - bg-blue-400
     - bg-blue-500
     - bg-blue-500/10
+    - bg-cyan-400/10
+    - bg-cyan-400/20
+    - bg-cyan-400/70
+    - bg-emerald-400/10
     - bg-glass-100
     - bg-glass-100/30
     - bg-glass-100/50
@@ -454,6 +462,7 @@ utility_allowlist:
     - bg-red-500/10
     - bg-red-500/25
     - bg-red-500/5
+    - bg-slate-400/10
     - bg-slate-500
     - bg-slate-500/10
     - bg-slate-600
@@ -486,12 +495,15 @@ utility_allowlist:
     - border-accent-rose/20
     - border-amber-400/20
     - border-amber-400/30
+    - border-amber-400/40
     - border-amber-500/20
     - border-amber-500/30
     - border-b
     - border-b-2
     - border-blue-500/20
+    - border-cyan-400/30
     - border-dashed
+    - border-emerald-400/40
     - border-glass-100
     - border-glass-border
     - border-green-500/30
@@ -511,6 +523,7 @@ utility_allowlist:
     - border-red-400/40
     - border-red-500/20
     - border-red-500/25
+    - border-slate-400/30
     - border-slate-900
     - border-t
     - border-transparent
@@ -525,6 +538,7 @@ utility_allowlist:
     - bottom-6
     - bottom-full
     - bottom-right
+    - cursor-not-allowed
     - cursor-pointer
     - custom-scrollbar
     - delay-100
@@ -614,10 +628,12 @@ utility_allowlist:
     - hover:bg-accent-cyan/20
     - hover:bg-accent-cyan/30
     - hover:bg-accent-cyan/5
+    - hover:bg-amber-400/20
     - hover:bg-amber-400/30
     - hover:bg-amber-500/20
     - hover:bg-black/40
     - hover:bg-cyan-300
+    - hover:bg-cyan-400/30
     - hover:bg-glass-100
     - hover:bg-glass-300
     - hover:bg-red-500/10
@@ -875,6 +891,7 @@ utility_allowlist:
     - space-x-1
     - space-x-2.5
     - space-x-3
+    - space-y-0.5
     - space-y-1
     - space-y-1.5
     - space-y-2
@@ -893,6 +910,7 @@ utility_allowlist:
     - text-accent-orange
     - text-accent-rose
     - text-accent-violet
+    - text-amber-100
     - text-amber-200
     - text-amber-300
     - text-amber-300/60
@@ -904,6 +922,9 @@ utility_allowlist:
     - text-black
     - text-blue-400
     - text-center
+    - text-cyan-100
+    - text-cyan-200
+    - text-emerald-200
     - text-emerald-400
     - text-green-400
     - text-green-400/70
@@ -1064,6 +1085,7 @@ inline_style_allowlist:
     - "#0f172a"
     - ${100 / visibleSlots}%
     - ${item.progress}%
+    - ${percent}%
     - "0"
     - "0.16"
     - "0.3"
@@ -2184,6 +2206,40 @@ component_contracts:
     state_rules:
       - id: compact-density-mode
         rule: Compact mode behavior is governed by visibleSlots threshold and keeps AI/duration collapse behavior.
+  UpdateBanner:
+    file: components/ui/UpdateBanner.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  UpdateModal:
+    file: components/ui/UpdateModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
 validation_policy:
   unknown_utility_class: error
   missing_required_field: error

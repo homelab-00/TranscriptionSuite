@@ -29,6 +29,54 @@ export interface TrayMenuState {
   isStandby?: boolean;
 }
 
+export type InstallerStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | {
+      state: 'downloading';
+      version: string;
+      percent: number;
+      bytesPerSecond: number;
+      transferred: number;
+      total: number;
+    }
+  | { state: 'verifying'; version: string }
+  | { state: 'downloaded'; version: string }
+  | { state: 'cancelled' }
+  | { state: 'error'; message: string }
+  | {
+      state: 'manual-download-required';
+      version: string | null;
+      downloadUrl: string;
+      reason: string;
+    };
+
+/** Per-release manifest shape (M4). Kept in sync with compatGuard.ts. */
+export interface Manifest {
+  version: string;
+  compatibleServerRange: string;
+  sha256: Record<string, string>;
+  releaseType: string;
+}
+
+export type CompatUnknownReason =
+  | 'no-manifest'
+  | 'manifest-fetch-failed'
+  | 'manifest-parse-error'
+  | 'server-version-unavailable'
+  | 'invalid-range';
+
+export type CompatResult =
+  | { result: 'compatible'; manifest: Manifest; serverVersion: string }
+  | {
+      result: 'incompatible';
+      manifest: Manifest;
+      serverVersion: string;
+      compatibleRange: string;
+      deployment: 'local' | 'remote';
+    }
+  | { result: 'unknown'; reason: CompatUnknownReason; detail?: string };
+
 // Keep in sync with src/types/runtime.ts (canonical) and src/types/electron.d.ts
 export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
@@ -66,6 +114,7 @@ export interface ElectronAPI {
     getVersion: () => Promise<string>;
     getPlatform: () => string;
     getArch: () => string;
+    reportRendererReady: () => void;
     getSessionType: () => string;
     openExternal: (url: string) => Promise<void>;
     openPath: (filePath: string) => Promise<string>;
@@ -188,6 +237,62 @@ export interface ElectronAPI {
   updates: {
     getStatus: () => Promise<UpdateStatus | null>;
     checkNow: () => Promise<UpdateStatus>;
+    /**
+     * Begin download. Guards against concurrent calls. On incompatible
+     * server (M4 pre-flight compat check) returns `{ok:false,
+     * reason:'incompatible-server', detail:{...}}` and does NOT invoke the
+     * underlying UpdateInstaller.
+     */
+    download: () => Promise<
+      | { ok: true; reason?: 'already-downloading' }
+      | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
+      | { ok: false; reason: 'manual-download-required'; downloadUrl: string }
+      | {
+          ok: false;
+          reason: 'incompatible-server';
+          detail: {
+            serverVersion: string;
+            compatibleRange: string;
+            deployment: 'local' | 'remote';
+          };
+        }
+    >;
+    /**
+     * Run the M4 compat guard without starting a download. Used by M5's
+     * pre-install modal to render compat status before the user commits.
+     */
+    checkCompatibility: () => Promise<CompatResult>;
+    /**
+     * Request install. When the server is busy the install is deferred and
+     * the caller receives `{ok:false, reason:'deferred-until-idle', detail}`.
+     * A later `updates:installReady` event signals the pending install is
+     * now actionable. Pass-through `doInstall()` result otherwise.
+     */
+    install: () => Promise<{ ok: boolean; reason?: string; detail?: string }>;
+    /** Cancel any active download. No-op when idle. */
+    cancelDownload: () => Promise<{ ok: boolean }>;
+    /** Cancel a pending (deferred-until-idle) install. Idempotent. */
+    cancelPendingInstall: () => Promise<{ ok: true }>;
+    /** Read the current installer state. */
+    getInstallerStatus: () => Promise<InstallerStatus>;
+    /** Subscribe to installer state transitions. Returns an unsubscribe fn. */
+    onInstallerStatus: (callback: (status: InstallerStatus) => void) => () => void;
+    /** Fires when a deferred install transitions to actionable (server idle). */
+    onInstallReady: (callback: () => void) => () => void;
+    /**
+     * M7: open the GitHub release page in the user's default browser. Used
+     * by the manual-download banner state (read-only AppImage on Linux,
+     * macOS without code signing, etc.). The URL is allow-listed
+     * server-side to `https://github.com/homelab-00/TranscriptionSuite/
+     * releases/...` only.
+     */
+    openReleasePage: (
+      url: string,
+    ) => Promise<
+      | { ok: true }
+      | { ok: false; reason: 'untrusted-url' }
+      | { ok: false; reason: 'open-failed'; message: string }
+    >;
   };
   clipboard: {
     writeText: (text: string) => Promise<void>;
@@ -277,12 +382,14 @@ export interface ComponentUpdateStatus {
   latest: string | null;
   updateAvailable: boolean;
   error: string | null;
+  releaseNotes: string | null;
 }
 
 export interface UpdateStatus {
   lastChecked: string;
   app: ComponentUpdateStatus;
   server: ComponentUpdateStatus;
+  installer?: InstallerStatus;
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -295,6 +402,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getPlatform: () => process.platform,
     getArch: () => process.arch,
+    // M6: one-way signal fired by <App> after initial React mount. Main
+    // calls LaunchWatchdog.confirmLaunchStable in response, resetting the
+    // per-version launch-attempt counter. A broken renderer that never
+    // mounts will never emit, so the counter accumulates and triggers
+    // rollback on the 3rd failed launch. Idempotent on main side.
+    reportRendererReady: () => ipcRenderer.send('updates:rendererReady'),
     getSessionType: () =>
       process.env.XDG_SESSION_TYPE ?? (process.env.WAYLAND_DISPLAY ? 'wayland' : 'x11'),
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
@@ -464,6 +577,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updates: {
     getStatus: () => ipcRenderer.invoke('updates:getStatus'),
     checkNow: () => ipcRenderer.invoke('updates:checkNow'),
+    download: () => ipcRenderer.invoke('updates:download'),
+    checkCompatibility: () => ipcRenderer.invoke('updates:checkCompatibility'),
+    install: () => ipcRenderer.invoke('updates:install'),
+    cancelDownload: () => ipcRenderer.invoke('updates:cancelDownload'),
+    cancelPendingInstall: () => ipcRenderer.invoke('updates:cancelPendingInstall'),
+    getInstallerStatus: () => ipcRenderer.invoke('updates:getInstallerStatus'),
+    onInstallerStatus: (callback: (status: InstallerStatus) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: InstallerStatus) =>
+        callback(status);
+      ipcRenderer.on('updates:installerStatus', handler);
+      return () => ipcRenderer.removeListener('updates:installerStatus', handler);
+    },
+    onInstallReady: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('updates:installReady', handler);
+      return () => ipcRenderer.removeListener('updates:installReady', handler);
+    },
+    openReleasePage: (url: string) => ipcRenderer.invoke('updates:openReleasePage', url),
   },
   clipboard: {
     writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),

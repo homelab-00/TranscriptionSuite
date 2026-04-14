@@ -407,6 +407,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     const normalizedLanHost = clientSettings.lanHost.trim();
     const normalizedUseHttps = clientSettings.useRemote ? true : clientSettings.useHttps;
 
+    if (
+      clientSettings.useRemote &&
+      normalizedRemoteProfile === 'tailscale' &&
+      !normalizedRemoteHost
+    ) {
+      toast.error('Tailscale remote mode requires a host or IP address.');
+      return;
+    }
+
     if (clientSettings.useRemote && normalizedRemoteProfile === 'lan' && !normalizedLanHost) {
       toast.error('LAN remote mode requires a host or IP address.');
       return;
@@ -1688,8 +1697,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </div>
           {aiModels.length > 0 && !aiModelDropdownOpen && (
             <p className="mt-1.5 text-xs text-slate-500">
-              {aiModels.length} model{aiModels.length !== 1 ? 's' : ''} available — click the
-              input to pick one
+              {aiModels.length} model{aiModels.length !== 1 ? 's' : ''} available — click the input
+              to pick one
             </p>
           )}
           {aiModelsFetchError && (

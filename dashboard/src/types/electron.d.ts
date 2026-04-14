@@ -92,6 +92,7 @@ interface ElectronAPI {
   app: {
     getVersion: () => Promise<string>;
     getPlatform: () => string;
+    reportRendererReady: () => void;
     getSessionType: () => string;
     openExternal: (url: string) => Promise<void>;
     openPath: (filePath: string) => Promise<string>;
@@ -183,6 +184,34 @@ interface ElectronAPI {
   updates: {
     getStatus: () => Promise<UpdateStatus | null>;
     checkNow: () => Promise<UpdateStatus>;
+    download: () => Promise<
+      | { ok: true; reason?: 'already-downloading' }
+      | { ok: false; reason: 'no-update-available' | 'error'; message?: string }
+      | { ok: false; reason: 'manual-download-required'; downloadUrl: string }
+      | {
+          ok: false;
+          reason: 'incompatible-server';
+          detail: {
+            serverVersion: string;
+            compatibleRange: string;
+            deployment: 'local' | 'remote';
+          };
+        }
+    >;
+    checkCompatibility: () => Promise<CompatResult>;
+    install: () => Promise<{ ok: boolean; reason?: string; detail?: string }>;
+    cancelDownload: () => Promise<{ ok: boolean }>;
+    cancelPendingInstall: () => Promise<{ ok: true }>;
+    getInstallerStatus: () => Promise<InstallerStatus>;
+    onInstallerStatus: (callback: (status: InstallerStatus) => void) => () => void;
+    onInstallReady: (callback: () => void) => () => void;
+    openReleasePage: (
+      url: string,
+    ) => Promise<
+      | { ok: true }
+      | { ok: false; reason: 'untrusted-url' }
+      | { ok: false; reason: 'open-failed'; message: string }
+    >;
   };
   clipboard: {
     writeText: (text: string) => Promise<void>;
@@ -216,12 +245,66 @@ interface ComponentUpdateStatus {
   latest: string | null;
   updateAvailable: boolean;
   error: string | null;
+  /**
+   * Markdown body from the GitHub release (app channel only). Trimmed to
+   * 50 000 chars at capture time. `null` when absent, empty, or when the
+   * source is not a GitHub release (e.g., the `server` channel on GHCR).
+   */
+  releaseNotes: string | null;
 }
+
+type InstallerStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | {
+      state: 'downloading';
+      version: string;
+      percent: number;
+      bytesPerSecond: number;
+      transferred: number;
+      total: number;
+    }
+  | { state: 'verifying'; version: string }
+  | { state: 'downloaded'; version: string }
+  | { state: 'cancelled' }
+  | { state: 'error'; message: string }
+  | {
+      state: 'manual-download-required';
+      version: string | null;
+      downloadUrl: string;
+      reason: string;
+    };
+
+interface Manifest {
+  version: string;
+  compatibleServerRange: string;
+  sha256: Record<string, string>;
+  releaseType: string;
+}
+
+type CompatUnknownReason =
+  | 'no-manifest'
+  | 'manifest-fetch-failed'
+  | 'manifest-parse-error'
+  | 'server-version-unavailable'
+  | 'invalid-range';
+
+type CompatResult =
+  | { result: 'compatible'; manifest: Manifest; serverVersion: string }
+  | {
+      result: 'incompatible';
+      manifest: Manifest;
+      serverVersion: string;
+      compatibleRange: string;
+      deployment: 'local' | 'remote';
+    }
+  | { result: 'unknown'; reason: CompatUnknownReason; detail?: string };
 
 interface UpdateStatus {
   lastChecked: string;
   app: ComponentUpdateStatus;
   server: ComponentUpdateStatus;
+  installer?: InstallerStatus;
 }
 
 interface Window {

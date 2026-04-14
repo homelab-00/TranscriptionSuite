@@ -17,9 +17,9 @@
     "test": "vitest run --passWithNoTests",
     "build:electron": "npm run build && tsc -p electron/tsconfig.json",
     "preview": "vite preview",
-    "package:linux": "npm run build:electron && electron-builder --linux AppImage",
-    "package:windows": "npm run build:electron && electron-builder --win nsis",
-    "package:mac": "npm run build:electron && electron-builder --mac dmg zip",
+    "package:linux": "npm run build:electron && electron-builder --linux AppImage --publish=never",
+    "package:windows": "npm run build:electron && electron-builder --win nsis --publish=never",
+    "package:mac": "npm run build:electron && electron-builder --mac dmg zip --publish=never",
     "ui:contract:extract": "node scripts/ui-contract/extract-facts.mjs",
     "ui:contract:build": "node scripts/ui-contract/build-contract.mjs",
     "ui:contract:validate": "node scripts/ui-contract/validate-contract.mjs",
@@ -37,12 +37,14 @@
     "@tanstack/react-query": "5.90.21",
     "chokidar": "^5.0.0",
     "electron-store": "11.0.2",
+    "electron-updater": "^6.3.9",
     "lucide-react": "0.564.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-error-boundary": "5.0.0",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
+    "semver": "^7.7.4",
     "sonner": "2.0.7",
     "xxhash-wasm": "^1.1.0",
     "zustand": "^5.0.12"
@@ -56,6 +58,7 @@
     "@types/node": "25.3.5",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "@types/semver": "^7.7.1",
     "@vitejs/plugin-react": "5.1.4",
     "ajv": "8.18.0",
     "autoprefixer": "10.4.27",
@@ -186,7 +189,14 @@
           "path": "/Applications"
         }
       ]
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "homelab-00",
+        "repo": "TranscriptionSuite"
+      }
+    ]
   },
   "overrides": {
     "js-yaml": "4.1.1",
