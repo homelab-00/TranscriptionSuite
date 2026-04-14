@@ -234,7 +234,27 @@ export class APIClient {
     // malformed `http://:<port>` URL that getServerBaseUrl now emits
     // for blank-remote.
     // Spec: _bmad-output/implementation-artifacts/spec-in-app-update-remote-host-validation-renderer.md
-    if (!(await isServerUrlConfigured())) {
+    //
+    // Throw-safety: `isServerUrlConfigured()` reads config via the preload
+    // IPC bridge; a preload rejection or a localStorage-fallback
+    // QuotaExceededError can propagate as an uncaught throw. This
+    // function's docstring promises "Does not throw" — without this
+    // try/catch, a config-read failure would crash polling hooks
+    // (useServerStatus, useAdminStatus) with unhandled rejections.
+    let configured: boolean;
+    try {
+      configured = await isServerUrlConfigured();
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.warn('[APIClient] config-read failed in checkConnection:', detail);
+      return {
+        reachable: false,
+        ready: false,
+        status: null,
+        error: 'config-read-failed',
+      };
+    }
+    if (!configured) {
       return {
         reachable: false,
         ready: false,

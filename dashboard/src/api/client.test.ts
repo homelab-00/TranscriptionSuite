@@ -98,6 +98,33 @@ describe('APIClient.checkConnection — remote-host-not-configured short-circuit
     expect(result.error).not.toBe('remote-host-not-configured');
   });
 
+  it('returns {error: "config-read-failed"} when isServerUrlConfigured throws (preload rejection)', async () => {
+    // Restores the docstring's "Does not throw" contract. Preload IPC
+    // rejection / QuotaExceededError on localStorage fallback must surface
+    // as a stable error reason, not an unhandled rejection that crashes
+    // useServerStatus / useAdminStatus polling loops.
+    (window as any).electronAPI = {
+      server: { probeConnection },
+      config: {
+        get: vi.fn(async () => {
+          throw new Error('preload bridge rejected');
+        }),
+        set: vi.fn(),
+      },
+    };
+
+    const result = await apiClient.checkConnection();
+
+    expect(result).toEqual({
+      reachable: false,
+      ready: false,
+      status: null,
+      error: 'config-read-failed',
+    });
+    expect(probeConnection).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('does NOT short-circuit when useRemote=true with configured Tailscale host', async () => {
     installElectronBridge(
       {
