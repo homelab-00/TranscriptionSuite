@@ -144,8 +144,16 @@ export class TranscriptionSocket {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-  /** Derive ws:// or wss:// URL from the API client's base URL */
-  private getWsUrl(): string {
+  /**
+   * Derive ws:// or wss:// URL from the API client's base URL.
+   * Returns null when the underlying base URL is not configured (pre-sync or
+   * blank-remote): callers must surface 'remote-host-not-configured' via
+   * onError and skip `new WebSocket(...)` rather than construct a socket
+   * against a malformed URL.
+   * Spec: _bmad-output/implementation-artifacts/spec-in-app-update-renderer-network-paths-install-gate.md
+   */
+  private getWsUrl(): string | null {
+    if (!apiClient.isBaseUrlConfigured()) return null;
     const httpUrl = apiClient.getBaseUrl(); // e.g. "http://localhost:9786"
     const wsUrl = httpUrl.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
     return `${wsUrl}${this.endpoint}`;
@@ -161,6 +169,12 @@ export class TranscriptionSocket {
     this.setState('connecting');
 
     const url = this.getWsUrl();
+    if (url === null) {
+      this.log('Skipping connect: remote-host-not-configured', 'error');
+      this.callbacks.onError?.('remote-host-not-configured');
+      this.setState('error');
+      return;
+    }
     this.log(`Opening ${url}`);
     this.ws = new WebSocket(url);
     this.ws.binaryType = 'arraybuffer';
@@ -308,6 +322,12 @@ export class TranscriptionSocket {
     // Re-enter the connect flow but keep the attempt counter
     this.setState('connecting');
     const url = this.getWsUrl();
+    if (url === null) {
+      this.log('Skipping reconnect: remote-host-not-configured', 'error');
+      this.callbacks.onError?.('remote-host-not-configured');
+      this.setState('error');
+      return;
+    }
     this.ws = new WebSocket(url);
     this.ws.binaryType = 'arraybuffer';
 

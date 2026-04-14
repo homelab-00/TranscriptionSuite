@@ -51,6 +51,7 @@ export type { HealthResponse, ReadyResponse, ServerStatus } from './types';
 export class APIClient {
   private baseUrl: string;
   private authToken: string | null = null;
+  private synced: boolean = false;
 
   constructor(baseUrl: string = `http://localhost:${DEFAULT_SERVER_PORT}`) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
@@ -81,13 +82,39 @@ export class APIClient {
   /**
    * Sync base URL from config store.
    * Call this on app startup and whenever server config changes.
+   * Sets the `synced` flag — a precondition for isBaseUrlConfigured().
    */
   async syncFromConfig(): Promise<void> {
     const url = await getServerBaseUrl();
     this.setBaseUrl(url);
+    this.synced = true;
+  }
+
+  /**
+   * Sync predicate — returns true iff syncFromConfig() has completed at least
+   * once AND the current baseUrl parses with a non-empty hostname. Network-path
+   * helpers gate on this to prevent (a) pre-sync stealth-localhost probes on
+   * pure-remote users and (b) post-sync malformed-URL fallout from the loud-fail
+   * `http://:<port>` shape that getServerBaseUrl emits for blank-remote.
+   * Spec: _bmad-output/implementation-artifacts/spec-in-app-update-renderer-network-paths-install-gate.md
+   */
+  isBaseUrlConfigured(): boolean {
+    if (!this.synced) return false;
+    try {
+      const u = new URL(this.baseUrl);
+      return u.hostname.length > 0;
+    } catch {
+      return false;
+    }
   }
 
   // ─── Internal helpers ─────────────────────────────────────────────────────
+
+  private ensureConfigured(path: string): void {
+    if (!this.isBaseUrlConfigured()) {
+      throw new APIError(0, 'remote-host-not-configured', path);
+    }
+  }
 
   private headers(): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -102,6 +129,7 @@ export class APIClient {
   }
 
   private async get<T>(path: string): Promise<T> {
+    this.ensureConfigured(path);
     const res = await fetch(`${this.baseUrl}${path}`, {
       headers: this.authHeaders(),
     });
@@ -110,6 +138,7 @@ export class APIClient {
   }
 
   private async post<T>(path: string, body?: unknown): Promise<T> {
+    this.ensureConfigured(path);
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers: this.headers(),
@@ -120,6 +149,7 @@ export class APIClient {
   }
 
   private async patch<T>(path: string, body: unknown): Promise<T> {
+    this.ensureConfigured(path);
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: 'PATCH',
       headers: this.headers(),
@@ -130,6 +160,7 @@ export class APIClient {
   }
 
   private async put<T>(path: string, body?: unknown): Promise<T> {
+    this.ensureConfigured(path);
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: 'PUT',
       headers: this.headers(),
@@ -140,6 +171,7 @@ export class APIClient {
   }
 
   private async del<T>(path: string): Promise<T> {
+    this.ensureConfigured(path);
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: 'DELETE',
       headers: this.authHeaders(),
@@ -149,6 +181,7 @@ export class APIClient {
   }
 
   private async postFormData<T>(path: string, formData: FormData): Promise<T> {
+    this.ensureConfigured(path);
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers: this.authHeaders(), // No Content-Type — browser sets multipart boundary
@@ -467,8 +500,11 @@ export class APIClient {
   /**
    * GET /api/notebook/recordings/:id/audio
    * Returns the audio URL for streaming playback (not fetched — use as <audio> src).
+   * Returns null when the base URL is not configured (pre-sync or blank-remote);
+   * callers must guard and skip playback rather than pass a broken src.
    */
-  getAudioUrl(id: number): string {
+  getAudioUrl(id: number): string | null {
+    if (!this.isBaseUrlConfigured()) return null;
     const tokenParam = this.authToken ? `?token=${encodeURIComponent(this.authToken)}` : '';
     return `${this.baseUrl}/api/notebook/recordings/${id}/audio${tokenParam}`;
   }
@@ -476,8 +512,11 @@ export class APIClient {
   /**
    * GET /api/notebook/recordings/:id/export
    * Returns a download URL (not fetched directly).
+   * Returns null when the base URL is not configured (pre-sync or blank-remote);
+   * callers must guard and surface an error rather than open a broken URL.
    */
-  getExportUrl(id: number, format: ExportFormat): string {
+  getExportUrl(id: number, format: ExportFormat): string | null {
+    if (!this.isBaseUrlConfigured()) return null;
     const params = new URLSearchParams({ format });
     if (this.authToken) params.set('token', this.authToken);
     return `${this.baseUrl}/api/notebook/recordings/${id}/export?${params}`;
@@ -623,6 +662,12 @@ export class APIClient {
     onComplete?: () => void;
     onError?: (message: string) => void;
   }): () => void {
+    if (!this.isBaseUrlConfigured()) {
+      callbacks.onError?.('remote-host-not-configured');
+      return () => {
+        /* no-op: connection was never opened */
+      };
+    }
     const wsProto = this.baseUrl.startsWith('https') ? 'wss' : 'ws';
     const wsBase = this.baseUrl.replace(/^https?/, wsProto);
     const url = `${wsBase}/api/admin/models/load/stream`;
@@ -723,6 +768,7 @@ export class APIClient {
    * Returns an async generator yielding content chunks.
    */
   async *llmProcessStream(request: LLMRequest): AsyncGenerator<string, void, unknown> {
+    this.ensureConfigured('/api/llm/process/stream');
     const res = await fetch(`${this.baseUrl}/api/llm/process/stream`, {
       method: 'POST',
       headers: this.headers(),
@@ -746,6 +792,7 @@ export class APIClient {
     recordingId: number,
     customPrompt?: string,
   ): AsyncGenerator<string, void, unknown> {
+    this.ensureConfigured(`/api/llm/summarize/${recordingId}/stream`);
     const params = customPrompt ? `?custom_prompt=${encodeURIComponent(customPrompt)}` : '';
     const res = await fetch(`${this.baseUrl}/api/llm/summarize/${recordingId}/stream${params}`, {
       method: 'POST',
@@ -881,6 +928,7 @@ export class APIClient {
     temperature?: number;
     model?: string;
   }): AsyncGenerator<string, void, unknown> {
+    this.ensureConfigured('/api/llm/chat');
     const res = await fetch(`${this.baseUrl}/api/llm/chat`, {
       method: 'POST',
       headers: this.headers(),

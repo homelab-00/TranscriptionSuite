@@ -95,7 +95,9 @@ vi.mock('../../src/api/client', () => ({
     search: vi.fn().mockResolvedValue({ results: [], count: 0 }),
     updateRecordingTitle: vi.fn(),
     deleteRecording: vi.fn(),
-    getExportUrl: vi.fn().mockReturnValue(''),
+    getExportUrl: vi
+      .fn()
+      .mockReturnValue('http://localhost:9786/api/notebook/recordings/1/export?format=txt'),
   },
 }));
 

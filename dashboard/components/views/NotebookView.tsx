@@ -266,6 +266,11 @@ const NoteActionMenu: React.FC<MenuProps> = ({
       return;
     }
     const url = apiClient.getExportUrl(targetId, format);
+    if (url === null) {
+      toast.error('Remote host not configured. Open Settings → Connection.');
+      onClose();
+      return;
+    }
     window.open(url, '_blank');
     onClose();
   };
@@ -677,7 +682,13 @@ const TimeSection: React.FC<{
     }
     if (previewTimeoutRef.current) clearTimeout(previewTimeoutRef.current);
 
-    const audio = new Audio(apiClient.getAudioUrl(evt.recordingId));
+    const audioUrl = apiClient.getAudioUrl(evt.recordingId);
+    if (audioUrl === null) {
+      // Pre-sync or blank-remote — skip playback rather than crash on a broken src.
+      toast.error('Remote host not configured. Open Settings → Connection.');
+      return;
+    }
+    const audio = new Audio(audioUrl);
     previewAudioRef.current = audio;
     setPreviewingId(evt.id);
 
