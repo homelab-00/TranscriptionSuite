@@ -14,7 +14,7 @@ import logging
 import os
 import shutil
 import subprocess
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -484,9 +484,18 @@ async def process_with_llm(request: LLMRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/process/stream")
-async def process_with_llm_stream(request: LLMRequest):
-    """Send transcription to LLM for processing with streaming response"""
+def _build_llm_stream_response(
+    request: LLMRequest,
+    *,
+    on_complete: Callable[[str, str | None], Awaitable[None]] | None = None,
+) -> StreamingResponse:
+    """Build a StreamingResponse that relays LLM SSE chunks to the client.
+
+    If ``on_complete`` is provided, it is awaited after the upstream LLM signals
+    ``[DONE]`` with a non-empty accumulated response, passing ``(full_text,
+    captured_model)``. Persistence failures are logged but never break the
+    stream — the client still receives its final ``{'done': True}`` event.
+    """
     httpx = _get_httpx()
     config = get_llm_config()
 
@@ -537,51 +546,113 @@ async def process_with_llm_stream(request: LLMRequest):
     async def generate_stream() -> AsyncGenerator[str]:
         """Generate SSE stream from LLM response"""
         total_content_length = 0
+        full_text_parts: list[str] = []
+        captured_model: str | None = None
+        saw_error = False
+        persisted = False
+
+        async def _persist_once() -> None:
+            """Persist accumulated content idempotently. No-op on error/empty."""
+            nonlocal persisted
+            if persisted or on_complete is None or saw_error:
+                return
+            full_text = "".join(full_text_parts)
+            if not full_text:
+                return
+            try:
+                await on_complete(full_text, captured_model)
+                persisted = True
+            except Exception as exc:
+                logger.error(f"on_complete callback failed after LLM stream: {exc}", exc_info=True)
+                # Mark persisted so the finally safety net does not retry a
+                # callback that already raised — the caller decides retry policy.
+                persisted = True
+
         try:
-            async with httpx.AsyncClient(timeout=600.0) as client:
-                async with client.stream(
-                    "POST",
-                    f"{base_url}/v1/chat/completions",
-                    json=payload,
-                    headers=headers,
-                ) as response:
-                    if response.status_code != 200:
-                        error_text = await response.aread()
-                        logger.error(f"LLM API error: {response.status_code} - {error_text}")
-                        yield f"data: {json.dumps({'error': f'LLM server error: {response.status_code}'})}\n\n"
-                        return
+            try:
+                async with httpx.AsyncClient(timeout=600.0) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{base_url}/v1/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    ) as response:
+                        if response.status_code != 200:
+                            error_text = await response.aread()
+                            logger.error(f"LLM API error: {response.status_code} - {error_text}")
+                            saw_error = True
+                            yield f"data: {json.dumps({'error': f'LLM server error: {response.status_code}'})}\n\n"
+                            return
 
-                    async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            data_str = line[6:]  # Remove "data: " prefix
+                        async for line in response.aiter_lines():
+                            if line.startswith("data: "):
+                                data_str = line[6:]  # Remove "data: " prefix
 
-                            if data_str.strip() == "[DONE]":
-                                logger.info(
-                                    f"LLM Stream completed, total response: {total_content_length} chars"
-                                )
-                                yield f"data: {json.dumps({'done': True})}\n\n"
-                                break
+                                if data_str.strip() == "[DONE]":
+                                    logger.info(
+                                        f"LLM Stream completed, total response: {total_content_length} chars"
+                                    )
+                                    break
 
-                            try:
-                                data = json.loads(data_str)
-                                delta = data.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
+                                try:
+                                    data = json.loads(data_str)
+                                    # Last-wins: OpenAI spec treats the final
+                                    # chunk's model id as canonical. Proxies
+                                    # (LiteLLM, OpenRouter) sometimes emit a
+                                    # router-alias in early chunks and resolve
+                                    # to the real model later.
+                                    model_field = data.get("model")
+                                    if isinstance(model_field, str) and model_field:
+                                        captured_model = model_field
+                                    delta = data.get("choices", [{}])[0].get("delta", {})
+                                    content = delta.get("content", "")
 
-                                if content:
-                                    total_content_length += len(content)
-                                    yield f"data: {json.dumps({'content': content})}\n\n"
-                            except json.JSONDecodeError:
-                                continue
+                                    if content:
+                                        total_content_length += len(content)
+                                        full_text_parts.append(content)
+                                        yield f"data: {json.dumps({'content': content})}\n\n"
+                                except json.JSONDecodeError:
+                                    continue
 
-        except httpx.ConnectError:
-            logger.error("LLM Stream error: Cannot connect to AI provider")
-            yield f"data: {json.dumps({'error': 'Cannot connect to the AI provider. Check the endpoint URL.'})}\n\n"
-        except httpx.TimeoutException:
-            logger.error("LLM Stream error: Request timed out")
-            yield f"data: {json.dumps({'error': 'Request timed out'})}\n\n"
-        except Exception as e:
-            logger.error(f"Streaming error: {e}", exc_info=True)
-            yield f"data: {json.dumps({'error': 'An internal error occurred during streaming'})}\n\n"
+            except httpx.ConnectError:
+                logger.error("LLM Stream error: Cannot connect to AI provider")
+                saw_error = True
+                yield f"data: {json.dumps({'error': 'Cannot connect to the AI provider. Check the endpoint URL.'})}\n\n"
+                return
+            except httpx.TimeoutException:
+                logger.error("LLM Stream error: Request timed out")
+                saw_error = True
+                yield f"data: {json.dumps({'error': 'Request timed out'})}\n\n"
+                return
+            except Exception as e:
+                logger.error(f"Streaming error: {e}", exc_info=True)
+                # Do NOT flip saw_error here: we want the finally safety net to
+                # salvage any accumulated content. An unexpected httpx error
+                # after several chunks is exactly the CLAUDE.md data-loss case.
+                yield f"data: {json.dumps({'error': 'An internal error occurred during streaming'})}\n\n"
+                return
+
+            # Stream finished cleanly. Persist BEFORE yielding done so the
+            # client sees the terminal event only after durability is
+            # guaranteed (CLAUDE.md: persist first, deliver second).
+            await _persist_once()
+            if on_complete is not None and not persisted and not saw_error:
+                logger.info("LLM stream produced empty response; skipping persistence")
+
+            yield f"data: {json.dumps({'done': True})}\n\n"
+        finally:
+            # Safety net: if we accumulated content but never persisted (client
+            # disconnect → GeneratorExit, or an exception raised mid-stream),
+            # save it now. Can't yield from finally, but a DB write is fine.
+            # This is the CLAUDE.md "AVOID DATA LOSS AT ALL COSTS" guarantee.
+            if not persisted and on_complete is not None and full_text_parts:
+                try:
+                    await on_complete("".join(full_text_parts), captured_model)
+                except Exception as exc:
+                    logger.error(
+                        f"Fallback persistence on stream close failed: {exc}",
+                        exc_info=True,
+                    )
 
     return StreamingResponse(
         generate_stream(),  # lgtm[py/stack-trace-exposure] exceptions caught in generator
@@ -594,13 +665,23 @@ async def process_with_llm_stream(request: LLMRequest):
     )
 
 
+@router.post("/process/stream")
+async def process_with_llm_stream(request: LLMRequest):
+    """Send transcription to LLM for processing with streaming response"""
+    return _build_llm_stream_response(request)
+
+
 @router.post("/summarize/{recording_id}", response_model=LLMResponse)
 async def summarize_recording(
     recording_id: int,
     custom_prompt: str | None = None,
 ):
     """Convenience endpoint: fetch transcription and summarize it (non-streaming)"""
-    from server.database.database import get_recording, get_transcription
+    from server.database.database import (
+        get_recording,
+        get_transcription,
+        update_recording_summary,
+    )
 
     # Fetch the recording
     recording = get_recording(recording_id)
@@ -619,12 +700,31 @@ async def summarize_recording(
     )
 
     # Process with LLM
-    return await process_with_llm(
+    llm_response = await process_with_llm(
         LLMRequest(
             transcription_text=full_text,
             user_prompt=custom_prompt,
         )
     )
+
+    # Persist the generated summary so it survives application restarts.
+    # Failure to persist is logged but does not mask the response: the client
+    # already holds the generated text and can retry via the edit flow.
+    if llm_response.response:
+        try:
+            if not update_recording_summary(
+                recording_id, llm_response.response, llm_response.model
+            ):
+                logger.warning(
+                    f"update_recording_summary returned False for recording {recording_id}"
+                )
+        except Exception as exc:
+            logger.error(
+                f"Failed to persist summary for recording {recording_id}: {exc}",
+                exc_info=True,
+            )
+
+    return llm_response
 
 
 @router.post("/summarize/{recording_id}/stream")
@@ -633,7 +733,11 @@ async def summarize_recording_stream(
     custom_prompt: str | None = None,
 ):
     """Convenience endpoint: fetch transcription and summarize it (streaming)."""
-    from server.database.database import get_recording, get_transcription
+    from server.database.database import (
+        get_recording,
+        get_transcription,
+        update_recording_summary,
+    )
 
     # Fetch the recording
     recording = get_recording(recording_id)
@@ -651,11 +755,16 @@ async def summarize_recording_stream(
         for seg in transcription["segments"]
     )
 
-    return await process_with_llm_stream(
+    async def _persist(text: str, model: str | None) -> None:
+        if not update_recording_summary(recording_id, text, model):
+            logger.warning(f"update_recording_summary returned False for recording {recording_id}")
+
+    return _build_llm_stream_response(
         LLMRequest(
             transcription_text=full_text,
             user_prompt=custom_prompt,
-        )
+        ),
+        on_complete=_persist,
     )
 
 
