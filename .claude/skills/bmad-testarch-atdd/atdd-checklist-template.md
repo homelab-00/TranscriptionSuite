@@ -3,6 +3,14 @@ stepsCompleted: []
 lastStep: ''
 lastSaved: ''
 workflowType: 'testarch-atdd'
+storyId: '{story_id}'
+storyKey: '{story_key}'
+storyFile: '{story_file}'
+atddChecklistPath: '{test_artifacts}/atdd-checklist-{story_key}.md'
+generatedTestFiles:
+  - '{api_test_file_path}'
+  - '{e2e_test_file_path}'
+  - '{component_test_file_path}'
 inputDocuments: []
 ---
 
@@ -34,7 +42,19 @@ inputDocuments: []
 
 ---
 
-## Failing Tests Created (RED Phase)
+## Story Integration Metadata
+
+- **Story ID:** `{story_id}`
+- **Story Key:** `{story_key}`
+- **Story File:** `{story_file}`
+- **Checklist Path:** `{test_artifacts}/atdd-checklist-{story_key}.md`
+- **Generated Test Files:** `{e2e_test_file_path}`, `{api_test_file_path}`, `{component_test_file_path}`
+
+If this story came from BMM `create-story`, mirror these artifact paths into the story's `Dev Notes` so `dev-story` can discover and activate the red-phase scaffolds.
+
+---
+
+## Red-Phase Test Scaffolds Created
 
 ### E2E Tests ({e2e_test_count} tests)
 
@@ -166,7 +186,7 @@ test('should do something', async ({ {fixtureName} }) => {
 
 ## Implementation Checklist
 
-{Map each failing test to concrete implementation tasks that will make it pass}
+{Map each scaffolded test to concrete implementation tasks that will make it pass}
 
 ### Test: {test_name_1}
 
@@ -205,7 +225,7 @@ test('should do something', async ({ {fixtureName} }) => {
 ## Running Tests
 
 ```bash
-# Run all failing tests for this story
+# Run all activated tests for this story
 {test_command_all}
 
 # Run specific test file
@@ -229,7 +249,7 @@ test('should do something', async ({ {fixtureName} }) => {
 
 **TEA Agent Responsibilities:**
 
-- ✅ All tests written and failing
+- ✅ All tests written as red-phase scaffolds with `test.skip()`
 - ✅ Fixtures and factories created with auto-cleanup
 - ✅ Mock requirements documented
 - ✅ data-testid requirements listed
@@ -237,9 +257,9 @@ test('should do something', async ({ {fixtureName} }) => {
 
 **Verification:**
 
-- All tests run and fail as expected
-- Failure messages are clear and actionable
-- Tests fail due to missing implementation, not test bugs
+- All generated tests are present and marked with `test.skip()`
+- Activation guidance is clear and actionable
+- Any activated test fails due to missing implementation, not test bugs
 
 ---
 
@@ -247,12 +267,13 @@ test('should do something', async ({ {fixtureName} }) => {
 
 **DEV Agent Responsibilities:**
 
-1. **Pick one failing test** from implementation checklist (start with highest priority)
-2. **Read the test** to understand expected behavior
-3. **Implement minimal code** to make that specific test pass
-4. **Run the test** to verify it now passes (green)
-5. **Check off the task** in implementation checklist
-6. **Move to next test** and repeat
+1. **Pick one scaffolded test** from implementation checklist (start with highest priority)
+2. **Remove `test.skip()`** for that test and confirm it fails first
+3. **Read the test** to understand expected behavior
+4. **Implement minimal code** to make that specific test pass
+5. **Run the test** to verify it now passes (green)
+6. **Check off the task** in implementation checklist
+7. **Move to next test** and repeat
 
 **Key Principles:**
 
@@ -297,14 +318,15 @@ test('should do something', async ({ {fixtureName} }) => {
 
 ## Next Steps
 
-1. **Share this checklist and failing tests** with the dev workflow (manual handoff)
-2. **Review this checklist** with team in standup or planning
-3. **Run failing tests** to confirm RED phase: `{test_command_all}`
+1. **Link this checklist and generated tests** into the story file `Dev Notes` / `ATDD Artifacts` section when a writable story file is available
+2. **If the story file cannot be updated automatically**, share this checklist and generated tests with the dev workflow as a manual handoff
+3. **Review this checklist** with team in standup or planning
 4. **Begin implementation** using implementation checklist as guide
-5. **Work one test at a time** (red → green for each)
-6. **Share progress** in daily standup
-7. **When all tests pass**, refactor code for quality
-8. **When refactoring complete**, manually update story status to 'done' in sprint-status.yaml
+5. **Activate one scaffold at a time** by removing `test.skip()` for the current task, then confirm it fails before implementing
+6. **Work one activated test at a time** (red → green for each)
+7. **Share progress** in daily standup
+8. **When all activated tests pass**, refactor code for quality
+9. **When refactoring complete**, manually update story status to 'done' in sprint-status.yaml
 
 ---
 
@@ -325,25 +347,26 @@ See `tea-index.csv` for complete knowledge fragment mapping.
 
 ## Test Execution Evidence
 
-### Initial Test Run (RED Phase Verification)
+### Initial Scaffold Review / RED Verification
 
-**Command:** `{test_command_all}`
+**Command:** `{test_command_all}` (or a narrower command after removing `test.skip()` for the current task)
 
 **Results:**
 
 ```
-{paste_test_run_output_showing_all_tests_failing}
+{paste_test_run_output_showing_scaffolds_skipped_or_activated_tests_failing}
 ```
 
 **Summary:**
 
 - Total tests: {total_test_count}
-- Passing: 0 (expected)
-- Failing: {total_test_count} (expected)
-- Status: ✅ RED phase verified
+- Skipped: {total_test_count} (expected before activation)
+- Activated RED tests: {activated_test_count} (expected after activation, before implementation)
+- Passing: 0 before implementation (expected for activated tests)
+- Status: ✅ Red-phase scaffolds verified
 
 **Expected Failure Messages:**
-{list_expected_failure_messages_for_each_test}
+{list_expected_skip_or_failure_states_for_each_test}
 
 ---
 

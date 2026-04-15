@@ -1,7 +1,7 @@
 ---
 name: 'step-03-test-strategy'
 description: 'Map acceptance criteria to test levels and priorities'
-outputFile: '{test_artifacts}/atdd-checklist-{story_id}.md'
+outputFile: '{test_artifacts}/atdd-checklist-{story_key}.md'
 nextStepFile: './step-04-generate-tests.md'
 ---
 

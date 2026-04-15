@@ -1,15 +1,15 @@
 ---
 name: 'step-04a-subagent-api-failing'
-description: 'Subagent: Generate FAILING API tests (TDD red phase)'
+description: 'Subagent: Generate red-phase API test scaffolds (TDD red phase)'
 subagent: true
 outputFile: '/tmp/tea-atdd-api-tests-{{timestamp}}.json'
 ---
 
-# Subagent 4A: Generate Failing API Tests (TDD Red Phase)
+# Subagent 4A: Generate Red-Phase API Test Scaffolds (TDD Red Phase)
 
 ## SUBAGENT CONTEXT
 
-This is an **isolated subagent** running in parallel with E2E failing test generation.
+This is an **isolated subagent** running in parallel with E2E red-phase test generation.
 
 **What you have from parent workflow:**
 
@@ -21,19 +21,19 @@ This is an **isolated subagent** running in parallel with E2E failing test gener
 
 **If `use_pactjs_utils` is enabled:** Also generate consumer contract tests alongside API tests. Use the loaded pactjs-utils fragments (`pactjs-utils-overview`, `pactjs-utils-consumer-helpers`, `pactjs-utils-provider-verifier`, `pactjs-utils-request-filter`, `pact-consumer-di`) for patterns. If `pact_mcp` is `"mcp"`, use SmartBear MCP tools (Fetch Provider States, Generate Pact Tests) to inform test generation.
 
-**Your task:** Generate API tests that will FAIL because the feature is not implemented yet (TDD RED PHASE).
+**Your task:** Generate API test scaffolds for the feature's expected behavior. They stay in `test.skip()` until the developer activates them for the current task (TDD RED PHASE).
 
 ---
 
 ## MANDATORY EXECUTION RULES
 
 - 📖 Read this entire subagent file before acting
-- ✅ Generate FAILING API tests ONLY
-- ✅ Tests MUST fail when run (feature not implemented yet)
+- ✅ Generate red-phase API test scaffolds ONLY
+- ✅ Tests MUST be emitted with `test.skip()` until the developer activates them
 - ✅ Output structured JSON to temp file
 - ✅ Follow knowledge fragment patterns
 - ❌ Do NOT generate E2E tests (that's subagent 4B)
-- ❌ Do NOT generate passing tests (this is TDD red phase)
+- ❌ Do NOT generate active passing tests (this is TDD red phase)
 - ❌ Do NOT run tests (that's step 5)
 
 ---
@@ -59,7 +59,7 @@ Story: User Registration
 - System returns 422 Unprocessable Entity if validation fails
 ```
 
-### 2. Generate FAILING API Test Files
+### 2. Generate Red-Phase API Test Files
 
 For each API endpoint, create test file in `tests/api/[feature].spec.ts`:
 
@@ -108,7 +108,7 @@ test.describe('[Story Name] API Tests (ATDD)', () => {
 
 **CRITICAL ATDD Requirements:**
 
-- ✅ Use `test.skip()` to mark tests as intentionally failing (red phase)
+- ✅ Use `test.skip()` to mark tests as red-phase scaffolds
 - ✅ Write assertions for EXPECTED behavior (even though not implemented)
 - ✅ Use realistic test data (not placeholder data)
 - ✅ Test both happy path and error scenarios from acceptance criteria
@@ -213,7 +213,7 @@ Write JSON to temp file: `/tmp/tea-atdd-api-tests-{{timestamp}}.json`
     {
       "file": "tests/api/user-registration.spec.ts",
       "content": "[full TypeScript test file content with test.skip()]",
-      "description": "ATDD API tests for user registration (RED PHASE)",
+      "description": "ATDD API test scaffolds for user registration (RED PHASE)",
       "expected_to_fail": true,
       "acceptance_criteria_covered": [
         "User can register with email/password",
@@ -239,7 +239,7 @@ Write JSON to temp file: `/tmp/tea-atdd-api-tests-{{timestamp}}.json`
   "test_count": 3,
   "tdd_phase": "RED",
   "provider_scrutiny": "completed",
-  "summary": "Generated 3 FAILING API tests for user registration story"
+  "summary": "Generated 3 red-phase API test scaffolds for user registration story"
 }
 ```
 
@@ -263,7 +263,7 @@ Write JSON to temp file: `/tmp/tea-atdd-api-tests-{{timestamp}}.json`
 Subagent completes when:
 
 - ✅ All API endpoints from acceptance criteria have test files
-- ✅ All tests use `test.skip()` (documented failing tests)
+- ✅ All tests use `test.skip()` (documented red-phase scaffolds)
 - ✅ All tests assert EXPECTED behavior (not placeholder assertions)
 - ✅ JSON output written to temp file
 - ✅ Fixture needs to be tracked
@@ -286,7 +286,7 @@ Subagent completes when:
 
 ### ❌ FAILURE:
 
-- Generated passing tests (wrong - this is RED phase)
+- Generated active passing tests (wrong - this is RED phase)
 - Tests without test.skip() (will break CI)
 - Placeholder assertions (expect(true).toBe(true))
 - Did not follow knowledge fragment patterns

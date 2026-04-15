@@ -1,7 +1,7 @@
 # Test Architect workflow: bmad-testarch-atdd
 name: bmad-testarch-atdd
 # prettier-ignore
-description: 'Generate failing acceptance tests using TDD cycle. Use when the user says "lets write acceptance tests" or "I want to do ATDD"'
+description: 'Generate red-phase acceptance test scaffolds using TDD cycle. Use when the user says "lets write acceptance tests" or "I want to do ATDD"'
 
 # Critical variables from config
 config_source: "{project-root}/_bmad/tea/config.yaml"
@@ -23,7 +23,7 @@ variables:
   test_dir: "{project-root}/tests" # Root test directory
 
 # Output configuration
-default_output_file: "{test_artifacts}/atdd-checklist-{story_id}.md"
+default_output_file: "{test_artifacts}/atdd-checklist-{story_key}.md"
 
 # Required tools
 required_tools:

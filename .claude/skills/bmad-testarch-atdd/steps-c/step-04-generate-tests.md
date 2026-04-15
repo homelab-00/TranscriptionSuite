@@ -1,14 +1,14 @@
 ---
 name: 'step-04-generate-tests'
-description: 'Orchestrate adaptive FAILING test generation (TDD red phase)'
+description: 'Orchestrate adaptive red-phase test scaffold generation (TDD red phase)'
 nextStepFile: './step-04c-aggregate.md'
 ---
 
-# Step 4: Orchestrate Adaptive FAILING Test Generation
+# Step 4: Orchestrate Adaptive Red-Phase Test Scaffold Generation
 
 ## STEP GOAL
 
-Select execution mode deterministically, then generate FAILING API and E2E tests (TDD RED PHASE) with consistent output contracts across agent-team, subagent, or sequential execution.
+Select execution mode deterministically, then generate red-phase API and E2E test scaffolds (TDD RED PHASE) with consistent output contracts across agent-team, subagent, or sequential execution.
 
 ## MANDATORY EXECUTION RULES
 
@@ -16,10 +16,10 @@ Select execution mode deterministically, then generate FAILING API and E2E tests
 - ✅ Speak in `{communication_language}`
 - ✅ Resolve execution mode from config (`tea_execution_mode`, `tea_capability_probe`)
 - ✅ Apply fallback rules deterministically when requested mode is unsupported
-- ✅ Generate FAILING tests only (TDD red phase)
+- ✅ Generate red-phase test scaffolds only (TDD red phase)
 - ✅ Wait for required worker steps to complete
 - ❌ Do NOT skip capability checks when probing is enabled
-- ❌ Do NOT generate passing tests (this is red phase)
+- ❌ Do NOT generate active passing tests (this is red phase)
 - ❌ Do NOT proceed until required worker steps finish
 
 ---
@@ -162,7 +162,7 @@ If probing is disabled, honor the requested mode strictly. If that mode cannot b
 
 ---
 
-### 3. Dispatch Worker A: Failing API Test Generation
+### 3. Dispatch Worker A: Red-Phase API Test Generation
 
 **Dispatch worker:**
 
@@ -172,21 +172,21 @@ If probing is disabled, honor the requested mode strictly. If that mode cannot b
 - **Execution:**
   - `agent-team` or `subagent`: launch non-blocking
   - `sequential`: run blocking and wait before next dispatch
-- **TDD Phase:** RED (failing tests)
+- **TDD Phase:** RED (scaffold tests with `test.skip()`)
 
 **System Action:**
 
 ```
-🚀 Launching Subagent A: FAILING API Test Generation (RED PHASE)
+🚀 Launching Subagent A: RED-PHASE API Test Generation
 📝 Output: /tmp/tea-atdd-api-tests-${timestamp}.json
 ⚙️ Mode: ${resolvedMode}
-🔴 TDD Phase: RED (tests will fail until feature implemented)
+🔴 TDD Phase: RED (tests emitted as `test.skip()` scaffolds)
 ⏳ Status: Running...
 ```
 
 ---
 
-### 4. Dispatch Worker B: Failing E2E Test Generation
+### 4. Dispatch Worker B: Red-Phase E2E Test Generation
 
 **Dispatch worker:**
 
@@ -196,15 +196,15 @@ If probing is disabled, honor the requested mode strictly. If that mode cannot b
 - **Execution:**
   - `agent-team` or `subagent`: launch non-blocking
   - `sequential`: run blocking and wait before next dispatch
-- **TDD Phase:** RED (failing tests)
+- **TDD Phase:** RED (scaffold tests with `test.skip()`)
 
 **System Action:**
 
 ```
-🚀 Launching Subagent B: FAILING E2E Test Generation (RED PHASE)
+🚀 Launching Subagent B: RED-PHASE E2E Test Generation
 📝 Output: /tmp/tea-atdd-e2e-tests-${timestamp}.json
 ⚙️ Mode: ${resolvedMode}
-🔴 TDD Phase: RED (tests will fail until feature implemented)
+🔴 TDD Phase: RED (tests emitted as `test.skip()` scaffolds)
 ⏳ Status: Running...
 ```
 
@@ -251,14 +251,15 @@ if (!apiOutputExists || !e2eOutputExists) {
 **Display TDD status:**
 
 ```
-🔴 TDD RED PHASE: Failing Tests Generated
+🔴 TDD RED PHASE: Test Scaffolds Generated
 
 ✅ Both subagents completed:
 - API Tests: Generated with test.skip()
 - E2E Tests: Generated with test.skip()
 
 📋 All tests assert EXPECTED behavior
-📋 All tests will FAIL until feature implemented
+📋 Activated tests will FAIL until feature is implemented
+📋 Scaffolds stay skipped until a developer activates the current task
 📋 This is INTENTIONAL (TDD red phase)
 
 Next: Aggregation will verify TDD compliance
@@ -300,8 +301,8 @@ The aggregation step (4C) will:
 
 Proceed to Step 4C (Aggregation) when:
 
-- ✅ Subagent A (API failing tests) completed successfully
-- ✅ Subagent B (E2E failing tests) completed successfully
+- ✅ Subagent A (API red-phase tests) completed successfully
+- ✅ Subagent B (E2E red-phase tests) completed successfully
 - ✅ Both output files exist and are valid JSON
 - ✅ TDD red phase status reported
 
@@ -309,7 +310,7 @@ Proceed to Step 4C (Aggregation) when:
 
 - ❌ One or both subagents failed
 - ❌ Output files missing or corrupted
-- ❌ Subagent generated passing tests (wrong - must be failing)
+- ❌ Subagent generated active passing tests (wrong - must be red-phase scaffolds)
 
 ---
 
@@ -331,4 +332,4 @@ Proceed to Step 4C (Aggregation) when:
 - Tests generated without test.skip() (wrong phase)
 - Unsupported requested mode with probing disabled
 
-**Master Rule:** TDD RED PHASE requires FAILING tests (with test.skip()). Mode selection changes orchestration, never red-phase requirements.
+**Master Rule:** TDD RED PHASE requires acceptance test scaffolds marked with `test.skip()`. Mode selection changes orchestration, never red-phase requirements.

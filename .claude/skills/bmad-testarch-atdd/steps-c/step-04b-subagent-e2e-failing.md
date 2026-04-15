@@ -1,15 +1,15 @@
 ---
 name: 'step-04b-subagent-e2e-failing'
-description: 'Subagent: Generate FAILING E2E tests (TDD red phase)'
+description: 'Subagent: Generate red-phase E2E test scaffolds (TDD red phase)'
 subagent: true
 outputFile: '/tmp/tea-atdd-e2e-tests-{{timestamp}}.json'
 ---
 
-# Subagent 4B: Generate Failing E2E Tests (TDD Red Phase)
+# Subagent 4B: Generate Red-Phase E2E Test Scaffolds (TDD Red Phase)
 
 ## SUBAGENT CONTEXT
 
-This is an **isolated subagent** running in parallel with API failing test generation.
+This is an **isolated subagent** running in parallel with API red-phase test generation.
 
 **What you have from parent workflow:**
 
@@ -18,19 +18,19 @@ This is an **isolated subagent** running in parallel with API failing test gener
 - Knowledge fragments loaded: fixture-architecture, network-first, selector-resilience
 - Config: test framework, Playwright Utils enabled/disabled
 
-**Your task:** Generate E2E tests that will FAIL because the feature UI is not implemented yet (TDD RED PHASE).
+**Your task:** Generate E2E test scaffolds for the feature's expected UI behavior. They stay in `test.skip()` until the developer activates them for the current task (TDD RED PHASE).
 
 ---
 
 ## MANDATORY EXECUTION RULES
 
 - 📖 Read this entire subagent file before acting
-- ✅ Generate FAILING E2E tests ONLY
-- ✅ Tests MUST fail when run (UI not implemented yet)
+- ✅ Generate red-phase E2E test scaffolds ONLY
+- ✅ Tests MUST be emitted with `test.skip()` until the developer activates them
 - ✅ Output structured JSON to temp file
 - ✅ Follow knowledge fragment patterns
 - ❌ Do NOT generate API tests (that's subagent 4A)
-- ❌ Do NOT generate passing tests (this is TDD red phase)
+- ❌ Do NOT generate active passing tests (this is TDD red phase)
 - ❌ Do NOT run tests (that's step 5)
 
 ---
@@ -89,7 +89,7 @@ If `none`:
 
 - Generate selectors from best practices without browser verification
 
-### 3. Generate FAILING E2E Test Files
+### 3. Generate Red-Phase E2E Test Files
 
 For each user journey, create test file in `tests/e2e/[feature].spec.ts`:
 
@@ -129,7 +129,7 @@ test.describe('[Story Name] E2E User Journey (ATDD)', () => {
 
 **CRITICAL ATDD Requirements:**
 
-- ✅ Use `test.skip()` to mark tests as intentionally failing (red phase)
+- ✅ Use `test.skip()` to mark tests as red-phase scaffolds
 - ✅ Write assertions for EXPECTED UI behavior (even though not implemented)
 - ✅ Use resilient selectors: getByRole, getByText, getByLabel (from selector-resilience)
 - ✅ Follow network-first patterns if API calls involved (from network-first)
@@ -169,7 +169,7 @@ Write JSON to temp file: `/tmp/tea-atdd-e2e-tests-{{timestamp}}.json`
     {
       "file": "tests/e2e/user-registration.spec.ts",
       "content": "[full TypeScript test file content with test.skip()]",
-      "description": "ATDD E2E tests for user registration journey (RED PHASE)",
+      "description": "ATDD E2E test scaffolds for user registration journey (RED PHASE)",
       "expected_to_fail": true,
       "acceptance_criteria_covered": [
         "User can navigate to /register",
@@ -189,7 +189,7 @@ Write JSON to temp file: `/tmp/tea-atdd-e2e-tests-{{timestamp}}.json`
   "knowledge_fragments_used": ["fixture-architecture", "network-first", "selector-resilience"],
   "test_count": 2,
   "tdd_phase": "RED",
-  "summary": "Generated 2 FAILING E2E tests for user registration story"
+  "summary": "Generated 2 red-phase E2E test scaffolds for user registration story"
 }
 ```
 
@@ -213,7 +213,7 @@ Write JSON to temp file: `/tmp/tea-atdd-e2e-tests-{{timestamp}}.json`
 Subagent completes when:
 
 - ✅ All user journeys from acceptance criteria have test files
-- ✅ All tests use `test.skip()` (documented failing tests)
+- ✅ All tests use `test.skip()` (documented red-phase scaffolds)
 - ✅ All tests assert EXPECTED UI behavior (not placeholder assertions)
 - ✅ Resilient selectors used (getByRole, getByText)
 - ✅ JSON output written to temp file
@@ -236,7 +236,7 @@ Subagent completes when:
 
 ### ❌ FAILURE:
 
-- Generated passing tests (wrong - this is RED phase)
+- Generated active passing tests (wrong - this is RED phase)
 - Tests without test.skip() (will break CI)
 - Placeholder assertions (expect(true).toBe(true))
 - Brittle selectors used (CSS classes, XPath)

@@ -95,6 +95,12 @@ def test_skill_md_frontmatter_substitution():
         assert "{module-code}" not in skill_md
 
 
+def test_template_frontmatter_uses_quoted_name_placeholder():
+    """Test that the template frontmatter is valid before substitution."""
+    template_skill_md = (TEMPLATE_DIR / "SKILL.md").read_text()
+    assert 'name: "{setup-skill-name}"' in template_skill_md
+
+
 def test_generated_files_written():
     """Test that module.yaml and module-help.csv contain generated content."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -201,6 +207,7 @@ if __name__ == "__main__":
     tests = [
         test_basic_scaffold,
         test_skill_md_frontmatter_substitution,
+        test_template_frontmatter_uses_quoted_name_placeholder,
         test_generated_files_written,
         test_anti_zombie_replaces_existing,
         test_missing_target_dir,

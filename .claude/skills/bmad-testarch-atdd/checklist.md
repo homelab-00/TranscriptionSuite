@@ -50,7 +50,7 @@ Before starting this workflow, verify:
 
 ---
 
-## Step 3: Failing Tests Generated
+## Step 3: Red-Phase Test Scaffolds Generated
 
 ### Test File Structure Created
 
@@ -68,8 +68,8 @@ Before starting this workflow, verify:
 - [ ] One assertion per test (atomic test design)
 - [ ] No hard waits or sleeps (explicit waits only)
 - [ ] Network-first pattern applied (route interception BEFORE navigation)
-- [ ] Tests fail initially (RED phase verified by local test run)
-- [ ] Failure messages are clear and actionable
+- [ ] Tests are generated as `test.skip()` scaffolds
+- [ ] Activation guidance is documented for the current task
 
 ### API Tests (If Applicable)
 
@@ -79,7 +79,7 @@ Before starting this workflow, verify:
 - [ ] HTTP status codes verified
 - [ ] Response body validation includes all required fields
 - [ ] Error cases tested (400, 401, 403, 404, 500)
-- [ ] Tests fail initially (RED phase verified)
+- [ ] Tests are generated as `test.skip()` scaffolds
 
 ### Component Tests (If Applicable)
 
@@ -89,7 +89,7 @@ Before starting this workflow, verify:
 - [ ] Interaction testing covers user actions (click, hover, keyboard)
 - [ ] State management within component validated
 - [ ] Props and events tested
-- [ ] Tests fail initially (RED phase verified)
+- [ ] Tests are generated as `test.skip()` scaffolds
 
 ### Test Quality Validation
 
@@ -144,7 +144,7 @@ Before starting this workflow, verify:
 ## Step 5: Implementation Checklist Created
 
 - [ ] Implementation checklist created with clear structure
-- [ ] Each failing test mapped to concrete implementation tasks
+- [ ] Each scaffolded test mapped to concrete implementation tasks
 - [ ] Tasks include:
   - [ ] Route/component creation
   - [ ] Business logic implementation
@@ -170,12 +170,12 @@ Before starting this workflow, verify:
 
 ### ATDD Checklist Document Created
 
-- [ ] Output file created at `{test_artifacts}/atdd-checklist-{story_id}.md`
+- [ ] Output file created at `{test_artifacts}/atdd-checklist-{story_key}.md`
 - [ ] Document follows template structure from `atdd-checklist-template.md`
 - [ ] Document includes all required sections:
   - [ ] Story summary
   - [ ] Acceptance criteria breakdown
-  - [ ] Failing tests created (paths and line counts)
+  - [ ] Red-phase test scaffolds created (paths and line counts)
   - [ ] Data factories created
   - [ ] Fixtures created
   - [ ] Mock requirements
@@ -184,15 +184,16 @@ Before starting this workflow, verify:
   - [ ] Red-green-refactor workflow
   - [ ] Execution commands
   - [ ] Next steps for DEV team
-- [ ] Output shared with DEV workflow (manual handoff; not auto-consumed)
+- [ ] Checklist frontmatter includes `storyId`, `storyKey`, `storyFile`, `atddChecklistPath`, and generated test file paths
+- [ ] If a writable story file was provided, ATDD artifacts were linked back into story context
+- [ ] If a story file could not be updated, manual handoff instructions are present
 
-### All Tests Verified to Fail (RED Phase)
+### Red-Phase Scaffolds Verified
 
-- [ ] Full test suite run locally before finalizing
-- [ ] All tests fail as expected (RED phase confirmed)
-- [ ] No tests passing before implementation (if passing, test is invalid)
-- [ ] Failure messages documented in ATDD checklist
-- [ ] Failures are due to missing implementation, not test bugs
+- [ ] All generated acceptance test scaffolds are marked with `test.skip()`
+- [ ] No scaffold was emitted as an active passing test before implementation
+- [ ] Activation guidance is documented: remove `test.skip()` for the current task, then confirm RED before implementing
+- [ ] Any assumptions or expected failure reasons are documented in ATDD checklist
 - [ ] Test run output captured for reference
 
 ### Summary Provided
@@ -279,9 +280,9 @@ Before starting this workflow, verify:
 All of the following must be true before marking this workflow as complete:
 
 - [ ] **Story acceptance criteria analyzed** and mapped to appropriate test levels
-- [ ] **Failing tests created** at all appropriate levels (E2E, API, Component)
+- [ ] **Red-phase test scaffolds created** at all appropriate levels (E2E, API, Component)
 - [ ] **Given-When-Then format** used consistently across all tests
-- [ ] **RED phase verified** by local test run (all tests failing as expected)
+- [ ] **RED phase verified** by scaffold generation plus task-by-task activation guidance
 - [ ] **Network-first pattern** applied to E2E tests with network requests
 - [ ] **Data factories created** using faker (no hardcoded test data)
 - [ ] **Fixtures created** with auto-cleanup in teardown

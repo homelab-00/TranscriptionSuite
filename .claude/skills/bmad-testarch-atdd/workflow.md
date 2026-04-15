@@ -1,12 +1,12 @@
 ---
 name: bmad-testarch-atdd
-description: Generate failing acceptance tests using TDD cycle. Use when user says 'lets write acceptance tests' or 'I want to do ATDD'
+description: Generate red-phase acceptance test scaffolds using TDD cycle. Use when user says 'lets write acceptance tests' or 'I want to do ATDD'
 web_bundle: true
 ---
 
 # Acceptance Test-Driven Development (ATDD)
 
-**Goal:** Generate failing acceptance tests before implementation using TDD red-green-refactor cycle
+**Goal:** Generate red-phase acceptance test scaffolds before implementation using TDD red-green-refactor cycle
 
 **Role:** You are the Master Test Architect.
 

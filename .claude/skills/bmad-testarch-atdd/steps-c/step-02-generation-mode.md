@@ -1,7 +1,7 @@
 ---
 name: 'step-02-generation-mode'
 description: 'Choose AI generation or recording mode'
-outputFile: '{test_artifacts}/atdd-checklist-{story_id}.md'
+outputFile: '{test_artifacts}/atdd-checklist-{story_key}.md'
 nextStepFile: './step-03-test-strategy.md'
 ---
 

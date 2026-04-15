@@ -16,6 +16,6 @@
   - step-02-apply-edit.md
 
   ## Outputs
-  - {test_artifacts}/atdd-checklist-{story_id}.md
+  - {test_artifacts}/atdd-checklist-{story_key}.md
 
-- Failing acceptance tests under {project-root}/tests
+- Red-phase acceptance test scaffolds under {project-root}/tests
