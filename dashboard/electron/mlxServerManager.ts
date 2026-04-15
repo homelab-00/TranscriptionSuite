@@ -122,6 +122,31 @@ export class MLXServerManager {
       }
     }
 
+    // Ensure a config.yaml exists at the user data path before starting the
+    // server.  The Python backend's config.py searches for the file at startup
+    // and raises RuntimeError if none is found.  The Electron IPC handler
+    // `app:ensureServerConfig` normally creates this file, but it is only
+    // invoked from the renderer — which loads *after* this auto-start fires.
+    // We replicate the same logic here so the server always has a config file.
+    const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
+    if (!fs.existsSync(userConfigPath)) {
+      // Template search: one level above serverBackendDir works for both
+      // dev (server/backend/ → server/config.yaml) and packaged
+      // (<resourcesPath>/backend/ → <resourcesPath>/config.yaml) layouts.
+      const templatePath = path.resolve(serverBackendDir, '../config.yaml');
+      try {
+        fs.mkdirSync(path.dirname(userConfigPath), { recursive: true });
+        fs.copyFileSync(templatePath, userConfigPath);
+        this._appendLog(`[MLX] Copied config from ${templatePath} → ${userConfigPath}`);
+      } catch {
+        // Template not found (should not happen in a properly built package).
+        // Write a minimal stub so the server can at least start.
+        fs.mkdirSync(path.dirname(userConfigPath), { recursive: true });
+        fs.writeFileSync(userConfigPath, '# TranscriptionSuite configuration\n', 'utf-8');
+        this._appendLog('[MLX] Warning: no config template found; wrote minimal config stub.');
+      }
+    }
+
     this._setStatus('starting');
     this._emit('mlx:statusChanged', 'starting');
     this._appendLog(`[MLX] Starting uvicorn on port ${opts.port}…`);
