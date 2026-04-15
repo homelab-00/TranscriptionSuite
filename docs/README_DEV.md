@@ -193,12 +193,6 @@ Technical documentation for developing and building TranscriptionSuite.
       - [Setup (one-time, per clone)](#setup-one-time-per-clone)
       - [Running ad-hoc](#running-ad-hoc)
       - [Extending](#extending)
-    - [12.5 AI Agent Instructions](#125-ai-agent-instructions)
-      - [File Overview](#file-overview)
-      - [How it works](#how-it-works-1)
-      - [Updating project-context.md](#updating-project-contextmd)
-      - [Updating GitNexus context](#updating-gitnexus-context)
-      - [Key rules](#key-rules)
   - [13. Troubleshooting](#13-troubleshooting)
     - [13.1 Docker GPU Access](#131-docker-gpu-access)
       - [CUDA unknown error after system update](#cuda-unknown-error-after-system-update)
@@ -228,6 +222,8 @@ Technical documentation for developing and building TranscriptionSuite.
     - [16.2 Usage](#162-usage)
     - [16.3 Model Groups](#163-model-groups)
     - [16.4 Output Files](#164-output-files)
+  - [17. Developer Notes](#17-developer-notes)
+    - [17.1 AI Agent Information](#171-ai-agent-information) 
 
 ---
 
@@ -2924,54 +2920,6 @@ Add new hooks directly in `.pre-commit-config.yaml`. Use a `repo:` entry for thi
 
 ---
 
-### 12.5 AI Agent Instructions
-
-This project uses multiple AI coding tools (Claude Code, Gemini CLI, Cursor, etc.). Each tool loads instructions differently, so the project maintains a layered instruction system.
-
-### File Overview
-
-| File | Purpose | Auto-loaded by | Git-tracked |
-|------|---------|---------------|-------------|
-| `CLAUDE.md` | Lean router - GitNexus MCP reference + pointers to detailed rules | Claude Code | Yes |
-| `AGENTS.md` | Self-contained - full project rules inlined for non-Claude tools | Gemini CLI, Cursor, Windsurf, Copilot | Yes |
-| `docs/project-context.md` | Canonical source of truth - project-specific rules for AI agents | Referenced by CLAUDE.md, inlined into AGENTS.md | Yes |
-| `~/.claude/rules/` | Global coding standards (not project-specific) | Claude Code only | N/A (home dir) |
-| `~/.claude/projects/.../memory/` | Auto-memory - cross-session project knowledge | Claude Code only | N/A (home dir) |
-| `.claude/skills/` | Specialized workflows (GitNexus, UI contract, BMAD, testing) | Claude Code (on demand) | Partially |
-
-### How it works
-
-- **Claude Code** loads `CLAUDE.md` + global rules + auto-memory every session. `CLAUDE.md` points to `docs/project-context.md` for detailed rules, keeping context lean.
-- **Other AI tools** (Gemini, Cursor, etc.) load only `AGENTS.md`. It contains the full project rules inlined because these tools have no access to Claude-specific rules, memory, or skills.
-- **GitNexus MCP** auto-generates a reference block (tools, resources, graph schema) between `<!-- gitnexus:start/end -->` markers in both `CLAUDE.md` and `AGENTS.md`. Content outside the markers is preserved during regeneration.
-
-### Updating project-context.md
-
-When the tech stack, coding patterns, or critical rules change:
-
-1. Run `/bmad-generate-project-context` in Claude Code (interactive workflow)
-2. Move the output from `_bmad-output/project-context.md` to `docs/project-context.md`
-3. Copy the updated content into `AGENTS.md` (below the `<!-- gitnexus:end -->` marker)
-
-### Updating GitNexus context
-
-After significant code changes:
-
-```bash
-gitnexus analyze
-```
-
-This regenerates the `<!-- gitnexus:start/end -->` block in both `CLAUDE.md` and `AGENTS.md`. User content outside the markers is preserved.
-
-### Key rules
-
-- **`CLAUDE.md` should stay lean** - Claude Code already has global rules + memory. Don't duplicate.
-- **`AGENTS.md` must be self-contained** - it's the only instruction non-Claude tools see.
-- **`docs/project-context.md` is the single source of truth** - edit here, propagate to `AGENTS.md`.
-- **Never manually edit inside `<!-- gitnexus:start/end -->` markers** - `gitnexus analyze` overwrites them.
-
----
-
 ## 13. Troubleshooting
 
 ### 13.1 Docker GPU Access
@@ -3712,4 +3660,30 @@ The JSON file contains full output including segments and word-level data.
 The CSV file contains one row per `(model, file)` pair with the core metrics
 for quick comparison in a spreadsheet.
 
+---
+
+## 17. Developer Notes
+
+## 17.1 AI Agent Information
+
+If you are a fellow developer working on this project with the help of an AI
+coding agent and you want to share the same "thinking context" I use day-to-day,
+install the **BMad Method** in your own environment:
+
+- Repo: https://github.com/bmad-code-org/BMAD-METHOD
+
+BMad is what I drive ~90% of the time while working on TranscriptionSuite. It
+is agent-agnostic — it installs into Claude Code, Codex, Cursor, Windsurf, and
+others — so you don't need to match my exact setup, only the methodology.
+
+A few notes:
+
+- The `.claude/` and `_bmad/` folders are intentionally **not** tracked in this
+  repo. They are large, change constantly as tooling evolves, and are personal
+  to each developer's environment. Install BMad fresh in your own clone via
+  its installer rather than expecting them to be checked in.
+- The project-level context an agent actually needs — architecture, API
+  contracts, data models, source tree, invariants — lives in `docs/` and is
+  indexed from `docs/index.md`. That is the entry point to point any agent at,
+  regardless of which coding assistant you use.
 

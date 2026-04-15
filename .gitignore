@@ -34,8 +34,10 @@ TranscriptionSuite.app
 # AI Stuff
 
 .claude/worktrees/
-.gitnexus/
 _bmad-output/
+_bmad/
+.claude/
+.gitnexus/
 .superpowers/
 
 
