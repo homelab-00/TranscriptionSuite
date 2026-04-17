@@ -19,7 +19,7 @@
     "preview": "vite preview",
     "package:linux": "npm run build:electron && electron-builder --linux AppImage --publish=never",
     "package:windows": "npm run build:electron && electron-builder --win nsis --publish=never",
-    "package:mac": "npm run build:electron && electron-builder --mac dmg zip --publish=never",
+    "package:mac": "npm run build:electron && electron-builder --mac dmg --publish=never",
     "ui:contract:extract": "node scripts/ui-contract/extract-facts.mjs",
     "ui:contract:build": "node scripts/ui-contract/build-contract.mjs",
     "ui:contract:validate": "node scripts/ui-contract/validate-contract.mjs",
@@ -155,13 +155,8 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64"
+            "arm64",
+            "x64"
           ]
         }
       ],
@@ -177,6 +172,7 @@
     },
     "dmg": {
       "sign": false,
+      "artifactName": "${productName}-${version}-${arch}-mac.${ext}",
       "contents": [
         {
           "x": 130,

@@ -1,6 +1,16 @@
 #!/bin/bash
-# Build Electron DMG + ZIP for macOS (Apple Silicon arm64)
-# Requires: Node.js 24+, npm, Python 3 + pip3 (for dmgbuild)
+# Build Electron DMG for macOS (Apple Silicon arm64)
+#
+# Produces the "thin" dashboard-only DMG — Electron UI only, no Python/MLX
+# backend. This is the install artifact for Apple Silicon users who will
+# drive a remote server (Tailscale/LAN) or run the server in Docker on
+# their Mac and don't need the bundled Metal backend.
+#
+# The "bundled" Metal DMG (with Python/MLX backend pre-installed) is
+# produced by a separate CI job — see build-macos-metal in
+# .github/workflows/release.yml.
+#
+# Requires: Node.js 24+, npm, Python 3 + pip3 (for dmgbuild on macOS < 15.7)
 #
 # Optional release signing:
 #   GPG_KEY_ID         - key id / fingerprint used for detached .asc signatures
@@ -13,7 +23,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DASHBOARD_DIR="$PROJECT_ROOT/dashboard"
 
 echo "=================================================="
-echo "Building TranscriptionSuite macOS DMG + ZIP (arm64)"
+echo "Building TranscriptionSuite macOS DMG (arm64)"
 echo "=================================================="
 
 # Ensure Node.js is available

@@ -131,7 +131,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build macOS DMG + ZIP
+      - name: Build macOS DMG (thin)
         env:
           GPG_KEY_ID: ""
         run: bash build/build-electron-mac.sh
@@ -153,7 +153,6 @@ jobs:
           name: release-macos
           path: |
             dashboard/release/*.dmg
-            dashboard/release/*.zip
             dashboard/release/*.yml
             dashboard/release/*.asc
           if-no-files-found: error
@@ -267,6 +266,12 @@ jobs:
 
       - name: Create DMG from app bundle
         run: |
+          # Read version from dashboard/package.json so the bundled Metal DMG
+          # filename matches the thin DMG's versioned naming pattern
+          # (thin: TranscriptionSuite-<ver>-arm64-mac.dmg /
+          #        TranscriptionSuite-<ver>-x64-mac.dmg
+          #  bundled: TranscriptionSuite-<ver>-arm64-mac-metal.dmg).
+          VERSION="$(node -p "require('./dashboard/package.json').version")"
           mkdir -p dmg-staging
           cp -a dashboard/release/mac-arm64/TranscriptionSuite.app dmg-staging/
           ln -sf /Applications dmg-staging/Applications
@@ -276,7 +281,7 @@ jobs:
             -volname "TranscriptionSuite" \
             -srcfolder dmg-staging \
             -ov -format UDZO \
-            -o dashboard/release/TranscriptionSuite-arm64-metal.dmg
+            -o "dashboard/release/TranscriptionSuite-${VERSION}-arm64-mac-metal.dmg"
           rm -rf dmg-staging
 
       - name: Import GPG key
@@ -295,7 +300,7 @@ jobs:
         with:
           name: release-macos-metal
           path: |
-            dashboard/release/TranscriptionSuite-arm64-metal.dmg
+            dashboard/release/TranscriptionSuite-*-arm64-mac-metal.dmg
             dashboard/release/*.asc
           if-no-files-found: error
 

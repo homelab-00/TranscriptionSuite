@@ -56,8 +56,8 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
   - [1.2 Screenshots](#12-screenshots)
   - [1.3 Short Tour](#13-short-tour)
 - [2. Installation](#2-installation)
-  - [2.1 Apple Silicon (Metal/MLX)](#21-apple-silicon-metalmlx)
-  - [2.2 Linux, Windows, and Intel Mac](#22-linux-windows-and-intel-mac)
+  - [2.1 macOS (Apple Silicon or Intel)](#21-macos-apple-silicon-or-intel)
+  - [2.2 Linux and Windows](#22-linux-and-windows)
   - [2.3 Download the Dashboard app](#23-download-the-dashboard-app)
     - [2.3.1 Linux AppImage Prerequisites](#231-linux-appimage-prerequisites)
     - [2.3.2 Verify Download with Kleopatra (optional)](#232-verify-download-with-kleopatra-optional)
@@ -125,42 +125,65 @@ https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
 
 ## 2. Installation
 
-There are two separate installation paths - pick the one for your platform:
+Pick the section for your platform:
 
 | Platform | Path |
 |---|---|
-| **Apple Silicon Mac (M1+)** | → [§ 2.1](#21-apple-silicon-metalmlx) - one-command setup, no Docker |
-| **Linux / Windows / Intel Mac** | → [§§ 2.2–2.5](#22-linux-windows-and-intel-mac) - Docker/Podman-based |
+| **Apple Silicon Mac (M1+)** | → [§ 2.1](#21-macos-apple-silicon-or-intel) |
+| **Intel Mac (pre-M1)** | → [§ 2.1](#21-macos-apple-silicon-or-intel) |
+| **Linux / Windows** | → [§§ 2.2–2.5](#22-linux-and-windows) - Docker/Podman-based |
 
 ---
 
-### 2.1 Apple Silicon (Metal/MLX)
+### 2.1 macOS (Apple Silicon or Intel)
 
-On Apple Silicon Macs (M1 and later) the **Metal/MLX runtime** runs the transcription
-engine natively - no Docker required, full hardware acceleration out of the box.
+#### What hardware acceleration you get
 
-A single setup script handles everything: it installs dependencies (Homebrew, Node.js,
-uv, Python 3.13), builds the Electron dashboard, and bundles the Python/MLX backend
-into a self-contained `TranscriptionSuite.app` you can drag straight to your
-Applications folder:
+- **Apple Silicon Macs (M1 and later):** full GPU acceleration via Apple's **Metal + MLX** stack. Metal is Apple's GPU API; MLX is Apple's machine-learning framework that runs on top of Metal and is specifically built for Apple Silicon's unified-memory architecture. This is what the app calls the "Metal server" — it's really MLX running on Metal.
+- **Intel Macs (pre-M1):** **CPU only**. MLX does not exist on Intel Macs — it's Apple-Silicon-only. Metal the GPU API does exist on Intel Macs, but this project does not use it outside of MLX. Intel Macs run the transcription backend in a Docker container, on CPU. It works, but it's slow.
 
-```bash
-bash build/setup-macos-metal.sh
-# optional flag to install directly to /Applications/:
-bash build/setup-macos-metal.sh --install
-```
+> *Naming note: anywhere in the app's UI you see "Metal server", "Start Metal Server", or "Metal runtime", what's actually running is **MLX** — Apple's machine-learning framework, which uses Metal as its GPU API. The two terms are used loosely as synonyms in the UI, but only MLX is Apple-Silicon-only; plain Metal works on many Intel Macs too. If you have an Intel Mac with a Metal-capable GPU, the "Metal" label still does not apply to you — this project's Metal path requires MLX, which requires Apple Silicon.*
 
-> The script will offer to install Homebrew if it is absent, and downloads
-> Node.js, uv, Python 3.13, and ~3–5 GB of ML packages on first run.
-> See [README_DEV.md § 15](README_DEV.md#15-apple-silicon-metalmlx-development)
-> for manual / dev-mode instructions.
+#### The two macOS install artifacts
 
-Once the app is open: **Settings → Runtime Profile → Metal (Apple Silicon)**,
-then click **Start Metal Server**.
+Every release ships two DMGs on the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page. Pick the one that matches your plan:
+
+| Artifact | For | Size | Contents |
+|---|---|---|---|
+| `TranscriptionSuite-<ver>-arm64-mac-metal.dmg` | **Bundled MLX/Metal server on this Mac** (Apple Silicon only) | ~3-5 GB | Dashboard + Python 3.13 + MLX backend pre-installed inside the `.app`. No Docker, no Python setup. Launch the app, click **Start Metal Server**. |
+| `TranscriptionSuite-<ver>-arm64-mac.dmg` or `TranscriptionSuite-<ver>-x64-mac.dmg` | **Thin client** — dashboard only, you bring the server | ~200 MB | The dashboard UI by itself. Use this when the transcription work will happen **somewhere else**: either a remote server (Linux/Windows box with a GPU over Tailscale/LAN) or a Docker/Podman container running locally on this Mac. Pick `arm64` for Apple Silicon, `x64` for Intel. |
+
+Three use cases, mapped to artifacts:
+
+| Your use case | DMG to download |
+|---|---|
+| Apple Silicon Mac, run server locally on Metal/MLX | `arm64-mac-metal.dmg` (bundled) |
+| Apple Silicon Mac, connect to a remote server | `arm64-mac.dmg` (thin) |
+| Apple Silicon Mac, run server locally in Docker/Podman | `arm64-mac.dmg` (thin) |
+| Intel Mac, connect to a remote server | `x64-mac.dmg` (thin) |
+| Intel Mac, run server locally in Docker/Podman (CPU only) | `x64-mac.dmg` (thin) |
+
+> Apple Silicon users running a local Metal server can ignore the thin DMG entirely — the bundled DMG covers everything. Intel Macs never get the bundled DMG (no MLX).
+
+#### Install steps
+
+1. Download the DMG for your case from the Releases page.
+2. Open it and drag `TranscriptionSuite.app` to `/Applications`.
+3. Open Terminal and run this once to clear the macOS Gatekeeper quarantine on the
+   ad-hoc-signed bundle (see `Installation Instructions.txt` on the DMG for details):
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/TranscriptionSuite.app
+   ```
+
+4. Launch the app, then:
+   - **Bundled DMG (Apple Silicon, local Metal):** open **Settings → Runtime Profile**, choose **Metal (Apple Silicon)**, click **Start Metal Server**. You're done.
+   - **Thin DMG, connecting to a remote server:** skip Docker setup. Follow the remote-server configuration in [§ 2.5](#25-remote-access).
+   - **Thin DMG, running the server locally in Docker/Podman:** install Docker or Podman per §§ 2.2–2.4 first (Intel Macs and Apple Silicon users follow the same Docker install steps), then continue with [§ 2.3](#23-download-the-dashboard-app).
 
 ---
 
-### 2.2 Linux, Windows, and Intel Mac
+### 2.2 Linux and Windows
 
 Install Docker (or Podman) before proceeding with §§ 2.3–2.5.
 
@@ -204,16 +227,15 @@ After installation to make sure it's enabled, run `wsl --list --verbose` - if th
 2. Install NVIDIA GPU driver with WSL support (standard NVIDIA gaming drivers work fine)
     * Not required if using CPU mode
 
-**macOS (Intel / CPU-only):** Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
-or [Podman Desktop](https://podman-desktop.io/) - GPU acceleration is not available on Intel macOS;
-the server runs in CPU mode automatically.
+**macOS (running the server locally in Docker/Podman):** Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
+or [Podman Desktop](https://podman-desktop.io/). This path applies to both Intel Macs (which have no other option for a local server — MLX is Apple-Silicon-only) and Apple Silicon users who prefer Docker over the bundled Metal DMG. GPU acceleration is not available through Docker on macOS; the server runs in CPU mode.
 
 ### 2.3 Download the Dashboard app
 
 Before doing anything else, you need to download **and install** the Dashboard app for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page.
 This is just the frontend - no models or packages are downloaded yet, but it must be installed before setting up the server in the next step.
 
->* *Linux and Windows builds are x64; macOS is arm64*
+>* *Linux and Windows builds are x64; macOS ships both arm64 and x64 DMGs — see [§ 2.1](#21-macos-apple-silicon-or-intel) for which to pick*
 >* *Each release artifact includes an gpg signature by my key (`.asc`)*
 
 ##### 2.3.1 Linux AppImage Prerequisites

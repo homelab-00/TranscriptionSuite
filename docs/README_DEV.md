@@ -288,8 +288,12 @@ cd dashboard && npm run package:windows
 # Output: dashboard/release/TranscriptionSuite Setup *.exe
 
 # macOS (on macOS machine, Apple Silicon)
+# Builds the thin DMG — dashboard-only, for users connecting to a remote
+# server or running the server in Docker. The bundled Metal DMG
+# (end-user local-install artifact) is built by a separate CI job — see
+# §5.5, §5.8, and §15.10.
 ./build/build-electron-mac.sh
-# Output: dashboard/release/TranscriptionSuite-*-arm64.dmg
+# Output: dashboard/release/TranscriptionSuite-*-arm64-mac.dmg
 
 # Or from within dashboard/
 cd dashboard && npm run package:mac
@@ -340,7 +344,7 @@ TranscriptionSuite uses a **client-server architecture**:
 │  │  Renderer: React + TypeScript + Tailwind CSS      │  │
 │  │  Main Process: Electron (Node.js)                 │  │
 │  │  Targets: Linux (AppImage) + Windows (NSIS)       │  │
-│  │           + macOS (DMG + ZIP, arm64, unsigned)    │  │
+│  │           + macOS (DMG, arm64 + x64, unsigned)    │  │
 │  └───────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -363,7 +367,8 @@ TranscriptionSuite uses a **client-server architecture**:
 |----------|--------------|----------|-----------------|-------|
 | **Linux** | Single-process | Electron + React | GPU (default) or CPU | Packaged as AppImage via electron-builder |
 | **Windows** | Single-process | Electron + React | GPU (default) or CPU | Packaged as NSIS installer via electron-builder |
-| **macOS** | Single-process | Electron + React | CPU only (v1) | Packaged as DMG + ZIP (arm64), unsigned |
+| **macOS (Apple Silicon)** | Single-process | Electron + React | **Metal + MLX** (local server) or CPU (Docker) or remote | Two DMGs: bundled `arm64-mac-metal.dmg` (MLX backend baked in, end-user install) and thin `arm64-mac.dmg` (dashboard only). MLX is Apple-Silicon-only — it sits on top of Metal and exploits the unified-memory architecture. |
+| **macOS (Intel)** | Single-process | Electron + React | CPU only (Docker) or remote | Thin `x64-mac.dmg` only — MLX does not exist on Intel Macs. Local transcription runs in a Docker/Podman container on CPU. |
 
 **Dashboard UI Design**: Single codebase with **sidebar navigation** layout:
 - Left sidebar with navigation buttons and real-time status lights
@@ -485,7 +490,7 @@ TranscriptionSuite/
 │
 ├── build/                        # Build and development tools
 │   ├── build-electron-linux.sh   # Build Electron AppImage
-│   ├── build-electron-mac.sh     # Build Electron DMG + ZIP (macOS arm64)
+│   ├── build-electron-mac.sh     # Build Electron thin DMG (macOS arm64 + x64)
 │   ├── sign-electron-artifacts.sh # Generate armored detached signatures (.asc)
 │   ├── generate-ico.sh           # Generate PNG/ICO/ICNS/tray-icon assets + copy logo.svg to dashboard/public/
 │   ├── docker-build-push.sh      # Build and push Docker image
@@ -714,10 +719,18 @@ uv sync
 |----------|--------|--------|---------------------|
 | **Linux** | Electron + electron-builder | AppImage | None |
 | **Windows** | Electron + electron-builder | NSIS installer | None |
-| **macOS** | Electron + electron-builder | DMG + ZIP (arm64) | Python 3 + pip (for `dmgbuild`, see §13.7) |
-| **macOS Metal** | Local build script | Unpacked `.app` (~5 GB) | Apple Silicon Mac, Homebrew (see §15.10) |
+| **macOS (thin DMG, both archs)** | Electron + electron-builder | `arm64-mac.dmg` + `x64-mac.dmg` (~200 MB each) | Python 3 + pip (for `dmgbuild` on runners < macOS 15.7, see §13.7) |
+| **macOS Metal (bundled DMG, arm64 only)** | Dedicated CI job (injects Python 3.13 + MLX venv into the `.app`, re-signs, `hdiutil` DMG) | `arm64-mac-metal.dmg` (~3-5 GB) | GitHub-hosted `macos-14` runner, uv |
 
-> **Note:** The macOS Metal build is **not** part of the CI release pipeline. It bundles a full Python 3.13 venv with MLX/PyTorch dependencies into the `.app`, making it ~5 GB - too large for a GitHub Release artifact. Users build it locally via `build/setup-macos-metal.sh`. See [§15.10](#1510-bare-metal-build-script) for details.
+> **Three macOS release artifacts, all user-facing DMGs:**
+>
+> - **`TranscriptionSuite-<ver>-arm64-mac.dmg`** (thin, Apple Silicon, ~200 MB) - dashboard only, no Python/MLX backend. For Apple Silicon users who will drive a **remote server** (Tailscale/LAN) or run the server in **Docker/Podman** on their Mac. Built by `build-electron-mac.sh` / `npm run package:mac`.
+> - **`TranscriptionSuite-<ver>-x64-mac.dmg`** (thin, Intel, ~200 MB) - identical to the arm64 thin DMG but built for Intel Macs (`x86_64`). This is the **only** macOS artifact for Intel users — MLX is Apple-Silicon-only, so there is no Intel bundled DMG. Intel users run the server remotely or in a local Docker/Podman container (CPU only). Built by the same job as the arm64 thin DMG via electron-builder's multi-arch support.
+> - **`TranscriptionSuite-<ver>-arm64-mac-metal.dmg`** (bundled, Apple Silicon, ~3-5 GB) - dashboard + full Python 3.13 + MLX backend pre-installed inside the `.app`. The "Metal server" label in the UI refers to MLX running on Metal (Apple's GPU API). MLX is Apple-Silicon-only, so this artifact is arm64 only. Built by the `build-macos-metal` CI job (see §15.10).
+>
+> **There is no macOS ZIP artifact.** `platformGate.ts` resolves macOS to the `manual-download` strategy (the app is ad-hoc signed, so `electron-updater` would fail Squirrel.Mac's signature check), so no ZIP update feed is needed. macOS users update by downloading a new DMG from the Releases page.
+
+There is also a **fourth build path** that is not part of the release pipeline — `build/setup-macos-metal.sh` — used for local dev iteration on the bundled Metal build against an unreleased source tree. See §15.10 for how it relates to the `build-macos-metal` CI job.
 
 ### 5.3 Linux AppImage
 
@@ -745,12 +758,23 @@ npm run package:windows
 - Alternatively, run PowerShell as Administrator
 - This resolves `electron-builder` code signing extraction errors during packaging
 
-### 5.5 macOS DMG + ZIP (Unsigned)
+### 5.5 macOS Thin DMG (Unsigned, both archs)
+
+This produces the **thin** dashboard-only DMG — the install artifact for any
+macOS user who is **not** running the bundled MLX server locally. That covers:
+Apple Silicon users who will connect to a remote server, Apple Silicon users
+who want to run the server in Docker, and Intel Mac users (who have no other
+local-server option since MLX does not exist on Intel).
+
+electron-builder produces both architectures from a single invocation:
+`arm64-mac.dmg` for Apple Silicon and `x64-mac.dmg` for Intel. Neither
+includes the Python/MLX backend. The **bundled** Metal DMG (backend
+pre-installed, arm64 only) is built by a separate CI job — see §5.8 and §15.10.
 
 ```bash
 ./build/build-electron-mac.sh
-# Output: dashboard/release/TranscriptionSuite-*-arm64.dmg
-#         dashboard/release/TranscriptionSuite-*-arm64-mac.zip
+# Output: dashboard/release/TranscriptionSuite-*-arm64-mac.dmg
+#         dashboard/release/TranscriptionSuite-*-x64-mac.dmg
 ```
 
 Or manually:
@@ -837,23 +861,27 @@ Any tag matching `v*` triggers the workflow.
 
 #### Pipeline Overview
 
-The workflow runs **three parallel build jobs** on GitHub-hosted runners, then a final job that assembles the release:
+The workflow runs **four parallel build jobs** on GitHub-hosted runners, then a final job that assembles the release:
 
 ```
 v* tag push
-    ├── build-linux   (ubuntu-latest)   → AppImage + .asc
-    ├── build-windows (windows-latest)  → NSIS .exe + .asc
-    ├── build-macos   (macos-14, arm64) → DMG + ZIP + .asc
-    └── create-release (after all three) → Draft GitHub Release
+    ├── build-linux        (ubuntu-latest)   → AppImage + .asc
+    ├── build-windows      (windows-latest)  → NSIS .exe + .asc
+    ├── build-macos        (macos-14, arm64) → thin DMGs (arm64+x64) + .asc  (remote/Docker users on either arch, plus Intel-only)
+    ├── build-macos-metal  (macos-14, arm64) → bundled Metal DMG (arm64 only) + .asc  (local MLX server, Apple Silicon only)
+    └── create-release (after all four)      → Draft GitHub Release
 ```
 
 | Job | Runner | Build Command | Output |
 |-----|--------|---------------|--------|
 | `build-linux` | `ubuntu-latest` | `npm run package:linux` | `.AppImage` |
 | `build-windows` | `windows-latest` | `npm run package:windows` | `.exe` (NSIS) |
-| `build-macos` | `macos-14` | `bash build/build-electron-mac.sh` | `.dmg` + `.zip` (arm64) |
+| `build-macos` | `macos-14` | `bash build/build-electron-mac.sh` | `-arm64-mac.dmg` + `-x64-mac.dmg` (thin, ~200 MB each) |
+| `build-macos-metal` | `macos-14` | inline in workflow (uv → python-build-standalone → `uv sync --extra mlx` → `hdiutil`) | `-arm64-mac-metal.dmg` (bundled, ~3-5 GB) |
 
-The macOS job uses the full `build-electron-mac.sh` script (handles `dmgbuild` installation, `.icns` generation, etc.) rather than a bare `npm run package:mac`.
+The `build-macos-metal` job injects a full Python 3.13 + MLX venv into the `.app` bundle, rewrites venv python symlinks to be relocation-safe, re-signs the bundle with ad-hoc signatures, and wraps everything in a DMG via `hdiutil`. See [§15.10](#1510-bare-metal-build-script) for the mirror local-dev script and the rationale for running this in CI.
+
+All three macOS DMGs are user-facing install artifacts (two thin DMGs covering arm64 + x64; one bundled Metal DMG for arm64 only). **No macOS ZIP is built** — the app is ad-hoc signed and `platformGate.ts` routes macOS to `manual-download`, so there is no `electron-updater` feed to produce.
 
 The Windows job includes retry logic (3 attempts, 15s delay) to handle transient 502 errors when electron-builder downloads `winCodeSign` from GitHub Releases.
 
@@ -885,10 +913,12 @@ TranscriptionSuite-<version>-x86_64.AppImage
 TranscriptionSuite-<version>-x86_64.AppImage.asc
 TranscriptionSuite Setup <version>.exe
 TranscriptionSuite Setup <version>.exe.asc
-TranscriptionSuite-<version>-arm64-mac.dmg
+TranscriptionSuite-<version>-arm64-mac.dmg         # thin DMG, Apple Silicon — dashboard only
 TranscriptionSuite-<version>-arm64-mac.dmg.asc
-TranscriptionSuite-<version>-arm64-mac.zip
-TranscriptionSuite-<version>-arm64-mac.zip.asc
+TranscriptionSuite-<version>-x64-mac.dmg           # thin DMG, Intel — dashboard only (Intel Macs' only artifact)
+TranscriptionSuite-<version>-x64-mac.dmg.asc
+TranscriptionSuite-<version>-arm64-mac-metal.dmg   # bundled DMG, Apple Silicon — dashboard + MLX backend
+TranscriptionSuite-<version>-arm64-mac-metal.dmg.asc
 ```
 
 ---
@@ -3147,7 +3177,7 @@ These checks are useful for:
 
 ### 13.7 macOS DMG Build Failure (dmgbuild binary)
 
-**Issue**: `electron-builder` ≥ 26.7 bundles a `dmgbuild` binary (`dmg-builder@1.2.0`) that was compiled for **macOS 15.7 (Sequoia)**. On older macOS versions, the build fails with:
+**Issue**: `electron-builder` ≥ 26.7 bundles a `dmgbuild` binary (`dmg-builder@1.2.0`) that was compiled for **macOS 15.7 (Sequoia)**. On older macOS versions, the thin-DMG build fails with:
 ```
 dyld: Library not loaded: /usr/local/opt/gettext/lib/libintl.8.dylib
   (built for macOS 15.7 which is newer than running OS)
@@ -3164,6 +3194,8 @@ npm run package:mac
 The `build-electron-mac.sh` script does this automatically. If you run `npm run package:mac` directly, set `CUSTOM_DMGBUILD_PATH` first.
 
 **Alternative**: Upgrade macOS to 15.7+ (Sequoia), which is the minimum version the bundled binary supports.
+
+> This applies to the **thin** DMG path only. The bundled Metal DMG (`build-macos-metal` CI job) uses `hdiutil` directly and is unaffected.
 
 ---
 
@@ -3200,6 +3232,8 @@ The Metal/MLX backend provides hardware-accelerated transcription on Apple Silic
 Macs using the `mlx-audio`, `parakeet-mlx`, and `canary-mlx` packages. When the
 Metal runtime profile is selected, the dashboard manages a native uvicorn server
 process directly - no Docker required.
+
+> *Naming note: the dashboard's UI strings ("Metal server", "Start Metal Server", "Metal runtime", `mlx:start` IPC, etc.) and several variable names in this section conflate **Metal** with **MLX**. They are not the same thing. **Metal** is Apple's GPU API and runs on many Intel Macs too (AMD GCN+, NVIDIA Kepler+, Intel HD 4000+ GPUs). **MLX** is Apple's machine-learning framework that uses Metal under the hood and is **Apple-Silicon-only**. This project's "Metal" code path is really an MLX path — it cannot run on Intel Macs even if they have a Metal-capable GPU. Treat "Metal" in UI labels and identifiers as shorthand for "MLX-on-Metal" until a future renaming pass cleans up the terminology.*
 
 | Component | Details |
 |-----------|---------|
@@ -3517,19 +3551,21 @@ If `mlx.available` is `false`, check `mlx.reason`:
 
 ### 15.10 Bare-Metal Build Script
 
-`build/setup-macos-metal.sh` is a local, user-facing setup script that produces a **self-contained** `TranscriptionSuite.app` with the Python/MLX backend embedded inside. It is not part of the CI release pipeline (see the note in [§5.2](#52-build-matrix) for why).
+`build/setup-macos-metal.sh` is a local developer script that produces a **self-contained** `TranscriptionSuite.app` with the Python/MLX backend embedded inside — the same shape as the CI-built `-arm64-mac-metal.dmg` release artifact, but assembled locally against your current working tree (useful for dev iteration on unreleased changes).
 
-#### How it differs from the CI macOS build
+#### How each macOS build path differs
 
-| | `build-electron-mac.sh` (CI - §5.5) | `setup-macos-metal.sh` (local - this section) |
-|---|---|---|
-| **Purpose** | Produce release artifacts for GitHub | One-command local setup for Metal users |
-| **Runner** | GitHub Actions `macos-14` | User's own Apple Silicon Mac |
-| **electron-builder target** | `--mac dmg zip` | `--mac dir --arm64` (unpacked `.app`) |
-| **Python backend** | Not bundled (server runs in Docker) | Full Python 3.13 venv + MLX baked into `Contents/Resources/backend/` |
-| **System deps** | Assumes CI environment | Installs Homebrew, uv, Node.js, ffmpeg if missing |
-| **Output size** | ~200 MB (DMG + ZIP) | ~5 GB (venv + MLX + PyTorch) |
-| **Distributable** | Yes (GitHub Release artifact) | No (local only) |
+There are **three** macOS build paths to be aware of:
+
+| | `build-electron-mac.sh` (CI - §5.5) | `build-macos-metal` CI job (§5.8) | `setup-macos-metal.sh` (local - this section) |
+|---|---|---|---|
+| **Purpose** | Thin DMG for remote / Docker users | Bundled DMG for local Metal users | Dev iteration on a local checkout |
+| **Runner** | GitHub Actions `macos-14` | GitHub Actions `macos-14` | User's own Apple Silicon Mac |
+| **electron-builder target** | `--mac dmg` | `--mac dir --arm64` (unpacked `.app`, post-processed) | `--mac dir --arm64` |
+| **Python backend** | Not bundled — user runs server remotely or in Docker | Full Python 3.13 venv + MLX baked into `Contents/Resources/backend/` | Same as CI metal job |
+| **System deps** | Assumes CI environment, uses `dmgbuild` via pip | Assumes CI environment, installs uv via `astral-sh/setup-uv` | Installs Homebrew, uv, Node.js, ffmpeg if missing |
+| **Output** | `-arm64-mac.dmg` (~200 MB) | `-arm64-mac-metal.dmg` (~3-5 GB) | Unpacked `.app` (~5 GB) |
+| **Distributable** | Yes (GitHub Release — user-facing install) | Yes (GitHub Release — user-facing install) | No (local only) |
 
 #### Usage
 
