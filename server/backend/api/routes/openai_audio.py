@@ -125,9 +125,12 @@ async def create_transcription(
         await asyncio.to_thread(model_manager.ensure_transcription_loaded)
     except BackendDependencyError as dep_err:
         remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
-        detail_message = f"Backend dependency missing: {dep_err}{remedy_suffix}"
-        logger.warning("OpenAI transcription pre-check failed — %s", detail_message)
-        return _openai_error(503, detail_message, error_type="server_error")
+        logger.warning(
+            "OpenAI transcription pre-check failed — Backend dependency missing: %s%s",
+            dep_err,
+            remedy_suffix,
+        )
+        return _openai_error(503, "Backend dependency unavailable", error_type="server_error")
 
     success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
     if not success:
@@ -235,9 +238,12 @@ async def create_translation(
         await asyncio.to_thread(model_manager.ensure_transcription_loaded)
     except BackendDependencyError as dep_err:
         remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
-        detail_message = f"Backend dependency missing: {dep_err}{remedy_suffix}"
-        logger.warning("OpenAI translation pre-check failed — %s", detail_message)
-        return _openai_error(503, detail_message, error_type="server_error")
+        logger.warning(
+            "OpenAI translation pre-check failed — Backend dependency missing: %s%s",
+            dep_err,
+            remedy_suffix,
+        )
+        return _openai_error(503, "Backend dependency unavailable", error_type="server_error")
 
     success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
     if not success:

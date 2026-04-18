@@ -716,11 +716,14 @@ async def summarize_recording(
                 recording_id, llm_response.response, llm_response.model
             ):
                 logger.warning(
-                    f"update_recording_summary returned False for recording {recording_id}"
+                    "update_recording_summary returned False for recording %s",
+                    sanitize_for_log(str(recording_id)),
                 )
         except Exception as exc:
             logger.error(
-                f"Failed to persist summary for recording {recording_id}: {exc}",
+                "Failed to persist summary for recording %s: %s",
+                sanitize_for_log(str(recording_id)),
+                sanitize_for_log(str(exc)),
                 exc_info=True,
             )
 
@@ -757,7 +760,10 @@ async def summarize_recording_stream(
 
     async def _persist(text: str, model: str | None) -> None:
         if not update_recording_summary(recording_id, text, model):
-            logger.warning(f"update_recording_summary returned False for recording {recording_id}")
+            logger.warning(
+                "update_recording_summary returned False for recording %s",
+                sanitize_for_log(str(recording_id)),
+            )
 
     return _build_llm_stream_response(
         LLMRequest(

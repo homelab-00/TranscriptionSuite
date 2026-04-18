@@ -128,22 +128,42 @@ export class MLXServerManager {
     // `app:ensureServerConfig` normally creates this file, but it is only
     // invoked from the renderer — which loads *after* this auto-start fires.
     // We replicate the same logic here so the server always has a config file.
+    //
+    // Writes use O_EXCL semantics (COPYFILE_EXCL / flag 'wx') so the
+    // existence check and the write are a single atomic syscall — avoids a
+    // TOCTOU race if another process creates the file mid-call.
     const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
-    if (!fs.existsSync(userConfigPath)) {
-      // Template search: one level above serverBackendDir works for both
-      // dev (server/backend/ → server/config.yaml) and packaged
-      // (<resourcesPath>/backend/ → <resourcesPath>/config.yaml) layouts.
-      const templatePath = path.resolve(serverBackendDir, '../config.yaml');
-      try {
-        fs.mkdirSync(path.dirname(userConfigPath), { recursive: true });
-        fs.copyFileSync(templatePath, userConfigPath);
-        this._appendLog(`[MLX] Copied config from ${templatePath} → ${userConfigPath}`);
-      } catch {
+    // Template search: one level above serverBackendDir works for both
+    // dev (server/backend/ → server/config.yaml) and packaged
+    // (<resourcesPath>/backend/ → <resourcesPath>/config.yaml) layouts.
+    const templatePath = path.resolve(serverBackendDir, '../config.yaml');
+    fs.mkdirSync(path.dirname(userConfigPath), { recursive: true });
+    try {
+      fs.copyFileSync(templatePath, userConfigPath, fs.constants.COPYFILE_EXCL);
+      this._appendLog(`[MLX] Copied config from ${templatePath} → ${userConfigPath}`);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === 'EEXIST') {
+        // File already exists — another process beat us, or prior run created it.
+        // Either way, the precondition ("config file present") is satisfied.
+        this._appendLog(`[MLX] Config already present at ${userConfigPath}`);
+      } else {
         // Template not found (should not happen in a properly built package).
         // Write a minimal stub so the server can at least start.
-        fs.mkdirSync(path.dirname(userConfigPath), { recursive: true });
-        fs.writeFileSync(userConfigPath, '# TranscriptionSuite configuration\n', 'utf-8');
-        this._appendLog('[MLX] Warning: no config template found; wrote minimal config stub.');
+        try {
+          fs.writeFileSync(userConfigPath, '# TranscriptionSuite configuration\n', {
+            encoding: 'utf-8',
+            flag: 'wx',
+          });
+          this._appendLog('[MLX] Warning: no config template found; wrote minimal config stub.');
+        } catch (stubErr) {
+          const stubCode = (stubErr as NodeJS.ErrnoException)?.code;
+          if (stubCode === 'EEXIST') {
+            this._appendLog(`[MLX] Config already present at ${userConfigPath}`);
+          } else {
+            throw stubErr;
+          }
+        }
       }
     }
 

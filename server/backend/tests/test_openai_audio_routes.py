@@ -557,8 +557,13 @@ class TestEnsureTranscriptionLoadedIntegration:
         assert resp.status_code == 200
         ensure.assert_called_once()
 
-    def test_backend_dependency_error_returns_503_with_remedy_in_openai_envelope(self):
-        """NeMo missing → 503 with OpenAI-shaped body containing the remedy."""
+    def test_backend_dependency_error_returns_503_with_generic_body_and_logged_remedy(self, caplog):
+        """NeMo missing → 503 with generic OpenAI-shaped body; remedy goes to server log only.
+
+        Client response intentionally does NOT echo the exception string
+        (CodeQL py/stack-trace-exposure). Operators still see the full
+        error and remedy in the server log.
+        """
         from server.core.stt.backends.base import BackendDependencyError
 
         def _raise_missing_nemo() -> None:
@@ -579,9 +584,12 @@ class TestEnsureTranscriptionLoadedIntegration:
         # was never reached.
         app.state.model_manager.job_tracker.try_start_job = try_start_job
 
-        with patch(
-            "server.api.routes.openai_audio.resolve_main_transcriber_model",
-            return_value="test-model",
+        with (
+            patch(
+                "server.api.routes.openai_audio.resolve_main_transcriber_model",
+                return_value="test-model",
+            ),
+            caplog.at_level("WARNING", logger="server.api.routes.openai_audio"),
         ):
             client = TestClient(app, raise_server_exceptions=False)
             resp = _upload(client)
@@ -591,17 +599,19 @@ class TestEnsureTranscriptionLoadedIntegration:
         # OpenAI envelope shape preserved.
         assert body["error"]["type"] == "server_error"
         msg = body["error"]["message"]
-        # Both the original error text AND the remedy must be in the message
-        # so external clients surface an actionable diagnostic to the user.
-        assert "nemo-toolkit is not installed" in msg
-        assert "Set INSTALL_NEMO=true" in msg
+        # Response body is generic — no exception text, no remedy.
+        assert msg == "Backend dependency unavailable"
+        # Server log still carries the full diagnostic for operators.
+        log_text = "\n".join(r.getMessage() for r in caplog.records)
+        assert "nemo-toolkit is not installed" in log_text
+        assert "Set INSTALL_NEMO=true" in log_text
         # try_start_job MUST NOT have been reached — the slot stays free for
         # the next request once the operator fixes the dep.
         try_start_job.assert_not_called()
         end_job.assert_not_called()
         fake_engine.transcribe_file.assert_not_called()
 
-    def test_backend_dependency_error_on_translation_returns_503(self):
+    def test_backend_dependency_error_on_translation_returns_503(self, caplog):
         """Symmetric coverage for the translation handler."""
         from server.core.stt.backends.base import BackendDependencyError
 
@@ -618,9 +628,12 @@ class TestEnsureTranscriptionLoadedIntegration:
             transcription_engine=fake_engine,
             try_start_job_result=(True, "job-1", None),
         )
-        with patch(
-            "server.api.routes.openai_audio.resolve_main_transcriber_model",
-            return_value="test-model",
+        with (
+            patch(
+                "server.api.routes.openai_audio.resolve_main_transcriber_model",
+                return_value="test-model",
+            ),
+            caplog.at_level("WARNING", logger="server.api.routes.openai_audio"),
         ):
             client = TestClient(app, raise_server_exceptions=False)
             resp = _upload(client, path="/v1/audio/translations")
@@ -628,7 +641,10 @@ class TestEnsureTranscriptionLoadedIntegration:
         assert resp.status_code == 503
         body = resp.json()
         assert body["error"]["type"] == "server_error"
-        assert "Install nemo" in body["error"]["message"]
+        assert body["error"]["message"] == "Backend dependency unavailable"
+        log_text = "\n".join(r.getMessage() for r in caplog.records)
+        assert "nemo-toolkit missing" in log_text
+        assert "Install nemo" in log_text
 
     def test_ensure_runs_before_try_start_job(self):
         """Call-order lock: ensure_transcription_loaded must execute before

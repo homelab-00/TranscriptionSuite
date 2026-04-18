@@ -1147,8 +1147,6 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
         404: Job not found.
         410: Job failed (includes error_message).
     """
-    import json as _json
-
     from ...database.job_repository import get_job, mark_delivered
 
     job = get_job(job_id)
@@ -1250,8 +1248,6 @@ async def retry_transcription(
 
 async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_state: Any) -> None:
     """Background task: re-transcribe from saved audio and persist the result."""
-    import json as _json
-
     from ...core.json_utils import sanitize_for_json
     from ...database.job_repository import mark_failed, save_result
 
@@ -1519,8 +1515,6 @@ async def get_recent_undelivered_results(request: Request) -> JSONResponse:
     Returns:
         200: List of up to 5 undelivered completed jobs with a text preview.
     """
-    import json as _json
-
     from ...database.job_repository import get_recent_undelivered
 
     client_name = get_client_name(request)
