@@ -2632,6 +2632,24 @@ async function fetchTagDate(
 }
 
 /**
+ * Discriminated result of `listRemoteTags`.
+ *
+ * `not-published` is reserved for the specific case where GHCR responds 404
+ * to `/v2/<package>/tags/list` — the package exists in the registry namespace
+ * but has never had a tag pushed. With the GH-83 legacy variant split, this
+ * is the realistic first-release state for `-legacy` until the first
+ * `docker-build-push.sh --variant legacy` run lands. The UI surfaces this
+ * as a distinct "not yet published" state rather than a silent empty chip row.
+ *
+ * `error` covers every other failure mode (network, non-404 HTTP, timeout,
+ * malformed JSON) and keeps the existing UI error affordance.
+ */
+export type RemoteTagsResult =
+  | { status: 'ok'; tags: RemoteTag[] }
+  | { status: 'not-published'; tags: [] }
+  | { status: 'error'; tags: [] };
+
+/**
  * Fetch available image tags from the GitHub Container Registry.
  *
  * GHCR requires a two-step anonymous auth flow even for public packages:
@@ -2639,35 +2657,44 @@ async function fetchTagDate(
  * 2. GET /v2/.../tags/list with Authorization header
  * 3. For each tag, fetch manifest + config blob for creation date (parallel)
  *
- * Returns version-matching tags sorted by semver descending, or [] on failure.
- * The GHCR package queried is chosen by `server.useLegacyGpu` (Issue #83).
+ * Returns a discriminated `RemoteTagsResult` so callers can distinguish a
+ * genuinely empty tag list from a 404 ("package exists but never published")
+ * from a network/registry error. The GHCR package queried is chosen by
+ * `server.useLegacyGpu` (Issue #83).
  */
 /**
  * Fetch the tag list only (fast, ~1-2s). Dates are fetched separately
  * via fetchRemoteTagDates() so the UI isn't blocked.
  */
-async function listRemoteTags(): Promise<RemoteTag[]> {
+async function listRemoteTags(): Promise<RemoteTagsResult> {
   const { tokenUrl, tagsUrl } = buildGhcrUrls(readUseLegacyGpuFromStore());
   try {
     const signal = AbortSignal.timeout(5000);
 
     const tokenResp = await fetch(tokenUrl, { signal });
-    if (!tokenResp.ok) return [];
+    if (!tokenResp.ok) return { status: 'error', tags: [] };
     const { token } = (await tokenResp.json()) as { token?: string };
-    if (!token) return [];
+    if (!token) return { status: 'error', tags: [] };
 
     const resp = await fetch(tagsUrl, {
       signal,
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!resp.ok) return [];
+    // GH-83: a 404 from tags/list means the package has no tags yet. Treat as
+    // a dedicated "not yet published" state so the UI can say so instead of
+    // silently rendering zero chips.
+    if (resp.status === 404) return { status: 'not-published', tags: [] };
+    if (!resp.ok) return { status: 'error', tags: [] };
     const data = (await resp.json()) as { tags?: string[] };
     const tags = (data.tags ?? []).filter((t: string) => TAG_RE.test(t));
 
     tags.sort(semverDescending);
-    return tags.slice(0, 20).map((tag) => ({ tag, created: null }));
+    return {
+      status: 'ok',
+      tags: tags.slice(0, 20).map((tag) => ({ tag, created: null })),
+    };
   } catch {
-    return [];
+    return { status: 'error', tags: [] };
   }
 }
 

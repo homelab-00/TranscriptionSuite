@@ -1551,13 +1551,31 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       <label className="mb-1 block text-xs font-medium text-slate-500">
                         Select Image Tag
                       </label>
-                      <ImageTagChips
-                        remoteTags={mergedTags}
-                        localTags={localTagSet}
-                        localDates={localDateMap}
-                        value={selectedImage}
-                        onChange={setSelectedImage}
-                      />
+                      {/*
+                        GH-83 EC-7+12: distinguish "registry returned 404" from
+                        "registry returned an empty tag list". The legacy-GPU
+                        package (`…-server-legacy`) can legitimately return 404
+                        between the GH-83 merge and the first `--variant legacy`
+                        publish, leaving the tag chip row empty with no signal.
+                        Surface a dedicated unpublished state when we see 404
+                        + useLegacyGpu so the user knows to fall back to a
+                        local build or wait for the next release instead of
+                        silently getting zero chips.
+                      */}
+                      {docker.remoteTagsStatus === 'not-published' && useLegacyGpu ? (
+                        <div className="border-accent-amber/30 bg-accent-amber/5 rounded-lg border px-3 py-2 text-xs text-slate-400">
+                          Legacy image not yet published for this release. Pull a default image and
+                          toggle legacy mode off, or wait for the next release.
+                        </div>
+                      ) : (
+                        <ImageTagChips
+                          remoteTags={mergedTags}
+                          localTags={localTagSet}
+                          localDates={localDateMap}
+                          value={selectedImage}
+                          onChange={setSelectedImage}
+                        />
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-col justify-end space-y-2">
@@ -1844,13 +1862,18 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
                 {/*
                   Legacy-GPU image toggle (Issue #83 — Pascal/Maxwell support).
-                  Visible only for the NVIDIA CUDA profile; hidden otherwise to
-                  avoid noise for Vulkan / Metal / CPU users.
+                  Shown on all non-Metal profiles (GH-83 EC-18): a Pascal user
+                  whose first-run auto-detect landed on Vulkan or CPU (e.g.
+                  because a CUDA probe failed with the default cu129 wheels)
+                  needs to reach this toggle *without* first guessing they
+                  should switch runtime back to GPU. Hidden on Metal because
+                  Apple Silicon has no NVIDIA hardware and the legacy image
+                  is not applicable there.
                   Switching repos requires a container restart and clears the
                   runtime volume so the next bootstrap re-syncs wheels from the
                   new PyTorch index — this is handled via a confirmation dialog.
                 */}
-                {runtimeProfile === 'gpu' && (
+                {runtimeProfile !== 'metal' && (
                   <div className="flex items-center gap-3 border-b border-white/5 pb-4">
                     <label className="flex cursor-pointer items-center gap-3">
                       <input
@@ -1883,7 +1906,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <span className="text-xs text-slate-500 italic">
                       {containerStatus.exists && !isRunning
                         ? 'Remove the existing container to switch variants'
-                        : 'cu126 wheels — enable for GTX 1070/1080 and older (sm_50..sm_61)'}
+                        : runtimeProfile === 'gpu'
+                          ? 'cu126 wheels — enable for GTX 1070/1080 and older (sm_50..sm_61)'
+                          : 'cu126 wheels — switch to GPU runtime after enabling to use a Pascal/Maxwell card'}
                     </span>
                   </div>
                 )}

@@ -144,7 +144,11 @@ export interface ElectronAPI {
     listImages: () => Promise<
       Array<{ tag: string; fullName: string; size: string; created: string; id: string }>
     >;
-    listRemoteTags: () => Promise<Array<{ tag: string; created: string | null }>>;
+    listRemoteTags: () => Promise<
+      | { status: 'ok'; tags: Array<{ tag: string; created: string | null }> }
+      | { status: 'not-published'; tags: [] }
+      | { status: 'error'; tags: [] }
+    >;
     fetchRemoteTagDates: (tags: string[]) => Promise<Record<string, string | null>>;
     pullImage: (tag: string) => Promise<string>;
     cancelPull: () => Promise<boolean>;
@@ -472,7 +476,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listImages: () => ipcRenderer.invoke('docker:listImages'),
     listRemoteTags: () =>
       ipcRenderer.invoke('docker:listRemoteTags') as Promise<
-        Array<{ tag: string; created: string | null }>
+        | { status: 'ok'; tags: Array<{ tag: string; created: string | null }> }
+        | { status: 'not-published'; tags: [] }
+        | { status: 'error'; tags: [] }
       >,
     fetchRemoteTagDates: (tags: string[]) =>
       ipcRenderer.invoke('docker:fetchRemoteTagDates', tags) as Promise<

@@ -424,6 +424,20 @@ export class UpdateManager {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(15_000),
       });
+      // GH-83 EC-12: a 404 on the legacy package's tags/list is the expected
+      // state between the GH-83 merge and the first `--variant legacy` push.
+      // Surface it as a distinct, human-readable error instead of the raw
+      // "GHCR tags request returned 404" — the banner UI shows this string
+      // directly to the user.
+      if (tagsRes.status === 404 && useLegacyGpu) {
+        return {
+          current: localVersion,
+          latest: null,
+          updateAvailable: false,
+          error: 'Legacy image not yet published for this release',
+          releaseNotes: null,
+        };
+      }
       if (!tagsRes.ok) {
         throw new Error(`GHCR tags request returned ${tagsRes.status}`);
       }

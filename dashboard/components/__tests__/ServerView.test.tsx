@@ -39,7 +39,7 @@ const mockDocker = {
   stopLogStream: vi.fn(),
   clearLogs: vi.fn(),
   remoteTags: [] as string[],
-  remoteTagsError: false,
+  remoteTagsStatus: 'ok' as 'ok' | 'not-published' | 'error' | null,
   refreshImages: vi.fn(),
   refreshRemoteTags: vi.fn(),
   refreshVolumes: vi.fn(),

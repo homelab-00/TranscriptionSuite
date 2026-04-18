@@ -80,7 +80,21 @@ export interface UseDockerReturn {
 
   // Remote tags (GHCR registry)
   remoteTags: RemoteTag[];
-  remoteTagsError: boolean;
+  /**
+   * GH-83: tri-state status from the last `listRemoteTags` probe.
+   *   - `null`      : never probed (initial mount, or not in Electron)
+   *   - `'ok'`      : registry responded with a tag list (may be empty for an
+   *                   *existing* but freshly created tagless package)
+   *   - `'not-published'`: registry returned 404 on `/v2/<pkg>/tags/list` —
+   *                   the package exists in the namespace but has no tags.
+   *                   Realistic first-release state for the `-legacy` repo
+   *                   until `docker-build-push.sh --variant legacy` has run.
+   *   - `'error'`   : network/HTTP failure other than 404.
+   *
+   * Callers distinguish these to render dedicated UI affordances instead of
+   * the pre-GH-83 "empty chip row + silent updater" failure mode.
+   */
+  remoteTagsStatus: 'ok' | 'not-published' | 'error' | null;
   refreshRemoteTags: () => Promise<void>;
 
   // Sidecar image state
@@ -142,7 +156,9 @@ export function useDocker(): UseDockerReturn {
   const [pulling, setPulling] = useState(false);
   const [sidecarPulling, setSidecarPulling] = useState(false);
   const [remoteTags, setRemoteTags] = useState<RemoteTag[]>([]);
-  const [remoteTagsError, setRemoteTagsError] = useState(false);
+  const [remoteTagsStatus, setRemoteTagsStatus] = useState<'ok' | 'not-published' | 'error' | null>(
+    null,
+  );
 
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const volumeRefreshedOnHealthyRef = useRef(false);
@@ -231,13 +247,14 @@ export function useDocker(): UseDockerReturn {
     if (!docker?.listRemoteTags) return;
     try {
       // Step 1: fetch tag list (fast, ~1-2s) — UI shows chips immediately
-      const tags = await docker.listRemoteTags();
-      setRemoteTags(tags);
-      setRemoteTagsError(false);
+      const result = await docker.listRemoteTags();
+      setRemoteTags(result.tags);
+      setRemoteTagsStatus(result.status);
 
-      // Step 2: fetch dates in background (slow, ~5-8s) — chips update with dates
-      if (tags.length > 0 && docker.fetchRemoteTagDates) {
-        const tagNames = tags.map((t) => t.tag);
+      // Step 2: fetch dates in background (slow, ~5-8s) — chips update with dates.
+      // Only meaningful when we actually have tags (status === 'ok' and non-empty).
+      if (result.status === 'ok' && result.tags.length > 0 && docker.fetchRemoteTagDates) {
+        const tagNames = result.tags.map((t) => t.tag);
         docker
           .fetchRemoteTagDates(tagNames)
           .then((dates) => {
@@ -253,7 +270,8 @@ export function useDocker(): UseDockerReturn {
           });
       }
     } catch {
-      setRemoteTagsError(true);
+      setRemoteTags([]);
+      setRemoteTagsStatus('error');
     }
   }, []);
 
@@ -552,7 +570,7 @@ export function useDocker(): UseDockerReturn {
     cancelPull,
     pulling,
     remoteTags,
-    remoteTagsError,
+    remoteTagsStatus,
     refreshRemoteTags,
     hasSidecarImage,
     pullSidecarImage,

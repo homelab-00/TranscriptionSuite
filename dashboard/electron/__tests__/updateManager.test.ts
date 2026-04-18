@@ -230,3 +230,68 @@ describe('UpdateManager failure-retry timer', () => {
     expect(setSpy).not.toHaveBeenCalledWith('updates.lastStatus', expect.anything());
   });
 });
+
+// ─── GH-83 EC-12: legacy-repo 404 surfaces a human-readable error ──────────
+
+describe('UpdateManager.checkServer — legacy 404 handling', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let manager: UpdateManager;
+  let store: ReturnType<typeof makeFakeStore>;
+
+  beforeEach(() => {
+    store = makeFakeStore();
+    store.set('server.useLegacyGpu', true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    manager = new UpdateManager(store as any);
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+  });
+
+  afterEach(() => {
+    manager.destroy();
+    fetchSpy.mockRestore();
+  });
+
+  it('returns "Legacy image not yet published" when GHCR returns 404 and useLegacyGpu is true', async () => {
+    fetchSpy.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes('api.github.com')) {
+        return new Response(JSON.stringify({ tag_name: 'v1.0.0', body: '' }), { status: 200 });
+      }
+      if (url.includes('ghcr.io/token')) {
+        return new Response(JSON.stringify({ token: 'fake' }), { status: 200 });
+      }
+      if (url.includes('ghcr.io/v2') && url.includes('-legacy')) {
+        return new Response('not found', { status: 404 });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    });
+
+    const result = await manager.check();
+    expect(result.server.error).toBe('Legacy image not yet published for this release');
+    expect(result.server.latest).toBeNull();
+    expect(result.server.updateAvailable).toBe(false);
+  });
+
+  it('still surfaces a generic error for 404 on the default (non-legacy) repo', async () => {
+    store.set('server.useLegacyGpu', false);
+    fetchSpy.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes('api.github.com')) {
+        return new Response(JSON.stringify({ tag_name: 'v1.0.0', body: '' }), { status: 200 });
+      }
+      if (url.includes('ghcr.io/token')) {
+        return new Response(JSON.stringify({ token: 'fake' }), { status: 200 });
+      }
+      if (url.includes('ghcr.io/v2')) {
+        return new Response('not found', { status: 404 });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    });
+
+    const result = await manager.check();
+    // Default repo 404 is unexpected — surface the raw status so an operator
+    // can diagnose. We only remap the legacy case because that one has a
+    // known, recurring, first-release-state cause.
+    expect(result.server.error).toMatch(/GHCR tags request returned 404/);
+  });
+});
