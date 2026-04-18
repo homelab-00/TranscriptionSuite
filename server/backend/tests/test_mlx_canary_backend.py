@@ -248,7 +248,7 @@ class TestMLXCanaryBackendTranscribe:
         backend, _, mock_model = _loaded_backend("One sentence.")
         audio = np.zeros(16000, dtype=np.float32)  # 1 s
 
-        segments, info = backend.transcribe(audio)
+        segments, info = backend.transcribe(audio, language="en")
 
         assert len(segments) == 1
         assert segments[0].text == "One sentence."
@@ -262,7 +262,7 @@ class TestMLXCanaryBackendTranscribe:
         audio = np.zeros(60 * 16000, dtype=np.float32)
 
         with patch.object(mod, "_compute_speech_chunks", side_effect=_fixed_chunks):
-            segments, info = backend.transcribe(audio)
+            segments, info = backend.transcribe(audio, language="en")
 
         assert len(segments) == 2
         assert segments[0].start == pytest.approx(0.0)
@@ -276,7 +276,7 @@ class TestMLXCanaryBackendTranscribe:
         audio = np.zeros(65 * 16000, dtype=np.float32)
 
         with patch.object(mod, "_compute_speech_chunks", side_effect=_fixed_chunks):
-            segments, _ = backend.transcribe(audio)
+            segments, _ = backend.transcribe(audio, language="en")
 
         assert len(segments) == 3
         assert segments[2].start == pytest.approx(60.0)
@@ -290,7 +290,7 @@ class TestMLXCanaryBackendTranscribe:
         audio = np.zeros(30 * 16000 + 300, dtype=np.float32)
 
         with patch.object(mod, "_compute_speech_chunks", side_effect=_fixed_chunks):
-            segments, _ = backend.transcribe(audio)
+            segments, _ = backend.transcribe(audio, language="en")
 
         # Only the first 30 s chunk should produce a segment.
         assert len(segments) == 1
@@ -304,7 +304,7 @@ class TestMLXCanaryBackendTranscribe:
         audio = np.zeros(90 * 16000, dtype=np.float32)  # 3 chunks
 
         with patch.object(mod, "_compute_speech_chunks", side_effect=_fixed_chunks):
-            segments, _ = backend.transcribe(audio)
+            segments, _ = backend.transcribe(audio, language="en")
 
         # Only the non-empty chunk contributes a segment
         assert len(segments) == 1
@@ -321,14 +321,15 @@ class TestMLXCanaryBackendTranscribe:
         call_kwargs = mock_model.transcribe.call_args
         assert call_kwargs.kwargs.get("language") == "fr"
 
-    def test_transcribe_language_defaults_to_english(self) -> None:
-        backend, _, mock_model = _loaded_backend("Hello.")
+    def test_transcribe_rejects_missing_language(self) -> None:
+        """gh-81: MLX Canary must not silently default to English when no
+        source language is given. Previously the resolver coerced ``None`` to
+        "en", which translated every non-English audio to English."""
+        backend, _, _ = _loaded_backend("Hello.")
         audio = np.zeros(16000, dtype=np.float32)
 
-        backend.transcribe(audio)
-
-        call_kwargs = mock_model.transcribe.call_args
-        assert call_kwargs.kwargs.get("language") == "en"
+        with pytest.raises(ValueError, match="explicit source language"):
+            backend.transcribe(audio)
 
     def test_transcribe_returns_correct_info(self) -> None:
         backend, _, _ = _loaded_backend("Text.")
@@ -345,7 +346,7 @@ class TestMLXCanaryBackendTranscribe:
         mock_model.transcribe.return_value = "   "
         audio = np.zeros(16000, dtype=np.float32)
 
-        segments, _ = backend.transcribe(audio)
+        segments, _ = backend.transcribe(audio, language="en")
 
         assert segments == []
 
@@ -355,7 +356,7 @@ class TestMLXCanaryBackendTranscribe:
         backend, _, mock_model = _loaded_backend("Hello.")
         audio = np.zeros(16000, dtype=np.float32)
 
-        backend.transcribe(audio)
+        backend.transcribe(audio, language="en")
 
         call_kwargs = mock_model.transcribe.call_args
         assert call_kwargs.kwargs.get("timestamps") is False
@@ -365,7 +366,7 @@ class TestMLXCanaryBackendTranscribe:
         audio = np.zeros(16000, dtype=np.float32)
         callback = MagicMock()
 
-        backend.transcribe(audio, progress_callback=callback)
+        backend.transcribe(audio, language="en", progress_callback=callback)
 
         assert callback.call_count >= 1
         # Final call reports completion: progress_callback(audio_len, audio_len)
@@ -394,7 +395,7 @@ class TestMLXCanaryResampling:
             {"scipy": scipy_stub, "scipy.signal": scipy_signal_stub},
         ):
             audio_44k = np.zeros(44100, dtype=np.float32)
-            backend.transcribe(audio_44k, audio_sample_rate=44100)
+            backend.transcribe(audio_44k, audio_sample_rate=44100, language="en")
 
         scipy_signal_stub.resample.assert_called_once()
 
@@ -412,7 +413,7 @@ class TestMLXCanaryResampling:
             {"scipy": scipy_stub, "scipy.signal": scipy_signal_stub},
         ):
             audio_16k = np.zeros(16000, dtype=np.float32)
-            backend.transcribe(audio_16k, audio_sample_rate=16000)
+            backend.transcribe(audio_16k, audio_sample_rate=16000, language="en")
 
         scipy_signal_stub.resample.assert_not_called()
 
@@ -421,7 +422,7 @@ class TestMLXCanaryResampling:
         backend, _, mock_model = _loaded_backend("Hello.")
         audio_int16 = np.zeros(16000, dtype=np.int16)
 
-        segments, _ = backend.transcribe(audio_int16)
+        segments, _ = backend.transcribe(audio_int16, language="en")
 
         # First positional arg is a temp file path (str) — audio conversion is
         # implicit before sf.write; no dtype assertion needed on the path itself.

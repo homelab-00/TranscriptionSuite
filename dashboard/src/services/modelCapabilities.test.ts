@@ -8,6 +8,8 @@ import {
   isVibeVoiceASRModel,
   isEnglishOnlyWhisperModel,
   filterLanguagesForModel,
+  pickDefaultLanguage,
+  supportsAutoDetect,
   supportsTranslation,
   supportsDiarization,
   NEMO_LANGUAGES,
@@ -236,10 +238,12 @@ describe('filterLanguagesForModel', () => {
     expect(result).not.toContain('Chinese');
   });
 
-  it('filters to NeMo languages + Auto Detect for canary', () => {
+  it('filters to NeMo languages and drops Auto Detect for canary (gh-81)', () => {
     const result = filterLanguagesForModel(allLanguages, 'nvidia/canary-1b-v2');
 
-    expect(result).toContain('Auto Detect');
+    expect(result).not.toContain('Auto Detect');
+    expect(result).toContain('English');
+    expect(result).toContain('French');
     expect(result).not.toContain('Japanese');
   });
 
@@ -255,10 +259,10 @@ describe('filterLanguagesForModel', () => {
     expect(result).toEqual(['Auto Detect']);
   });
 
-  it('filters to NeMo languages + Auto Detect for mlx canary', () => {
+  it('filters to NeMo languages and drops Auto Detect for mlx canary (gh-81)', () => {
     const result = filterLanguagesForModel(allLanguages, 'eelcor/canary-1b-v2-mlx');
 
-    expect(result).toContain('Auto Detect');
+    expect(result).not.toContain('Auto Detect');
     expect(result).toContain('English');
     expect(result).toContain('French');
     expect(result).not.toContain('Japanese');
@@ -432,5 +436,57 @@ describe('supportsTranslation with GGML models', () => {
 
   it('returns false for GGML turbo models', () => {
     expect(supportsTranslation('ggml-large-v3-turbo.bin')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pickDefaultLanguage (gh-81 snap-to-English fallback)
+// ---------------------------------------------------------------------------
+describe('pickDefaultLanguage', () => {
+  it('prefers English when present', () => {
+    expect(pickDefaultLanguage(['Bulgarian', 'English', 'Greek'])).toBe('English');
+  });
+
+  it('falls back to first option when English is missing', () => {
+    expect(pickDefaultLanguage(['French', 'German'])).toBe('French');
+  });
+
+  it('returns "Auto Detect" for an empty list (defensive default)', () => {
+    expect(pickDefaultLanguage([])).toBe('Auto Detect');
+  });
+
+  it('picks English over Auto Detect when both are options', () => {
+    expect(pickDefaultLanguage(['Auto Detect', 'English', 'French'])).toBe('English');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// supportsAutoDetect (gh-81)
+// ---------------------------------------------------------------------------
+describe('supportsAutoDetect', () => {
+  it.each([
+    'Systran/faster-whisper-large-v3',
+    'nvidia/parakeet-tdt-0.6b-v3',
+    'mlx-community/parakeet-tdt-0.6b-v3',
+    'microsoft/VibeVoice-ASR',
+    'ggml-large-v3.bin',
+    'Systran/faster-whisper-small.en',
+  ])('returns true for auto-detect-capable model: %s', (model) => {
+    expect(supportsAutoDetect(model)).toBe(true);
+  });
+
+  it.each([
+    'nvidia/canary-1b-v2',
+    'nvidia/canary-180m-flash',
+    'eelcor/canary-1b-v2-mlx',
+    'Mediform/canary-1b-v2-mlx-q8',
+  ])('returns false for canary model (requires explicit source_lang): %s', (model) => {
+    expect(supportsAutoDetect(model)).toBe(false);
+  });
+
+  it('returns true for null/undefined/empty (permissive default)', () => {
+    expect(supportsAutoDetect(null)).toBe(true);
+    expect(supportsAutoDetect(undefined)).toBe(true);
+    expect(supportsAutoDetect('')).toBe(true);
   });
 });

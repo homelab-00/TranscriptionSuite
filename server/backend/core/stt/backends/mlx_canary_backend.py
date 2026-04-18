@@ -360,6 +360,14 @@ class MLXCanaryBackend(STTBackend):
         if not self._loaded or self._model is None:
             raise RuntimeError("MLX Canary model is not loaded")
 
+        # MLX Canary shares Canary's limitation — no auto-detect, explicit
+        # source_lang required. Reject missing language loudly instead of the
+        # silent "en" default that caused issue #81 for the NVIDIA backend.
+        if not language:
+            raise ValueError(
+                "MLX Canary requires an explicit source language; received None. "
+                "Set 'language' in the transcription request."
+            )
         lang_code = _resolve_language_code(language)
 
         # Resample if needed.

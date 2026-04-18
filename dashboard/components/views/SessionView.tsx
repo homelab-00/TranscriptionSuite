@@ -47,6 +47,7 @@ import {
   filterLanguagesForModel,
   isCanaryModel,
   isWhisperModel,
+  pickDefaultLanguage,
   CANARY_TRANSLATION_TARGETS,
 } from '../../src/services/modelCapabilities';
 import { isModelDisabled } from '../../src/services/modelSelection';
@@ -472,11 +473,21 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   useEffect(() => {
     if (languagesLoading) return;
+    // When the current selection is no longer valid for the active model,
+    // prefer "English" so Canary-style models (which don't support
+    // Auto Detect) land on a sensible default. Persist the correction so a
+    // stale selection doesn't survive reload.
     if (!mainLanguageOptions.includes(mainLanguage)) {
-      setMainLanguage(mainLanguageOptions[0] ?? 'Auto Detect');
+      const next = pickDefaultLanguage(mainLanguageOptions);
+      setMainLanguage(next);
+      persistedSelectionsRef.current.mainLanguage = next;
+      void setConfig('session.mainLanguage', next).catch(() => {});
     }
     if (!liveLanguageOptions.includes(liveLanguage)) {
-      setLiveLanguage(liveLanguageOptions[0] ?? 'Auto Detect');
+      const next = pickDefaultLanguage(liveLanguageOptions);
+      setLiveLanguage(next);
+      persistedSelectionsRef.current.liveLanguage = next;
+      void setConfig('session.liveLanguage', next).catch(() => {});
     }
   }, [languagesLoading, mainLanguageOptions, liveLanguageOptions, mainLanguage, liveLanguage]);
 
@@ -597,13 +608,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // state from the remote server connection so tray controls remain functional.
   const isRemoteMode = clientMode === 'remote';
   const trayContainerRunning = isRemoteMode ? clientRunning : serverRunning;
-  const trayContainerHealth = isRemoteMode || isBareMetal
-    ? serverConnection.serverStatus === 'active'
-      ? 'healthy'
-      : serverConnection.serverStatus === 'error'
-        ? 'unhealthy'
-        : 'starting'
-    : docker.container.health;
+  const trayContainerHealth =
+    isRemoteMode || isBareMetal
+      ? serverConnection.serverStatus === 'active'
+        ? 'healthy'
+        : serverConnection.serverStatus === 'error'
+          ? 'unhealthy'
+          : 'starting'
+      : docker.container.health;
 
   // Sync tray icon state with application state
   useTraySync({

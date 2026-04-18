@@ -18,6 +18,26 @@ def normalize_model_name(model_name: str | None) -> str:
     return (model_name or "").strip().lower()
 
 
+def supports_auto_detect(model_name: str | None) -> bool:
+    """
+    Return True if the model supports source-language auto-detection.
+
+    Canary models (NVIDIA and the MLX community ports) require an explicit
+    ``source_lang`` and have no built-in language detection — exposing an
+    "Auto Detect" option for them silently coerces to English and translates
+    everything (see GitHub issue #81). Mirrors ``supportsAutoDetect`` in
+    dashboard/src/services/modelCapabilities.ts.
+    """
+    name = normalize_model_name(model_name)
+    if not name:
+        return True
+    if _CANARY_PATTERN.match(name):
+        return False
+    if _MLX_CANARY_PATTERN.match(name):
+        return False
+    return True
+
+
 def supports_english_translation(model_name: str | None) -> bool:
     """
     Return True if the model name likely supports Whisper translate task.

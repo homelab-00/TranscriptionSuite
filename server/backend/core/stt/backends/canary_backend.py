@@ -72,8 +72,15 @@ class CanaryBackend(ParakeetBackend):
         if self._model is None:
             raise RuntimeError("Canary model is not loaded")
 
-        # Canary requires an explicit source language code.
-        source_lang = language if language else "en"
+        # Canary requires an explicit source language — the model has no
+        # built-in auto-detection. Silently defaulting to "en" caused issue
+        # #81 (non-English audio was force-translated to English).
+        if not language:
+            raise ValueError(
+                "Canary requires an explicit source language; received None. "
+                "Set 'language' in the transcription request."
+            )
+        source_lang = language
 
         if task == "translate":
             # Use caller-specified target, defaulting to English.

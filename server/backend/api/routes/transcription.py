@@ -1577,13 +1577,20 @@ async def get_supported_languages(request: Request) -> dict[str, Any]:
     """
     from server.config import resolve_main_transcriber_model
     from server.core.stt.backends.factory import detect_backend_type
+    from server.core.stt.capabilities import supports_auto_detect
 
+    model_name: str | None = None
+    backend_type = "whisper"
     try:
         config = request.app.state.config
         model_name = resolve_main_transcriber_model(config)
         backend_type = detect_backend_type(model_name)
     except Exception:
-        backend_type = "whisper"
+        # On config-read failure, keep the conservative defaults above so we
+        # don't lie about capabilities — model_name stays None, backend_type
+        # stays "whisper". supports_auto_detect(None) is True, which matches
+        # the fallback Whisper story.
+        pass
 
     if backend_type in ("parakeet", "canary", "mlx_canary"):
         languages = _NEMO_LANGUAGES
@@ -1598,7 +1605,7 @@ async def get_supported_languages(request: Request) -> dict[str, Any]:
     return {
         "languages": languages,
         "count": len(languages),
-        "auto_detect": True,
+        "auto_detect": supports_auto_detect(model_name),
         "backend_type": backend_type,
         "supports_translation": supports_translation,
     }

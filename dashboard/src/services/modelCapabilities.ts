@@ -175,15 +175,46 @@ export function isEnglishOnlyWhisperModel(modelName: string | null | undefined):
 }
 
 /**
+ * Pick a sensible language when the current selection is no longer valid
+ * (e.g. the user switched to a Canary model and the previous selection was
+ * "Auto Detect"). Prefers "English" — every NeMo/Whisper model we ship with
+ * has English — and falls back to the first option, or "Auto Detect" if the
+ * options list is empty.
+ */
+export function pickDefaultLanguage(options: string[]): string {
+  if (options.includes('English')) return 'English';
+  return options[0] ?? 'Auto Detect';
+}
+
+/**
+ * Returns true if the model actually supports "Auto Detect" for the source
+ * language. Canary models require an explicit `source_lang` and have no
+ * built-in language detection — giving them an "Auto Detect" option would
+ * silently coerce to English and translate every non-English audio to English
+ * (see GitHub issue #81).
+ *
+ * Mirrors `supports_auto_detect` in server/backend/core/stt/capabilities.py.
+ */
+export function supportsAutoDetect(modelName: string | null | undefined): boolean {
+  if (isCanaryModel(modelName)) return false;
+  if (isMLXCanaryModel(modelName)) return false;
+  return true;
+}
+
+/**
  * Filter a language list to only those supported by the given model.
  * Whisper models support everything; NeMo models (Parakeet, Canary) support 25 languages.
  * English-only (.en) Whisper models restrict to English only.
- * The "Auto Detect" entry is always preserved for applicable models.
+ * "Auto Detect" is kept only for models that actually support auto-detection
+ * (see `supportsAutoDetect`).
  */
 export function filterLanguagesForModel(
   languages: string[],
   modelName: string | null | undefined,
 ): string[] {
+  const keepAutoDetect = (l: string): boolean =>
+    l !== 'Auto Detect' || supportsAutoDetect(modelName);
+
   if (isVibeVoiceASRModel(modelName)) {
     return languages.filter((l) => l === 'Auto Detect');
   }
@@ -191,15 +222,17 @@ export function filterLanguagesForModel(
     // parakeet-mlx exposes no language-hint API; the model auto-detects language from audio
     return languages.filter((l) => l === 'Auto Detect');
   }
-  if (isMLXCanaryModel(modelName)) {
-    // MLX Canary supports the same 25 NeMo languages as nvidia/canary-*
-    return languages.filter((l) => l === 'Auto Detect' || NEMO_LANGUAGES.has(l));
-  }
   if (isEnglishOnlyWhisperModel(modelName)) {
     return languages.filter((l) => l === 'English');
   }
-  if (!isNemoModel(modelName)) return languages;
-  return languages.filter((l) => l === 'Auto Detect' || NEMO_LANGUAGES.has(l));
+  if (isMLXCanaryModel(modelName) || isNemoModel(modelName)) {
+    // NVIDIA Canary and MLX Canary: 25 NeMo languages, no Auto Detect (see
+    // supportsAutoDetect). NVIDIA Parakeet: 25 NeMo languages, keeps Auto Detect.
+    return languages.filter(
+      (l) => keepAutoDetect(l) && (l === 'Auto Detect' || NEMO_LANGUAGES.has(l)),
+    );
+  }
+  return languages.filter(keepAutoDetect);
 }
 
 /**

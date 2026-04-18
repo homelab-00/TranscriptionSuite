@@ -2,6 +2,7 @@
 
 import pytest
 from server.core.stt.capabilities import (
+    supports_auto_detect,
     supports_english_translation,
     validate_translation_request,
 )
@@ -52,3 +53,51 @@ def test_non_translate_task_is_noop_validation() -> None:
         )
         == "en"
     )
+
+
+@pytest.mark.parametrize(
+    "model_name",
+    [
+        "Systran/faster-whisper-large-v3",
+        "nvidia/parakeet-tdt-0.6b-v3",
+        "mlx-community/parakeet-tdt-0.6b-v3",
+        "microsoft/VibeVoice-ASR",
+        "Systran/faster-whisper-small.en",
+        None,
+        "",
+    ],
+)
+def test_auto_detect_supported(model_name: str | None) -> None:
+    """Whisper, Parakeet (NVIDIA + MLX), VibeVoice, and unknown models auto-detect."""
+    assert supports_auto_detect(model_name)
+
+
+@pytest.mark.parametrize(
+    "model_name",
+    [
+        "nvidia/canary-1b-v2",
+        "nvidia/canary-180m-flash",
+        "eelcor/canary-1b-v2-mlx",
+        "Mediform/canary-1b-v2-mlx-q8",
+    ],
+)
+def test_auto_detect_unsupported_for_canary(model_name: str) -> None:
+    """Canary (NVIDIA + MLX ports) requires an explicit source language."""
+    assert not supports_auto_detect(model_name)
+
+
+def test_canary_backend_rejects_missing_language() -> None:
+    """Regression for gh-81: Canary must not silently default language to 'en'."""
+    import numpy as np
+    from server.core.stt.backends.canary_backend import CanaryBackend
+
+    backend = CanaryBackend.__new__(CanaryBackend)
+    # Bypass heavy __init__; set only what transcribe() touches before raising.
+    backend._model = object()  # type: ignore[attr-defined]
+
+    with pytest.raises(ValueError, match="explicit source language"):
+        backend.transcribe(
+            np.zeros(16000, dtype=np.float32),
+            language=None,
+            task="transcribe",
+        )
