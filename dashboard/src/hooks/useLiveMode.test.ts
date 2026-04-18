@@ -15,6 +15,7 @@ let lastSocket: {
   sendAudio: Mock;
   setAudioSampleRate: Mock;
   getState: Mock;
+  handleConfigChanged: Mock;
 };
 let lastSocketCbs: {
   onMessage?: (msg: { type: string; data?: Record<string, unknown> }) => void;
@@ -32,6 +33,7 @@ vi.mock('../services/websocket', () => ({
       sendAudio: vi.fn(),
       setAudioSampleRate: vi.fn(),
       getState: vi.fn().mockReturnValue('disconnected'),
+      handleConfigChanged: vi.fn(),
     };
     return lastSocket;
   }),
@@ -478,10 +480,12 @@ describe('[P1] useLiveMode', () => {
     });
   });
 
-  // ── Install-gate rearm: socket.connect() is triggered by config-changed
-  //   ONLY when the socket is in error state. Prevents churn in healthy
-  //   sessions while closing the WS-reconnect dead-end regression.
-  describe('install-gate rearm on config-changed', () => {
+  // ── config-changed forwarding: the hook no longer branches on socket state
+  //   itself — it just forwards `isBaseUrlConfigured()` to
+  //   TranscriptionSocket.handleConfigChanged so the socket class can own the
+  //   error-rearm / pending-backoff-shortcut / active-session-warn branches.
+  //   Exhaustive per-branch coverage lives in src/services/websocket.test.ts.
+  describe('config-changed forwarding to socket.handleConfigChanged', () => {
     beforeEach(() => {
       (window as any).electronAPI = {
         config: {
@@ -494,60 +498,29 @@ describe('[P1] useLiveMode', () => {
       };
     });
 
-    it('calls socket.connect() when config-changed fires AND socket is in error state', async () => {
+    it('forwards configured=true after a successful sync', async () => {
       const { result } = renderHook(() => useLiveMode());
       await driveToListening(result);
 
-      // One connect() call happened at start(); reset so we isolate the rearm.
-      lastSocket.connect.mockClear();
-      lastSocket.getState.mockReturnValue('error');
+      lastSocket.handleConfigChanged.mockClear();
 
       await act(async () => {
         await apiClient.syncFromConfig();
       });
 
-      expect(lastSocket.connect).toHaveBeenCalledTimes(1);
+      expect(lastSocket.handleConfigChanged).toHaveBeenCalledTimes(1);
+      expect(lastSocket.handleConfigChanged).toHaveBeenCalledWith(true);
     });
 
-    it('does NOT call socket.connect() when socket is in a healthy state', async () => {
+    it('forwards configured=false when the sync threw and gate is closed', async () => {
+      // Prove that the gate boolean forwarded to handleConfigChanged reflects
+      // the post-sync predicate — not just "did the sync happen". IPC rejects
+      // → synced stays false → hook forwards false → socket short-circuits.
       const { result } = renderHook(() => useLiveMode());
       await driveToListening(result);
 
-      lastSocket.connect.mockClear();
-      lastSocket.getState.mockReturnValue('ready');
+      lastSocket.handleConfigChanged.mockClear();
 
-      await act(async () => {
-        await apiClient.syncFromConfig();
-      });
-
-      expect(lastSocket.connect).not.toHaveBeenCalled();
-    });
-
-    it('does NOT throw when config-changed fires before any session has started (null socketRef)', async () => {
-      const { result } = renderHook(() => useLiveMode());
-      // No start() call — socketRef.current is null. The handler's optional
-      // chain (`socketRef.current?.getState()`) must short-circuit cleanly;
-      // if it didn't, the act() below would surface the throw.
-
-      await act(async () => {
-        await apiClient.syncFromConfig();
-      });
-
-      expect(result.current.status).toBe('idle');
-    });
-
-    it('does NOT rearm when the gate is still closed (sync threw — synced stays false)', async () => {
-      // Prove that rearm is double-gated: socket=error is necessary but not
-      // sufficient. If syncFromConfig threw (IPC reject), isBaseUrlConfigured
-      // stays false and rearm must NOT fire — otherwise we'd loop between
-      // rearm → connect → getWsUrl-null → error → rearm on every sync.
-      const { result } = renderHook(() => useLiveMode());
-      await driveToListening(result);
-
-      lastSocket.connect.mockClear();
-      lastSocket.getState.mockReturnValue('error');
-
-      // Swap the bridge to reject so this sync throws internally.
       (window as any).electronAPI = {
         config: {
           get: vi.fn(async () => {
@@ -556,18 +529,29 @@ describe('[P1] useLiveMode', () => {
           set: vi.fn(),
         },
       };
-      // Suppress the expected warn noise.
       vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      // Reset the apiClient singleton's synced state so the throw path
-      // actually flips isBaseUrlConfigured to false.
       (apiClient as any).synced = false;
 
       await act(async () => {
         await apiClient.syncFromConfig();
       });
 
-      expect(lastSocket.connect).not.toHaveBeenCalled();
+      expect(lastSocket.handleConfigChanged).toHaveBeenCalledWith(false);
+      expect(lastSocket.handleConfigChanged).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT throw when config-changed fires before any session has started (null socketRef)', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      // No start() call — socketRef.current is null. The handler's optional
+      // chain (`socketRef.current?.handleConfigChanged(...)`) must short-circuit
+      // cleanly; if it didn't, the act() below would surface the throw.
+
+      await act(async () => {
+        await apiClient.syncFromConfig();
+      });
+
+      expect(result.current.status).toBe('idle');
     });
   });
 });

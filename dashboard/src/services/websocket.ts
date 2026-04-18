@@ -123,6 +123,15 @@ export class TranscriptionSocket {
   private audioSampleRateHz = DEFAULT_AUDIO_SAMPLE_RATE;
   /** When true, disconnect was initiated by the user — don't auto-reconnect */
   private intentionalDisconnect = false;
+  /**
+   * URL the currently-live WebSocket was opened against. Set after
+   * `new WebSocket(...)` in connect()/doReconnect(); cleared only on
+   * intentional disconnect(). On unintentional `onclose` / `onerror` the
+   * field is NOT cleared — the socket class tracks it through the
+   * subsequent reconnect dance, and `handleConfigChanged()` protects
+   * against stale reads by state-gating before it touches the field.
+   */
+  private connectedUrl: string | null = null;
 
   constructor(
     endpoint: SocketEndpoint,
@@ -177,6 +186,7 @@ export class TranscriptionSocket {
     }
     this.log(`Opening ${url}`);
     this.ws = new WebSocket(url);
+    this.connectedUrl = url;
     this.ws.binaryType = 'arraybuffer';
 
     this.ws.onopen = () => {
@@ -233,6 +243,7 @@ export class TranscriptionSocket {
       this.ws = null;
     }
     this.cleanup();
+    this.connectedUrl = null;
     this.setState('disconnected');
   }
 
@@ -329,6 +340,7 @@ export class TranscriptionSocket {
       return;
     }
     this.ws = new WebSocket(url);
+    this.connectedUrl = url;
     this.ws.binaryType = 'arraybuffer';
 
     this.ws.onopen = () => {
@@ -379,6 +391,58 @@ export class TranscriptionSocket {
   /** Update reconnect configuration at runtime. */
   setReconnectConfig(config: Partial<ReconnectConfig>): void {
     this.reconnectConfig = { ...this.reconnectConfig, ...config };
+  }
+
+  /**
+   * Rearm / diagnostic dispatch for `apiClient.onConfigChanged` events.
+   * Called by `useTranscription` / `useLiveMode` after `syncFromConfig()`
+   * attempts (success OR failure). Three branches:
+   *
+   * 1. `error` + configured → fresh `connect()` (install-gate rearm). This
+   *    branch is NOT dead code despite the onerror→onclose sequence normally
+   *    landing us in `disconnected`: `connect()`/`doReconnect()`'s null-URL
+   *    short-circuit leaves the socket persistently in `error` (no `onclose`
+   *    follows), and that's the state `handleConfigChanged` is recovering
+   *    from after the user fixes Settings.
+   * 2. `disconnected` + a pending backoff timer + configured + non-null new
+   *    URL → cancel the pending timer, reset attempt counter, fire
+   *    `doReconnect()` now. This lands the reconnect within a tick against
+   *    the new URL instead of up to `maxDelayMs` (~30s) later, AND gives the
+   *    new URL a fresh backoff curve (otherwise the previous host's
+   *    exhausted attempts would cap the new host at `maxDelayMs` from the
+   *    first retry). EC-3 — Edge-Case Hunter 2026-04-14.
+   * 3. Any active state (`connecting`/`authenticating`/`ready`) whose live
+   *    socket was opened against a URL that no longer matches the current
+   *    `getWsUrl()` → emit one `warning`-level breadcrumb naming both URLs.
+   *    Does NOT drop the live socket — tearing down a `ready` WebSocket
+   *    would cancel in-flight transcription audio. (EC-2 — same source.)
+   *
+   * `intentionalDisconnect` short-circuits all branches.
+   */
+  handleConfigChanged(configured: boolean): void {
+    if (this.intentionalDisconnect) return;
+    const state = this.state;
+    if (state === 'error') {
+      if (configured) this.connect();
+      return;
+    }
+    if (state === 'disconnected') {
+      if (configured && this.reconnectTimer !== null && this.getWsUrl() !== null) {
+        this.cancelReconnect();
+        this.reconnectAttempt = 0;
+        this.doReconnect();
+      }
+      return;
+    }
+    // state ∈ {connecting, authenticating, ready} — active session
+    if (this.connectedUrl === null) return;
+    const newUrl = this.getWsUrl();
+    if (newUrl !== null && newUrl !== this.connectedUrl) {
+      this.log(
+        `Base URL changed during active session; current: ${this.connectedUrl} -> next reconnect: ${newUrl}`,
+        'warning',
+      );
+    }
   }
   // ── Internal ───────────────────────────────────────────────────────────────
 

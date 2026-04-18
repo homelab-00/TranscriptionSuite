@@ -82,19 +82,13 @@ export function useLiveMode(): LiveModeState {
     };
   }, []);
 
-  // Rearm a dead-ended socket after the user fixes Settings mid-session.
-  // doReconnect() short-circuits to state=`error` when isBaseUrlConfigured()
-  // is false, then never retries on its own. When syncFromConfig() runs after
-  // a Settings save, this listener triggers a fresh connect() — but ONLY when
-  // (a) the socket is in `error` AND (b) the gate is now usable. The gate
-  // check prevents a redundant connect() when the sync itself failed (IPC
-  // throw leaves synced=false; a rearm in that state would just hit the
-  // getWsUrl() null-guard and immediately re-enter `error`).
+  // Rearm / diagnostic dispatch for config-changed events. The socket class
+  // owns the branching (error rearm, pending-backoff shortcut, active-session
+  // host-change warn) so this listener just forwards the current install-gate
+  // predicate. See TranscriptionSocket.handleConfigChanged for each branch.
   useEffect(() => {
     return apiClient.onConfigChanged(() => {
-      if (socketRef.current?.getState() === 'error' && apiClient.isBaseUrlConfigured()) {
-        socketRef.current.connect();
-      }
+      socketRef.current?.handleConfigChanged(apiClient.isBaseUrlConfigured());
     });
   }, []);
 

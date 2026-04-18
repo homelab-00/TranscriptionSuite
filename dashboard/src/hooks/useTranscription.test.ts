@@ -14,6 +14,7 @@ let lastSocket: {
   sendAudio: Mock;
   setAudioSampleRate: Mock;
   getState: Mock;
+  handleConfigChanged: Mock;
 };
 let lastSocketCbs: {
   onMessage?: (msg: { type: string; data?: Record<string, unknown> }) => void;
@@ -31,6 +32,7 @@ vi.mock('../services/websocket', () => ({
       sendAudio: vi.fn(),
       setAudioSampleRate: vi.fn(),
       getState: vi.fn().mockReturnValue('disconnected'),
+      handleConfigChanged: vi.fn(),
     };
     return lastSocket;
   }),
@@ -421,69 +423,50 @@ describe('[P1] useTranscription', () => {
     });
   });
 
-  // ── Install-gate rearm: socket.connect() fires on config-changed ONLY
-  //   when the underlying socket is in error state AND the gate is usable.
-  //   Avoids churn in healthy sessions AND avoids a redundant connect when
-  //   the sync itself failed (IPC throw leaves the gate closed).
-  describe('install-gate rearm on config-changed', () => {
+  // ── config-changed forwarding: the hook no longer branches on socket state
+  //   itself — it just forwards `isBaseUrlConfigured()` to
+  //   TranscriptionSocket.handleConfigChanged so the socket class can own the
+  //   error-rearm / pending-backoff-shortcut / active-session-warn branches.
+  //   Exhaustive per-branch coverage lives in src/services/websocket.test.ts.
+  describe('config-changed forwarding to socket.handleConfigChanged', () => {
     beforeEach(() => {
       configChangedListeners.clear();
       mockGateConfigured = true;
     });
 
-    it('calls socket.connect() when config-changed fires AND socket is in error state', async () => {
+    it('forwards configured=true when the gate is open', async () => {
       const { result } = renderHook(() => useTranscription());
       await driveToRecording(result);
 
-      lastSocket.connect.mockClear();
-      lastSocket.getState.mockReturnValue('error');
+      lastSocket.handleConfigChanged.mockClear();
 
       act(() => {
         emitConfigChangedFromTest();
       });
 
-      expect(lastSocket.connect).toHaveBeenCalledTimes(1);
+      expect(lastSocket.handleConfigChanged).toHaveBeenCalledTimes(1);
+      expect(lastSocket.handleConfigChanged).toHaveBeenCalledWith(true);
     });
 
-    it('does NOT call socket.connect() when socket is in a healthy state', async () => {
+    it('forwards configured=false when the sync that fired the event failed', async () => {
       const { result } = renderHook(() => useTranscription());
       await driveToRecording(result);
 
-      lastSocket.connect.mockClear();
-      lastSocket.getState.mockReturnValue('ready');
-
-      act(() => {
-        emitConfigChangedFromTest();
-      });
-
-      expect(lastSocket.connect).not.toHaveBeenCalled();
-    });
-
-    it('does NOT rearm when the gate is still closed (sync failed — isBaseUrlConfigured false)', async () => {
-      // Prove double-gating: socket=error alone is insufficient. If the
-      // sync that fired the event actually failed (IPC reject → synced stays
-      // false → gate closed), rearm must skip to avoid a redundant connect
-      // that would immediately re-enter error.
-      const { result } = renderHook(() => useTranscription());
-      await driveToRecording(result);
-
-      lastSocket.connect.mockClear();
-      lastSocket.getState.mockReturnValue('error');
+      lastSocket.handleConfigChanged.mockClear();
       mockGateConfigured = false;
 
       act(() => {
         emitConfigChangedFromTest();
       });
 
-      expect(lastSocket.connect).not.toHaveBeenCalled();
+      expect(lastSocket.handleConfigChanged).toHaveBeenCalledWith(false);
     });
 
-    it('unsubscribes on unmount; emit after unmount does not call connect', async () => {
+    it('unsubscribes on unmount; emit after unmount does not call handleConfigChanged', async () => {
       const { result, unmount } = renderHook(() => useTranscription());
       await driveToRecording(result);
 
-      lastSocket.connect.mockClear();
-      lastSocket.getState.mockReturnValue('error');
+      lastSocket.handleConfigChanged.mockClear();
 
       unmount();
 
@@ -491,7 +474,7 @@ describe('[P1] useTranscription', () => {
         emitConfigChangedFromTest();
       });
 
-      expect(lastSocket.connect).not.toHaveBeenCalled();
+      expect(lastSocket.handleConfigChanged).not.toHaveBeenCalled();
     });
   });
 });
