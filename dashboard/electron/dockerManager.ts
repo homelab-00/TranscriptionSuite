@@ -40,7 +40,65 @@ const __dirname = path.dirname(__filename);
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
+// Keep these two in sync with `dashboard/src/services/versionUtils.ts`.
+// Renderer-side utils are intentionally not imported here — main-process code
+// stays self-contained (same reason as the inline semverDescending() below).
+export const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
+export const LEGACY_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-legacy';
+
+/**
+ * Select the GHCR image repo for this session based on the persisted
+ * `server.useLegacyGpu` setting (Issue #83 — Pascal/Maxwell support).
+ * The dashboard uses exactly one repo at a time — never mixes the two.
+ */
+export function resolveImageRepo(useLegacyGpu: boolean): string {
+  return useLegacyGpu ? LEGACY_IMAGE_REPO : IMAGE_REPO;
+}
+
+/**
+ * Read the persisted `server.useLegacyGpu` boolean from the electron-store
+ * JSON file on disk. Defaults to false when the file is missing or the key
+ * is absent — matches the config store default.
+ */
+export function readUseLegacyGpuFromStore(): boolean {
+  try {
+    const storePath = path.join(app.getPath('userData'), 'dashboard-config.json');
+    const raw = fs.readFileSync(storePath, 'utf8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    return data['server.useLegacyGpu'] === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * GHCR registry paths for the selected image repo.
+ *
+ * The path segment after `ghcr.io/` or `ghcr.io/v2/` is the GHCR *package
+ * name*, which equals the `IMAGE_REPO` URL with the `ghcr.io/` host stripped.
+ * Legacy mode (Issue #83) targets the separate `-legacy` repo so tag lists
+ * never mix between variants.
+ */
+export interface GhcrUrls {
+  tokenUrl: string;
+  tagsUrl: string;
+  blobBase: string;
+}
+
+/**
+ * Build GHCR v2 registry URLs for a given image-repo URL. Exported for unit
+ * testing; the module-internal `buildGhcrUrls(useLegacyGpu)` wrapper picks the
+ * repo from `server.useLegacyGpu` and delegates here.
+ */
+export function buildGhcrUrlsForRepo(imageRepo: string): GhcrUrls {
+  const pkgPath = imageRepo.replace(/^ghcr\.io\//, '');
+  return {
+    tokenUrl: `https://ghcr.io/token?scope=repository:${pkgPath}:pull`,
+    tagsUrl: `https://ghcr.io/v2/${pkgPath}/tags/list`,
+    blobBase: `https://ghcr.io/v2/${pkgPath}`,
+  };
+}
+
 export const CONTAINER_NAME = 'transcriptionsuite-container';
 
 /** Host-side path to the startup events file (set during startContainer). */
@@ -869,8 +927,12 @@ let sidecarPullProcess: ChildProcess | null = null;
 
 /**
  * List local Docker images matching our repo.
+ *
+ * The repo URL is chosen by the persisted `server.useLegacyGpu` setting
+ * (Issue #83). Only one repo is scanned per call — never both.
  */
 async function listImages(): Promise<DockerImage[]> {
+  const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore());
   const parseLegacyFormat = (output: string): DockerImage[] => {
     return output
       .split('\n')
@@ -882,7 +944,7 @@ async function listImages(): Promise<DockerImage[]> {
         const tag = repoAndTag.length > 1 ? repoAndTag[repoAndTag.length - 1] : 'unknown';
         return { tag, fullName, size, created, id };
       })
-      .filter((img) => img.fullName.startsWith(`${IMAGE_REPO}:`) && img.tag !== '<none>');
+      .filter((img) => img.fullName.startsWith(`${imageRepo}:`) && img.tag !== '<none>');
   };
 
   // Strategy 1: JSON format with filter (most reliable on modern Docker)
@@ -892,7 +954,7 @@ async function listImages(): Promise<DockerImage[]> {
       '--format',
       'json',
       '--filter',
-      `reference=${IMAGE_REPO}`,
+      `reference=${imageRepo}`,
     ]);
     if (!output) {
       console.log(
@@ -945,7 +1007,7 @@ async function listImages(): Promise<DockerImage[]> {
           const resolvedSize = row.Size?.trim() ?? (row.size != null ? String(row.size) : '');
           for (const ref of refs) {
             const trimmed = ref.trim();
-            if (!trimmed.startsWith(`${IMAGE_REPO}:`)) continue;
+            if (!trimmed.startsWith(`${imageRepo}:`)) continue;
             const lastColon = trimmed.lastIndexOf(':');
             const tag = lastColon > -1 ? trimmed.slice(lastColon + 1) : 'unknown';
             if (tag === '<none>') continue;
@@ -1010,7 +1072,7 @@ async function listImages(): Promise<DockerImage[]> {
       '--format',
       '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}\t{{.ID}}',
       '--filter',
-      `reference=${IMAGE_REPO}`,
+      `reference=${imageRepo}`,
     ]);
     const results = parseLegacyFormat(legacyOutput);
     if (results.length > 0) {
@@ -1043,13 +1105,18 @@ async function listImages(): Promise<DockerImage[]> {
 /**
  * Pull an image tag from the registry.
  * Uses spawn instead of exec so the process can be cancelled.
+ *
+ * Pulls from the repo selected by the persisted `server.useLegacyGpu` setting
+ * (Issue #83). A mid-session toggle requires a restart to take effect — this
+ * is by design (Never rule: "Dashboard uses one image-repo at a time").
  */
 async function pullImage(tag: string): Promise<string> {
+  const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore());
   const bin = await runtimeBin();
   return new Promise((resolve, reject) => {
     cancelPull(); // kill any existing pull first
 
-    const proc = spawn(bin, ['pull', `${IMAGE_REPO}:${tag}`], {
+    const proc = spawn(bin, ['pull', `${imageRepo}:${tag}`], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
     });
@@ -1178,9 +1245,13 @@ function isSidecarPulling(): boolean {
 
 /**
  * Remove a local image by tag.
+ *
+ * Targets the repo selected by the persisted `server.useLegacyGpu` setting
+ * (Issue #83) — removing from the other repo requires toggling first.
  */
 async function removeImage(tag: string): Promise<string> {
-  return exec(await runtimeBin(), ['rmi', `${IMAGE_REPO}:${tag}`]);
+  const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore());
+  return exec(await runtimeBin(), ['rmi', `${imageRepo}:${tag}`]);
 }
 
 // ─── Container Operations ───────────────────────────────────────────────────
@@ -1280,6 +1351,13 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   const composeEnv: Record<string, string> = { ...tlsEnv };
   const normalizedHfDecision = normalizeHfTokenDecision(hfTokenDecision);
 
+  // Resolve the image repo *once* per start so listImages, the TAG default,
+  // and compose's IMAGE_REPO env all agree (Issue #83). The setting is read
+  // from electron-store at start time, not on every subsequent operation.
+  const useLegacyGpu = readUseLegacyGpuFromStore();
+  const imageRepoForSession = resolveImageRepo(useLegacyGpu);
+  composeEnv['IMAGE_REPO'] = imageRepoForSession;
+
   // Prefer a local image tag for dev workflows when no explicit tag is provided.
   let resolvedTag = imageTag;
   if (!resolvedTag) {
@@ -1333,6 +1411,10 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   const envUpdates: Record<string, string> = {};
   // Persist TLS mode so readComposeEnvValue('TLS_ENABLED') reflects reality
   envUpdates['TLS_ENABLED'] = mode === 'remote' ? 'true' : 'false';
+  // Persist IMAGE_REPO so compose commands outside this process (manual
+  // `docker compose stop/logs/down` from the same dir) also resolve the
+  // correct image reference (Issue #83).
+  envUpdates['IMAGE_REPO'] = imageRepoForSession;
   if (hfToken !== undefined) {
     envUpdates['HUGGINGFACE_TOKEN'] = hfToken;
   }
@@ -2480,10 +2562,15 @@ async function downloadModelToCache(modelId: string): Promise<void> {
 
 // ─── Remote Tag Listing ─────────────────────────────────────────────────────
 
-const GHCR_TOKEN_URL =
-  'https://ghcr.io/token?scope=repository:homelab-00/transcriptionsuite-server:pull';
-const GHCR_TAGS_URL = 'https://ghcr.io/v2/homelab-00/transcriptionsuite-server/tags/list';
-const GHCR_BLOB_BASE = 'https://ghcr.io/v2/homelab-00/transcriptionsuite-server';
+/**
+ * Resolve GHCR registry URLs from the persisted `server.useLegacyGpu` setting.
+ * Thin wrapper over `buildGhcrUrlsForRepo` declared at the top of this module
+ * alongside the repo constants.
+ */
+function buildGhcrUrls(useLegacyGpu: boolean): GhcrUrls {
+  return buildGhcrUrlsForRepo(resolveImageRepo(useLegacyGpu));
+}
+
 const TAG_RE = /^v\d+\.\d+\.\d+(rc\d*)?$/;
 
 interface RemoteTag {
@@ -2509,14 +2596,18 @@ function semverDescending(a: string, b: string): number {
 /**
  * Fetch the image creation date for a single tag from its OCI config blob.
  * Returns ISO timestamp string or null on failure.
+ *
+ * `blobBase` is resolved by the caller (buildGhcrUrls) so the function stays
+ * pure and can be shared between the default and legacy GHCR packages.
  */
 async function fetchTagDate(
   tag: string,
   token: string,
+  blobBase: string,
   signal: AbortSignal,
 ): Promise<string | null> {
   try {
-    const manifestResp = await fetch(`${GHCR_BLOB_BASE}/manifests/${tag}`, {
+    const manifestResp = await fetch(`${blobBase}/manifests/${tag}`, {
       signal,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -2528,7 +2619,7 @@ async function fetchTagDate(
     const configDigest = manifest.config?.digest;
     if (!configDigest) return null;
 
-    const blobResp = await fetch(`${GHCR_BLOB_BASE}/blobs/${configDigest}`, {
+    const blobResp = await fetch(`${blobBase}/blobs/${configDigest}`, {
       signal,
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -2549,21 +2640,23 @@ async function fetchTagDate(
  * 3. For each tag, fetch manifest + config blob for creation date (parallel)
  *
  * Returns version-matching tags sorted by semver descending, or [] on failure.
+ * The GHCR package queried is chosen by `server.useLegacyGpu` (Issue #83).
  */
 /**
  * Fetch the tag list only (fast, ~1-2s). Dates are fetched separately
  * via fetchRemoteTagDates() so the UI isn't blocked.
  */
 async function listRemoteTags(): Promise<RemoteTag[]> {
+  const { tokenUrl, tagsUrl } = buildGhcrUrls(readUseLegacyGpuFromStore());
   try {
     const signal = AbortSignal.timeout(5000);
 
-    const tokenResp = await fetch(GHCR_TOKEN_URL, { signal });
+    const tokenResp = await fetch(tokenUrl, { signal });
     if (!tokenResp.ok) return [];
     const { token } = (await tokenResp.json()) as { token?: string };
     if (!token) return [];
 
-    const resp = await fetch(GHCR_TAGS_URL, {
+    const resp = await fetch(tagsUrl, {
       signal,
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -2584,11 +2677,12 @@ async function listRemoteTags(): Promise<RemoteTag[]> {
  * Returns a map of tag → ISO date string.
  */
 async function fetchRemoteTagDates(tags: string[]): Promise<Record<string, string | null>> {
+  const { tokenUrl, blobBase } = buildGhcrUrls(readUseLegacyGpuFromStore());
   const result: Record<string, string | null> = {};
   try {
     const signal = AbortSignal.timeout(8000);
 
-    const tokenResp = await fetch(GHCR_TOKEN_URL, { signal });
+    const tokenResp = await fetch(tokenUrl, { signal });
     if (!tokenResp.ok) return result;
     const { token } = (await tokenResp.json()) as { token?: string };
     if (!token) return result;
@@ -2596,7 +2690,7 @@ async function fetchRemoteTagDates(tags: string[]): Promise<Record<string, strin
     // Fetch dates for the first 8 tags only (what's visible in UI)
     const batch = tags.slice(0, 8);
     const dateResults = await Promise.allSettled(
-      batch.map((tag) => fetchTagDate(tag, token, signal)),
+      batch.map((tag) => fetchTagDate(tag, token, blobBase, signal)),
     );
 
     for (let i = 0; i < batch.length; i++) {

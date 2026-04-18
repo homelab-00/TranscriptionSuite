@@ -7,6 +7,25 @@
 
 export const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
 
+/**
+ * Separate GHCR repo for the legacy-GPU image variant (Issue #83).
+ *
+ * Built against the cu126 PyTorch wheel index (still ships sm_50..sm_90) so
+ * Pascal/Maxwell cards (e.g. GTX 1070, GTX 1080) that cu129 rejects keep
+ * working. Tag shape is identical to the default repo (`vX.Y.Z[rcN]`), so
+ * `VERSION_RE` and the tag-selector logic do not change — only the repo URL.
+ */
+export const LEGACY_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-legacy';
+
+/**
+ * Return the GHCR repo URL the dashboard should use for this session.
+ * Never mixes repos within a single session — the user's `useLegacyGpu`
+ * setting is the single source of truth for image-repo selection.
+ */
+export function resolveImageRepo(useLegacyGpu: boolean): string {
+  return useLegacyGpu ? LEGACY_IMAGE_REPO : IMAGE_REPO;
+}
+
 const VERSION_RE = /^v(\d+)\.(\d+)\.(\d+)(rc\d*)?$/;
 
 export interface ParsedVersion {

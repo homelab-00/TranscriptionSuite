@@ -6,6 +6,8 @@ import {
   isNewerVersion,
   formatDateDMY,
   IMAGE_REPO,
+  LEGACY_IMAGE_REPO,
+  resolveImageRepo,
 } from './versionUtils';
 
 describe('parseVersionTag', () => {
@@ -153,5 +155,33 @@ describe('formatDateDMY', () => {
 describe('IMAGE_REPO', () => {
   it('matches the canonical image repository', () => {
     expect(IMAGE_REPO).toBe('ghcr.io/homelab-00/transcriptionsuite-server');
+  });
+});
+
+describe('LEGACY_IMAGE_REPO', () => {
+  it('is a distinct GHCR repo suffixed with -legacy (Issue #83)', () => {
+    // A separate repo — not a tag suffix — keeps VERSION_RE and the tag sorter
+    // untouched, and prevents users on modern GPUs from picking a legacy tag.
+    expect(LEGACY_IMAGE_REPO).toBe('ghcr.io/homelab-00/transcriptionsuite-server-legacy');
+    expect(LEGACY_IMAGE_REPO).not.toBe(IMAGE_REPO);
+    expect(LEGACY_IMAGE_REPO.endsWith('-legacy')).toBe(true);
+  });
+});
+
+describe('resolveImageRepo', () => {
+  it('returns the default repo when useLegacyGpu is false', () => {
+    expect(resolveImageRepo(false)).toBe(IMAGE_REPO);
+  });
+
+  it('returns the legacy repo when useLegacyGpu is true', () => {
+    expect(resolveImageRepo(true)).toBe(LEGACY_IMAGE_REPO);
+  });
+
+  it('never mixes repos — exact equality with the canonical constants', () => {
+    // Guards against future refactors that might introduce a suffix/prefix.
+    const defaultResolved = resolveImageRepo(false);
+    const legacyResolved = resolveImageRepo(true);
+    expect(defaultResolved).not.toEqual(legacyResolved);
+    expect(new Set([defaultResolved, legacyResolved]).size).toBe(2);
   });
 });

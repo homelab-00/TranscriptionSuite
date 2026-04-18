@@ -67,7 +67,20 @@ RT_DISPLAY="Docker"
 # Constants
 # ============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOCKER_IMAGE="ghcr.io/homelab-00/transcriptionsuite-server:${TAG:?TAG must be set}"
+
+# Issue #83 — honour IMAGE_REPO from caller env or a sibling .env so manual
+# CLI starts line up with the dashboard's useLegacyGpu setting. The dashboard
+# writes IMAGE_REPO into `<userData>/docker/.env`; for ad-hoc shell use the
+# caller can `export IMAGE_REPO=…-legacy` before invoking this script.
+if [[ -z "${IMAGE_REPO:-}" && -f "$SCRIPT_DIR/.env" ]]; then
+    # shellcheck disable=SC2046
+    set -a
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+IMAGE_REPO="${IMAGE_REPO:-ghcr.io/homelab-00/transcriptionsuite-server}"
+DOCKER_IMAGE="${IMAGE_REPO}:${TAG:?TAG must be set}"
 CONTAINER_NAME="transcriptionsuite-container"
 HF_DIARIZATION_TERMS_URL="https://huggingface.co/pyannote/speaker-diarization-community-1"
 PROMPT_TIME_OFFSET_SECONDS=0

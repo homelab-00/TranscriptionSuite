@@ -67,6 +67,7 @@ Technical documentation for developing and building TranscriptionSuite.
       - [How It Works](#how-it-works)
       - [GGML Model Detection](#ggml-model-detection)
       - [Docker Compose Setup](#docker-compose-setup)
+    - [6.10 Legacy-GPU image variant (Issue #83)](#610-legacy-gpu-image-variant-issue-83)
       - [Networking by Platform](#networking-by-platform)
       - [Configuration](#configuration)
       - [Capability Differences](#capability-differences)
@@ -1481,6 +1482,123 @@ whisper.cpp models have different capabilities compared to the default faster-wh
 - **No diarization**: whisper.cpp has no pyannote integration. Speaker diarization is unavailable for GGML models.
 - **No live mode**: The sidecar architecture is not yet integrated with the live transcription engine.
 - **AMD GPU requirement**: Vulkan acceleration requires an AMD GPU with RADV support (RDNA1+) or an Intel GPU with ANV support. RDNA1 GPUs (e.g. RX 5500 XT) may need the `iommu=soft` kernel parameter.
+
+### 6.10 Legacy-GPU image variant (Issue #83)
+
+**Why this exists.** PyTorch's cu129 wheels (what the default image ships) dropped
+kernels for all CUDA compute capabilities below `sm_70`. On boot, affected users
+see PyTorch refuse the GPU with a message like
+
+```
+NVIDIA GeForce GTX 1070 with CUDA capability sm_61 is not compatible with the
+current PyTorch installation.
+The current PyTorch install supports CUDA capabilities
+  sm_70 sm_75 sm_80 sm_86 sm_90 sm_100 sm_120 compute_120.
+```
+
+The container then crash-loops. The Issue #60 compute-type auto-correction
+doesn't help — that fix kicks in *after* PyTorch loads the GPU, but cu129
+never loads it in the first place.
+
+**Who it's for.** Anyone whose NVIDIA GPU is Pascal-generation or older:
+- Pascal (`sm_6x`) — GeForce GTX 10-series (1050/1060/1070/1080 and Ti variants),
+  Tesla P4 / P40 / P100, Quadro P-series.
+- Maxwell (`sm_5x`) — GeForce GTX 9-series, Tesla M40, Quadro M-series.
+
+Users on Volta (`sm_70`) or newer — Turing, Ampere, Ada, Hopper, Blackwell — do
+**not** need this image and should leave the `useLegacyGpu` toggle off.
+
+**What it is.** A second Docker image built from the same `Dockerfile` but wired
+to PyTorch's cu126 wheel index instead of cu129. cu126 still ships kernels for
+`sm_50..sm_90`, restoring compatibility with the cards above at the cost of not
+including the newest Blackwell architectures. Pascal/Maxwell owners get a working
+image; modern-GPU users are unaffected (default image is byte-identical to pre-
+GH-83). The toggle is opt-in per user so nothing happens automatically.
+
+**Repo layout:**
+- Default: `ghcr.io/homelab-00/transcriptionsuite-server:<tag>` — cu129, `sm_70..sm_120`
+- Legacy: `ghcr.io/homelab-00/transcriptionsuite-server-legacy:<tag>` — cu126, `sm_50..sm_90`
+
+The legacy image is published to a **separate GHCR repo**, not a tag suffix, so
+`VERSION_RE` (`dashboard/src/services/versionUtils.ts`) and the tag-selector
+logic stay untouched. The dashboard picks exactly one repo per session via the
+persisted `server.useLegacyGpu` boolean; user-facing switching happens through
+the toggle in Server settings (Runtime = GPU (CUDA)).
+
+**How the divergence materialises:**
+- Single `Dockerfile` with `ARG PYTORCH_VARIANT=cu129` propagated to
+  `ENV PYTORCH_VARIANT`. Default build is identical to today.
+- Single `pyproject.toml` with one explicit index (`pytorch-cu129`) and
+  `[tool.uv.sources]` pinning `torch`/`torchaudio` to that *named* index.
+  No separate `pytorch-cu126` index is declared — the legacy bootstrap
+  **overrides the URL of the existing `pytorch-cu129` name** at install time.
+- `server/docker/bootstrap_runtime.py::run_dependency_sync` branches on
+  `PYTORCH_VARIANT`. cu129 keeps `--frozen`; cu126 drops `--frozen` and passes
+  `--index pytorch-cu129=https://download.pytorch.org/whl/cu126` (name-reuse
+  URL swap). Reusing the same name is load-bearing: uv's source pin resolves
+  by index name, so swapping the URL under the existing name redirects `torch`
+  to the cu126 wheels. Declaring a *new* name would leave the source pin
+  untouched and uv would still install cu129 wheels. The variant is baked
+  into the structural fingerprint so a flip triggers a rebuild.
+
+**Building and publishing:**
+
+Two workflows — the two-step flow mirrors the default-image release process;
+the one-shot flow is a convenience that does `docker build` + push in a single
+invocation. Pick whichever matches your habits.
+
+*Two-step (mirrors the default-image release flow):*
+```bash
+# Default cu129 image (unchanged from before GH-83):
+TAG=v1.3.4 docker compose -f server/docker/docker-compose.yml build --no-cache
+./build/docker-build-push.sh v1.3.4
+
+# Legacy cu126 image:
+TAG=v1.3.4 PYTORCH_VARIANT=cu126 \
+  IMAGE_REPO=ghcr.io/homelab-00/transcriptionsuite-server-legacy \
+  docker compose -f server/docker/docker-compose.yml build --no-cache
+./build/docker-build-push.sh --variant legacy v1.3.4
+```
+The three env vars for the legacy build:
+- `PYTORCH_VARIANT=cu126` — compose `build.args` picks it up and bakes it into
+  the image as an `ENV` so bootstrap branches correctly on first run.
+- `IMAGE_REPO=…-legacy` — the templated `image:` line tags the build under the
+  legacy repo locally (what `docker-build-push.sh --variant legacy` then pushes).
+- `TAG` — the version tag, same semantics as before.
+
+*One-shot (runs `docker build` with the right build-arg, then pushes):*
+```bash
+# Default:
+./build/docker-build-push.sh --build v1.3.4
+
+# Legacy:
+./build/docker-build-push.sh --variant legacy --build v1.3.4
+```
+
+*Releasing both variants of the same version:* run the two legacy commands
+(or the one-shot legacy command) after the two default ones. Each targets its
+own GHCR repo and its own `:latest` alias, so they never collide.
+
+`--variant legacy` flips both the build-arg (`PYTORCH_VARIANT=cu126`) and the
+push target. `latest` is auto-tagged only within the `-legacy` repo; the
+default repo is never touched by a legacy run. See `build/docker-build-push.sh
+--help` for full usage.
+
+**Trade-offs:**
+- Legacy first-run bootstrap is longer than the default variant — without
+  `--frozen`, `uv` does a fresh resolve against cu126. Reproducibility
+  guarantees are weaker for this one variant (acceptable given the small
+  user population and known-fixed hardware target).
+- Not wired into `release.yml`. The legacy image is published manually,
+  consistent with the existing Docker publishing flow.
+- The dashboard never mixes repos in a single session: toggling
+  `useLegacyGpu` prompts for a container restart and (by default) wipes
+  the `transcriptionsuite-runtime` volume so the next bootstrap re-syncs
+  wheels from the newly-selected index.
+
+See `_bmad-output/implementation-artifacts/spec-gh-83-legacy-gpu-image.md`
+for the frozen intent/boundaries block and the full task breakdown, and
+GitHub Issues #83 (Pascal/Maxwell support) and #60 (compute_type downgrade).
 
 ---
 

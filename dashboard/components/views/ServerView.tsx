@@ -235,6 +235,18 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Runtime profile (persisted in electron-store)
   const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('cpu');
 
+  // Legacy-GPU image variant (Issue #83 — Pascal/Maxwell support).
+  // Persisted in electron-store under `server.useLegacyGpu`.
+  const [useLegacyGpu, setUseLegacyGpu] = useState<boolean>(false);
+  const [legacyGpuDialogOpen, setLegacyGpuDialogOpen] = useState(false);
+  // Pending state the user confirmed — applied when they accept the dialog.
+  const [pendingLegacyGpuValue, setPendingLegacyGpuValue] = useState<boolean | null>(null);
+  const [legacyGpuWipeVolume, setLegacyGpuWipeVolume] = useState<boolean>(true);
+  // Guards the Confirm button against double-clicks while the IPC is in-flight.
+  // Without this, a second click would re-fire `setUseLegacyGpu` with stale
+  // `pendingLegacyGpuValue` (React state updates are batched).
+  const [legacyGpuConfirmInFlight, setLegacyGpuConfirmInFlight] = useState<boolean>(false);
+
   // Metal (Apple Silicon) detection – derived from server-side feature check
   const mlxFeature = (adminStatus?.models as any)?.features?.mlx as
     | { available: boolean; reason: string }
@@ -325,6 +337,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         .then((val: unknown) => {
           if (typeof val === 'string') setAuthToken(val);
         })
+        .catch(() => {});
+    }
+    // Issue #83 — load the legacy-GPU toggle through the dedicated IPC.
+    if (api?.server?.getUseLegacyGpu) {
+      api.server
+        .getUseLegacyGpu()
+        .then((val: boolean) => setUseLegacyGpu(Boolean(val)))
         .catch(() => {});
     }
     // Detect local Tailscale hostname
@@ -1822,6 +1841,52 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     </span>
                   )}
                 </div>
+
+                {/*
+                  Legacy-GPU image toggle (Issue #83 — Pascal/Maxwell support).
+                  Visible only for the NVIDIA CUDA profile; hidden otherwise to
+                  avoid noise for Vulkan / Metal / CPU users.
+                  Switching repos requires a container restart and clears the
+                  runtime volume so the next bootstrap re-syncs wheels from the
+                  new PyTorch index — this is handled via a confirmation dialog.
+                */}
+                {runtimeProfile === 'gpu' && (
+                  <div className="flex items-center gap-3 border-b border-white/5 pb-4">
+                    <label className="flex cursor-pointer items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={useLegacyGpu}
+                        // Disabled when the container exists at all — even stopped
+                        // containers still hold a reference to the runtime volume,
+                        // so the wipe-on-toggle would silently fail. User must
+                        // remove the container (Stop + cleanup) before switching.
+                        disabled={isRunning || containerStatus.exists}
+                        onChange={(e) => {
+                          const next = e.target.checked;
+                          // Don't apply immediately — show the confirmation
+                          // dialog so the user acknowledges the restart
+                          // requirement and chooses the wipe-volume option.
+                          setPendingLegacyGpuValue(next);
+                          setLegacyGpuWipeVolume(true);
+                          setLegacyGpuDialogOpen(true);
+                        }}
+                        className={`h-4 w-4 rounded border-white/20 bg-black/20 ${
+                          isRunning || containerStatus.exists
+                            ? 'cursor-not-allowed opacity-50'
+                            : 'cursor-pointer'
+                        }`}
+                      />
+                      <span className="text-sm font-medium text-slate-300">
+                        Use legacy-GPU image (Pascal / Maxwell only)
+                      </span>
+                    </label>
+                    <span className="text-xs text-slate-500 italic">
+                      {containerStatus.exists && !isRunning
+                        ? 'Remove the existing container to switch variants'
+                        : 'cu126 wheels — enable for GTX 1070/1080 and older (sm_50..sm_61)'}
+                    </span>
+                  </div>
+                )}
                 {runtimeProfile === 'vulkan' && !isRunning && sidecarNeeded && (
                   <div className="border-accent-rose/20 bg-accent-rose/5 flex items-center gap-3 rounded-lg border px-4 py-3">
                     {docker.sidecarPulling ? (
@@ -2409,6 +2474,132 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 disabled={docker.operating || startupFlowPending}
               >
                 Clean All
+              </Button>
+            </div>
+          </DialogPanel>
+        </div>
+      </Dialog>
+
+      {/*
+        Legacy-GPU image toggle confirmation (Issue #83).
+        Switching repos requires a container restart; offering to wipe the
+        runtime volume ensures the next bootstrap re-syncs wheels from the
+        new PyTorch index. If the container is still running, the wipe is
+        best-effort — the IPC handler logs a warning and the user should
+        stop the container first.
+      */}
+      <Dialog
+        open={legacyGpuDialogOpen}
+        onClose={() => {
+          setLegacyGpuDialogOpen(false);
+          setPendingLegacyGpuValue(null);
+        }}
+        className="relative z-60"
+      >
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" aria-hidden="true" />
+        <div className="fixed inset-0 flex items-center justify-center p-4">
+          <DialogPanel className="border-accent-orange/25 w-full max-w-lg overflow-hidden rounded-3xl border bg-black/75 shadow-2xl backdrop-blur-xl">
+            <div className="border-accent-orange/20 bg-accent-orange/10 border-b px-6 py-4">
+              <DialogTitle className="text-accent-orange text-lg font-semibold">
+                {pendingLegacyGpuValue ? 'Enable legacy-GPU image?' : 'Disable legacy-GPU image?'}
+              </DialogTitle>
+              <p className="mt-1 text-sm text-slate-300">
+                {pendingLegacyGpuValue
+                  ? 'Switches to the cu126 image for Pascal/Maxwell support (GTX 1070/1080, sm_50..sm_61).'
+                  : 'Switches back to the default cu129 image for modern GPUs (sm_70 and newer).'}
+              </p>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <p className="text-sm text-slate-300">
+                This change requires a container restart. Any currently-running container will keep
+                its existing image until you stop and restart it.
+              </p>
+              <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={legacyGpuWipeVolume}
+                  onChange={(e) => setLegacyGpuWipeVolume(e.target.checked)}
+                  className="text-accent-cyan focus:ring-accent-cyan h-4 w-4 rounded border-white/20 bg-black/30"
+                />
+                <div>
+                  <span className="text-sm text-slate-200">
+                    Wipe runtime volume now (recommended)
+                  </span>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    Forces the next bootstrap to re-sync PyTorch wheels from the new index. Skip
+                    only if you plan to wipe it yourself.
+                  </p>
+                </div>
+              </label>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setLegacyGpuDialogOpen(false);
+                  setPendingLegacyGpuValue(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabled={legacyGpuConfirmInFlight}
+                onClick={() => {
+                  const next = pendingLegacyGpuValue;
+                  if (next === null || legacyGpuConfirmInFlight) {
+                    setLegacyGpuDialogOpen(false);
+                    return;
+                  }
+                  const api = (window as any).electronAPI;
+                  if (!api?.server?.setUseLegacyGpu) {
+                    setLegacyGpuDialogOpen(false);
+                    setPendingLegacyGpuValue(null);
+                    return;
+                  }
+                  setLegacyGpuConfirmInFlight(true);
+                  // Close + clear the pending value synchronously so the dialog
+                  // dismisses immediately. The promise chain uses the captured
+                  // `next` local instead of reading state, so later updates
+                  // remain correct even if the user dismisses via Escape.
+                  setLegacyGpuDialogOpen(false);
+                  setPendingLegacyGpuValue(null);
+                  api.server
+                    .setUseLegacyGpu(next, legacyGpuWipeVolume)
+                    .then(
+                      (result: {
+                        useLegacyGpu: boolean;
+                        runtimeVolumeWiped: boolean;
+                        runtimeVolumeWipeError: string | null;
+                      }) => {
+                        setUseLegacyGpu(next);
+                        const base = `${next ? 'Enabled' : 'Disabled'} legacy-GPU image. `;
+                        if (legacyGpuWipeVolume && !result.runtimeVolumeWiped) {
+                          // Wipe was requested but failed — tell the user so
+                          // they know the runtime volume still holds old wheels.
+                          toast.error(
+                            base +
+                              `Runtime volume wipe failed${
+                                result.runtimeVolumeWipeError
+                                  ? `: ${result.runtimeVolumeWipeError}`
+                                  : ''
+                              }. Remove the container and try again.`,
+                          );
+                        } else {
+                          toast.success(base + 'Restart the container to apply.');
+                        }
+                      },
+                    )
+                    .catch((err: unknown) => {
+                      const msg = err instanceof Error ? err.message : String(err);
+                      toast.error(`Failed to update legacy-GPU setting: ${msg}`);
+                    })
+                    .finally(() => {
+                      setLegacyGpuConfirmInFlight(false);
+                    });
+                }}
+              >
+                {legacyGpuConfirmInFlight ? 'Confirming…' : 'Confirm'}
               </Button>
             </div>
           </DialogPanel>

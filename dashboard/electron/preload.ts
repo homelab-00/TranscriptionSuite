@@ -325,6 +325,31 @@ export interface ElectronAPI {
     checkFirewallPort: (
       port: number,
     ) => Promise<{ listening: boolean; firewallSuspect: boolean; hint: string | null }>;
+    /**
+     * Read the persisted legacy-GPU toggle (Issue #83).
+     * Returns false when unset (default user path unchanged).
+     */
+    getUseLegacyGpu: () => Promise<boolean>;
+    /**
+     * Write the legacy-GPU toggle. When `wipeRuntimeVolume` is true the main
+     * process attempts to remove the `transcriptionsuite-runtime` volume so
+     * the next bootstrap re-syncs wheels from the new PyTorch index.
+     *
+     * `runtimeVolumeWiped` reflects the actual outcome — false when the wipe
+     * was requested but failed (e.g., volume held by a stopped-but-not-removed
+     * container). `runtimeVolumeWipeError` carries the failure reason in that
+     * case so the renderer can surface it. When no volume exists yet (first
+     * toggle before any container has bootstrapped), `runtimeVolumeWiped` is
+     * true with `runtimeVolumeWipeError = null` — there is nothing to wipe.
+     */
+    setUseLegacyGpu: (
+      value: boolean,
+      wipeRuntimeVolume?: boolean,
+    ) => Promise<{
+      useLegacyGpu: boolean;
+      runtimeVolumeWiped: boolean;
+      runtimeVolumeWipeError: string | null;
+    }>;
   };
   tailscale: {
     getHostname: () => Promise<string | null>;
@@ -634,6 +659,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
         listening: boolean;
         firewallSuspect: boolean;
         hint: string | null;
+      }>,
+    getUseLegacyGpu: () => ipcRenderer.invoke('server:getUseLegacyGpu') as Promise<boolean>,
+    setUseLegacyGpu: (value: boolean, wipeRuntimeVolume?: boolean) =>
+      ipcRenderer.invoke('server:setUseLegacyGpu', value, wipeRuntimeVolume ?? false) as Promise<{
+        useLegacyGpu: boolean;
+        runtimeVolumeWiped: boolean;
+        runtimeVolumeWipeError: string | null;
       }>,
   },
   tailscale: {

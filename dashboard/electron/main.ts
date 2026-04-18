@@ -440,6 +440,10 @@ const store = new Store({
     'updates.bannerSnoozedUntil': 0,
     'server.runtimeProfile': 'cpu',
     'server.gpuAutoDetectDone': false,
+    // Issue #83 — opt-in legacy-GPU image variant (Pascal/Maxwell support).
+    // Default false keeps behaviour unchanged for existing users. When true,
+    // the dashboard uses the `-legacy` GHCR repo for list/pull/tag operations.
+    'server.useLegacyGpu': false,
     'server.mainModelSelection': 'nvidia/parakeet-tdt-0.6b-v3',
     'server.mainCustomModel': '',
     'server.liveModelSelection': 'Systran/faster-whisper-medium',
@@ -1214,6 +1218,55 @@ ipcMain.handle('docker:readOptionalDependencyBootstrapStatus', async () => {
 ipcMain.handle('docker:checkTailscaleCertsExist', async () => {
   return dockerManager.checkTailscaleCertsExist();
 });
+
+// ─── Legacy-GPU Image Variant (Issue #83) ──────────────────────────────────
+//
+// Typed IPC pair that wraps the `server.useLegacyGpu` store key. The renderer
+// could reach this via `config.get/set` directly, but a dedicated pair makes
+// the side-effect (optional runtime-volume wipe) explicit and discoverable.
+// When the flag flips, the runtime volume should be wiped so the next bootstrap
+// re-syncs wheels from the new index — leaving the old cu129/cu126 venv in
+// place would leave `torch.cuda.is_available()` returning False on the other
+// hardware class.
+
+ipcMain.handle('server:getUseLegacyGpu', async () => {
+  return (store.get('server.useLegacyGpu') as boolean) ?? false;
+});
+
+ipcMain.handle(
+  'server:setUseLegacyGpu',
+  async (_event, value: boolean, wipeRuntimeVolume?: boolean) => {
+    const normalized = Boolean(value);
+    store.set('server.useLegacyGpu', normalized);
+    // Wipe the runtime volume on request so the next bootstrap re-syncs
+    // wheels from the newly-selected PyTorch index. The status we return
+    // reflects actual outcome — the renderer surfaces an error toast when
+    // the wipe was requested but did not happen (e.g., volume still held
+    // by a stopped-but-not-removed container).
+    let runtimeVolumeWiped = false;
+    let runtimeVolumeWipeError: string | null = null;
+    if (wipeRuntimeVolume) {
+      try {
+        const exists = await dockerManager.volumeExists(dockerManager.VOLUME_NAMES.runtime);
+        if (!exists) {
+          // First-time toggle before any container has ever bootstrapped —
+          // there is nothing to wipe, so report success without noise.
+          runtimeVolumeWiped = true;
+        } else {
+          await dockerManager.removeVolume(dockerManager.VOLUME_NAMES.runtime);
+          runtimeVolumeWiped = true;
+        }
+      } catch (err) {
+        runtimeVolumeWipeError = err instanceof Error ? err.message : String(err);
+        console.warn(
+          '[main] runtime volume wipe on legacy-GPU toggle failed:',
+          runtimeVolumeWipeError,
+        );
+      }
+    }
+    return { useLegacyGpu: normalized, runtimeVolumeWiped, runtimeVolumeWipeError };
+  },
+);
 
 ipcMain.handle('docker:getLogs', async (_event, tail?: number) => {
   return dockerManager.getLogs(tail);

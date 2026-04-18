@@ -194,6 +194,7 @@ def compute_dependency_fingerprint(
     arch: str,
     extras: tuple[str, ...] = (),
     gpu_driver: str = "",
+    pytorch_variant: str = "cu129",
 ) -> str:
     hasher = hashlib.sha256()
     hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode())
@@ -201,6 +202,7 @@ def compute_dependency_fingerprint(
     hasher.update(f"arch={arch}".encode())
     hasher.update(f"extras={','.join(sorted(extras))}".encode())
     hasher.update(f"gpu_driver={gpu_driver}".encode())
+    hasher.update(f"pytorch_variant={pytorch_variant}".encode())
 
     update_hash_with_file(hasher, "uv-lock", LOCK_FILE)
 
@@ -212,12 +214,15 @@ def compute_structural_fingerprint(
     arch: str,
     extras: tuple[str, ...] = (),
     gpu_driver: str = "",
+    pytorch_variant: str = "cu129",
 ) -> str:
-    """Hash of factors that determine venv shape (ABI, arch, extras, GPU driver).
+    """Hash of factors that determine venv shape (ABI, arch, extras, GPU driver, variant).
 
     A change here means the venv cannot be incrementally updated.
     The GPU driver version is structural because compiled CUDA extensions
-    (e.g. PyTorch) are linked against a specific driver ABI.
+    (e.g. PyTorch) are linked against a specific driver ABI. The PyTorch wheel
+    variant (cu129 vs cu126, Issue #83) is structural for the same reason —
+    swapping wheel indexes ships a different CUDA-linked binary.
     """
     hasher = hashlib.sha256()
     hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode())
@@ -225,6 +230,7 @@ def compute_structural_fingerprint(
     hasher.update(f"arch={arch}".encode())
     hasher.update(f"extras={','.join(sorted(extras))}".encode())
     hasher.update(f"gpu_driver={gpu_driver}".encode())
+    hasher.update(f"pytorch_variant={pytorch_variant}".encode())
     return hasher.hexdigest()
 
 
@@ -333,16 +339,41 @@ def run_dependency_sync(
     cache_dir: Path,
     timeout_seconds: int,
     extras: tuple[str, ...] = (),
+    pytorch_variant: str = "cu129",
 ) -> None:
-    """Run dependency sync into the runtime virtual environment."""
-    cmd = [
+    """Run dependency sync into the runtime virtual environment.
+
+    Variant handling (Issue #83):
+        cu129 (default) — frozen sync against the lock-pinned PyTorch index.
+        cu126 (legacy)  — drops --frozen and overrides the URL of the named
+                          index `pytorch-cu129` with the cu126 wheel URL via
+                          `--index pytorch-cu129=https://…/cu126` (name-reuse
+                          URL swap). Because `[tool.uv.sources]` in pyproject
+                          pins torch/torchaudio to the *name* `pytorch-cu129`,
+                          reusing that name is what redirects the source pin.
+                          Declaring a new index name would leave the pin
+                          untouched and uv would still install cu129 wheels.
+                          uv.lock pins wheel hashes to the cu129 URL, so
+                          --frozen would reject the cu126 wheels; hence drop it.
+    """
+    cmd: list[str] = [
         "uv",
         "sync",
-        "--frozen",
         "--no-dev",
         "--project",
         str(PROJECT_DIR),
     ]
+    if pytorch_variant == "cu126":
+        # Legacy-GPU path — Pascal/Maxwell support requires cu126 wheels (sm_50..sm_90).
+        cmd.extend(
+            [
+                "--index",
+                "pytorch-cu129=https://download.pytorch.org/whl/cu126",
+            ]
+        )
+    else:
+        # Default cu129 path — preserve byte-identical behaviour with --frozen.
+        cmd.insert(2, "--frozen")
     for extra in extras:
         cmd.extend(["--extra", extra])
     run_command(
@@ -388,6 +419,7 @@ def ensure_runtime_dependencies(
     timeout_seconds: int,
     log_changes: bool,
     extras: tuple[str, ...] = (),
+    pytorch_variant: str = "cu129",
 ) -> tuple[Path, str, dict[str, int], dict[str, Any]]:
     ensure_start = time.perf_counter()
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -407,12 +439,14 @@ def ensure_runtime_dependencies(
         arch=arch,
         extras=extras,
         gpu_driver=gpu_driver,
+        pytorch_variant=pytorch_variant,
     )
     structural_fp = compute_structural_fingerprint(
         python_abi=python_abi,
         arch=arch,
         extras=extras,
         gpu_driver=gpu_driver,
+        pytorch_variant=pytorch_variant,
     )
     lock_fp = compute_lock_fingerprint()
     force_rebuild = parse_bool_env("BOOTSTRAP_FORCE_REBUILD", False)
@@ -479,6 +513,7 @@ def ensure_runtime_dependencies(
                     cache_dir=cache_dir,
                     timeout_seconds=timeout_seconds,
                     extras=extras,
+                    pytorch_variant=pytorch_variant,
                 )
                 log_timing(
                     f"dependency sync complete (mode={final_sync_mode})",
@@ -505,6 +540,7 @@ def ensure_runtime_dependencies(
                         cache_dir=cache_dir,
                         timeout_seconds=timeout_seconds,
                         extras=extras,
+                        pytorch_variant=pytorch_variant,
                     )
                     log_timing(
                         f"dependency sync complete (mode={final_sync_mode})",
@@ -549,6 +585,7 @@ def ensure_runtime_dependencies(
                     cache_dir=cache_dir,
                     timeout_seconds=timeout_seconds,
                     extras=extras,
+                    pytorch_variant=pytorch_variant,
                 )
                 log_timing(
                     f"dependency sync complete (mode={final_sync_mode})",
@@ -595,6 +632,7 @@ def ensure_runtime_dependencies(
                 "python_abi": python_abi,
                 "arch": arch,
                 "gpu_driver": gpu_driver,
+                "pytorch_variant": pytorch_variant,
                 "structural_fingerprint": structural_fp,
                 "lock_fingerprint": lock_fp,
                 "sync_mode": final_sync_mode,
@@ -1210,6 +1248,21 @@ def main() -> int:
     hf_home = os.environ.get("HF_HOME", "/models")
     previous_status_payload = load_status_file(status_file)
 
+    # PyTorch wheel-index variant (Issue #83). Set at build time via
+    # `--build-arg PYTORCH_VARIANT=cu126` for the legacy-GPU image and
+    # propagated to the runtime via the matching `ENV PYTORCH_VARIANT`.
+    # Unknown values fall back to the default cu129 with a warning so a typo
+    # never silently invalidates the venv fingerprint.
+    raw_variant = (os.environ.get("PYTORCH_VARIANT") or "").strip().lower()
+    if raw_variant in {"", "cu129"}:
+        pytorch_variant = "cu129"
+    elif raw_variant == "cu126":
+        pytorch_variant = "cu126"
+    else:
+        log(f"Unknown PYTORCH_VARIANT={raw_variant!r}; falling back to cu129")
+        pytorch_variant = "cu129"
+    log(f"PyTorch variant: {pytorch_variant}")
+
     if require_hf_token and not hf_token:
         log("HF token required by configuration but not provided")
         emit_event(
@@ -1238,9 +1291,10 @@ def main() -> int:
         timeout_seconds=timeout_seconds,
         log_changes=log_changes,
         extras=extras_tuple,
+        pytorch_variant=pytorch_variant,
     )
     log_timing("runtime dependency bootstrap phase complete", deps_start)
-    log(f"Dependency update path: {sync_mode}")
+    log(f"Dependency update path: {sync_mode} variant={pytorch_variant}")
 
     deps_elapsed_ms = round((time.perf_counter() - deps_start) * 1000)
     if sync_mode == "skip":
@@ -1250,6 +1304,7 @@ def main() -> int:
             "Dependencies up to date",
             status="complete",
             syncMode="cache-hit",
+            variant=pytorch_variant,
             durationMs=deps_elapsed_ms,
             phase="bootstrap",
         )
@@ -1273,6 +1328,7 @@ def main() -> int:
             "Dependencies installed",
             status="complete",
             syncMode=sync_mode_label,
+            variant=pytorch_variant,
             detail=detail,
             durationMs=deps_elapsed_ms,
             phase="bootstrap",
@@ -1727,6 +1783,7 @@ def main() -> int:
             "bootstrap": {
                 "schema_version": BOOTSTRAP_SCHEMA_VERSION,
                 "sync_mode": sync_mode,
+                "pytorch_variant": pytorch_variant,
                 "package_delta": package_delta,
                 "selection_reason": diagnostics.get("selection_reason"),
                 "escalated_to_rebuild": diagnostics.get("escalated_to_rebuild", False),

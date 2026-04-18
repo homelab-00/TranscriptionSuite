@@ -19,6 +19,22 @@ vi.mock('../dockerManager.js', () => ({
   dockerManager: {
     listImages: async () => [],
   },
+  // Matches the real pure helpers — buildGhcrUrlsForRepo is deterministic, and
+  // resolveImageRepo returns the default repo when useLegacyGpu is false (the
+  // path these tests exercise). Keeps URL substrings that the fetch mocks match
+  // on (`ghcr.io/token`, `ghcr.io/v2`).
+  buildGhcrUrlsForRepo: (imageRepo: string) => {
+    const pkgPath = imageRepo.replace(/^ghcr\.io\//, '');
+    return {
+      tokenUrl: `https://ghcr.io/token?scope=repository:${pkgPath}:pull`,
+      tagsUrl: `https://ghcr.io/v2/${pkgPath}/tags/list`,
+      blobBase: `https://ghcr.io/v2/${pkgPath}`,
+    };
+  },
+  resolveImageRepo: (useLegacyGpu: boolean) =>
+    useLegacyGpu
+      ? 'ghcr.io/homelab-00/transcriptionsuite-server-legacy'
+      : 'ghcr.io/homelab-00/transcriptionsuite-server',
 }));
 
 import { sanitizeReleaseBody, UpdateManager, FAILURE_RETRY_MS } from '../updateManager';

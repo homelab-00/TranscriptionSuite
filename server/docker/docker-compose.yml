@@ -55,7 +55,17 @@ services:
     build:
       context: ../..
       dockerfile: server/docker/Dockerfile
-    image: ghcr.io/homelab-00/transcriptionsuite-server:${TAG:-latest}
+      # PYTORCH_VARIANT threads through to the Dockerfile ARG so a manual
+      # `docker compose build` with `PYTORCH_VARIANT=cu126` produces the legacy
+      # image locally. Default keeps the existing cu129 behaviour unchanged.
+      # (The dashboard never calls `compose build` — it pulls from GHCR — so this
+      # matters for CLI/dev builds only; see Issue #83.)
+      args:
+        PYTORCH_VARIANT: ${PYTORCH_VARIANT:-cu129}
+    # Image repo is templated so the dashboard can switch between the default
+    # `transcriptionsuite-server` and the legacy-GPU `transcriptionsuite-server-legacy`
+    # repo (Issue #83). The default keeps the existing behaviour for unchanged callers.
+    image: ${IMAGE_REPO:-ghcr.io/homelab-00/transcriptionsuite-server}:${TAG:-latest}
     container_name: transcriptionsuite-container
     
     # Environment variables

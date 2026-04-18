@@ -1206,3 +1206,126 @@ def test_marker_written_with_sub_fingerprints(
     assert persisted["lock_fingerprint"] == "lock-fp"
     assert persisted["sync_mode"] == "delta-sync"
     assert persisted["escalated_to_rebuild"] is False
+
+
+# ─── PyTorch variant branching (Issue #83 — legacy-GPU image) ─────────────────
+
+
+def _capture_run_dependency_sync_cmd(
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
+    *,
+    pytorch_variant: str,
+    extras: tuple[str, ...] = (),
+) -> list[str]:
+    """Invoke run_dependency_sync with run_command monkeypatched to capture argv."""
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_command(cmd: list[str], **_: object) -> None:
+        captured["cmd"] = list(cmd)
+
+    monkeypatch.setattr(module, "run_command", fake_run_command)
+    monkeypatch.setattr(module, "build_uv_sync_env", lambda **_: {})
+
+    module.run_dependency_sync(
+        venv_dir=Path("/tmp/venv"),
+        cache_dir=Path("/tmp/cache"),
+        timeout_seconds=300,
+        extras=extras,
+        pytorch_variant=pytorch_variant,
+    )
+    return captured["cmd"]
+
+
+def test_run_dependency_sync_default_cu129_uses_frozen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default cu129 path stays --frozen and never injects an --index override."""
+    module = _load_bootstrap_module()
+    cmd = _capture_run_dependency_sync_cmd(monkeypatch, module, pytorch_variant="cu129")
+
+    assert "--frozen" in cmd, "cu129 path must keep --frozen for lock-pinned wheels"
+    assert "--index-strategy" not in cmd
+    assert not any(
+        arg.startswith("pytorch-cu129=") and arg != cmd[cmd.index("--index") + 1]
+        if "--index" in cmd
+        else False
+        for arg in cmd
+    ), "cu129 path must not carry a URL-override --index"
+    assert "--index" not in cmd, "cu129 path relies on lock-pinned index; no CLI override"
+
+
+def test_run_dependency_sync_legacy_cu126_drops_frozen_and_overrides_cu129_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy cu126 path drops --frozen and swaps the pytorch-cu129 index URL.
+
+    The override MUST reuse the `pytorch-cu129` name because `[tool.uv.sources]`
+    in pyproject.toml pins `torch`/`torchaudio` to that named index. Declaring a
+    new name (e.g. `pytorch-cu126`) would leave the source pin untouched and uv
+    would still install cu129 wheels.
+    """
+    module = _load_bootstrap_module()
+    cmd = _capture_run_dependency_sync_cmd(monkeypatch, module, pytorch_variant="cu126")
+
+    assert "--frozen" not in cmd, "cu126 path must drop --frozen (lock pins cu129 hashes)"
+    assert "--index" in cmd, "cu126 path must supply the --index override"
+    idx = cmd.index("--index")
+    assert cmd[idx + 1] == "pytorch-cu129=https://download.pytorch.org/whl/cu126", (
+        "cu126 path must reuse the `pytorch-cu129` name with the cu126 URL — "
+        "adding a new index name would not override the `[tool.uv.sources]` pin"
+    )
+    # No --index-strategy override — only one named index is in play post-amendment.
+    assert "--index-strategy" not in cmd
+
+
+def test_run_dependency_sync_legacy_propagates_extras(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Extras are appended after the cu126 index args, not swallowed by the branch."""
+    module = _load_bootstrap_module()
+    cmd = _capture_run_dependency_sync_cmd(
+        monkeypatch,
+        module,
+        pytorch_variant="cu126",
+        extras=("whisper", "nemo"),
+    )
+
+    extras_pairs = [(cmd[i], cmd[i + 1]) for i in range(len(cmd) - 1) if cmd[i] == "--extra"]
+    assert ("--extra", "whisper") in extras_pairs
+    assert ("--extra", "nemo") in extras_pairs
+    # Extras land after the --index override so they don't get captured as its value.
+    index_idx = cmd.index("--index")
+    first_extra_idx = cmd.index("--extra")
+    assert first_extra_idx > index_idx
+
+
+def test_marker_persists_pytorch_variant_for_legacy_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The marker file records the active variant so a flip rebuilds the venv."""
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _patch_fingerprint_context(module, monkeypatch)
+
+    def fake_sync(**_: object) -> None:
+        _touch_runtime_python(runtime_dir)
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+
+    module.ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=300,
+        log_changes=False,
+        pytorch_variant="cu126",
+    )
+
+    marker = json.loads(
+        (runtime_dir / ".runtime-bootstrap-marker.json").read_text(encoding="utf-8")
+    )
+    assert marker["pytorch_variant"] == "cu126"

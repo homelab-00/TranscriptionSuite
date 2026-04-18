@@ -11,7 +11,7 @@
 
 import { Notification, app } from 'electron';
 import type Store from 'electron-store';
-import { dockerManager } from './dockerManager.js';
+import { dockerManager, buildGhcrUrlsForRepo, resolveImageRepo } from './dockerManager.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyStore = Store<any>;
@@ -95,10 +95,9 @@ export interface UpdateStatus {
 const GITHUB_RELEASES_URL =
   'https://api.github.com/repos/homelab-00/TranscriptionSuite/releases/latest';
 
-const GHCR_TOKEN_URL =
-  'https://ghcr.io/token?service=ghcr.io&scope=repository:homelab-00/transcriptionsuite-server:pull';
-
-const GHCR_TAGS_URL = 'https://ghcr.io/v2/homelab-00/transcriptionsuite-server/tags/list';
+// GHCR URLs for the server-image channel are resolved per-check from
+// `server.useLegacyGpu` (Issue #83). A legacy user should see legacy updates
+// on the same channel — not mixed default updates.
 
 const INTERVAL_MS: Record<string, number> = {
   '24h': 24 * 60 * 60 * 1000,
@@ -391,7 +390,15 @@ export class UpdateManager {
   // ─── Server image check (GHCR) ─────────────────────────────────────────
 
   private async checkServer(): Promise<ComponentUpdateStatus> {
-    // Local: highest semver tag from locally pulled Docker images
+    // Resolve repo (default vs legacy-GPU) at check time so a user who
+    // toggles `useLegacyGpu` between checks gets the right channel on
+    // the next probe, not the cached one. (Issue #83.)
+    const useLegacyGpu = (this.store.get('server.useLegacyGpu') as boolean) ?? false;
+    const { tokenUrl, tagsUrl } = buildGhcrUrlsForRepo(resolveImageRepo(useLegacyGpu));
+
+    // Local: highest semver tag from locally pulled Docker images.
+    // `dockerManager.listImages()` already reads the same setting, so local
+    // and remote refer to the same repo in one check.
     let localVersion: string | null = null;
     try {
       const images = await dockerManager.listImages();
@@ -403,7 +410,7 @@ export class UpdateManager {
 
     try {
       // Anonymous token for GHCR public repo
-      const tokenRes = await fetch(GHCR_TOKEN_URL, {
+      const tokenRes = await fetch(tokenUrl, {
         signal: AbortSignal.timeout(15_000),
       });
       if (!tokenRes.ok) {
@@ -413,7 +420,7 @@ export class UpdateManager {
       const token = tokenData.token;
       if (!token) throw new Error('No token in GHCR response');
 
-      const tagsRes = await fetch(GHCR_TAGS_URL, {
+      const tagsRes = await fetch(tagsUrl, {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(15_000),
       });

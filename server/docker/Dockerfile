@@ -5,9 +5,17 @@
 
 FROM ubuntu:24.04 AS runtime
 
+# PyTorch wheel-index variant (Issue #83):
+#   cu129 (default) — modern GPUs, sm_70..sm_120 (Volta and newer)
+#   cu126           — legacy-GPU image, sm_50..sm_90 (restores Pascal/Maxwell, e.g. GTX 1070)
+# Selected at build time via `--build-arg PYTORCH_VARIANT=cu126` and consumed by
+# bootstrap_runtime.py to switch the `uv sync` index. Default = cu129 keeps existing
+# behaviour byte-identical for unchanged builds.
+ARG PYTORCH_VARIANT=cu129
+
 # OCI standard labels for container metadata
 LABEL org.opencontainers.image.title="TranscriptionSuite Server"
-LABEL org.opencontainers.image.description="Self contained server for TranscriptionSuite"
+LABEL org.opencontainers.image.description="Self contained server for TranscriptionSuite (PyTorch variant: ${PYTORCH_VARIANT})"
 LABEL org.opencontainers.image.authors="homelab-00"
 LABEL org.opencontainers.image.vendor="homelab-00"
 LABEL org.opencontainers.image.source="https://github.com/homelab-00/TranscriptionSuite"
@@ -20,6 +28,9 @@ ENV DEBIAN_FRONTEND="noninteractive"
 ENV PYTHONUNBUFFERED="1"
 ENV PYTHONDONTWRITEBYTECODE="1"
 ENV UV_PYTHON="3.13"
+# Propagate the build-time PyTorch variant into runtime so bootstrap_runtime.py
+# can branch its `uv sync` between the cu129 (default) and cu126 (legacy) index.
+ENV PYTORCH_VARIANT="${PYTORCH_VARIANT}"
 ENV BOOTSTRAP_RUNTIME_DIR="/runtime"
 ENV BOOTSTRAP_CACHE_DIR="/runtime/cache"
 ENV BOOTSTRAP_STATUS_FILE="/runtime/bootstrap-status.json"

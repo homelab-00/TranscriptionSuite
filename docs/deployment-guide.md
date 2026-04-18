@@ -107,6 +107,45 @@ When TLS is enabled:
 - nvidia-container-toolkit or nvidia-container-runtime
 - 6-16GB VRAM depending on model
 - CDI mode available for newer setups
+- **Modern GPUs only** — the default image ships PyTorch cu129 wheels, which
+  support compute capability `sm_70..sm_120` (Volta and newer: RTX 20/30/40/50,
+  Tesla V100/A100/H100, data-centre L4/L40, etc.). Pascal (GTX 10-series) and
+  Maxwell (GTX 9-series, Tesla M40) are **not** supported by the default image —
+  see [Legacy-GPU image variant](#legacy-gpu-image-variant-issue-83) below.
+
+### Legacy-GPU image variant (Issue #83)
+
+Users with Pascal (`sm_6x`) or Maxwell (`sm_5x`) cards — e.g. **GTX 1070, GTX
+1080, Tesla P4/P40/P100, Tesla M40** — need the `-legacy` image, which is
+built against PyTorch cu126 wheels (still ships `sm_50..sm_90`). The cu129
+wheels rebuilt with these cards were dropped upstream; that's why Issue #60's
+compute-type auto-correction doesn't help — PyTorch rejects the GPU outright
+before the backend can downgrade `float16` to `int8`.
+
+**Enable it via the dashboard:**
+Server settings → Runtime = **GPU (CUDA)** → check **"Use legacy-GPU image
+(Pascal / Maxwell only)"**. The dashboard switches to the
+`ghcr.io/homelab-00/transcriptionsuite-server-legacy` repo for the remainder
+of the session; confirm the restart prompt to wipe the runtime volume so the
+next bootstrap re-syncs wheels from the cu126 index.
+
+**Build & push it manually:**
+```bash
+# From the repo root — build locally with the cu126 build-arg, then push to the
+# -legacy GHCR repo. The default `docker compose build` is unaffected.
+./build/docker-build-push.sh --variant legacy --build v1.3.4
+```
+`--variant legacy` flips both the build-arg (`PYTORCH_VARIANT=cu126`) and the
+push target (`…/transcriptionsuite-server-legacy`). `latest` is auto-tagged
+only within its own repo, never across the two.
+
+**Caveats:**
+- First-run bootstrap takes longer than the default variant — the legacy path
+  runs `uv sync` without `--frozen` because `uv.lock` pins wheel hashes to the
+  cu129 index. It does a fresh resolve + download against cu126.
+- Reproducibility guarantees are weaker for this variant only.
+- Not available in `release.yml` — the legacy image is published manually by
+  the maintainer (consistent with the existing Docker publishing flow).
 
 ### AMD/Intel Vulkan
 - Vulkan-capable GPU with `/dev/dri` access

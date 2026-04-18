@@ -291,6 +291,9 @@ Notes:
 *TranscriptionSuite supports both Docker and Podman. The dashboard and CLI scripts auto-detect which runtime is available. For GPU mode with Podman, ensure CDI is configured (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`).*
 *Podman 4.7+ is required for `podman compose` support.*
 
+* *Older NVIDIA GPUs (GTX 1070 / 1080 and similar):*
+*If your card is Pascal- or Maxwell-era, the default image will fail to start. See the [older NVIDIA GPUs](#server-fails-to-start-on-older-nvidia-gpus-pascal--maxwell) troubleshooting entry for the one-toggle fix.*
+
 ### 2.5 AMD / Intel GPU Support (Vulkan)
 
 If you have an **AMD or Intel GPU** instead of NVIDIA, you can still get GPU-accelerated transcription using [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with Vulkan.
@@ -796,6 +799,33 @@ sudo systemctl enable --now nvidia-persistence.service
 ```
 
 **Alternative:** Reboot the host to fully reset the driver state.
+
+### Server fails to start on older NVIDIA GPUs (Pascal / Maxwell)
+
+**Symptom:** The container crash-loops shortly after you click Start Local. The server logs contain a message like:
+
+> NVIDIA GeForce GTX 1070 with CUDA capability sm_61 is not compatible with the current PyTorch installation.
+
+**Who is affected:** Anyone whose NVIDIA card is Pascal- or Maxwell-generation. Concretely:
+
+- GeForce GTX 10-series — 1050 / 1060 / 1070 / 1080 (and Ti variants)
+- GeForce GTX 9-series
+- Tesla P4 / P40 / P100 / M40
+- Quadro P-series and M-series
+
+**Why:** The default Docker image ships PyTorch built for Volta and newer GPUs (RTX 20-series and up). PyTorch refuses to load your card, and the container exits.
+
+**Fix:** Switch to the **legacy-GPU image** — a separate image we build specifically for these cards.
+
+1. Stop the server (Server tab → Stop) and remove the existing container (Server tab → cleanup controls).
+2. In the Server tab, make sure the runtime is set to **GPU (CUDA)**.
+3. Tick **Use legacy-GPU image (Pascal / Maxwell only)**.
+4. Confirm the dialog. Leave "Wipe runtime volume now (recommended)" checked.
+5. Click **Fetch Fresh Image** to pull the legacy image, then **Start Local**.
+
+The first start after switching re-downloads PyTorch and its dependencies and takes roughly as long as your original first install (10-20 minutes on reasonable hardware). Once running, the server behaves identically to the default image.
+
+> **If your GPU is Volta or newer** (RTX 20/30/40/50-series, Quadro RTX, Tesla V/A/H/B-series), **leave this toggle off** — the default image is what you want. Enabling the legacy image on a modern GPU just gives you older PyTorch wheels for no benefit.
 
 ### Advanced Troubleshooting
 
