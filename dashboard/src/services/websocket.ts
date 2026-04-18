@@ -76,6 +76,18 @@ export interface SocketCallbacks {
   onReconnect?: (attempt: number, delayMs: number) => void;
   /** Called when reconnect gives up after maxAttempts */
   onReconnectExhausted?: () => void;
+  /**
+   * Called from `handleConfigChanged` when an active session (state ∈
+   * {connecting, authenticating, ready}) detects that the base URL has
+   * mutated away from `connectedUrl`. Consumers that own audio capture
+   * (e.g. `useLiveMode`) use this as the signal to drain + retarget:
+   * stop sending new frames, flush any server-side VAD buffer via a
+   * `stop` message, close the old socket, and reconnect to the new host.
+   * The socket class itself only logs a breadcrumb — the consumer decides
+   * whether to preserve the old session or tear it down, because only
+   * the consumer knows whether in-flight audio is recoverable.
+   */
+  onHostMismatch?: (oldUrl: string, newUrl: string) => void;
 }
 
 // ─── Binary framing ──────────────────────────────────────────────────────────
@@ -438,10 +450,27 @@ export class TranscriptionSocket {
     if (this.connectedUrl === null) return;
     const newUrl = this.getWsUrl();
     if (newUrl !== null && newUrl !== this.connectedUrl) {
+      const oldUrl = this.connectedUrl;
       this.log(
-        `Base URL changed during active session; current: ${this.connectedUrl} -> next reconnect: ${newUrl}`,
+        `Base URL changed during active session; current: ${oldUrl} -> next reconnect: ${newUrl}`,
         'warning',
       );
+      // Hand the decision to the consumer. The socket class does NOT drop the
+      // socket itself because only the consumer knows whether the in-flight
+      // audio is recoverable (live mic vs. finished upload), and tearing down
+      // a ready WebSocket mid-session from inside this helper would lose the
+      // consumer's chance to drain cleanly. Live-mode implements drain +
+      // retarget; the longform/file hook leaves the socket alive.
+      // Wrapped in try/catch so a throwing consumer cannot corrupt the socket
+      // state (the callback runs synchronously inside an event dispatch).
+      try {
+        this.callbacks.onHostMismatch?.(oldUrl, newUrl);
+      } catch (err) {
+        this.log(
+          `onHostMismatch handler threw: ${err instanceof Error ? err.message : String(err)}`,
+          'error',
+        );
+      }
     }
   }
   // ── Internal ───────────────────────────────────────────────────────────────

@@ -73,6 +73,11 @@ export function useLiveMode(): LiveModeState {
   const socketRef = useRef<TranscriptionSocket | null>(null);
   const captureRef = useRef<AudioCapture | null>(null);
   const startOptsRef = useRef<LiveStartOptions>({});
+  // Retarget hook: holds the latest `start` closure so the socket's
+  // onHostMismatch callback can reopen the session on the new URL without
+  // a stale reference. Updated on every render (see the effect below).
+  const retargetRef = useRef<(() => void) | null>(null);
+  const isRetargetingRef = useRef(false);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -84,8 +89,8 @@ export function useLiveMode(): LiveModeState {
 
   // Rearm / diagnostic dispatch for config-changed events. The socket class
   // owns the branching (error rearm, pending-backoff shortcut, active-session
-  // host-change warn) so this listener just forwards the current install-gate
-  // predicate. See TranscriptionSocket.handleConfigChanged for each branch.
+  // host-change warn/retarget) so this listener just forwards the current
+  // install-gate predicate. See TranscriptionSocket.handleConfigChanged.
   useEffect(() => {
     return apiClient.onConfigChanged(() => {
       socketRef.current?.handleConfigChanged(apiClient.isBaseUrlConfigured());
@@ -195,9 +200,14 @@ export function useLiveMode(): LiveModeState {
     (options?: LiveStartOptions) => {
       setError(null);
       setPartial('');
-      setSentences([]);
+      // A retarget hop is a continuation of the same user session, not a new
+      // one — preserve already-accumulated sentences and unmute state so the
+      // transcript doesn't visually reset on host change.
+      if (!isRetargetingRef.current) {
+        setSentences([]);
+        setMuted(false);
+      }
       setStatusMessage(null);
-      setMuted(false);
       startOptsRef.current = options ?? {};
 
       setStatus('connecting');
@@ -212,16 +222,52 @@ export function useLiveMode(): LiveModeState {
           setAnalyser(null);
         },
         onClose: () => {
+          // During a retarget the onClose of the OLD socket fires AFTER we've
+          // already installed the new socket. Swallow the status reset so the
+          // UI doesn't flip to 'idle' between hops.
+          if (isRetargetingRef.current) return;
           captureRef.current?.stop();
           setAnalyser(null);
           setStatusMessage(null);
           setStatus('idle');
+        },
+        onHostMismatch: () => {
+          // Drain + retarget for EC-6: the user changed hosts while live mode
+          // was recording. Stop frames to the old host, drain its VAD buffer
+          // via `stop`, tear down cleanly, then reconnect against the new URL
+          // with the same options. Deferred until microtask so the socket's
+          // handleConfigChanged call can return cleanly before we destroy it.
+          const retarget = retargetRef.current;
+          if (!retarget) return;
+          isRetargetingRef.current = true;
+          try {
+            captureRef.current?.stop();
+            setAnalyser(null);
+            socketRef.current?.sendJSON({ type: 'stop' });
+          } catch {
+            // sendJSON/stop is best-effort — if the socket already closed,
+            // there's nothing to drain. Retarget anyway.
+          }
+          queueMicrotask(() => {
+            try {
+              retarget();
+            } finally {
+              isRetargetingRef.current = false;
+            }
+          });
         },
       });
       socketRef.current.connect();
     },
     [handleMessage],
   );
+
+  // Keep the retarget ref pointed at the latest `start` closure. Updated every
+  // time `start` is recreated (i.e. when handleMessage changes). Without this
+  // the onHostMismatch callback would capture a stale `start` reference.
+  useEffect(() => {
+    retargetRef.current = () => start(startOptsRef.current);
+  }, [start]);
 
   const stop = useCallback(() => {
     socketRef.current?.sendJSON({ type: 'stop' });

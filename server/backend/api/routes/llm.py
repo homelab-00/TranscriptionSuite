@@ -25,6 +25,50 @@ from server.config import get_config
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# In-flight guard for per-recording AI-summary generation.
+#
+# Two parallel "Generate AI Summary" clicks on the same recording would
+# otherwise race: each call invokes ``update_recording_summary`` independently
+# and SQLite serialises the UPDATEs last-writer-wins, so the DB can end up
+# holding text from stream B while the already-open modal still displays
+# stream A — a user-visible UI/DB desync. The contract here is to reject a
+# second request for the same recording with a 409 Conflict while the first
+# is still running (streaming or blocking). Per-recording granularity means
+# unrelated recordings continue to summarise in parallel.
+#
+# The set + lock pair is an atomic check-and-insert primitive: ``asyncio.Lock``
+# is cheaper than a full ``asyncio.Semaphore`` table, and rejecting eagerly
+# (rather than serialising) gives the user immediate feedback instead of a
+# mysterious hang behind an earlier job.
+_summary_in_flight: set[int] = set()
+_summary_in_flight_lock = asyncio.Lock()
+
+
+async def _acquire_summary_slot(recording_id: int) -> None:
+    """Reserve the per-recording summary slot; raise 409 if already in flight.
+
+    Must be released via ``_release_summary_slot`` in a ``finally`` block. The
+    streaming path wires the release through ``on_finally`` on
+    ``_build_llm_stream_response`` so the slot is returned when the generator's
+    finally runs — success, cancellation, and exception paths alike.
+    """
+    async with _summary_in_flight_lock:
+        if recording_id in _summary_in_flight:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Summary generation already in progress for recording {recording_id}. "
+                    "Wait for the current generation to finish before retrying."
+                ),
+            )
+        _summary_in_flight.add(recording_id)
+
+
+async def _release_summary_slot(recording_id: int) -> None:
+    """Return the per-recording slot. Safe to call when the slot is absent."""
+    async with _summary_in_flight_lock:
+        _summary_in_flight.discard(recording_id)
+
 
 def _get_httpx():
     """Import httpx lazily to avoid startup cost for non-LLM flows."""
@@ -488,6 +532,7 @@ def _build_llm_stream_response(
     request: LLMRequest,
     *,
     on_complete: Callable[[str, str | None], Awaitable[None]] | None = None,
+    on_finally: Callable[[], Awaitable[None]] | None = None,
 ) -> StreamingResponse:
     """Build a StreamingResponse that relays LLM SSE chunks to the client.
 
@@ -495,6 +540,12 @@ def _build_llm_stream_response(
     ``[DONE]`` with a non-empty accumulated response, passing ``(full_text,
     captured_model)``. Persistence failures are logged but never break the
     stream — the client still receives its final ``{'done': True}`` event.
+
+    If ``on_finally`` is provided, it is awaited inside the generator's finally
+    block regardless of success, cancellation, or exception. This is the hook
+    the per-recording summary guard uses to release its slot on every exit
+    path — including client disconnect (``GeneratorExit``) and mid-stream
+    httpx errors that don't trigger ``on_complete``.
     """
     httpx = _get_httpx()
     config = get_llm_config()
@@ -653,6 +704,18 @@ def _build_llm_stream_response(
                         f"Fallback persistence on stream close failed: {exc}",
                         exc_info=True,
                     )
+            # Release any per-call resources (e.g. the summary in-flight slot).
+            # Runs after persistence so a slow release never delays the final
+            # DB write; and unconditionally so cancellation paths still free
+            # the slot.
+            if on_finally is not None:
+                try:
+                    await on_finally()
+                except Exception as exc:
+                    logger.error(
+                        f"on_finally callback failed after LLM stream: {exc}",
+                        exc_info=True,
+                    )
 
     return StreamingResponse(
         generate_stream(),  # lgtm[py/stack-trace-exposure] exceptions caught in generator
@@ -693,41 +756,50 @@ async def summarize_recording(
     if not transcription or not transcription.get("segments"):
         raise HTTPException(status_code=404, detail="No transcription found")
 
-    # Build full text from segments
-    full_text = "\n".join(
-        f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}" if seg.get("speaker") else seg["text"]
-        for seg in transcription["segments"]
-    )
-
-    # Process with LLM
-    llm_response = await process_with_llm(
-        LLMRequest(
-            transcription_text=full_text,
-            user_prompt=custom_prompt,
+    # Reject a second concurrent generation for the same recording. The 404
+    # checks above run unguarded so a bad id always returns 404 (not 409).
+    await _acquire_summary_slot(recording_id)
+    try:
+        # Build full text from segments
+        full_text = "\n".join(
+            f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}"
+            if seg.get("speaker")
+            else seg["text"]
+            for seg in transcription["segments"]
         )
-    )
 
-    # Persist the generated summary so it survives application restarts.
-    # Failure to persist is logged but does not mask the response: the client
-    # already holds the generated text and can retry via the edit flow.
-    if llm_response.response:
-        try:
-            if not update_recording_summary(
-                recording_id, llm_response.response, llm_response.model
-            ):
-                logger.warning(
-                    "update_recording_summary returned False for recording %s",
-                    sanitize_for_log(str(recording_id)),
-                )
-        except Exception as exc:
-            logger.error(
-                "Failed to persist summary for recording %s: %s",
-                sanitize_for_log(str(recording_id)),
-                sanitize_for_log(str(exc)),
-                exc_info=True,
+        # Process with LLM
+        llm_response = await process_with_llm(
+            LLMRequest(
+                transcription_text=full_text,
+                user_prompt=custom_prompt,
             )
+        )
 
-    return llm_response
+        # Persist the generated summary so it survives application restarts.
+        # Failure to persist is logged but does not mask the response: the
+        # client already holds the generated text and can retry via the edit
+        # flow.
+        if llm_response.response:
+            try:
+                if not update_recording_summary(
+                    recording_id, llm_response.response, llm_response.model
+                ):
+                    logger.warning(
+                        "update_recording_summary returned False for recording %s",
+                        sanitize_for_log(str(recording_id)),
+                    )
+            except Exception as exc:
+                logger.error(
+                    "Failed to persist summary for recording %s: %s",
+                    sanitize_for_log(str(recording_id)),
+                    sanitize_for_log(str(exc)),
+                    exc_info=True,
+                )
+
+        return llm_response
+    finally:
+        await _release_summary_slot(recording_id)
 
 
 @router.post("/summarize/{recording_id}/stream")
@@ -752,26 +824,42 @@ async def summarize_recording_stream(
     if not transcription or not transcription.get("segments"):
         raise HTTPException(status_code=404, detail="No transcription found")
 
-    # Build full text from segments
-    full_text = "\n".join(
-        f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}" if seg.get("speaker") else seg["text"]
-        for seg in transcription["segments"]
-    )
+    # Reject a second concurrent generation for the same recording. The slot is
+    # released inside the stream generator's finally block (via on_finally),
+    # so cancellation and mid-stream errors never leak the lock.
+    await _acquire_summary_slot(recording_id)
+    try:
+        # Build full text from segments
+        full_text = "\n".join(
+            f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}"
+            if seg.get("speaker")
+            else seg["text"]
+            for seg in transcription["segments"]
+        )
 
-    async def _persist(text: str, model: str | None) -> None:
-        if not update_recording_summary(recording_id, text, model):
-            logger.warning(
-                "update_recording_summary returned False for recording %s",
-                sanitize_for_log(str(recording_id)),
-            )
+        async def _persist(text: str, model: str | None) -> None:
+            if not update_recording_summary(recording_id, text, model):
+                logger.warning(
+                    "update_recording_summary returned False for recording %s",
+                    sanitize_for_log(str(recording_id)),
+                )
 
-    return _build_llm_stream_response(
-        LLMRequest(
-            transcription_text=full_text,
-            user_prompt=custom_prompt,
-        ),
-        on_complete=_persist,
-    )
+        async def _release_slot() -> None:
+            await _release_summary_slot(recording_id)
+
+        return _build_llm_stream_response(
+            LLMRequest(
+                transcription_text=full_text,
+                user_prompt=custom_prompt,
+            ),
+            on_complete=_persist,
+            on_finally=_release_slot,
+        )
+    except Exception:
+        # Response construction failed (e.g. LLM disabled → HTTPException 503).
+        # Release the slot synchronously; the generator's finally will never run.
+        await _release_summary_slot(recording_id)
+        raise
 
 
 # =============================================================================

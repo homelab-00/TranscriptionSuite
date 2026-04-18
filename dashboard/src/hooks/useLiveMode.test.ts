@@ -21,6 +21,7 @@ let lastSocketCbs: {
   onMessage?: (msg: { type: string; data?: Record<string, unknown> }) => void;
   onError?: (err: string) => void;
   onClose?: (code: number, reason: string) => void;
+  onHostMismatch?: (oldUrl: string, newUrl: string) => void;
 };
 
 vi.mock('../services/websocket', () => ({
@@ -552,6 +553,84 @@ describe('[P1] useLiveMode', () => {
       });
 
       expect(result.current.status).toBe('idle');
+    });
+  });
+
+  // EC-6 drain+retarget: the user changes the server host mid-session. The
+  // socket class detects the URL mismatch and fires onHostMismatch; the hook
+  // responds by flushing the old server's VAD buffer via `stop`, closing the
+  // old socket, and reconnecting against the new URL with the same options.
+  // The transcript state MUST survive the hop — the user expects continuity,
+  // not a blank slate.
+  describe('config-changed retarget (EC-6 drain+retarget)', () => {
+    it('drains and reconnects when onHostMismatch fires, preserving sentences', async () => {
+      const TranscriptionSocketMock = (await import('../services/websocket'))
+        .TranscriptionSocket as unknown as Mock;
+
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+
+      // Accumulate a sentence so we can assert it survives the retarget.
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'sentence',
+          data: { text: 'Existing sentence.' },
+        });
+      });
+      expect(result.current.sentences).toHaveLength(1);
+
+      const socketConstructorCallsBefore = TranscriptionSocketMock.mock.calls.length;
+      const oldSocketDisconnect = lastSocket.disconnect;
+      const oldSocketSendJSON = lastSocket.sendJSON;
+      const oldCaptureStop = lastCapture.stop;
+
+      // Fire the host-mismatch callback synchronously; retarget is deferred to
+      // a microtask so the current dispatch returns cleanly.
+      await act(async () => {
+        lastSocketCbs.onHostMismatch?.('ws://old-host:9786/ws/live', 'ws://new-host:9786/ws/live');
+        // Flush the queueMicrotask via a microtask of our own.
+        await Promise.resolve();
+      });
+
+      // Immediate drain side effects on the OLD session.
+      expect(oldCaptureStop).toHaveBeenCalled();
+      expect(oldSocketSendJSON).toHaveBeenCalledWith({ type: 'stop' });
+      // Retarget microtask tore down the old socket and built a new one.
+      expect(oldSocketDisconnect).toHaveBeenCalled();
+      expect(TranscriptionSocketMock.mock.calls.length).toBe(socketConstructorCallsBefore + 1);
+      expect(lastSocket.connect).toHaveBeenCalled();
+
+      // Transcript state must carry across the hop.
+      expect(result.current.sentences).toHaveLength(1);
+      expect(result.current.sentences[0].text).toBe('Existing sentence.');
+    });
+
+    it('suppresses OLD socket onClose during the retarget microtask', async () => {
+      // While the retarget flag is set (between onHostMismatch firing and the
+      // queueMicrotask finally), an OLD socket onClose must not flip status to
+      // 'idle'. Fire onClose BEFORE awaiting the microtask so the flag is
+      // still true. In real code this race is guarded by disconnect() nulling
+      // ws.onclose, but a synchronous mock onClose from test infra can reach
+      // the hook before the microtask-finally clears the flag — the same
+      // shape the guard is written for.
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+
+      const oldOnClose = lastSocketCbs.onClose;
+
+      act(() => {
+        lastSocketCbs.onHostMismatch?.('ws://old-host:9786/ws/live', 'ws://new-host:9786/ws/live');
+        // Fire onClose synchronously BEFORE the microtask runs — flag is true.
+        oldOnClose?.(1000, 'Reconnecting');
+      });
+
+      // Status must NOT be 'idle' — the guard suppressed the reset.
+      expect(result.current.status).not.toBe('idle');
+
+      // Flush the microtask so the retarget completes cleanly.
+      await act(async () => {
+        await Promise.resolve();
+      });
     });
   });
 });

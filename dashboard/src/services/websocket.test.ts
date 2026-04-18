@@ -291,6 +291,52 @@ describe('TranscriptionSocket.handleConfigChanged', () => {
     socket.disconnect();
   });
 
+  it('active session with URL mismatch → invokes onHostMismatch with old + new URLs (EC-6 drain+retarget)', () => {
+    vi.spyOn(apiClient, 'isBaseUrlConfigured').mockReturnValue(true);
+    vi.spyOn(apiClient, 'getBaseUrl').mockReturnValue('http://old-host:9786');
+
+    const onHostMismatch = vi.fn();
+    const socket = new TranscriptionSocket('/ws', { onHostMismatch });
+    socket.connect();
+    (socket as unknown as { state: string }).state = 'ready';
+
+    vi.mocked(apiClient.getBaseUrl).mockReturnValue('http://new-host:9786');
+
+    socket.handleConfigChanged(true);
+
+    expect(onHostMismatch).toHaveBeenCalledTimes(1);
+    expect(onHostMismatch).toHaveBeenCalledWith('ws://old-host:9786/ws', 'ws://new-host:9786/ws');
+
+    socket.disconnect();
+  });
+
+  it('onHostMismatch throwing does not prevent the warning log or crash the dispatch', () => {
+    vi.spyOn(apiClient, 'isBaseUrlConfigured').mockReturnValue(true);
+    vi.spyOn(apiClient, 'getBaseUrl').mockReturnValue('http://old-host:9786');
+
+    const onHostMismatch = vi.fn(() => {
+      throw new Error('consumer bug');
+    });
+    const socket = new TranscriptionSocket('/ws', { onHostMismatch });
+    socket.connect();
+    (socket as unknown as { state: string }).state = 'ready';
+
+    vi.mocked(logClientEvent).mockClear();
+    vi.mocked(apiClient.getBaseUrl).mockReturnValue('http://new-host:9786');
+
+    expect(() => socket.handleConfigChanged(true)).not.toThrow();
+
+    // One warning breadcrumb + one error breadcrumb for the throwing callback.
+    const warnCalls = vi.mocked(logClientEvent).mock.calls.filter((c) => c[2] === 'warning');
+    const errorCalls = vi
+      .mocked(logClientEvent)
+      .mock.calls.filter((c) => c[2] === 'error' && String(c[1]).includes('onHostMismatch'));
+    expect(warnCalls).toHaveLength(1);
+    expect(errorCalls).toHaveLength(1);
+
+    socket.disconnect();
+  });
+
   it('active session with URL match → silent no-op', () => {
     vi.spyOn(apiClient, 'isBaseUrlConfigured').mockReturnValue(true);
     vi.spyOn(apiClient, 'getBaseUrl').mockReturnValue('http://localhost:9786');

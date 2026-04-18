@@ -24,8 +24,15 @@ vi.mock('../../../src/config/store', () => ({
 }));
 
 // ── Mock sonner (M6 error toast) ────────────────────────────────────────────
+//
+// `toast.error` returns an incrementing id (matches sonner's real signature),
+// and each call's options object is captured so tests can invoke `onDismiss`
+// / `onAutoClose` to simulate the user closing the toast or it auto-closing.
+// This is the only way the test can drive the "dismissed" edge-case in the
+// dedup hardening (see module-level dedupState in UpdateBanner.tsx).
 
-const toastErrorMock = vi.fn();
+let nextToastId = 1;
+const toastErrorMock = vi.fn((..._args: unknown[]) => nextToastId++);
 const toastSuccessMock = vi.fn();
 
 vi.mock('sonner', () => ({
@@ -34,6 +41,17 @@ vi.mock('sonner', () => ({
     success: (...args: unknown[]) => toastSuccessMock(...args),
   },
 }));
+
+/** Simulate the user dismissing the Nth call to `toast.error` (1-indexed). */
+function simulateDismissCall(index: number): void {
+  const call = toastErrorMock.mock.calls[index - 1];
+  const id = toastErrorMock.mock.results[index - 1]?.value as number | undefined;
+  if (!call || id === undefined) return;
+  const options = call[1] as
+    | { onDismiss?: (t: { id: number }) => void; onAutoClose?: (t: { id: number }) => void }
+    | undefined;
+  options?.onDismiss?.({ id });
+}
 
 // ── Import after mocks ──────────────────────────────────────────────────────
 
@@ -153,6 +171,7 @@ beforeEach(() => {
   setConfigMock.mockClear();
   toastErrorMock.mockClear();
   toastSuccessMock.mockClear();
+  nextToastId = 1;
   // Module-level error-toast dedup state persists across renders by design;
   // reset between tests to prevent leaks.
   __resetErrorToastDedup();
@@ -840,6 +859,86 @@ describe('UpdateBanner M6 error toasts', () => {
     // Second retry-failure dedups on the shared 'download-error' key within
     // the window → total 2 toasts, not 3.
     expect(toastErrorMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('user dismissal invalidates dedup so same-key error re-toasts within window', async () => {
+    // Regression: after the dedup window hardening, dismissing the first toast
+    // removed the [Retry] affordance from the UI. Subsequent identical errors
+    // inside the 5 s window were silently dropped — the user was stranded
+    // with no way to retry until the window expired or a non-error transition
+    // cleared state. Dismissal now forces the next same-key event to fire a
+    // fresh toast carrying a new [Retry].
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(1_000_000));
+      const h = buildHarness();
+      installHarness(h);
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      await act(async () => {
+        h.emit({ state: 'error', message: 'network down' });
+      });
+      expect(toastErrorMock).toHaveBeenCalledTimes(1);
+
+      // User dismisses the first toast.
+      await act(async () => {
+        simulateDismissCall(1);
+      });
+
+      // Advance a tiny amount — still well inside the 5 s window.
+      vi.setSystemTime(new Date(1_000_000 + 1_500));
+      await act(async () => {
+        h.emit({ state: 'error', message: 'network down' });
+      });
+
+      expect(toastErrorMock).toHaveBeenCalledTimes(2);
+      // Second toast carries the retry action so the user is not stranded.
+      const [, options] = toastErrorMock.mock.calls[1] as [string, { action?: { label: string } }];
+      expect(options.action?.label).toBe('Retry');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('late dismissal callback for a superseded toast does not clobber fresh dedup state', async () => {
+    // Concurrency guard: if onDismiss for toast A arrives AFTER toast B has
+    // already taken over the dedup slot (different key), the late callback
+    // must NOT mark B as dismissed — that would let a third same-key event
+    // inappropriately refire. Only the currently-tracked id can flip the
+    // dismissed flag.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(3_000_000));
+      const h = buildHarness();
+      installHarness(h);
+      render(<UpdateBanner isBusy={false} />);
+      await flush();
+
+      await act(async () => {
+        h.emit({ state: 'error', message: 'first' });
+      });
+      await act(async () => {
+        h.emit({ state: 'error', message: 'second' });
+      });
+      expect(toastErrorMock).toHaveBeenCalledTimes(2);
+
+      // Late onDismiss for the superseded first toast.
+      await act(async () => {
+        simulateDismissCall(1);
+      });
+
+      // A same-key 'second' error inside the window must still dedup — the
+      // second toast is still visible, so no refire.
+      vi.setSystemTime(new Date(3_000_000 + 500));
+      await act(async () => {
+        h.emit({ state: 'error', message: 'second' });
+      });
+
+      expect(toastErrorMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('dedup state survives unmount + remount within 5 s', async () => {

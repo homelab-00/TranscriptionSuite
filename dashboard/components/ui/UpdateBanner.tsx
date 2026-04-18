@@ -69,21 +69,68 @@ export function clampSnooze(stored: number, now: number): number {
 // Keys are string literals assigned per call site (see Design Notes in
 // spec-update-banner-dedup-hardening.md) — NOT the user-visible message string,
 // which can vary across paths for the same semantic event.
+//
+// Retry-affordance preservation: a user-dismissed toast invalidates the dedup
+// memory immediately. Without this, repeated errors inside the 5 s window are
+// silently dropped after dismissal — the user loses the [Retry] action until
+// the window expires or a non-error transition clears state. `toastId` stores
+// the sonner id returned by the most recent toast; `dismissed` flips true when
+// that specific toast is user-closed or auto-closed. `tryToastDedup` treats
+// any same-key incoming as fresh once `dismissed === true`.
 const DEDUP_WINDOW_MS = 5_000;
-const dedupState: { key: string | null; timestamp: number } = { key: null, timestamp: 0 };
+const dedupState: {
+  key: string | null;
+  timestamp: number;
+  toastId: string | number | null;
+  dismissed: boolean;
+} = { key: null, timestamp: 0, toastId: null, dismissed: false };
 
 function tryToastDedup(key: string, now: number): boolean {
-  if (dedupState.key === key && now - dedupState.timestamp < DEDUP_WINDOW_MS) {
+  // Same-key incoming AND the prior toast is still visible (not dismissed /
+  // auto-closed) AND still inside the window → suppress. Once the user closes
+  // the toast, the retry affordance is gone from the UI; the next same-key
+  // event must fire a fresh toast or the user is stranded.
+  if (
+    dedupState.key === key &&
+    !dedupState.dismissed &&
+    now - dedupState.timestamp < DEDUP_WINDOW_MS
+  ) {
     return false;
   }
   dedupState.key = key;
   dedupState.timestamp = now;
+  dedupState.toastId = null;
+  dedupState.dismissed = false;
   return true;
 }
 
 function resetToastDedup(): void {
   dedupState.key = null;
   dedupState.timestamp = 0;
+  dedupState.toastId = null;
+  dedupState.dismissed = false;
+}
+
+/**
+ * Register the sonner id returned by the toast call so a subsequent dismissal
+ * can be matched against the active dedup entry.
+ */
+function trackToastId(id: string | number | undefined | null): void {
+  if (id === undefined || id === null) return;
+  dedupState.toastId = id;
+  dedupState.dismissed = false;
+}
+
+/**
+ * Invoked from the sonner onDismiss / onAutoClose callbacks. Only marks the
+ * state when the fired toast matches the currently tracked id — a late
+ * callback for a superseded toast must NOT clobber a fresher dedup entry.
+ */
+function markToastDismissed(id: string | number | undefined): void {
+  if (id === undefined || id === null) return;
+  if (dedupState.toastId === id) {
+    dedupState.dismissed = true;
+  }
 }
 
 /** test-only — reset module-level dedup state between tests to prevent leaks. */
@@ -241,7 +288,11 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
   // cross-path events with different copy still dedup together.
   const toastInvocationError = useCallback((key: string, message: string): void => {
     if (!tryToastDedup(key, Date.now())) return;
-    toast.error(message);
+    const id = toast.error(message, {
+      onDismiss: (t) => markToastDismissed(t?.id),
+      onAutoClose: (t) => markToastDismissed(t?.id),
+    });
+    trackToastId(id);
   }, []);
 
   useEffect(() => {
@@ -322,14 +373,17 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
         const key = message;
         if (!tryToastDedup(key, Date.now())) return;
         const copy = errorToastCopy(message) ?? `Update failed: ${message}`;
-        toast.error(copy, {
+        const id = toast.error(copy, {
           action: {
             label: 'Retry',
             onClick: () => {
               void handleRetry();
             },
           },
+          onDismiss: (t) => markToastDismissed(t?.id),
+          onAutoClose: (t) => markToastDismissed(t?.id),
         });
+        trackToastId(id);
       } else if (
         s.state === 'downloading' ||
         s.state === 'downloaded' ||
