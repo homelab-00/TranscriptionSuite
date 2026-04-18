@@ -195,6 +195,7 @@ def compute_dependency_fingerprint(
     extras: tuple[str, ...] = (),
     gpu_driver: str = "",
     pytorch_variant: str = "cu129",
+    include_variant: bool = True,
 ) -> str:
     hasher = hashlib.sha256()
     hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode())
@@ -202,7 +203,8 @@ def compute_dependency_fingerprint(
     hasher.update(f"arch={arch}".encode())
     hasher.update(f"extras={','.join(sorted(extras))}".encode())
     hasher.update(f"gpu_driver={gpu_driver}".encode())
-    hasher.update(f"pytorch_variant={pytorch_variant}".encode())
+    if include_variant:
+        hasher.update(f"pytorch_variant={pytorch_variant}".encode())
 
     update_hash_with_file(hasher, "uv-lock", LOCK_FILE)
 
@@ -215,6 +217,7 @@ def compute_structural_fingerprint(
     extras: tuple[str, ...] = (),
     gpu_driver: str = "",
     pytorch_variant: str = "cu129",
+    include_variant: bool = True,
 ) -> str:
     """Hash of factors that determine venv shape (ABI, arch, extras, GPU driver, variant).
 
@@ -223,6 +226,10 @@ def compute_structural_fingerprint(
     (e.g. PyTorch) are linked against a specific driver ABI. The PyTorch wheel
     variant (cu129 vs cu126, Issue #83) is structural for the same reason —
     swapping wheel indexes ships a different CUDA-linked binary.
+
+    ``include_variant=False`` reproduces the pre-GH-83 hash form (no variant
+    component) and is used only to grandfather existing cu129 markers through
+    the GH-83 schema expansion — see ``ensure_runtime_dependencies``.
     """
     hasher = hashlib.sha256()
     hasher.update(f"schema={BOOTSTRAP_SCHEMA_VERSION}".encode())
@@ -230,7 +237,8 @@ def compute_structural_fingerprint(
     hasher.update(f"arch={arch}".encode())
     hasher.update(f"extras={','.join(sorted(extras))}".encode())
     hasher.update(f"gpu_driver={gpu_driver}".encode())
-    hasher.update(f"pytorch_variant={pytorch_variant}".encode())
+    if include_variant:
+        hasher.update(f"pytorch_variant={pytorch_variant}".encode())
     return hasher.hexdigest()
 
 
@@ -239,6 +247,25 @@ def compute_lock_fingerprint() -> str:
     hasher = hashlib.sha256()
     update_hash_with_file(hasher, "uv-lock", LOCK_FILE)
     return hasher.hexdigest()
+
+
+def discover_cudnn_lib_path(venv_dir: Path) -> str:
+    """Return the directory that actually contains cuDNN shared libs, or "".
+
+    Globs the venv's ``nvidia/cudnn/lib`` directories for any ``libcudnn*.so``
+    to accommodate future wheel layouts (different Python minor version,
+    different cuDNN vendor path). Issue #83 EC-4 fallback for when the
+    Dockerfile's hardcoded ``LD_LIBRARY_PATH`` does not resolve.
+    """
+    try:
+        for candidate in venv_dir.glob("lib/python*/site-packages/nvidia/cudnn/lib"):
+            if not candidate.is_dir():
+                continue
+            if any(candidate.glob("libcudnn*.so*")):
+                return str(candidate)
+    except OSError:
+        pass
+    return ""
 
 
 def run_command(
@@ -478,10 +505,79 @@ def ensure_runtime_dependencies(
             and marker_data.get("arch") == arch
         )
 
+        # Blind Hunter #10 (Issue #83): grandfather pre-GH-83 markers that lack
+        # a ``pytorch_variant`` field. Those markers were written by the older
+        # fingerprint form that omitted the variant component, so the stored
+        # hash will never match the new variant-aware fingerprint — every
+        # existing cu129 user would otherwise pay a forced rebuild-sync on the
+        # GH-83 upgrade even though nothing about their install actually
+        # changed. Only relax the comparison when the current runtime is cu129
+        # (the implicit pre-GH-83 default); a cu126 boot must rebuild because
+        # the legacy variant swaps the PyTorch wheel index.
+        marker_has_variant = "pytorch_variant" in marker_data
+        if (
+            not marker_matches
+            and venv_exists
+            and not force_rebuild
+            and not marker_has_variant
+            and pytorch_variant == "cu129"
+            and marker_data.get("schema_version") == BOOTSTRAP_SCHEMA_VERSION
+            and marker_data.get("python_abi") == python_abi
+            and marker_data.get("arch") == arch
+        ):
+            legacy_fingerprint = compute_dependency_fingerprint(
+                python_abi=python_abi,
+                arch=arch,
+                extras=extras,
+                gpu_driver=gpu_driver,
+                pytorch_variant=pytorch_variant,
+                include_variant=False,
+            )
+            legacy_structural_fp = compute_structural_fingerprint(
+                python_abi=python_abi,
+                arch=arch,
+                extras=extras,
+                gpu_driver=gpu_driver,
+                pytorch_variant=pytorch_variant,
+                include_variant=False,
+            )
+            stored_struct = marker_data.get("structural_fingerprint")
+            if marker_data.get("fingerprint") == legacy_fingerprint and (
+                stored_struct is None or stored_struct == legacy_structural_fp
+            ):
+                marker_matches = True
+                diagnostics["grandfathered_pre_variant_marker"] = True
+                log(
+                    "Bootstrap path selected: grandfathered pre-GH-83 marker "
+                    "(implicit cu129 → explicit cu129); upgrading marker in place"
+                )
+
         if marker_matches:
             diagnostics["selection_reason"] = "hash_match_skip"
             log("Bootstrap path selected: mode=skip reason=hash_match_skip")
             log("Runtime dependencies already up-to-date (mode=skip)")
+
+            # Grandfathered path: marker was valid for cu129 under the legacy
+            # fingerprint form. Overwrite it with the new variant-aware form so
+            # future boots take the fast hash-match-skip path without this
+            # compat branch.
+            if diagnostics.get("grandfathered_pre_variant_marker"):
+                upgraded_payload = dict(marker_data)
+                upgraded_payload.update(
+                    {
+                        "schema_version": BOOTSTRAP_SCHEMA_VERSION,
+                        "fingerprint": fingerprint,
+                        "python_abi": python_abi,
+                        "arch": arch,
+                        "gpu_driver": gpu_driver,
+                        "pytorch_variant": pytorch_variant,
+                        "structural_fingerprint": structural_fp,
+                        "lock_fingerprint": lock_fp,
+                        "updated_at": datetime.now(UTC).isoformat(),
+                    }
+                )
+                write_marker(marker_file, upgraded_payload)
+
             log_timing("ensure_runtime_dependencies complete (mode=skip)", ensure_start)
             return venv_dir, "skip", package_delta, diagnostics
 
@@ -914,32 +1010,47 @@ def write_status_file(status_file: Path, payload: dict[str, Any]) -> None:
 def check_whisper_import(
     venv_python: Path,
     timeout_seconds: int,
+    env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    checker = """
+    # Issue #83 EC-4: ctranslate2 is *actually imported* here (not just
+    # ``find_spec``) so this probe exercises the cuDNN shared-library resolution
+    # against LD_LIBRARY_PATH. A find_spec-only check would succeed even when
+    # the baked cuDNN path is empty, hiding the failure until the first real
+    # transcription. faster_whisper/whisperx stay on find_spec to keep the
+    # probe fast — their DLL dependencies overlap with ctranslate2's anyway.
+    checker = r"""
+import importlib
 import importlib.util
 import json
+import re
 
-modules = ("faster_whisper", "ctranslate2", "whisperx")
 errors = []
 
-for module_name in modules:
+for module_name, deep_import in (
+    ("faster_whisper", False),
+    ("ctranslate2", True),
+    ("whisperx", False),
+):
     try:
-        spec = importlib.util.find_spec(module_name)
-        if spec is None:
-            errors.append(f"{module_name}: not found")
+        if deep_import:
+            importlib.import_module(module_name)
+        else:
+            spec = importlib.util.find_spec(module_name)
+            if spec is None:
+                errors.append(f"{module_name}: not found")
     except Exception as exc:
         errors.append(f"{module_name}: {type(exc).__name__}: {exc}")
 
 if errors:
-    print(
-        json.dumps(
-            {
-                "available": False,
-                "reason": "import_failed",
-                "error": " | ".join(errors),
-            }
-        )
+    combined = " | ".join(errors)
+    # Classify cuDNN-resolution failures so the caller can retry with a
+    # glob-discovered LD_LIBRARY_PATH fallback (Issue #83 EC-4).
+    reason = (
+        "cudnn_missing"
+        if re.search(r"libcudnn|cudnn", combined, re.IGNORECASE)
+        else "import_failed"
     )
+    print(json.dumps({"available": False, "reason": reason, "error": combined}))
 else:
     print(json.dumps({"available": True, "reason": "ready"}))
 """
@@ -950,6 +1061,7 @@ else:
             text=True,
             capture_output=True,
             timeout=max(30, min(timeout_seconds, 300)),
+            env=env,
             check=False,
         )
     except Exception as exc:
@@ -1227,6 +1339,63 @@ print(json.dumps(payload))
     return result_payload
 
 
+def probe_whisper_with_cudnn_fallback(
+    venv_python: Path,
+    venv_dir: Path,
+    timeout_seconds: int,
+) -> tuple[dict[str, Any], str]:
+    """Run ``check_whisper_import`` and retry with a glob-discovered cuDNN path.
+
+    Returns ``(status, discovered_cudnn_dir)``. ``discovered_cudnn_dir`` is
+    populated when the second attempt succeeded because the primary
+    LD_LIBRARY_PATH did not resolve the cuDNN shared libraries — the caller
+    should pass this path to downstream consumers (docker-entrypoint.sh
+    already globs independently, but recording the path in the status file
+    makes the failure mode visible). Issue #83 EC-4.
+    """
+    status = check_whisper_import(
+        venv_python=venv_python,
+        timeout_seconds=timeout_seconds,
+    )
+    if status.get("available") or status.get("reason") != "cudnn_missing":
+        return status, ""
+
+    discovered = discover_cudnn_lib_path(venv_dir)
+    if not discovered:
+        return status, ""
+
+    retry_env = os.environ.copy()
+    torch_lib = venv_dir / "lib" / "python3.13" / "site-packages" / "torch" / "lib"
+    if not torch_lib.is_dir():
+        for candidate in venv_dir.glob("lib/python*/site-packages/torch/lib"):
+            if candidate.is_dir():
+                torch_lib = candidate
+                break
+    augmented_parts = [discovered, str(torch_lib), retry_env.get("LD_LIBRARY_PATH", "")]
+    retry_env["LD_LIBRARY_PATH"] = ":".join(part for part in augmented_parts if part)
+
+    retry_status = check_whisper_import(
+        venv_python=venv_python,
+        timeout_seconds=timeout_seconds,
+        env=retry_env,
+    )
+    if retry_status.get("available"):
+        log(
+            "faster-whisper feature check: retried with glob-discovered cuDNN "
+            f"path ({discovered}) after the baked LD_LIBRARY_PATH failed to "
+            "resolve. Server launch will apply the same fallback."
+        )
+        retry_status["cudnn_fallback_applied"] = True
+        retry_status["cudnn_lib_dir"] = discovered
+        return retry_status, discovered
+    # Preserve the original error but annotate that the glob fallback was
+    # attempted so operators can distinguish "no cuDNN anywhere" from
+    # "hardcoded path wrong".
+    status.setdefault("cudnn_lib_dir", discovered)
+    status["cudnn_fallback_applied"] = True
+    return status, discovered
+
+
 def main() -> int:
     log_timing("bootstrap main() started")
     bootstrap_start = time.perf_counter()
@@ -1261,6 +1430,30 @@ def main() -> int:
     else:
         log(f"Unknown PYTORCH_VARIANT={raw_variant!r}; falling back to cu129")
         pytorch_variant = "cu129"
+
+    # Issue #83 EC-5/EC-14 defense: the Dockerfile bakes the resolved build-arg
+    # into ``/app/.pytorch_variant``. If the runtime env disagrees with the
+    # baked value (e.g. someone exports PYTORCH_VARIANT at compose-up time to
+    # something other than what the image was built with), trust the baked
+    # value — it reflects which PyTorch wheels are actually installed.
+    baked_variant_file = APP_ROOT / ".pytorch_variant"
+    if baked_variant_file.exists():
+        try:
+            baked_variant = (
+                baked_variant_file.read_text(encoding="utf-8", errors="replace").strip().lower()
+            )
+        except OSError:
+            baked_variant = ""
+        if baked_variant and baked_variant != pytorch_variant:
+            log(
+                f"WARNING: image was built with PYTORCH_VARIANT={baked_variant!r} "
+                f"but runtime env reports {pytorch_variant!r} — trusting the "
+                "baked build-arg (installed wheels are the ground truth). This "
+                "usually indicates a manual `compose build` that paired "
+                "IMAGE_REPO and PYTORCH_VARIANT incorrectly; see "
+                "docs/deployment-guide.md."
+            )
+            pytorch_variant = baked_variant
     log(f"PyTorch variant: {pytorch_variant}")
 
     if require_hf_token and not hf_token:
@@ -1432,8 +1625,9 @@ def main() -> int:
             f"(available={whisper_status.get('available')})"
         )
     else:
-        existing_whisper_status = check_whisper_import(
+        existing_whisper_status, _cudnn_fallback_dir = probe_whisper_with_cudnn_fallback(
             venv_python=venv_python,
+            venv_dir=venv_dir,
             timeout_seconds=timeout_seconds,
         )
 
@@ -1463,8 +1657,9 @@ def main() -> int:
                         cache_dir=cache_dir,
                     ),
                 )
-                whisper_status = check_whisper_import(
+                whisper_status, _cudnn_fallback_dir = probe_whisper_with_cudnn_fallback(
                     venv_python=venv_python,
+                    venv_dir=venv_dir,
                     timeout_seconds=timeout_seconds,
                 )
                 if whisper_status.get("available"):

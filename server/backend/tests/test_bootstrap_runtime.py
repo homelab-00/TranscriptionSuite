@@ -1329,3 +1329,359 @@ def test_marker_persists_pytorch_variant_for_legacy_path(
         (runtime_dir / ".runtime-bootstrap-marker.json").read_text(encoding="utf-8")
     )
     assert marker["pytorch_variant"] == "cu126"
+
+
+# ─── Blind Hunter #10 (Issue #83) — grandfathered pre-variant markers ─────────
+
+
+def _patch_fingerprint_context_with_variant_flag(
+    module: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fingerprint fakes that branch on the ``include_variant`` kwarg."""
+
+    def fake_dep_fp(*, include_variant: bool = True, **_: object) -> str:
+        return "fp" if include_variant else "legacy-fp"
+
+    def fake_struct_fp(*, include_variant: bool = True, **_: object) -> str:
+        return "struct-fp" if include_variant else "legacy-struct-fp"
+
+    monkeypatch.setattr(module, "compute_dependency_fingerprint", fake_dep_fp)
+    monkeypatch.setattr(module, "compute_structural_fingerprint", fake_struct_fp)
+    monkeypatch.setattr(module, "compute_lock_fingerprint", lambda: "lock-fp")
+    monkeypatch.setattr(module, "python_abi_tag", lambda: "abi")
+    monkeypatch.setattr(module.platform, "machine", lambda: "arch")
+
+
+def test_grandfathered_pre_variant_marker_skips_for_cu129(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-GH-83 cu129 markers (no pytorch_variant field) take the skip path."""
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            # Pre-GH-83 fingerprint — computed without pytorch_variant.
+            "fingerprint": "legacy-fp",
+            "python_abi": "abi",
+            "arch": "arch",
+            # No "pytorch_variant" key — this is the grandfather signal.
+        },
+    )
+    _patch_fingerprint_context_with_variant_flag(module, monkeypatch)
+    monkeypatch.setattr(
+        module,
+        "run_dependency_sync",
+        lambda **_: (_ for _ in ()).throw(AssertionError("sync should not run")),
+    )
+
+    _, sync_mode, _, diagnostics = module.ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=300,
+        log_changes=False,
+        pytorch_variant="cu129",
+    )
+
+    assert sync_mode == "skip"
+    assert diagnostics["selection_reason"] == "hash_match_skip"
+    assert diagnostics.get("grandfathered_pre_variant_marker") is True
+
+
+def test_grandfathered_marker_is_upgraded_in_place(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After grandfather-match, the marker is rewritten with the new form so
+    the next boot hits the fast hash-match-skip path without the compat branch."""
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            "fingerprint": "legacy-fp",
+            "python_abi": "abi",
+            "arch": "arch",
+        },
+    )
+    _patch_fingerprint_context_with_variant_flag(module, monkeypatch)
+    monkeypatch.setattr(module, "run_dependency_sync", lambda **_: None)
+
+    module.ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=300,
+        log_changes=False,
+        pytorch_variant="cu129",
+    )
+
+    persisted = json.loads(
+        (runtime_dir / ".runtime-bootstrap-marker.json").read_text(encoding="utf-8")
+    )
+    assert persisted["fingerprint"] == "fp"  # variant-aware form
+    assert persisted["pytorch_variant"] == "cu129"
+    assert persisted["structural_fingerprint"] == "struct-fp"
+
+
+def test_grandfather_does_not_apply_to_cu126_flip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cu126 boot against a pre-variant marker must rebuild (wheels differ)."""
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            "fingerprint": "legacy-fp",
+            "python_abi": "abi",
+            "arch": "arch",
+        },
+    )
+    _patch_fingerprint_context_with_variant_flag(module, monkeypatch)
+
+    sync_calls: list[str] = []
+
+    def fake_sync(**_: object) -> None:
+        sync_calls.append("sync")
+        _touch_runtime_python(runtime_dir)
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+
+    _, sync_mode, _, diagnostics = module.ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=300,
+        log_changes=False,
+        pytorch_variant="cu126",
+    )
+
+    assert sync_mode == "rebuild-sync"
+    assert diagnostics.get("grandfathered_pre_variant_marker") is not True
+    assert len(sync_calls) == 1
+
+
+# ─── EC-4 (Issue #83) — cuDNN discovery and import classification ─────────────
+
+
+def test_discover_cudnn_lib_path_returns_directory_with_libcudnn(
+    tmp_path: Path,
+) -> None:
+    module = _load_bootstrap_module()
+    cudnn_dir = tmp_path / "lib" / "python3.14" / "site-packages" / "nvidia" / "cudnn" / "lib"
+    cudnn_dir.mkdir(parents=True)
+    (cudnn_dir / "libcudnn.so.9").write_bytes(b"elf")
+
+    found = module.discover_cudnn_lib_path(tmp_path)
+
+    assert found == str(cudnn_dir)
+
+
+def test_discover_cudnn_lib_path_returns_empty_when_no_libs(
+    tmp_path: Path,
+) -> None:
+    module = _load_bootstrap_module()
+    cudnn_dir = tmp_path / "lib" / "python3.13" / "site-packages" / "nvidia" / "cudnn" / "lib"
+    cudnn_dir.mkdir(parents=True)
+
+    assert module.discover_cudnn_lib_path(tmp_path) == ""
+
+
+def test_check_whisper_import_classifies_cudnn_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del args, kwargs
+        return subprocess.CompletedProcess(
+            args=["python", "-c", "probe"],
+            returncode=0,
+            stdout=(
+                '{"available": false, "reason": "cudnn_missing", '
+                '"error": "ctranslate2: OSError: libcudnn_ops_infer.so.8: cannot open shared object file"}\n'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    status = module.check_whisper_import(Path("/tmp/fake-python"), timeout_seconds=30)
+
+    assert status["available"] is False
+    assert status["reason"] == "cudnn_missing"
+
+
+def test_probe_whisper_with_cudnn_fallback_retries_with_discovered_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """First probe fails with cudnn_missing; second probe sees the glob path and succeeds."""
+    module = _load_bootstrap_module()
+    venv_dir = tmp_path / ".venv"
+    cudnn_dir = venv_dir / "lib" / "python3.13" / "site-packages" / "nvidia" / "cudnn" / "lib"
+    cudnn_dir.mkdir(parents=True)
+    (cudnn_dir / "libcudnn.so.9").write_bytes(b"elf")
+
+    call_count = 0
+    observed_envs: list[dict[str, str] | None] = []
+
+    def fake_check(
+        venv_python: Path,
+        timeout_seconds: int,
+        env: dict[str, str] | None = None,
+    ) -> dict[str, object]:
+        nonlocal call_count
+        call_count += 1
+        observed_envs.append(env)
+        if call_count == 1:
+            return {
+                "available": False,
+                "reason": "cudnn_missing",
+                "error": "libcudnn.so.9: cannot open shared object file",
+            }
+        return {"available": True, "reason": "ready"}
+
+    monkeypatch.setattr(module, "check_whisper_import", fake_check)
+
+    status, discovered = module.probe_whisper_with_cudnn_fallback(
+        venv_python=venv_dir / "bin/python",
+        venv_dir=venv_dir,
+        timeout_seconds=30,
+    )
+
+    assert status["available"] is True
+    assert status["cudnn_fallback_applied"] is True
+    assert status["cudnn_lib_dir"] == str(cudnn_dir)
+    assert discovered == str(cudnn_dir)
+    assert call_count == 2
+    # Second probe must be invoked with a patched LD_LIBRARY_PATH.
+    second_env = observed_envs[1]
+    assert second_env is not None
+    assert str(cudnn_dir) in second_env.get("LD_LIBRARY_PATH", "")
+
+
+def test_probe_whisper_with_cudnn_fallback_preserves_error_when_retry_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry-still-fails keeps the original reason but records the discovered dir."""
+    module = _load_bootstrap_module()
+    venv_dir = tmp_path / ".venv"
+    cudnn_dir = venv_dir / "lib" / "python3.13" / "site-packages" / "nvidia" / "cudnn" / "lib"
+    cudnn_dir.mkdir(parents=True)
+    (cudnn_dir / "libcudnn.so.9").write_bytes(b"elf")
+
+    def fake_check(**_: object) -> dict[str, object]:
+        return {
+            "available": False,
+            "reason": "cudnn_missing",
+            "error": "libcudnn.so.9 load failure",
+        }
+
+    monkeypatch.setattr(module, "check_whisper_import", fake_check)
+
+    status, discovered = module.probe_whisper_with_cudnn_fallback(
+        venv_python=venv_dir / "bin/python",
+        venv_dir=venv_dir,
+        timeout_seconds=30,
+    )
+
+    assert status["available"] is False
+    assert status["reason"] == "cudnn_missing"
+    assert status["cudnn_fallback_applied"] is True
+    assert status["cudnn_lib_dir"] == str(cudnn_dir)
+    assert discovered == str(cudnn_dir)
+
+
+# ─── EC-5/EC-14 (Issue #83) — baked PYTORCH_VARIANT cross-check ───────────────
+
+
+def test_main_trusts_baked_variant_over_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When /app/.pytorch_variant disagrees with the runtime env, the baked value wins."""
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    status_file = runtime_dir / "bootstrap-status.json"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+
+    baked_file = tmp_path / ".pytorch_variant"
+    baked_file.write_text("cu126\n", encoding="utf-8")
+    monkeypatch.setattr(module, "APP_ROOT", tmp_path)
+
+    resolved_variant: dict[str, str] = {}
+
+    def fake_ensure_runtime_dependencies(
+        **kwargs: object,
+    ):  # type: ignore[no-untyped-def]
+        resolved_variant["variant"] = str(kwargs.get("pytorch_variant"))
+        diagnostics = {
+            "selection_reason": "hash_match_skip",
+            "escalated_to_rebuild": False,
+        }
+        return runtime_dir / ".venv", "skip", {}, diagnostics
+
+    monkeypatch.setattr(module, "ensure_runtime_dependencies", fake_ensure_runtime_dependencies)
+    monkeypatch.setattr(
+        module,
+        "load_config_models",
+        lambda: (
+            "Systran/faster-whisper-large-v3",
+            "Systran/faster-whisper-large-v3",
+            module.DEFAULT_DIARIZATION_MODEL,
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "compute_diarization_preload_cache_key",
+        lambda **_: "k",
+    )
+    monkeypatch.setattr(
+        module,
+        "check_diarization_access",
+        lambda **_: {"available": False, "reason": "token_missing"},
+    )
+    monkeypatch.setattr(
+        module,
+        "probe_whisper_with_cudnn_fallback",
+        lambda **_: ({"available": True, "reason": "ready"}, ""),
+    )
+    monkeypatch.setattr(
+        module,
+        "check_nemo_asr_import",
+        lambda **_: {"available": False, "reason": "not_requested"},
+    )
+    monkeypatch.setattr(module, "write_status_file", lambda *_args, **_kwargs: None)
+
+    monkeypatch.setenv("BOOTSTRAP_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.setenv("BOOTSTRAP_CACHE_DIR", str(cache_dir))
+    monkeypatch.setenv("BOOTSTRAP_STATUS_FILE", str(status_file))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "models"))
+    # Runtime env says cu129 but the image was built with cu126.
+    monkeypatch.setenv("PYTORCH_VARIANT", "cu129")
+
+    rc = module.main()
+
+    assert rc == 0
+    assert resolved_variant["variant"] == "cu126"

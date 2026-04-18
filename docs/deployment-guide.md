@@ -147,6 +147,38 @@ only within its own repo, never across the two.
 - Not available in `release.yml` — the legacy image is published manually by
   the maintainer (consistent with the existing Docker publishing flow).
 
+**Manual `compose build`: `IMAGE_REPO` and `PYTORCH_VARIANT` must be paired.**
+`server/docker/docker-compose.yml` reads both through env vars with independent
+defaults (`IMAGE_REPO=…-server`, `PYTORCH_VARIANT=cu129`). Setting only one
+locally produces a misleading image — the tag claims one variant while the
+installed wheels are the other. The dashboard never calls `compose build` (it
+always `docker pull`s pre-built images), so this footgun only affects manual
+CLI workflows. Rule of thumb:
+
+```bash
+# Default (modern GPUs) — both defaults apply; nothing to export.
+docker compose build
+
+# Legacy (Pascal/Maxwell) — export BOTH, never one in isolation:
+IMAGE_REPO=ghcr.io/homelab-00/transcriptionsuite-server-legacy \
+PYTORCH_VARIANT=cu126 \
+docker compose build
+```
+
+`server/docker/start-common.sh` inspects the resolved image on startup and
+prints a warning if the baked `PYTORCH_VARIANT` does not match the repo
+implied by `IMAGE_REPO`, so a mismatched build is surfaced before you spend
+an hour debugging a cryptic CUDA error on first transcription.
+
+**Grandfathering existing users through GH-83 (Blind #10).** The runtime
+bootstrap fingerprint absorbed `pytorch_variant` in GH-83. To avoid forcing
+every existing cu129 user to pay a full `uv sync` rebuild on the upgrade,
+`bootstrap_runtime.py` treats a pre-GH-83 marker (no `pytorch_variant` field)
+as implicitly cu129 and recomputes the legacy fingerprint form; if it
+matches, the marker is rewritten in place and the next boot takes the fast
+hash-match-skip path. Users flipping to cu126 still rebuild — only the
+non-flipping cu129 path is zero-cost.
+
 ### AMD/Intel Vulkan
 - Vulkan-capable GPU with `/dev/dri` access
 - Uses whisper.cpp sidecar (`ghcr.io/ggml-org/whisper.cpp:main-vulkan`)

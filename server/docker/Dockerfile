@@ -87,6 +87,14 @@ RUN chmod 700 ./docker/docker-entrypoint.sh
 # Copy default configuration (users can override via mounted /user-config/config.yaml)
 COPY server/config.yaml ./config.yaml
 
+# Bake the resolved PYTORCH_VARIANT ARG into a file so bootstrap_runtime.py can
+# cross-check the runtime env against the variant the image was actually built
+# with (Issue #83 EC-5/EC-14). This is the source of truth for "which PyTorch
+# wheels are installed" — runtime-env overrides are warned about and ignored.
+RUN printf '%s\n' "${PYTORCH_VARIANT}" > /app/.pytorch_variant && \
+    chown appuser:appuser /app/.pytorch_variant && \
+    chmod 0644 /app/.pytorch_variant
+
 # Create data directories with correct permissions
 # /runtime is for first-run dependency bootstrap.
 # /runtime/cache stores uv package cache (inside the runtime volume) for incremental updates.

@@ -81,8 +81,40 @@ fi
 export PATH="$RUNTIME_VENV/bin:$PATH"
 export VIRTUAL_ENV="$RUNTIME_VENV"
 
-# Keep runtime CUDA library path in sync with dynamically bootstrapped venv
-export LD_LIBRARY_PATH="$RUNTIME_VENV/lib/python3.13/site-packages/nvidia/cudnn/lib:$RUNTIME_VENV/lib/python3.13/site-packages/torch/lib:${LD_LIBRARY_PATH:-}"
+# Keep runtime CUDA library path in sync with dynamically bootstrapped venv.
+# Issue #83 EC-4 fallback: if the canonical python3.13 cuDNN/torch paths are
+# empty (future wheel layouts, renamed Python minor version, etc.) glob for
+# any python*/site-packages/nvidia/cudnn/lib with actual libcudnn* content.
+# Keeps ctranslate2/faster-whisper loadable even if the baked ENV path drifts.
+CUDNN_LIB_DIR="$RUNTIME_VENV/lib/python3.13/site-packages/nvidia/cudnn/lib"
+TORCH_LIB_DIR="$RUNTIME_VENV/lib/python3.13/site-packages/torch/lib"
+
+if [ ! -d "$CUDNN_LIB_DIR" ] || ! compgen -G "$CUDNN_LIB_DIR/libcudnn*.so*" > /dev/null; then
+    discovered_cudnn=""
+    for candidate in "$RUNTIME_VENV"/lib/python*/site-packages/nvidia/cudnn/lib; do
+        [ -d "$candidate" ] || continue
+        if compgen -G "$candidate/libcudnn*.so*" > /dev/null; then
+            discovered_cudnn="$candidate"
+            break
+        fi
+    done
+    if [ -n "$discovered_cudnn" ]; then
+        log "cuDNN libs not at $CUDNN_LIB_DIR — glob-discovered: $discovered_cudnn"
+        CUDNN_LIB_DIR="$discovered_cudnn"
+    else
+        log "WARNING: cuDNN libs not found in $RUNTIME_VENV — ctranslate2 may fail to load"
+    fi
+fi
+
+if [ ! -d "$TORCH_LIB_DIR" ]; then
+    for candidate in "$RUNTIME_VENV"/lib/python*/site-packages/torch/lib; do
+        [ -d "$candidate" ] || continue
+        TORCH_LIB_DIR="$candidate"
+        break
+    done
+fi
+
+export LD_LIBRARY_PATH="$CUDNN_LIB_DIR:$TORCH_LIB_DIR:${LD_LIBRARY_PATH:-}"
 
 # Drop privileges and run the Python entrypoint
 log "Starting application as appuser..."

@@ -439,6 +439,22 @@ check_existing_container_mode
 
 if $RT images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${DOCKER_IMAGE}$"; then
     print_info "Using existing image: $DOCKER_IMAGE"
+
+    # Issue #83 EC-5/EC-14: warn when the image's baked PYTORCH_VARIANT
+    # disagrees with the variant implied by IMAGE_REPO. A manual `compose
+    # build` that sets only one of {IMAGE_REPO, PYTORCH_VARIANT} produces a
+    # tag that lies about its binary content; catch that here so the user
+    # sees a clear fix rather than an opaque CUDA error at first transcription.
+    baked_variant="$($RT inspect --format '{{range .Config.Env}}{{.}}{{println}}{{end}}' "$DOCKER_IMAGE" 2>/dev/null | grep '^PYTORCH_VARIANT=' | head -n1 | cut -d'=' -f2)"
+    expected_variant="cu129"
+    if [[ "$IMAGE_REPO" == *"-legacy" ]]; then
+        expected_variant="cu126"
+    fi
+    if [[ -n "$baked_variant" && "$baked_variant" != "$expected_variant" ]]; then
+        print_info "WARNING: $DOCKER_IMAGE was built with PYTORCH_VARIANT=$baked_variant but $IMAGE_REPO expects $expected_variant."
+        print_info "         The tag does not match the binary content — usually a manual \`$RT compose build\` that did not pair both env vars."
+        print_info "         Rebuild with: IMAGE_REPO=$IMAGE_REPO PYTORCH_VARIANT=$expected_variant $RT compose build"
+    fi
 else
     print_info "Image will be built on first run"
 fi
