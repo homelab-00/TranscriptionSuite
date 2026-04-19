@@ -28,13 +28,12 @@ or CPU mode. Dockerized for fast setup.
       <strong>OS Support:</strong><br>
       <img src="https://img.shields.io/badge/Linux-%23FCC624.svg?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">
       <img src="https://img.shields.io/badge/Windows%2011-%230078D4.svg?style=for-the-badge&logo=Windows%2011&logoColor=white" alt="Windows 11"><br>
-      Experimental:<br>
       <img src="https://img.shields.io/badge/macOS-000000.svg?style=for-the-badge&logo=apple&logoColor=white" alt="macOS"><br>
       <strong>Hardware Acceleration:</strong><br>
-      <img src="https://img.shields.io/badge/NVIDIA-Recommended-%2376B900.svg?style=for-the-badge&logo=nvidia&logoColor=white" alt="NVIDIA Recommended"><br>
+      <img src="https://img.shields.io/badge/NVIDIA-CUDA-%2376B900.svg?style=for-the-badge&logo=nvidia&logoColor=white" alt="NVIDIA CUDA"><br>
+      <img src="https://img.shields.io/badge/Apple(M1+)-Metal(MLX)-000000.svg?style=for-the-badge&logo=apple&logoColor=white" alt="Apple (M1+) - Metal (MLX)"><br>
+      <img src="https://img.shields.io/badge/AMD%2FIntel-Vulkan-%23ED1C24.svg?style=for-the-badge" alt="AMD/Intel Vulkan"><br>
       <img src="https://img.shields.io/badge/CPU-Supported-%230EA5E9.svg?style=for-the-badge" alt="CPU Supported">
-      Experimental:<br>
-     <img src="https://img.shields.io/badge/AMD%2FIntel-Vulkan-%23ED1C24.svg?style=for-the-badge" alt="AMD/Intel Vulkan"><br>
     </td>
   </tr>
 </table>
