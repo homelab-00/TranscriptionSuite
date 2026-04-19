@@ -1550,14 +1550,14 @@ invocation. Pick whichever matches your habits.
 *Two-step (mirrors the default-image release flow):*
 ```bash
 # Default cu129 image (unchanged from before GH-83):
-TAG=v1.3.4 docker compose -f server/docker/docker-compose.yml build --no-cache
-./build/docker-build-push.sh v1.3.4
+TAG=v1.3.3 docker compose -f server/docker/docker-compose.yml build --no-cache
+./build/docker-build-push.sh v1.3.3
 
 # Legacy cu126 image:
-TAG=v1.3.4 PYTORCH_VARIANT=cu126 \
+TAG=v1.3.3 PYTORCH_VARIANT=cu126 \
   IMAGE_REPO=ghcr.io/homelab-00/transcriptionsuite-server-legacy \
   docker compose -f server/docker/docker-compose.yml build --no-cache
-./build/docker-build-push.sh --variant legacy v1.3.4
+./build/docker-build-push.sh --variant legacy v1.3.3
 ```
 The three env vars for the legacy build:
 - `PYTORCH_VARIANT=cu126` — compose `build.args` picks it up and bakes it into
@@ -1569,10 +1569,10 @@ The three env vars for the legacy build:
 *One-shot (runs `docker build` with the right build-arg, then pushes):*
 ```bash
 # Default:
-./build/docker-build-push.sh --build v1.3.4
+./build/docker-build-push.sh --build v1.3.3
 
 # Legacy:
-./build/docker-build-push.sh --variant legacy --build v1.3.4
+./build/docker-build-push.sh --variant legacy --build v1.3.3
 ```
 
 *Releasing both variants of the same version:* run the two legacy commands

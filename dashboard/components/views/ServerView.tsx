@@ -29,6 +29,7 @@ import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { CustomSelect } from '../ui/CustomSelect';
 import { ImageTagChips } from '../ui/ImageTagChips';
+import { AppleSwitch } from '../ui/AppleSwitch';
 import { NvidiaIcon } from '../ui/icons/NvidiaIcon';
 import { AmdIcon } from '../ui/icons/AmdIcon';
 import { IntelIcon } from '../ui/icons/IntelIcon';
@@ -1862,53 +1863,40 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
                 {/*
                   Legacy-GPU image toggle (Issue #83 — Pascal/Maxwell support).
-                  Shown on all non-Metal profiles (GH-83 EC-18): a Pascal user
-                  whose first-run auto-detect landed on Vulkan or CPU (e.g.
-                  because a CUDA probe failed with the default cu129 wheels)
-                  needs to reach this toggle *without* first guessing they
-                  should switch runtime back to GPU. Hidden on Metal because
-                  Apple Silicon has no NVIDIA hardware and the legacy image
-                  is not applicable there.
+                  Gated to GPU (CUDA) runtime only: the cu126 wheels are
+                  pointless on Vulkan, CPU, or Metal, and surfacing the toggle
+                  there would invite confusion. Pascal/Maxwell users must
+                  pick GPU (CUDA) first — the README's §2.4 note tells them so.
                   Switching repos requires a container restart and clears the
                   runtime volume so the next bootstrap re-syncs wheels from the
                   new PyTorch index — this is handled via a confirmation dialog.
                 */}
-                {runtimeProfile !== 'metal' && (
+                {runtimeProfile === 'gpu' && (
                   <div className="flex items-center gap-3 border-b border-white/5 pb-4">
-                    <label className="flex cursor-pointer items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={useLegacyGpu}
-                        // Disabled when the container exists at all — even stopped
-                        // containers still hold a reference to the runtime volume,
-                        // so the wipe-on-toggle would silently fail. User must
-                        // remove the container (Stop + cleanup) before switching.
-                        disabled={isRunning || containerStatus.exists}
-                        onChange={(e) => {
-                          const next = e.target.checked;
-                          // Don't apply immediately — show the confirmation
-                          // dialog so the user acknowledges the restart
-                          // requirement and chooses the wipe-volume option.
-                          setPendingLegacyGpuValue(next);
-                          setLegacyGpuWipeVolume(true);
-                          setLegacyGpuDialogOpen(true);
-                        }}
-                        className={`h-4 w-4 rounded border-white/20 bg-black/20 ${
-                          isRunning || containerStatus.exists
-                            ? 'cursor-not-allowed opacity-50'
-                            : 'cursor-pointer'
-                        }`}
-                      />
-                      <span className="text-sm font-medium text-slate-300">
-                        Use legacy-GPU image (Pascal / Maxwell only)
-                      </span>
-                    </label>
+                    <AppleSwitch
+                      checked={useLegacyGpu}
+                      // Disabled when the container exists at all — even stopped
+                      // containers still hold a reference to the runtime volume,
+                      // so the wipe-on-toggle would silently fail. User must
+                      // remove the container (Stop + cleanup) before switching.
+                      disabled={isRunning || containerStatus.exists}
+                      onChange={(next) => {
+                        // Don't apply immediately — show the confirmation
+                        // dialog so the user acknowledges the restart
+                        // requirement and chooses the wipe-volume option.
+                        setPendingLegacyGpuValue(next);
+                        setLegacyGpuWipeVolume(true);
+                        setLegacyGpuDialogOpen(true);
+                      }}
+                      size="sm"
+                    />
+                    <span className="text-sm font-medium text-slate-300">
+                      Use legacy-GPU image (GTX 10-series / 900-series and older)
+                    </span>
                     <span className="text-xs text-slate-500 italic">
                       {containerStatus.exists && !isRunning
                         ? 'Remove the existing container to switch variants'
-                        : runtimeProfile === 'gpu'
-                          ? 'cu126 wheels — enable for GTX 1070/1080 and older (sm_50..sm_61)'
-                          : 'cu126 wheels — switch to GPU runtime after enabling to use a Pascal/Maxwell card'}
+                        : 'cu126 wheels — required for Pascal/Maxwell cards (GTX 1050–1080 Ti, GTX 900s, Tesla P/M, Quadro P/M)'}
                     </span>
                   </div>
                 )}
@@ -2530,7 +2518,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               </DialogTitle>
               <p className="mt-1 text-sm text-slate-300">
                 {pendingLegacyGpuValue
-                  ? 'Switches to the cu126 image for Pascal/Maxwell support (GTX 1070/1080, sm_50..sm_61).'
+                  ? 'Switches to the cu126 image for Pascal/Maxwell cards (GTX 10-series, GTX 900s, Tesla P/M, Quadro P/M — sm_50..sm_61).'
                   : 'Switches back to the default cu129 image for modern GPUs (sm_70 and newer).'}
               </p>
             </div>

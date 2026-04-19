@@ -123,8 +123,9 @@ compute-type auto-correction doesn't help — PyTorch rejects the GPU outright
 before the backend can downgrade `float16` to `int8`.
 
 **Enable it via the dashboard:**
-Server settings → Runtime = **GPU (CUDA)** → check **"Use legacy-GPU image
-(Pascal / Maxwell only)"**. The dashboard switches to the
+Server settings → Runtime = **GPU (CUDA)** → flip the **"Use legacy-GPU image
+(GTX 10-series / 900-series and older)"** toggle (only visible when the CUDA
+runtime is selected). The dashboard switches to the
 `ghcr.io/homelab-00/transcriptionsuite-server-legacy` repo for the remainder
 of the session; confirm the restart prompt to wipe the runtime volume so the
 next bootstrap re-syncs wheels from the cu126 index.

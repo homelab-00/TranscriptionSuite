@@ -125,6 +125,8 @@ https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
 
 ## 2. Installation
 
+To begin with, let me explain simply how this setup works. The app is comprised of **two** parts - a lightweight frontend (**Dashboard**) plus the server backend (**Docker image**). Both are obviously required *(with some exceptions)*. The [*Releases*](https://github.com/homelab-00/TranscriptionSuite/releases) page contains the Dashboard only; the server can be downloaded from inside the Dashboard app.
+
 Pick the section for your platform:
 
 | Platform | Path |
@@ -291,8 +293,20 @@ Notes:
 *TranscriptionSuite supports both Docker and Podman. The dashboard and CLI scripts auto-detect which runtime is available. For GPU mode with Podman, ensure CDI is configured (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`).*
 *Podman 4.7+ is required for `podman compose` support.*
 
-* *Older NVIDIA GPUs (GTX 1070 / 1080 and similar):*
-*If your card is Pascal- or Maxwell-era, the default image will fail to start. See the [older NVIDIA GPUs](#server-fails-to-start-on-older-nvidia-gpus-pascal--maxwell) troubleshooting entry for the one-toggle fix.*
+* *Older NVIDIA GPUs (GTX 1000-series and earlier — Pascal / Maxwell):*
+  *The default Docker image ships PyTorch built for Volta and newer GPUs (RTX 20-series and up). If your card is Pascal- or Maxwell-generation it will be rejected by PyTorch and the container will crash-loop with an error like "NVIDIA GeForce GTX 1070 with CUDA capability sm_61 is not compatible with the current PyTorch installation". Affected cards include:*
+  * *GeForce GTX 10-series — 1050 / 1060 / 1070 / 1080 (and Ti variants)*
+  * *GeForce GTX 900-series and GTX 750 / 750 Ti*
+  * *Tesla P4 / P40 / P100 / M40*
+  * *Quadro P-series and M-series*
+
+  *Fix: switch to the **legacy-GPU image** — a separate image we build from the same Dockerfile but pinned to the cu126 PyTorch wheels (which still cover sm_50..sm_90). Steps:*
+  1. *In the Server tab, set the runtime to **GPU (CUDA)** (the legacy-GPU toggle only appears under this runtime).*
+  2. *If the container already exists, stop the server and remove it via the cleanup controls.*
+  3. *Flip the **Use legacy-GPU image (GTX 10-series / 900-series and older)** toggle. Confirm the dialog and leave "Wipe runtime volume now (recommended)" checked so the next bootstrap re-syncs the cu126 wheels cleanly.*
+  4. *Click **Fetch Fresh Image** to pull the legacy image, then **Start Local**. The first start re-downloads PyTorch and dependencies (10-20 minutes on reasonable hardware); subsequent starts are normal speed.*
+
+  *Once running, the legacy image behaves identically to the default. If you later move to a Volta-or-newer card, flip the toggle back off — leaving it on a modern GPU just gives you older PyTorch wheels for no benefit.*
 
 ### 2.5 AMD / Intel GPU Support (Vulkan)
 
@@ -799,33 +813,6 @@ sudo systemctl enable --now nvidia-persistence.service
 ```
 
 **Alternative:** Reboot the host to fully reset the driver state.
-
-### Server fails to start on older NVIDIA GPUs (Pascal / Maxwell)
-
-**Symptom:** The container crash-loops shortly after you click Start Local. The server logs contain a message like:
-
-> NVIDIA GeForce GTX 1070 with CUDA capability sm_61 is not compatible with the current PyTorch installation.
-
-**Who is affected:** Anyone whose NVIDIA card is Pascal- or Maxwell-generation. Concretely:
-
-- GeForce GTX 10-series — 1050 / 1060 / 1070 / 1080 (and Ti variants)
-- GeForce GTX 9-series
-- Tesla P4 / P40 / P100 / M40
-- Quadro P-series and M-series
-
-**Why:** The default Docker image ships PyTorch built for Volta and newer GPUs (RTX 20-series and up). PyTorch refuses to load your card, and the container exits.
-
-**Fix:** Switch to the **legacy-GPU image** — a separate image we build specifically for these cards.
-
-1. Stop the server (Server tab → Stop) and remove the existing container (Server tab → cleanup controls).
-2. In the Server tab, make sure the runtime is set to **GPU (CUDA)**.
-3. Tick **Use legacy-GPU image (Pascal / Maxwell only)**.
-4. Confirm the dialog. Leave "Wipe runtime volume now (recommended)" checked.
-5. Click **Fetch Fresh Image** to pull the legacy image, then **Start Local**.
-
-The first start after switching re-downloads PyTorch and its dependencies and takes roughly as long as your original first install (10-20 minutes on reasonable hardware). Once running, the server behaves identically to the default image.
-
-> **If your GPU is Volta or newer** (RTX 20/30/40/50-series, Quadro RTX, Tesla V/A/H/B-series), **leave this toggle off** — the default image is what you want. Enabling the legacy image on a modern GPU just gives you older PyTorch wheels for no benefit.
 
 ### Advanced Troubleshooting
 

@@ -734,7 +734,7 @@ for (const name of facts.components.names) {
 
 const contract = {
   meta: {
-    spec_version: '1.0.18',
+    spec_version: '1.0.19',
     contract_mode: 'closed_set',
     source_scope: 'mockup_repo',
     validation_method: 'static_source_scan',
