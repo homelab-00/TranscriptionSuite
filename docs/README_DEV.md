@@ -2098,30 +2098,56 @@ Transcribe an audio or video file. Language auto-detected when `language` is omi
 | `model` | `string` | `"whisper-1"` | Accepted but ignored; the server uses whatever model is configured |
 | `language` | `string` | auto-detect | BCP-47 language code (e.g. `en`, `fr`) |
 | `prompt` | `string` | `null` | Initial prompt passed to the transcription engine as `initial_prompt` |
-| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt` |
+| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt`, `diarized_json` |
 | `temperature` | `float` | `null` | Accepted but ignored |
-| `timestamp_granularities[]` | `list[string]` | `null` | Include `"word"` to enable word-level timestamps (only effective with `verbose_json`) |
+| `timestamp_granularities[]` | `list[string]` | `null` | Include `"word"` to enable word-level timestamps (effective with `verbose_json` / `diarized_json`) |
+| `diarization` | `bool` | `false` | When `true`, run speaker diarization and attach speaker labels to segments. Requires a configured diarization engine (PyAnnote with `HF_TOKEN`, or Sortformer on Apple Silicon) |
+| `expected_speakers` | `int (1-10)` | `null` | Exact speaker count hint; out-of-range values return `400` |
+| `parallel_diarization` | `bool` | `config.diarization.parallel` | Override parallel vs sequential diarize + transcribe for this call |
 
 **Response formats:**
 
 | `response_format` | Content-Type | Shape |
 |-------------------|--------------|-------|
-| `json` | `application/json` | `{"text": "..."}` |
+| `json` | `application/json` | `{"text": "..."}` — minimal OpenAI body; never leaks speaker labels even when diarization ran |
 | `text` | `text/plain` | Raw transcript string |
-| `verbose_json` | `application/json` | Full object with `task`, `language`, `duration`, `text`, `segments`, optional `words` |
-| `srt` | `text/plain` | SRT subtitle file |
-| `vtt` | `text/plain` | WebVTT subtitle file |
+| `verbose_json` | `application/json` | Full OpenAI object (`task`, `language`, `duration`, `text`, `segments`, optional `words`); gains per-segment `speaker` and top-level `num_speakers` when diarization ran |
+| `srt` | `text/plain` | SRT subtitle file; cues prefixed `Speaker 1:`, `Speaker 2:` when diarization ran |
+| `vtt` | `text/plain` | WebVTT subtitle file; same speaker prefix as SRT |
+| `diarized_json` | `application/json` | Compact `{task, language, duration, text, num_speakers, segments}` with `speaker`, `start`, `end`, `text` per segment (raw `SPEAKER_00` form for programmatic use); segments carry `words[]` when word granularity requested |
+
+**Speaker labels:** JSON bodies (`verbose_json`, `diarized_json`) preserve the raw `SPEAKER_00`/`SPEAKER_01` form from `speaker_merge.build_speaker_segments` so API consumers get stable programmatic identifiers. Subtitle formats (`srt`, `vtt`) normalize to `Speaker 1`/`Speaker 2` via `subtitle_export.normalize_speaker_labels` — the same convention the dashboard's longform export uses. The `UNKNOWN` sentinel produced by `build_speaker_segments_nowords` is dropped from every output (filtered through `formatters._normalize_speaker_value`) so `num_speakers=0` never co-occurs with a `"speaker": "UNKNOWN"` field.
+
+**Diarization failure tolerance:** If `diarization=true` is requested but any stage fails (no HF token, PyAnnote/Sortformer engine load error, CUDA OOM, speaker-merge error, integrated-backend `ValueError`), the endpoint returns 200 with a plain transcript (`num_speakers=0`, no `speaker` keys) and logs a WARNING server-side. This mirrors the non-OpenAI `/api/transcription/audio` route. Diarization hiccups never 5xx the call. The only diarization-driven failure that is *not* fail-open is `expected_speakers` out of `[1,10]` — that's a client input error and returns `400 invalid_request_error`.
+
+**Orchestration (internal).** When `diarization=true`, the route delegates to the private `_run_transcription` helper in `server/backend/api/routes/openai_audio.py`, which mirrors the three-path dispatch from `routes/transcription.py`:
+
+1. **Integrated single-pass** — if the active backend overrides `STTBackend.transcribe_with_diarization` (WhisperX, VibeVoice-ASR), call it directly. Any exception → warn-and-fall-through to path 3 (fail-open).
+2. **Parallel or sequential diarize+transcribe** — `server/backend/core/parallel_diarize.py::{transcribe_and_diarize, transcribe_then_diarize}` orchestrates STT + PyAnnote/Sortformer, then `speaker_merge.build_speaker_segments` (or `build_speaker_segments_nowords` when the backend has no word timestamps) attributes speakers to words and re-groups into segments.
+3. **Plain transcription** — `engine.transcribe_file` when diarization is disabled or every upstream branch fell through.
+
+Internally `word_timestamps=True` is forced whenever `diarization=true` so `build_speaker_segments` has alignment data to work with. Per-word fields are only *emitted* in response bodies when the client also passed `timestamp_granularities[]=word` — this preserves OpenAI's external contract while satisfying the internal merge prerequisite.
 
 **Error codes:**
 
 | Status | `type` | Cause |
 |--------|--------|-------|
-| `400` | `invalid_request_error` | Unknown `response_format`, missing/empty `file` |
+| `400` | `invalid_request_error` | Unknown `response_format`, missing/empty `file`, `expected_speakers` outside `[1,10]` |
 | `429` | `rate_limit_error` | Another transcription job is already running |
 | `503` | `server_error` | No transcription model is configured |
 | `500` | `server_error` | Internal engine error |
 
-**Example (curl):**
+**Example — diarized `diarized_json` (curl):**
+```bash
+curl -X POST http://localhost:9786/v1/audio/transcriptions \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@recording.wav" \
+  -F "diarization=true" \
+  -F "expected_speakers=2" \
+  -F "response_format=diarized_json"
+```
+
+**Example — word-level verbose (curl):**
 ```bash
 curl -X POST http://localhost:9786/v1/audio/transcriptions \
   -H "Authorization: Bearer <token>" \
@@ -2138,7 +2164,7 @@ curl -X POST http://localhost:9786/v1/audio/transcriptions \
 Transcribe **and translate** an audio or video file to English. Identical to `/transcriptions` except:
 - `language` is not accepted (source language is always auto-detected)
 - Translation target is always English
-- The `task` field in `verbose_json` responses is `"translate"` instead of `"transcribe"`
+- The `task` field in `verbose_json` / `diarized_json` responses is `"translate"` instead of `"transcribe"`
 
 **Form fields:**
 
@@ -2147,13 +2173,16 @@ Transcribe **and translate** an audio or video file to English. Identical to `/t
 | `file` | `UploadFile` | required | Audio or video file |
 | `model` | `string` | `"whisper-1"` | Accepted but ignored |
 | `prompt` | `string` | `null` | Initial prompt passed to the transcription engine |
-| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt` |
+| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt`, `diarized_json` |
 | `temperature` | `float` | `null` | Accepted but ignored |
 | `timestamp_granularities[]` | `list[string]` | `null` | Include `"word"` to enable word-level timestamps |
+| `diarization` | `bool` | `false` | Same semantics as `/transcriptions` — speaker labels attach to the *translated* segments |
+| `expected_speakers` | `int (1-10)` | `null` | Exact speaker count hint; out-of-range values return `400` |
+| `parallel_diarization` | `bool` | `config.diarization.parallel` | Override parallel vs sequential orchestration |
 
-**Error codes:** Same as `/transcriptions`.
+**Error codes:** Same as `/transcriptions` (including `expected_speakers` validation).
 
-> **Backend note:** Translation requires a Whisper-family model with translation capability. Parakeet/Canary backends that don't support `task="translate"` will return a `400` or `500` from the engine layer.
+> **Backend note:** Translation requires a Whisper-family model with translation capability. Parakeet/Canary backends that don't support `task="translate"` will return a `400` or `500` from the engine layer. Diarization is orthogonal to translation — speaker labels attach whether or not translation succeeded.
 
 **Example (curl):**
 ```bash
@@ -2162,6 +2191,22 @@ curl -X POST http://localhost:9786/v1/audio/translations \
   -F "file=@foreign_audio.mp3" \
   -F "response_format=text"
 ```
+
+**Example — diarized translation (curl):**
+```bash
+curl -X POST http://localhost:9786/v1/audio/translations \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@foreign_audio.mp3" \
+  -F "diarization=true" \
+  -F "response_format=diarized_json"
+```
+
+**Reference implementation files:**
+- Route + form fields + `_run_transcription` orchestrator: `server/backend/api/routes/openai_audio.py`
+- Response formatters (`format_verbose_json`, `format_diarized_json`, `_result_to_cues`): `server/backend/core/formatters.py`
+- Diarization orchestrators: `server/backend/core/parallel_diarize.py`, `server/backend/core/speaker_merge.py`, `server/backend/core/subtitle_export.py`
+- Acceptance tests: `server/backend/tests/test_openai_audio_routes.py::TestDiarizationOverOpenAI`
+- Design spec (ignored by git): `_bmad-output/implementation-artifacts/spec-gh-88-openai-diarization.md`
 
 ### 7.6 Outgoing Webhook System
 

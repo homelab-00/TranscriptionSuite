@@ -97,6 +97,57 @@
 | `/ws` | Token (first message) | Longform recording transcription |
 | `/ws/live` | Token (first message) | Real-time live transcription |
 
+## OpenAI-Compatible Audio Endpoints
+
+Both endpoints accept `multipart/form-data` and follow the OpenAI Audio API spec so drop-in clients (Open-WebUI, LM Studio-compat scripts, curl) work unchanged. Authentication is the usual bearer-token flow.
+
+**Standard fields:** `file`, `model`, `language` (transcriptions only), `prompt`, `response_format`, `temperature`, `timestamp_granularities[]`.
+
+**Diarization fields (extension, GH-88):**
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `diarization` | bool | `false` | When true, run speaker diarization and attach speaker labels to segments. |
+| `expected_speakers` | int (1–10) | none | Exact speaker count hint. Out-of-range values return 400. |
+| `parallel_diarization` | bool | `config.diarization.parallel` | Override parallel vs sequential diarize + transcribe. |
+
+**Response formats:** `json` (default, OpenAI-minimal `{"text"}`), `text`, `verbose_json`, `srt`, `vtt`, `diarized_json` (extension).
+
+**Speaker-label behavior:**
+- JSON bodies (`verbose_json`, `diarized_json`) retain raw `SPEAKER_00`/`SPEAKER_01` labels so programmatic clients get stable identifiers.
+- Subtitle formats (`srt`, `vtt`) normalize to `Speaker 1`/`Speaker 2` (same convention the dashboard's longform export uses) and prefix cue text accordingly.
+- `response_format=json` remains `{"text": ...}` even when diarization ran — speakers are computed internally but not leaked into the minimal body.
+- Word-level speaker assignments appear in `verbose_json.words[*].speaker` and `diarized_json.segments[*].words[*].speaker` only when the client requested word granularity via `timestamp_granularities[]=word`.
+
+**`diarized_json` shape:**
+
+```json
+{
+  "task": "transcribe",
+  "language": "el",
+  "duration": 12.4,
+  "text": "Γεια σας. Καλώς ήρθατε.",
+  "num_speakers": 2,
+  "segments": [
+    {"speaker": "SPEAKER_00", "start": 0.0, "end": 4.1, "text": "Γεια σας."},
+    {"speaker": "SPEAKER_01", "start": 4.5, "end": 12.4, "text": "Καλώς ήρθατε."}
+  ]
+}
+```
+
+**Failure tolerance:** When diarization is requested but any stage fails (no HF token, engine OOM, speaker-merge error), the endpoint returns a 200 with a plain transcript — `num_speakers=0` and no `speaker` keys — and logs a WARNING server-side. The call never 5xxs just because the diarization engine hiccuped.
+
+**Example:**
+
+```bash
+curl -F file=@sample.wav \
+     -F diarization=true \
+     -F expected_speakers=2 \
+     -F response_format=diarized_json \
+     -H "Authorization: Bearer $TOKEN" \
+     http://localhost:9786/v1/audio/transcriptions
+```
+
 ## WebSocket Protocol — Longform (`/ws`)
 
 **Auth:** First message must be `{authenticate: "<token>"}`

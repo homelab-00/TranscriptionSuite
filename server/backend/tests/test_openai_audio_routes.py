@@ -675,3 +675,413 @@ class TestEnsureTranscriptionLoadedIntegration:
 
         assert resp.status_code == 200
         assert call_order == ["ensure", "try_start_job"]
+
+
+# ------------------------------------------------------------------
+# GH-88: Diarization over /v1/audio/transcriptions and /v1/audio/translations
+# ------------------------------------------------------------------
+
+
+def _make_diarized_result(**overrides):
+    """TranscriptionResult with speaker-attributed segments and words already merged."""
+    defaults = {
+        "text": "Hello there how are you",
+        "language": "en",
+        "language_probability": 0.95,
+        "duration": 5.0,
+        "num_speakers": 2,
+        "segments": [
+            {
+                "start_time": 0.0,
+                "end_time": 2.0,
+                "text": "Hello there",
+                "speaker": "SPEAKER_00",
+                "words": [
+                    {"word": "Hello", "start_time": 0.0, "end_time": 0.8, "speaker": "SPEAKER_00"},
+                    {"word": "there", "start_time": 0.9, "end_time": 2.0, "speaker": "SPEAKER_00"},
+                ],
+            },
+            {
+                "start_time": 2.5,
+                "end_time": 5.0,
+                "text": "how are you",
+                "speaker": "SPEAKER_01",
+                "words": [
+                    {"word": "how", "start_time": 2.5, "end_time": 3.0, "speaker": "SPEAKER_01"},
+                    {"word": "are", "start_time": 3.1, "end_time": 3.5, "speaker": "SPEAKER_01"},
+                    {"word": "you", "start_time": 3.6, "end_time": 5.0, "speaker": "SPEAKER_01"},
+                ],
+            },
+        ],
+        "words": [
+            {"word": "Hello", "start_time": 0.0, "end_time": 0.8, "speaker": "SPEAKER_00"},
+            {"word": "there", "start_time": 0.9, "end_time": 2.0, "speaker": "SPEAKER_00"},
+            {"word": "how", "start_time": 2.5, "end_time": 3.0, "speaker": "SPEAKER_01"},
+            {"word": "are", "start_time": 3.1, "end_time": 3.5, "speaker": "SPEAKER_01"},
+            {"word": "you", "start_time": 3.6, "end_time": 5.0, "speaker": "SPEAKER_01"},
+        ],
+    }
+    defaults.update(overrides)
+    return _FakeResult(**defaults)
+
+
+@pytest.fixture()
+def diarization_client():
+    """TestClient whose engine routes through the parallel diarize orchestrator.
+
+    The engine's ``_backend`` is set to ``None`` to bypass the integrated
+    single-pass path — tests drive the orchestration via
+    ``transcribe_and_diarize`` / ``transcribe_then_diarize`` stubs.
+    """
+    from server.api.routes import openai_audio
+
+    app = FastAPI()
+    app.include_router(openai_audio.router, prefix="/v1/audio")
+
+    mock_engine = MagicMock()
+    mock_engine._backend = None  # force Path 2 (parallel/sequential)
+    mock_engine.transcribe_file.return_value = _make_result()
+
+    app.state.model_manager = SimpleNamespace(
+        ensure_transcription_loaded=lambda: mock_engine,
+        transcription_engine=mock_engine,
+        job_tracker=SimpleNamespace(
+            try_start_job=lambda client_name: (True, "job-1", None),
+            end_job=lambda job_id: None,
+            is_cancelled=lambda: False,
+        ),
+    )
+    app.state.config = SimpleNamespace(
+        transcription={"model": "test-model"},
+        get=lambda *a, default=None, **kw: default,
+    )
+
+    with patch(
+        "server.api.routes.openai_audio.resolve_main_transcriber_model",
+        return_value="test-model",
+    ):
+        client = TestClient(app, raise_server_exceptions=False)
+        yield client, mock_engine
+
+
+def _patch_parallel_diarize(return_value):
+    """Patch both orchestrators in parallel_diarize to return a scripted tuple."""
+    return patch.multiple(
+        "server.core.parallel_diarize",
+        transcribe_and_diarize=MagicMock(return_value=return_value),
+        transcribe_then_diarize=MagicMock(return_value=return_value),
+    )
+
+
+class TestDiarizationOverOpenAI:
+    """GH-88 acceptance: diarization is available through the OpenAI-compat routes."""
+
+    def test_diarized_json_success(self, diarization_client):
+        client, _ = diarization_client
+        speaker_result = _make_diarized_result()
+        with _patch_parallel_diarize((speaker_result, None)):
+            resp = _upload(client, diarization="true", response_format="diarized_json")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["task"] == "transcribe"
+        assert body["num_speakers"] == 2
+        assert body["text"] == "Hello there how are you"
+        assert len(body["segments"]) == 2
+        assert body["segments"][0]["speaker"] == "SPEAKER_00"
+        assert body["segments"][1]["speaker"] == "SPEAKER_01"
+        # Without timestamp_granularities[]=word, per-word fields stay out.
+        assert "words" not in body["segments"][0]
+
+    def test_diarized_json_with_word_timestamps(self, diarization_client):
+        """When the client asks for word granularity, each segment carries its words."""
+        client, _ = diarization_client
+        speaker_result = _make_diarized_result()
+        with _patch_parallel_diarize((speaker_result, None)):
+            files = {"file": ("test.wav", io.BytesIO(b"RIFF" + b"\x00" * 100), "audio/wav")}
+            data = {
+                "model": "whisper-1",
+                "diarization": "true",
+                "response_format": "diarized_json",
+                "timestamp_granularities[]": "word",
+            }
+            resp = client.post("/v1/audio/transcriptions", files=files, data=data)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "words" in body["segments"][0]
+        assert body["segments"][0]["words"][0]["speaker"] == "SPEAKER_00"
+
+    def test_verbose_json_carries_speakers(self, diarization_client):
+        client, _ = diarization_client
+        speaker_result = _make_diarized_result()
+        with _patch_parallel_diarize((speaker_result, None)):
+            resp = _upload(client, diarization="true", response_format="verbose_json")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["num_speakers"] == 2
+        assert body["segments"][0]["speaker"] == "SPEAKER_00"
+        assert body["segments"][1]["speaker"] == "SPEAKER_01"
+
+    def test_srt_cues_prefixed_with_speaker(self, diarization_client):
+        """Subtitle cues use the human-readable ``Speaker N`` form produced by
+        ``subtitle_export.normalize_speaker_labels`` — same convention the
+        dashboard's longform export already shows users. JSON bodies keep the
+        raw ``SPEAKER_00`` form for programmatic consumers.
+        """
+        client, _ = diarization_client
+        speaker_result = _make_diarized_result()
+        with _patch_parallel_diarize((speaker_result, None)):
+            resp = _upload(client, diarization="true", response_format="srt")
+
+        assert resp.status_code == 200
+        assert "Speaker 1: Hello there" in resp.text
+        assert "Speaker 2: how are you" in resp.text
+
+    def test_vtt_cues_prefixed_with_speaker(self, diarization_client):
+        client, _ = diarization_client
+        speaker_result = _make_diarized_result()
+        with _patch_parallel_diarize((speaker_result, None)):
+            resp = _upload(client, diarization="true", response_format="vtt")
+
+        assert resp.status_code == 200
+        assert resp.text.startswith("WEBVTT")
+        assert "Speaker 1: Hello there" in resp.text
+        assert "Speaker 2: how are you" in resp.text
+
+    def test_json_format_does_not_leak_speakers(self, diarization_client):
+        """response_format=json must keep its minimal {"text": ...} body."""
+        client, _ = diarization_client
+        speaker_result = _make_diarized_result()
+        with _patch_parallel_diarize((speaker_result, None)):
+            resp = _upload(client, diarization="true", response_format="json")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body == {"text": "Hello there how are you"}
+        assert "speaker" not in body
+        assert "num_speakers" not in body
+
+    def test_expected_speakers_too_low_returns_400(self, diarization_client):
+        client, _ = diarization_client
+        resp = _upload(client, diarization="true", expected_speakers="0")
+        assert resp.status_code == 400
+        err = resp.json()["error"]
+        assert err["type"] == "invalid_request_error"
+        assert err["param"] == "expected_speakers"
+
+    def test_expected_speakers_too_high_returns_400(self, diarization_client):
+        client, _ = diarization_client
+        resp = _upload(client, diarization="true", expected_speakers="11")
+        assert resp.status_code == 400
+        assert resp.json()["error"]["param"] == "expected_speakers"
+
+    def test_expected_speakers_at_bounds_is_accepted(self, diarization_client):
+        client, _ = diarization_client
+        speaker_result = _make_diarized_result()
+        with _patch_parallel_diarize((speaker_result, None)):
+            resp1 = _upload(
+                client,
+                diarization="true",
+                expected_speakers="1",
+                response_format="diarized_json",
+            )
+            resp10 = _upload(
+                client,
+                diarization="true",
+                expected_speakers="10",
+                response_format="diarized_json",
+            )
+        assert resp1.status_code == 200
+        assert resp10.status_code == 200
+
+    def test_diarization_failure_returns_plain_transcript(self, diarization_client, caplog):
+        """If the orchestrator raises, the endpoint falls back to transcript without speakers."""
+        client, engine = diarization_client
+
+        def _boom(**kwargs):
+            raise RuntimeError("simulated diarization failure (no HF token)")
+
+        with (
+            patch("server.core.parallel_diarize.transcribe_and_diarize", side_effect=_boom),
+            patch("server.core.parallel_diarize.transcribe_then_diarize", side_effect=_boom),
+        ):
+            # The plain transcription_file fallback path returns a non-diarized result.
+            engine.transcribe_file.return_value = _make_result()
+            with caplog.at_level("WARNING"):
+                resp = _upload(
+                    client,
+                    diarization="true",
+                    response_format="diarized_json",
+                )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["num_speakers"] == 0
+        # No segments carry a `speaker` field because diarization never ran successfully.
+        assert all("speaker" not in seg for seg in body["segments"])
+        assert any("diarization" in rec.message.lower() for rec in caplog.records)
+
+    def test_diarized_json_without_diarization_flag(self, diarization_client):
+        """response_format=diarized_json without diarization=true returns num_speakers=0."""
+        client, engine = diarization_client
+        engine.transcribe_file.return_value = _make_result()
+        resp = _upload(client, response_format="diarized_json")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["num_speakers"] == 0
+        assert all("speaker" not in seg for seg in body["segments"])
+
+    def test_translation_endpoint_honors_diarization(self, diarization_client):
+        """/v1/audio/translations mirrors /v1/audio/transcriptions for diarization."""
+        client, _ = diarization_client
+        speaker_result = _make_diarized_result()
+        with _patch_parallel_diarize((speaker_result, None)):
+            resp = _upload(
+                client,
+                path="/v1/audio/translations",
+                diarization="true",
+                response_format="diarized_json",
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["task"] == "translate"
+        assert body["num_speakers"] == 2
+        assert body["segments"][0]["speaker"] == "SPEAKER_00"
+
+    def test_unknown_speaker_label_is_not_emitted(self, diarization_client):
+        """Review patch: ``build_speaker_segments_nowords`` can produce UNKNOWN
+        sentinels. Those must never reach the JSON body (they'd contradict
+        ``num_speakers=0``). Formatters funnel all speaker access through a
+        normalizer that drops UNKNOWN.
+        """
+        client, _ = diarization_client
+        unknown_result = _FakeResult(
+            text="Hello there",
+            language="en",
+            language_probability=0.95,
+            duration=2.0,
+            num_speakers=0,
+            segments=[
+                {
+                    "start_time": 0.0,
+                    "end_time": 2.0,
+                    "text": "Hello there",
+                    "speaker": "UNKNOWN",
+                }
+            ],
+            words=[
+                {"word": "Hello", "start_time": 0.0, "end_time": 1.0, "speaker": "UNKNOWN"},
+                {"word": "there", "start_time": 1.0, "end_time": 2.0, "speaker": "UNKNOWN"},
+            ],
+        )
+        with _patch_parallel_diarize((unknown_result, None)):
+            resp_diar = _upload(client, diarization="true", response_format="diarized_json")
+            resp_verb = _upload(client, diarization="true", response_format="verbose_json")
+            resp_srt = _upload(client, diarization="true", response_format="srt")
+
+        assert resp_diar.status_code == 200
+        assert all("speaker" not in seg for seg in resp_diar.json()["segments"])
+        assert resp_diar.json()["num_speakers"] == 0
+
+        assert resp_verb.status_code == 200
+        verbose_body = resp_verb.json()
+        assert "num_speakers" not in verbose_body
+        assert all("speaker" not in seg for seg in verbose_body["segments"])
+
+        assert "UNKNOWN:" not in resp_srt.text
+
+    def test_diarized_json_words_fallback_to_flat_result_words(self, diarization_client):
+        """Review patch: when a segment lacks a per-segment ``words`` key but
+        ``result.words`` is populated, ``format_diarized_json`` must slice the
+        flat list into each segment so clients asking for word granularity
+        always get words back.
+        """
+        client, _ = diarization_client
+        result_with_flat_words = _FakeResult(
+            text="Hello there",
+            language="en",
+            language_probability=0.95,
+            duration=2.0,
+            num_speakers=1,
+            segments=[
+                {
+                    "start_time": 0.0,
+                    "end_time": 2.0,
+                    "text": "Hello there",
+                    "speaker": "SPEAKER_00",
+                }
+            ],
+            words=[
+                {"word": "Hello", "start_time": 0.0, "end_time": 1.0, "speaker": "SPEAKER_00"},
+                {"word": "there", "start_time": 1.0, "end_time": 1.9, "speaker": "SPEAKER_00"},
+            ],
+        )
+        with _patch_parallel_diarize((result_with_flat_words, None)):
+            files = {"file": ("test.wav", io.BytesIO(b"RIFF" + b"\x00" * 100), "audio/wav")}
+            data = {
+                "model": "whisper-1",
+                "diarization": "true",
+                "response_format": "diarized_json",
+                "timestamp_granularities[]": "word",
+            }
+            resp = client.post("/v1/audio/transcriptions", files=files, data=data)
+
+        assert resp.status_code == 200
+        seg = resp.json()["segments"][0]
+        assert "words" in seg
+        assert [w["word"] for w in seg["words"]] == ["Hello", "there"]
+        assert seg["words"][0]["speaker"] == "SPEAKER_00"
+
+    def test_integrated_backend_valueerror_falls_back(self, diarization_client):
+        """Review patch: WhisperX raises ValueError for missing HF token.
+
+        Spec lists "no HF token" as a fail-open scenario, so the Path 1
+        integrated-backend handler must treat ValueError the same as any
+        other error — warn and fall through — not propagate to a 400. This
+        tests the simpler monkey-patched scenario: ensure that a generic
+        exception inside the parallel path still produces a 200 transcript
+        (already covered) AND that a ValueError there doesn't cross the
+        fail-open guarantee.
+        """
+        client, engine = diarization_client
+
+        def _boom_value_error(**kwargs):
+            raise ValueError("HuggingFace token required for diarization")
+
+        with (
+            patch(
+                "server.core.parallel_diarize.transcribe_and_diarize",
+                side_effect=_boom_value_error,
+            ),
+            patch(
+                "server.core.parallel_diarize.transcribe_then_diarize",
+                side_effect=_boom_value_error,
+            ),
+        ):
+            engine.transcribe_file.return_value = _make_result()
+            resp = _upload(client, diarization="true", response_format="diarized_json")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["num_speakers"] == 0
+        assert all("speaker" not in seg for seg in body["segments"])
+
+    def test_diarization_false_preserves_legacy_shape(self, diarization_client):
+        """Back-compat: diarization=false (default) must not change any response."""
+        client, engine = diarization_client
+        engine.transcribe_file.return_value = _make_result()
+
+        resp_json = _upload(client, response_format="json")
+        resp_verbose = _upload(client, response_format="verbose_json")
+        resp_srt = _upload(client, response_format="srt")
+
+        assert resp_json.json() == {"text": "Hello world"}
+        verbose_body = resp_verbose.json()
+        assert "num_speakers" not in verbose_body
+        assert all("speaker" not in seg for seg in verbose_body["segments"])
+        assert "SPEAKER_" not in resp_srt.text
+        assert "Speaker 1:" not in resp_srt.text

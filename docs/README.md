@@ -622,35 +622,52 @@ Transcribe an audio or video file. Language auto-detected when `language` is omi
 | `model` | `string` | `"whisper-1"` | Accepted but ignored; the server uses whatever model is configured |
 | `language` | `string` | auto-detect | BCP-47 language code (e.g. `en`, `fr`) |
 | `prompt` | `string` | `null` | Initial prompt passed to the transcription engine as `initial_prompt` |
-| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt` |
+| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt`, `diarized_json` |
 | `temperature` | `float` | `null` | Accepted but ignored |
-| `timestamp_granularities[]` | `list[string]` | `null` | Include `"word"` to enable word-level timestamps (only effective with `verbose_json`) |
+| `timestamp_granularities[]` | `list[string]` | `null` | Include `"word"` to enable word-level timestamps (effective with `verbose_json` / `diarized_json`) |
+| `diarization` | `bool` | `false` | When `true`, run speaker diarization and attach speaker labels to segments |
+| `expected_speakers` | `int (1-10)` | `null` | Exact speaker count hint; out-of-range values return `400` |
+| `parallel_diarization` | `bool` | server config | Override parallel vs sequential diarize + transcribe for this call |
 
 **Response formats:**
 
 | `response_format` | Content-Type | Shape |
 |-------------------|--------------|-------|
-| `json` | `application/json` | `{"text": "..."}` |
+| `json` | `application/json` | `{"text": "..."}` — minimal OpenAI body; never leaks speaker labels |
 | `text` | `text/plain` | Raw transcript string |
-| `verbose_json` | `application/json` | Full object with `task`, `language`, `duration`, `text`, `segments`, optional `words` |
-| `srt` | `text/plain` | SRT subtitle file |
-| `vtt` | `text/plain` | WebVTT subtitle file |
+| `verbose_json` | `application/json` | Full OpenAI object (`task`, `language`, `duration`, `text`, `segments`, optional `words`); gains per-segment `speaker` and top-level `num_speakers` when diarization ran |
+| `srt` | `text/plain` | SRT subtitle file; cues prefixed `Speaker 1:`, `Speaker 2:` when diarization ran |
+| `vtt` | `text/plain` | WebVTT subtitle file; same speaker prefix as SRT |
+| `diarized_json` | `application/json` | Compact `{task, language, duration, text, num_speakers, segments}` with `speaker`, `start`, `end`, `text` per segment (raw `SPEAKER_00` form for programmatic use) |
+
+**Speaker labels:** JSON bodies (`verbose_json`, `diarized_json`) use raw `SPEAKER_00`/`SPEAKER_01` form for stable programmatic identifiers. Subtitle formats (`srt`, `vtt`) normalize to `Speaker 1`/`Speaker 2` — same convention the dashboard's longform export uses.
+
+**Diarization failure tolerance:** If `diarization=true` is requested but the diarization engine fails (no HF token, OOM, merge error), the endpoint returns 200 with a plain transcript (`num_speakers=0`, no `speaker` keys) and logs a WARNING server-side. Diarization hiccups never 5xx the call.
 
 **Error codes:**
 
 | Status | `type` | Cause |
 |--------|--------|-------|
-| `400` | `invalid_request_error` | Unknown `response_format`, missing/empty `file` |
+| `400` | `invalid_request_error` | Unknown `response_format`, missing/empty `file`, `expected_speakers` out of 1–10 |
 | `429` | `rate_limit_error` | Another transcription job is already running |
 | `503` | `server_error` | No transcription model is configured |
 | `500` | `server_error` | Internal engine error |
 
-**Example (curl):**
+**Example — diarized verbose transcript (curl):**
 ```bash
 curl -X POST http://localhost:9786/v1/audio/transcriptions \
   -H "Authorization: Bearer <token>" \
   -F "file=@recording.wav" \
-  -F "model=whisper-1" \
+  -F "diarization=true" \
+  -F "expected_speakers=2" \
+  -F "response_format=diarized_json"
+```
+
+**Example — word-level verbose (curl):**
+```bash
+curl -X POST http://localhost:9786/v1/audio/transcriptions \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@recording.wav" \
   -F "response_format=verbose_json" \
   -F "timestamp_granularities[]=word"
 ```
@@ -669,9 +686,12 @@ Transcribe **and translate** an audio or video file to English. Identical to `/t
 | `file` | `UploadFile` | required | Audio or video file |
 | `model` | `string` | `"whisper-1"` | Accepted but ignored |
 | `prompt` | `string` | `null` | Initial prompt passed to the transcription engine |
-| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt` |
+| `response_format` | `string` | `"json"` | One of `json`, `text`, `verbose_json`, `srt`, `vtt`, `diarized_json` |
 | `temperature` | `float` | `null` | Accepted but ignored |
 | `timestamp_granularities[]` | `list[string]` | `null` | Include `"word"` to enable word-level timestamps |
+| `diarization` | `bool` | `false` | Same semantics as `/transcriptions` — speaker labels attach to the translated segments |
+| `expected_speakers` | `int (1-10)` | `null` | Exact speaker count hint |
+| `parallel_diarization` | `bool` | server config | Override parallel vs sequential orchestration |
 
 **Error codes:** Same as `/transcriptions`.
 
@@ -683,6 +703,15 @@ curl -X POST http://localhost:9786/v1/audio/translations \
   -H "Authorization: Bearer <token>" \
   -F "file=@foreign_audio.mp3" \
   -F "response_format=text"
+```
+
+**Example — diarized translation (curl):**
+```bash
+curl -X POST http://localhost:9786/v1/audio/translations \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@foreign_audio.mp3" \
+  -F "diarization=true" \
+  -F "response_format=diarized_json"
 ```
 
 **For more info about API endpoints, see section 7 of README_DEV.**
