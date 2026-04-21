@@ -58,7 +58,7 @@ The `transcription-suite-ui.contract.yaml` is the machine-enforced source of tru
 
 - **Token sprawl**: adding ad hoc colors, shadows, radii, or blur values without contract updates
 - **Arbitrary utilities**: random bracket-value classes not in the utility allowlist
-- **Blur stacking**: excessive `backdrop-blur` on nested layers
+- **Blur stacking**: excessive `backdrop-blur` on nested layers — enforced by `blur_depth_budgets:` in `transcription-suite-ui.contract.yaml`. The default per-file ceiling is 3 backdrop-blur references; existing outliers carry per-file overrides with documented `reason:` strings. Adding a new `backdrop-blur-*` class to a file at its budget fails `npm run ui:contract:check`. To raise a budget, edit the override entry and document why (e.g., mutually-exclusive modal layers).
 - **Inconsistent borders**: drifting glass border strength across sibling components
 - **Timing drift**: interaction timing outside approved motion tokens
 - **oklch/oklab leakage**: any `color-mix(in oklab, ...)`, `oklch(...)`, or `in oklab` gradient interpolation reaching the browser — the sRGB enforcement must remain active

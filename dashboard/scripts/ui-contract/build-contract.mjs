@@ -9,6 +9,22 @@ const outputPath = path.join(PROJECT_ROOT, 'ui-contract', 'transcription-suite-u
 
 const facts = JSON.parse(fs.readFileSync(factsPath, 'utf8'));
 
+// Read previous contract (if present) to preserve human-curated sections that
+// are NOT derived from facts: spec_version (manually bumped per change) and
+// blur_depth_budgets (per-file overrides + reasons). Without this, running
+// `extract → build` would wipe these sections on every build.
+let previousContract = null;
+try {
+  previousContract = YAML.parse(fs.readFileSync(outputPath, 'utf8'));
+} catch (err) {
+  if (err.code !== 'ENOENT') throw err;
+}
+const previousSpecVersion = previousContract?.meta?.spec_version || '1.0.19';
+const previousBlurBudgets = previousContract?.blur_depth_budgets || {
+  default_max: 3,
+  per_file_overrides: {},
+};
+
 const componentSpecs = {
   App: {
     required_tokens: ['colors', 'motion', 'layout', 'typography', 'z_index'],
@@ -734,7 +750,7 @@ for (const name of facts.components.names) {
 
 const contract = {
   meta: {
-    spec_version: '1.0.19',
+    spec_version: previousSpecVersion,
     contract_mode: 'closed_set',
     source_scope: 'mockup_repo',
     validation_method: 'static_source_scan',
@@ -839,6 +855,7 @@ const contract = {
     animation_strings: facts.inline_style.animation_strings,
     cubic_beziers: facts.inline_style.cubic_beziers,
   },
+  blur_depth_budgets: previousBlurBudgets,
   component_contracts: componentContracts,
   validation_policy: {
     unknown_utility_class: 'error',

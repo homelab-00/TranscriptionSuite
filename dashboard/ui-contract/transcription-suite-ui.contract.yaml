@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.20
+  spec_version: 1.0.21
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -51,7 +51,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-21T06:00:53.437Z
+    generated_at: 2026-04-21T06:30:02.289Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -1140,6 +1140,27 @@ inline_style_allowlist:
     - cubic-bezier(0.25,0.1,0.25,1)
     - cubic-bezier(0.32,0.72,0,1)
     - cubic-bezier(0.33,1,0.68,1)
+blur_depth_budgets:
+  default_max: 3
+  per_file_overrides:
+    App.tsx:
+      max: 8
+      reason: Four mutually-exclusive confirmation dialogs (overlay + panel each); only one mounts at a time.
+    components/views/AudioNoteModal.tsx:
+      max: 5
+      reason: Sibling visualizer overlays + modal chrome stack only when the modal is open.
+    components/views/BugReportModal.tsx:
+      max: 4
+      reason: Modal overlay + panel + nested input/preview surfaces.
+    components/views/NotebookView.tsx:
+      max: 4
+      reason: View container + header + scroll-edge fade gradients; design-language §Surface Language.
+    components/views/ServerView.tsx:
+      max: 4
+      reason: Multiple GlassCards co-resident on this primary view.
+    components/views/SessionView.tsx:
+      max: 4
+      reason: Primary working surface — header + scroll-edge fades + GlassCards.
 component_contracts:
   AboutModal:
     file: components/views/AboutModal.tsx

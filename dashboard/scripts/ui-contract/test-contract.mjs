@@ -149,13 +149,45 @@ async function main() {
     'Drift fail for sidebar notebook/server status binding',
   );
 
-  // 9. Pass case: non-style facts should not fail style contract.
+  // 9a. Drift fail: blur-budget exceeded when an existing override file's count grows past its override.
+  const factsBlurOverflow = clone(baseFacts);
+  // App.tsx has override max=8; bump to 9 to simulate one more backdrop-blur added.
+  factsBlurOverflow.tokens.blur_levels.per_file_counts['App.tsx'] = 9;
+  const blurOverflowReport = await createValidationReport({ factsOverride: factsBlurOverflow });
+  expect(
+    hasIssue(blurOverflowReport, 'blur_budget_exceeded', 'App.tsx'),
+    'Drift fail when backdrop-blur count exceeds per-file override',
+  );
+
+  // 9b. Pass case: a brand-new file at or below default_max should not trigger the budget.
+  const factsBlurUnderDefault = clone(baseFacts);
+  factsBlurUnderDefault.tokens.blur_levels.per_file_counts['components/views/NewSurface.tsx'] = 2;
+  const blurUnderDefaultReport = await createValidationReport({
+    factsOverride: factsBlurUnderDefault,
+  });
+  expect(
+    !hasIssue(blurUnderDefaultReport, 'blur_budget_exceeded', 'components/views/NewSurface.tsx'),
+    'Pass case when new file backdrop-blur count is at or below default_max',
+  );
+
+  // 9c. Drift fail: a brand-new file above default_max should trigger the budget.
+  const factsBlurOverDefault = clone(baseFacts);
+  factsBlurOverDefault.tokens.blur_levels.per_file_counts['components/views/NewSurface.tsx'] = 4;
+  const blurOverDefaultReport = await createValidationReport({
+    factsOverride: factsBlurOverDefault,
+  });
+  expect(
+    hasIssue(blurOverDefaultReport, 'blur_budget_exceeded', 'components/views/NewSurface.tsx'),
+    'Drift fail when new-file backdrop-blur count exceeds default_max',
+  );
+
+  // 10. Pass case: non-style facts should not fail style contract.
   const factsNonStyle = clone(baseFacts);
   factsNonStyle.non_style_metadata = { build_id: 'abc123' };
   const nonStylePass = await createValidationReport({ factsOverride: factsNonStyle });
   expect(nonStylePass.ok === true, 'Non-style changes do not fail style contract checks');
 
-  // 10. Versioning fail: contract hash changes with same version should fail.
+  // 11. Versioning fail: contract hash changes with same version should fail.
   const semverFailBaselinePath = await writeTempFile(
     'semver-fail-baseline.json',
     JSON.stringify(
@@ -177,7 +209,7 @@ async function main() {
     'Versioning fail requires semver bump when contract hash changes',
   );
 
-  // 11. Versioning pass: bumped spec_version with changed hash should pass (warning allowed).
+  // 12. Versioning pass: bumped spec_version with changed hash should pass (warning allowed).
   const bumpedContract = clone(originalContract);
   bumpedContract.meta.spec_version = bumpedSpecVersion;
   const bumpedContractPath = await writeTempFile(

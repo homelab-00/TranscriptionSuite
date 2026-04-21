@@ -133,6 +133,17 @@ export async function sourceFiles(root = PROJECT_ROOT) {
   return files;
 }
 
+// Scan-only file set for the blur-depth budget rule. Adds `src/**/*.tsx` on top
+// of `sourceFiles()` so hooks/services that render JSX (e.g., useConfirm) are
+// covered. Kept separate so the closed-set component-coverage check is not
+// affected by these additional files. (Issue #87.)
+export async function blurScanFiles(root = PROJECT_ROOT) {
+  const base = await sourceFiles(root);
+  const srcTsx = await walk(path.join(root, 'src'), (filePath) => filePath.endsWith('.tsx'));
+  const combined = new Set([...base, ...srcTsx]);
+  return Array.from(combined);
+}
+
 async function readFiles(filePaths) {
   const result = new Map();
   for (const filePath of filePaths) {
@@ -654,6 +665,34 @@ function extractGlobalCssContracts(cssText) {
   };
 }
 
+// Negative lookbehind blocks identifier-character prefixes, which excludes both
+// CSS-variable declarations (`--backdrop-blur-xs:` in the @theme block) and any
+// HTML-attribute-style strings (`data-backdrop-blur-*`). Trailing `(?:\b|\[)`
+// allows arbitrary values like `backdrop-blur-[8px]`.
+const BACKDROP_BLUR_OCCURRENCE_RE = /(?<![A-Za-z0-9_-])backdrop-blur(?:-[a-z0-9-]+)?(?:\b|\[)/g;
+
+function countBackdropBlurOccurrences(content) {
+  const matches = content.match(BACKDROP_BLUR_OCCURRENCE_RE);
+  return matches ? matches.length : 0;
+}
+
+function extractBackdropBlurCountsPerFile(fileContentMap, root) {
+  const counts = {};
+  for (const [filePath, content] of fileContentMap.entries()) {
+    const occurrences = countBackdropBlurOccurrences(content);
+    if (occurrences === 0) continue;
+    const relPosix = toPosixPath(path.relative(root, filePath));
+    counts[relPosix] = occurrences;
+  }
+  return counts;
+}
+
+async function extractBackdropBlurCountsForBlurScan(root) {
+  const files = await blurScanFiles(root);
+  const contents = await readFiles(files);
+  return extractBackdropBlurCountsPerFile(contents, root);
+}
+
 export async function extractFacts({ root = PROJECT_ROOT } = {}) {
   const files = await sourceFiles(root);
   const fileContentMap = await readFiles(files);
@@ -808,6 +847,7 @@ export async function extractFacts({ root = PROJECT_ROOT } = {}) {
       blur_levels: {
         backdrop: uniqueSorted(Array.from(backdropBlurClasses)),
         filter: uniqueSorted(Array.from(filterBlurClasses)),
+        per_file_counts: await extractBackdropBlurCountsForBlurScan(root),
       },
       shadow_levels: {
         classes: uniqueSorted(Array.from(shadowClasses)),

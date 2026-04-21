@@ -368,6 +368,41 @@ function buildSemanticDiff(contract, facts) {
   };
 }
 
+function checkBlurBudgets(contract, facts) {
+  const budgets = asObject(contract.blur_depth_budgets);
+  const defaultMax = Number.isInteger(budgets.default_max) ? budgets.default_max : null;
+  const overrides = asObject(budgets.per_file_overrides);
+  const counts = asObject(facts.tokens?.blur_levels?.per_file_counts);
+
+  const issues = [];
+  if (defaultMax === null) {
+    return issues;
+  }
+
+  for (const [filePath, rawCount] of Object.entries(counts)) {
+    const actual = Number(rawCount);
+    if (!Number.isFinite(actual)) continue;
+    const override = overrides[filePath];
+    const allowed = override && Number.isInteger(override.max) ? override.max : defaultMax;
+    if (actual > allowed) {
+      issues.push({
+        code: 'blur_budget_exceeded',
+        severity: 'error',
+        path: filePath,
+        message: `Backdrop-blur references in ${filePath} exceed budget (actual=${actual} allowed=${allowed}).`,
+        details: {
+          file: filePath,
+          actual,
+          allowed,
+          override_present: Boolean(override),
+        },
+      });
+    }
+  }
+
+  return issues;
+}
+
 function collectSemanticIssues(diff) {
   const issues = [];
 
@@ -560,6 +595,7 @@ export async function createValidationReport({
   const semanticDiff = buildSemanticDiff(contract, facts);
   report.semantic_diff = semanticDiff;
   report.issues.push(...collectSemanticIssues(semanticDiff));
+  report.issues.push(...checkBlurBudgets(contract, facts));
 
   const baselineResult = await checkBaseline({
     baselinePath,

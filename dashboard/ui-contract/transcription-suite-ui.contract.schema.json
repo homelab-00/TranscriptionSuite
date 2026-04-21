@@ -10,6 +10,7 @@
     "global_behaviors",
     "utility_allowlist",
     "inline_style_allowlist",
+    "blur_depth_budgets",
     "component_contracts",
     "validation_policy"
   ],
@@ -359,6 +360,39 @@
         },
         "cubic_beziers": {
           "$ref": "#/$defs/stringSet"
+        }
+      }
+    },
+    "blur_depth_budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default_max", "per_file_overrides"],
+      "properties": {
+        "default_max": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "per_file_overrides": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["max", "reason"],
+            "properties": {
+              "max": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
         }
       }
     },
