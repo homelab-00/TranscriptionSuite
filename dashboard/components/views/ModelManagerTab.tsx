@@ -123,6 +123,25 @@ function CapBadge({ label, active }: { label: string; active: boolean }) {
   );
 }
 
+// ─── Off-screen paint-skip styles (Issue #87) ───────────────────────────────
+//
+// `content-visibility: auto` lets the compositor skip layout/paint for off-screen
+// rows. It also applies paint containment, which clips the absolute-positioned
+// Select dropdown when a row is on-screen. To avoid that clipping, we flip the
+// row to `visible` while its dropdown is open (`selectOpen = true`). Hoisting
+// the two style objects to module scope keeps their identity stable so React
+// skips the inline-style write when `selectOpen` is unchanged.
+
+const ROW_CV_AUTO: React.CSSProperties = {
+  contentVisibility: 'auto',
+  containIntrinsicSize: 'auto 120px',
+};
+
+const ROW_CV_VISIBLE: React.CSSProperties = {
+  contentVisibility: 'visible',
+  containIntrinsicSize: 'auto 120px',
+};
+
 // ─── Model Row ──────────────────────────────────────────────────────────────
 
 interface ModelRowProps {
@@ -139,7 +158,7 @@ interface ModelRowProps {
   onSelectAs: (id: string, role: ModelRole) => void;
 }
 
-function ModelRow({
+const ModelRow = React.memo(function ModelRow({
   model,
   cached,
   cacheSize,
@@ -189,7 +208,10 @@ function ModelRow({
   if (isActiveDiarization) activeBadges.push('Diarization');
 
   return (
-    <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 transition-colors duration-200 hover:bg-white/10">
+    <div
+      style={selectOpen ? ROW_CV_VISIBLE : ROW_CV_AUTO}
+      className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 transition-colors duration-200 hover:bg-white/10"
+    >
       {/* Top line: name + actions */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
@@ -316,7 +338,7 @@ function ModelRow({
       <p className="mt-1 pl-5 text-xs text-slate-500">{model.description}</p>
     </div>
   );
-}
+});
 
 // ─── Custom Model Row ───────────────────────────────────────────────────────
 
@@ -335,7 +357,7 @@ interface CustomModelRowProps {
   onDelete: (id: string) => void;
 }
 
-function CustomModelRow({
+const CustomModelRow = React.memo(function CustomModelRow({
   modelId,
   cached,
   cacheSize,
@@ -375,7 +397,10 @@ function CustomModelRow({
   ];
 
   return (
-    <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 transition-colors duration-200 hover:bg-white/10">
+    <div
+      style={selectOpen ? ROW_CV_VISIBLE : ROW_CV_AUTO}
+      className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 transition-colors duration-200 hover:bg-white/10"
+    >
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <span
@@ -470,7 +495,7 @@ function CustomModelRow({
       )}
     </div>
   );
-}
+});
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.19
+  spec_version: 1.0.20
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -51,7 +51,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-19T06:12:03.162Z
+    generated_at: 2026-04-21T06:00:53.437Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -1073,6 +1073,8 @@ inline_style_allowlist:
     - backgroundColor
     - backgroundImage
     - backgroundSize
+    - containIntrinsicSize
+    - contentVisibility
     - display
     - gridTemplateRows
     - height
@@ -1097,6 +1099,7 @@ inline_style_allowlist:
     - "1"
     - "100"
     - 100%
+    - 120px
     - 16%
     - 1px
     - 1rem
@@ -1111,6 +1114,8 @@ inline_style_allowlist:
     - 50%
     - 7%
     - "90"
+    - auto
+    - auto 120px
     - auto repeat(${gridRows}, 1fr)
     - fixed
     - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
@@ -1122,6 +1127,7 @@ inline_style_allowlist:
     - radial-gradient(circle at top left, transparent 1rem, black 1rem)
     - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
     - translateY(${pillTop}px)
+    - visible
   keyframes:
     - dropdown-appear
     - slideInLeft
