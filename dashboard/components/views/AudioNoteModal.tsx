@@ -500,9 +500,14 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const autoTitleEnabledRef = useRef(true);
   useEffect(() => {
     if (!isOpen) return;
-    apiClient.getLLMStatus().then((status) => {
-      autoTitleEnabledRef.current = status.auto_title_enabled ?? true;
-    }).catch(() => { /* leave default true */ });
+    apiClient
+      .getLLMStatus()
+      .then((status) => {
+        autoTitleEnabledRef.current = status.auto_title_enabled ?? true;
+      })
+      .catch(() => {
+        /* leave default true */
+      });
   }, [isOpen]);
 
   // Output formatting
@@ -975,117 +980,120 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   };
 
   // LLM Chat handler — sends user message and streams assistant response
-  const handleSendMessage = useCallback(async (overrideText?: string) => {
-    const text = (overrideText ?? chatInput).trim();
-    if (!text || !note?.recordingId || isChatLoading) return;
+  const handleSendMessage = useCallback(
+    async (overrideText?: string) => {
+      const text = (overrideText ?? chatInput).trim();
+      if (!text || !note?.recordingId || isChatLoading) return;
 
-    let conversationId = activeConversationId;
-    if (!conversationId) {
-      try {
-        const conv = await apiClient.createConversation(note.recordingId, 'New Chat');
-        conversationId = conv.conversation_id;
-        const updatedAt = new Date().toISOString();
-        const createdSession: ChatSession = {
-          id: conversationId,
-          title: conv.title || 'New Chat',
-          type: inferSessionType(conv.title || 'New Chat'),
-          timestamp: formatSessionTime(updatedAt),
-          updatedAt,
-        };
-        setChatSessions((prev) =>
-          sortChatSessions([
-            createdSession,
-            ...prev.filter((session) => session.id !== createdSession.id),
-          ]),
-        );
-        setActiveConversationId(conversationId);
-      } catch {
-        setSessionsError('Failed to create a new session.');
-        return;
+      let conversationId = activeConversationId;
+      if (!conversationId) {
+        try {
+          const conv = await apiClient.createConversation(note.recordingId, 'New Chat');
+          conversationId = conv.conversation_id;
+          const updatedAt = new Date().toISOString();
+          const createdSession: ChatSession = {
+            id: conversationId,
+            title: conv.title || 'New Chat',
+            type: inferSessionType(conv.title || 'New Chat'),
+            timestamp: formatSessionTime(updatedAt),
+            updatedAt,
+          };
+          setChatSessions((prev) =>
+            sortChatSessions([
+              createdSession,
+              ...prev.filter((session) => session.id !== createdSession.id),
+            ]),
+          );
+          setActiveConversationId(conversationId);
+        } catch {
+          setSessionsError('Failed to create a new session.');
+          return;
+        }
       }
-    }
 
-    setSessionsError(null);
-    const isFirstExchange = chatMessages.length === 0;
-    setChatMessages((prev) => [
-      ...prev,
-      { role: 'user', content: text },
-      { role: 'assistant', content: '' },
-    ]);
-    setChatInput('');
-    setIsChatLoading(true);
-    let streamSucceeded = false;
-    try {
-      const stream = apiClient.chat({
-        conversation_id: conversationId,
-        user_message: text,
-        include_transcription: true,
-      });
-      let fullResponse = '';
-      for await (const chunk of stream) {
-        fullResponse += chunk;
+      setSessionsError(null);
+      const isFirstExchange = chatMessages.length === 0;
+      setChatMessages((prev) => [
+        ...prev,
+        { role: 'user', content: text },
+        { role: 'assistant', content: '' },
+      ]);
+      setChatInput('');
+      setIsChatLoading(true);
+      let streamSucceeded = false;
+      try {
+        const stream = apiClient.chat({
+          conversation_id: conversationId,
+          user_message: text,
+          include_transcription: true,
+        });
+        let fullResponse = '';
+        for await (const chunk of stream) {
+          fullResponse += chunk;
+          setChatMessages((prev) => {
+            const updated = [...prev];
+            const lastMsg: DisplayMessage = { role: 'assistant', content: fullResponse };
+            updated[updated.length - 1] = lastMsg;
+            return updated;
+          });
+        }
+        streamSucceeded = true;
+      } catch {
         setChatMessages((prev) => {
           const updated = [...prev];
-          const lastMsg: DisplayMessage = { role: 'assistant', content: fullResponse };
-          updated[updated.length - 1] = lastMsg;
+          const errorMsg: DisplayMessage = {
+            role: 'assistant',
+            content: 'Error: Failed to get response from LLM.',
+          };
+          updated[updated.length - 1] = errorMsg;
           return updated;
         });
+      } finally {
+        const updatedAt = new Date().toISOString();
+        setChatSessions((prev) => {
+          const current = prev.find((session) => session.id === conversationId);
+          if (!current) return prev;
+          const refreshed = {
+            ...current,
+            updatedAt,
+            timestamp: formatSessionTime(updatedAt),
+          };
+          return sortChatSessions([
+            refreshed,
+            ...prev.filter((session) => session.id !== conversationId),
+          ]);
+        });
+        setIsChatLoading(false);
       }
-      streamSucceeded = true;
-    } catch {
-      setChatMessages((prev) => {
-        const updated = [...prev];
-        const errorMsg: DisplayMessage = {
-          role: 'assistant',
-          content: 'Error: Failed to get response from LLM.',
-        };
-        updated[updated.length - 1] = errorMsg;
-        return updated;
-      });
-    } finally {
-      const updatedAt = new Date().toISOString();
-      setChatSessions((prev) => {
-        const current = prev.find((session) => session.id === conversationId);
-        if (!current) return prev;
-        const refreshed = {
-          ...current,
-          updatedAt,
-          timestamp: formatSessionTime(updatedAt),
-        };
-        return sortChatSessions([
-          refreshed,
-          ...prev.filter((session) => session.id !== conversationId),
-        ]);
-      });
-      setIsChatLoading(false);
-    }
-    // Auto-generate title after the first successful exchange (if enabled)
-    if (streamSucceeded && isFirstExchange && conversationId && autoTitleEnabledRef.current) {
-      try {
-        const { title } = await apiClient.generateConversationTitle(conversationId);
-        if (title) {
-          const updatedAt = new Date().toISOString();
-          setChatSessions((prev) =>
-            sortChatSessions(
-              prev.map((session) =>
-                session.id === conversationId
-                  ? {
-                      ...session,
-                      title,
-                      type: inferSessionType(title),
-                      updatedAt,
-                      timestamp: formatSessionTime(updatedAt),
-                    }
-                  : session,
+      // Auto-generate title after the first successful exchange (if enabled)
+      if (streamSucceeded && isFirstExchange && conversationId && autoTitleEnabledRef.current) {
+        try {
+          const { title } = await apiClient.generateConversationTitle(conversationId);
+          if (title) {
+            const updatedAt = new Date().toISOString();
+            setChatSessions((prev) =>
+              sortChatSessions(
+                prev.map((session) =>
+                  session.id === conversationId
+                    ? {
+                        ...session,
+                        title,
+                        type: inferSessionType(title),
+                        updatedAt,
+                        timestamp: formatSessionTime(updatedAt),
+                      }
+                    : session,
+                ),
               ),
-            ),
-          );
+            );
+          }
+        } catch {
+          // Title generation failure is non-fatal
         }
-      } catch {
-        // Title generation failure is non-fatal
       }
-    }
-  }, [chatInput, note?.recordingId, isChatLoading, activeConversationId, chatMessages]);
+    },
+    [chatInput, note?.recordingId, isChatLoading, activeConversationId, chatMessages],
+  );
 
   /**
    * Truncate conversation history then resend:
@@ -1495,7 +1503,11 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                     />
                   )}
                   <div className="pointer-events-none absolute inset-0 opacity-30">
-                    <AudioVisualizer analyserNode={analyserNode} className="h-full" />
+                    <AudioVisualizer
+                      analyserNode={analyserNode}
+                      className="h-full"
+                      isActive={isPlaying && !!analyserNode}
+                    />
                   </div>
                   <div className="relative z-10 flex flex-col items-center gap-4">
                     <div className="font-mono text-3xl font-light tracking-widest text-white">
@@ -1869,7 +1881,10 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                               />
                               <div className="mt-2 flex justify-end gap-2">
                                 <button
-                                  onClick={() => { setEditingMsgIndex(null); setEditingContent(''); }}
+                                  onClick={() => {
+                                    setEditingMsgIndex(null);
+                                    setEditingContent('');
+                                  }}
                                   className="rounded px-2 py-0.5 text-xs text-slate-400 hover:text-white"
                                 >
                                   Cancel

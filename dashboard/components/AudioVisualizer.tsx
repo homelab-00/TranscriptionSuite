@@ -6,12 +6,19 @@ interface AudioVisualizerProps {
   analyserNode?: AnalyserNode | null;
   /** Multiplier for visualizer amplitude (default 1.0, range ~0.25–4.0) */
   amplitudeScale?: number;
+  /**
+   * Gates the requestAnimationFrame loop. Defaults to false so a forgotten prop
+   * cannot silently re-introduce an always-on 60–120 Hz canvas paint (issue #87).
+   * Callers must opt in only when the visualizer is genuinely live.
+   */
+  isActive?: boolean;
 }
 
 export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
   className = 'h-48',
   analyserNode,
   amplitudeScale = 1.0,
+  isActive = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -22,7 +29,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animationId: number;
+    let animationId: number | null = null;
     let t = 0;
 
     // Frequency data buffer (reused each frame when analyser is available)
@@ -39,6 +46,15 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
 
     resize();
     window.addEventListener('resize', resize);
+
+    const cleanup = () => {
+      window.removeEventListener('resize', resize);
+      if (animationId !== null) cancelAnimationFrame(animationId);
+    };
+
+    // Gate the rAF loop. When inactive, the canvas stays at its last frame
+    // (typically blank on first mount) and no per-frame work is scheduled.
+    if (!isActive) return cleanup;
 
     const drawSimulation = () => {
       const dpr = window.devicePixelRatio || 1;
@@ -142,11 +158,8 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
 
     draw();
 
-    return () => {
-      window.removeEventListener('resize', resize);
-      cancelAnimationFrame(animationId);
-    };
-  }, [analyserNode, amplitudeScale]);
+    return cleanup;
+  }, [analyserNode, amplitudeScale, isActive]);
 
   return (
     <div

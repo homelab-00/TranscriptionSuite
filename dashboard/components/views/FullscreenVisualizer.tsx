@@ -102,7 +102,11 @@ export const FullscreenVisualizer: React.FC<FullscreenVisualizerProps> = ({
           {/* Top Left Corner Accent */}
           <div className="bg-accent-cyan/5 pointer-events-none absolute top-0 left-0 h-32 w-32 rounded-br-full blur-2xl"></div>
 
-          <AudioVisualizer className="h-full w-full" analyserNode={analyserNode} />
+          <AudioVisualizer
+            className="h-full w-full"
+            analyserNode={analyserNode}
+            isActive={isRendered && !!analyserNode}
+          />
 
           {/* Overlay Gradient for depth */}
           <div className="pointer-events-none absolute inset-0 bg-linear-to-t from-black/60 via-transparent to-black/20"></div>

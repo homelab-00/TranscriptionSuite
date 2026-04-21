@@ -1875,6 +1875,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                 <AudioVisualizer
                   analyserNode={activeAnalyser}
                   amplitudeScale={visualizerAmplitudeScale}
+                  isActive={!!activeAnalyser}
                 />
               </GlassCard>
 
