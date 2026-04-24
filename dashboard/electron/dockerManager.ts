@@ -2665,14 +2665,32 @@ export type RemoteTagsResult =
 /**
  * Fetch the tag list only (fast, ~1-2s). Dates are fetched separately
  * via fetchRemoteTagDates() so the UI isn't blocked.
+ *
+ * GH-99: the token endpoint returns 401 when the target GHCR package is
+ * Private (GHCR's first-push default). For the legacy variant — which has a
+ * history of being unpublished or newly pushed — we map that 401 to
+ * `not-published` so the dashboard surfaces the same actionable banner as a
+ * genuine "no tags yet" 404. The default repo is long-public, so a 401 there
+ * is a real registry fault and stays mapped to `error`.
+ *
+ * Exported for unit testing alongside `buildGhcrUrlsForRepo`.
  */
-async function listRemoteTags(): Promise<RemoteTagsResult> {
-  const { tokenUrl, tagsUrl } = buildGhcrUrls(readUseLegacyGpuFromStore());
+export async function listRemoteTags(): Promise<RemoteTagsResult> {
+  const useLegacyGpu = readUseLegacyGpuFromStore();
+  const { tokenUrl, tagsUrl } = buildGhcrUrls(useLegacyGpu);
   try {
     const signal = AbortSignal.timeout(5000);
 
     const tokenResp = await fetch(tokenUrl, { signal });
-    if (!tokenResp.ok) return { status: 'error', tags: [] };
+    if (!tokenResp.ok) {
+      // GH-99: legacy repo + 401 at the token step = Private package
+      // (the realistic failure mode post-v1.3.3). Route to the same UI
+      // affordance as a 404-on-tags-list so users see the actionable banner.
+      if (tokenResp.status === 401 && useLegacyGpu) {
+        return { status: 'not-published', tags: [] };
+      }
+      return { status: 'error', tags: [] };
+    }
     const { token } = (await tokenResp.json()) as { token?: string };
     if (!token) return { status: 'error', tags: [] };
 

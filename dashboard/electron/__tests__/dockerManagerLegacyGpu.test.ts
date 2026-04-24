@@ -42,6 +42,7 @@ import {
   resolveImageRepo,
   buildGhcrUrlsForRepo,
   readUseLegacyGpuFromStore,
+  listRemoteTags,
 } from '../dockerManager.js';
 
 const STORE_FILE = path.join(userDataRoot, 'dashboard-config.json');
@@ -164,6 +165,65 @@ describe('[P1] Issue #83 — readUseLegacyGpuFromStore', () => {
   it('returns false when the store file is malformed JSON', () => {
     fs.writeFileSync(STORE_FILE, '{not json', 'utf8');
     expect(readUseLegacyGpuFromStore()).toBe(false);
+  });
+});
+
+describe('[P1] Issue #99 — listRemoteTags token-401 mapping', () => {
+  // The GHCR token endpoint returns 401 for Private packages — the realistic
+  // failure mode the v1.3.3 legacy push exposed. These tests lock in that
+  // the mapping to `not-published` is gated on the legacy toggle so the
+  // default repo keeps its "401 = genuine fault" semantics.
+
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  function mockFetch(
+    impl: (url: string | URL | Request) => Promise<Response>,
+  ): ReturnType<typeof vi.fn> {
+    const fn = vi.fn(impl);
+    vi.stubGlobal('fetch', fn);
+    return fn;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    fetchSpy?.mockClear();
+  });
+
+  it('legacy ON + token 401 → not-published (GH-99 defense)', async () => {
+    writeStore({ 'server.useLegacyGpu': true });
+    fetchSpy = mockFetch(
+      async () => new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' }),
+    );
+    const result = await listRemoteTags();
+    expect(result.status).toBe('not-published');
+    expect(result.tags).toEqual([]);
+    // Sanity: the legacy tokenUrl was hit, not the default one.
+    const firstCallUrl = String(fetchSpy.mock.calls[0]?.[0]);
+    expect(firstCallUrl).toContain('transcriptionsuite-server-legacy');
+  });
+
+  it('legacy OFF + token 401 → error (default repo 401 is a genuine fault)', async () => {
+    writeStore({ 'server.useLegacyGpu': false });
+    fetchSpy = mockFetch(
+      async () => new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' }),
+    );
+    const result = await listRemoteTags();
+    expect(result.status).toBe('error');
+    expect(result.tags).toEqual([]);
+  });
+
+  it('legacy ON + token 200 + tags 404 → not-published (regression guard for GH-83)', async () => {
+    writeStore({ 'server.useLegacyGpu': true });
+    fetchSpy = mockFetch(async (url) => {
+      const s = String(url);
+      if (s.includes('/token')) {
+        return new Response(JSON.stringify({ token: 'fake-bearer' }), { status: 200 });
+      }
+      return new Response('Not Found', { status: 404, statusText: 'Not Found' });
+    });
+    const result = await listRemoteTags();
+    expect(result.status).toBe('not-published');
+    expect(result.tags).toEqual([]);
   });
 });
 

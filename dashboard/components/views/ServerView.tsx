@@ -2577,6 +2577,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   // remain correct even if the user dismisses via Escape.
                   setLegacyGpuDialogOpen(false);
                   setPendingLegacyGpuValue(null);
+                  // GH-99: clear stale remote-tag chips synchronously so the
+                  // user doesn't see default-repo tags while the legacy repo
+                  // is being queried (the IPC + refetch takes ~1-2s).
+                  docker.clearRemoteTags?.();
                   api.server
                     .setUseLegacyGpu(next, legacyGpuWipeVolume)
                     .then(
@@ -2586,6 +2590,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         runtimeVolumeWipeError: string | null;
                       }) => {
                         setUseLegacyGpu(next);
+                        // GH-99: re-fetch against the now-active variant's
+                        // GHCR repo. Fire-and-forget — refresh errors surface
+                        // through the existing `remoteTagsStatus` channel.
+                        void docker.refreshRemoteTags?.();
                         const base = `${next ? 'Enabled' : 'Disabled'} legacy-GPU image. `;
                         if (legacyGpuWipeVolume && !result.runtimeVolumeWiped) {
                           // Wipe was requested but failed — tell the user so

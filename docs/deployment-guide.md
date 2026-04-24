@@ -140,6 +140,24 @@ next bootstrap re-syncs wheels from the cu126 index.
 push target (`…/transcriptionsuite-server-legacy`). `latest` is auto-tagged
 only within its own repo, never across the two.
 
+**Post-push smoke check (mandatory on first push of a new package).**
+GHCR defaults first-push visibility to `Private`, which produces a 403 on
+anonymous pulls and misroutes in the dashboard. The script now prints a
+reminder on every push; on the **first** push of a newly created GHCR package
+(e.g. the initial `-legacy` publish for v1.3.3), flip the package to Public
+at `https://github.com/users/homelab-00/packages/container/<pkg>/settings`
+and then run the anonymous-pull smoke check from a shell with no GHCR creds:
+
+```bash
+docker logout ghcr.io
+docker pull ghcr.io/homelab-00/transcriptionsuite-server-legacy:v1.3.4
+```
+
+If the pull succeeds, the image is externally reachable. If it 403s, the
+package is still Private — fix visibility before announcing the release.
+This single step catches both the GHCR private-default failure mode *and*
+the "forgot to push one of the tags" variant.
+
 **Caveats:**
 - First-run bootstrap takes longer than the default variant — the legacy path
   runs `uv sync` without `--frozen` because `uv.lock` pins wheel hashes to the

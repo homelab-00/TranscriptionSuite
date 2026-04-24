@@ -96,6 +96,12 @@ export interface UseDockerReturn {
    */
   remoteTagsStatus: 'ok' | 'not-published' | 'error' | null;
   refreshRemoteTags: () => Promise<void>;
+  /**
+   * GH-99: reset `remoteTags` / `remoteTagsStatus` to their initial empty
+   * state. Called by `ServerView` on legacy-GPU toggle flip so stale chips
+   * from the previous variant don't linger during the ~1-2s refetch window.
+   */
+  clearRemoteTags: () => void;
 
   // Sidecar image state
   hasSidecarImage: () => Promise<boolean>;
@@ -279,6 +285,16 @@ export function useDocker(): UseDockerReturn {
   useEffect(() => {
     refreshRemoteTags();
   }, [refreshRemoteTags]);
+
+  /**
+   * GH-99: clear cached remote tag state so the UI doesn't show stale chips
+   * from the previously selected repo variant while a refetch is in flight.
+   * ServerView invokes this on legacy-GPU toggle flip.
+   */
+  const clearRemoteTags = useCallback(() => {
+    setRemoteTags([]);
+    setRemoteTagsStatus(null);
+  }, []);
 
   const refreshVolumes = useCallback(async () => {
     const docker = api();
@@ -572,6 +588,7 @@ export function useDocker(): UseDockerReturn {
     remoteTags,
     remoteTagsStatus,
     refreshRemoteTags,
+    clearRemoteTags,
     hasSidecarImage,
     pullSidecarImage,
     cancelSidecarPull,

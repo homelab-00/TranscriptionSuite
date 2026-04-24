@@ -601,6 +601,8 @@ Same as Tailscale above - if a firewall is active:
 
 ## 4. OpenAI-compatible API Endpoints
 
+*Note: This is a summary. For more info about API endpoints, see section 7 of README_DEV.*
+
 Mounted at `/v1/audio/`. These endpoints follow the [OpenAI Audio API spec](https://platform.openai.com/docs/api-reference/audio) so that OpenAI-compatible clients (Open-WebUI, LM Studio, etc.) can point at TranscriptionSuite as a drop-in STT backend.
 
 **Auth:** Same rules as all other API routes - Bearer token required in TLS mode; open to localhost in local mode.
@@ -713,8 +715,6 @@ curl -X POST http://localhost:9786/v1/audio/translations \
   -F "diarization=true" \
   -F "response_format=diarized_json"
 ```
-
-**For more info about API endpoints, see section 7 of README_DEV.**
 
 ---
 

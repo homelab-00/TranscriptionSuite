@@ -340,6 +340,21 @@ main() {
     echo "Update docker-compose.yml (or set IMAGE_REPO env) to use the new image:"
     echo "   image: ${IMAGE_NAME}:$custom_tag"
     echo ""
+
+    # GH-99: GHCR defaults new-package visibility to Private. A successful push
+    # is NOT proof that anonymous pulls work — that's the failure mode v1.3.3
+    # shipped with on the -legacy repo. Always remind the publisher to flip
+    # visibility on first push and verify with an anonymous pull.
+    local pkg_basename
+    pkg_basename="${IMAGE_NAME##*/}"
+    log_warning "First-time push to a NEW GHCR package? GHCR defaults visibility to PRIVATE."
+    echo "   If this is the first push of ${IMAGE_NAME}, anonymous pulls will return 403."
+    echo "   Flip to Public at:"
+    echo "     https://github.com/users/homelab-00/packages/container/${pkg_basename}/settings"
+    echo ""
+    echo "   Verify anonymously (catches private-default + any other publish-gap):"
+    echo "     docker logout ghcr.io && docker pull ${IMAGE_NAME}:$custom_tag"
+    echo ""
 }
 
 # Run main function

@@ -42,6 +42,7 @@ const mockDocker = {
   remoteTagsStatus: 'ok' as 'ok' | 'not-published' | 'error' | null,
   refreshImages: vi.fn(),
   refreshRemoteTags: vi.fn(),
+  clearRemoteTags: vi.fn(),
   refreshVolumes: vi.fn(),
   pullImage: vi.fn(),
   cancelPull: vi.fn(),
