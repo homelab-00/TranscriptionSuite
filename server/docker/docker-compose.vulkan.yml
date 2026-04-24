@@ -13,11 +13,14 @@
 #   upstream response-schema change (e.g. ``start`` → ``t0``) would silently
 #   corrupt every transcription timestamp with only a warning. Pin a SHA
 #   digest or add a schema-probe at backend load time.
-# TODO(GH-62-followup #B): ``devices: /dev/dri`` makes the container refuse
-#   to start on hosts without the Vulkan device file; the dashboard only
-#   sees "sidecar unreachable" with no specific diagnostic. Add a host-side
-#   pre-flight check (dockerManager) that surfaces "Vulkan device not
-#   available on this host".
+# NOTE(GH-62-followup #B / GH-101): The ``devices: /dev/dri`` mount below is
+#   Linux-only. Docker Desktop on Windows/macOS runs containers in a Linux VM
+#   without /dev/dri passthrough, so this overlay cannot work there at all
+#   today. The host-side guard in dashboard/electron/dockerManager.ts
+#   (checkVulkanSupport) is the primary protection — it blocks Start Server
+#   on non-Linux platforms (and on Linux without a DRI render node) before
+#   Docker is invoked, surfacing an actionable error instead of the cryptic
+#   "error gathering device information" daemon error.
 # TODO(GH-62-followup #C): the healthcheck shells out to ``curl``, which is
 #   present on the current ``ghcr.io/ggml-org/whisper.cpp:main-vulkan``
 #   image but not guaranteed across rebuilds. Replace with a tool-agnostic

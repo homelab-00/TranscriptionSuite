@@ -113,6 +113,43 @@ function getStartupEventsFilePath(): string | null {
 const VULKAN_SIDECAR_IMAGE = 'ghcr.io/ggml-org/whisper.cpp:main-vulkan';
 
 /**
+ * Pre-flight check for the Vulkan runtime profile (Issue #101).
+ *
+ * Returns an actionable error message if Vulkan cannot work on this host, or
+ * `null` when Vulkan is viable. Pure: takes platform and an `exists` predicate
+ * so it can be unit-tested without a real filesystem.
+ *
+ * Two failure modes:
+ *   1. Non-Linux platforms — Docker Desktop on Windows/macOS runs containers
+ *      in a Linux VM that does not pass `/dev/dri` through, so the sidecar
+ *      device mount in `docker-compose.vulkan.yml` cannot resolve regardless
+ *      of the host GPU.
+ *   2. Linux without `/dev/dri/renderD128` — common on WSL2 or hosts without
+ *      AMD/Intel kernel driver support.
+ */
+export function checkVulkanSupport(
+  platform: NodeJS.Platform,
+  exists: (p: string) => boolean,
+): string | null {
+  if (platform !== 'linux') {
+    return (
+      'Vulkan runtime is only supported on Linux. Docker Desktop on Windows/macOS ' +
+      'runs containers in a VM without /dev/dri GPU passthrough. ' +
+      'Switch the Runtime Profile to "CPU" (or "GPU (CUDA)" with NVIDIA hardware) and try again.'
+    );
+  }
+  if (!exists('/dev/dri') || !exists('/dev/dri/renderD128')) {
+    return (
+      '/dev/dri was not found on this system (or has no render node). ' +
+      'The Vulkan runtime profile requires a DRI-capable GPU with kernel driver support. ' +
+      'This is common on WSL2 or systems without AMD/Intel GPU drivers. ' +
+      'Switch the Runtime Profile to "CPU" and try again.'
+    );
+  }
+  return null;
+}
+
+/**
  * Resolve compose directory.
  *
  * In dev mode the repo's server/docker directory is used directly.
@@ -1331,20 +1368,14 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     }
   }
 
-  // Pre-flight Vulkan validation: verify /dev/dri and a render node exist
-  // before Docker tries to mount them (docker-compose.vulkan.yml: devices:
-  // - /dev/dri:/dev/dri).  On systems without DRI (WSL2, missing GPU drivers),
-  // Docker fails with a cryptic "error gathering device information" message.
-  // Mirrors the checkGpu() detection logic — both require directory + render node.
-  if (runtimeProfile === 'vulkan' && process.platform === 'linux') {
+  // Pre-flight Vulkan validation. Surfaces a clear message before Docker
+  // tries to mount /dev/dri (docker-compose.vulkan.yml: devices: /dev/dri).
+  // Covers non-Linux platforms (Issue #101) and Linux hosts without DRI.
+  if (runtimeProfile === 'vulkan') {
     const fs = await import('fs');
-    if (!fs.existsSync('/dev/dri') || !fs.existsSync('/dev/dri/renderD128')) {
-      throw new Error(
-        '/dev/dri was not found on this system (or has no render node). ' +
-          'The Vulkan runtime profile requires a DRI-capable GPU with kernel driver support. ' +
-          'This is common on WSL2 or systems without AMD/Intel GPU drivers. ' +
-          'Switch the Runtime Profile to "CPU" and try again.',
-      );
+    const vulkanError = checkVulkanSupport(process.platform, (p) => fs.existsSync(p));
+    if (vulkanError) {
+      throw new Error(vulkanError);
     }
   }
 

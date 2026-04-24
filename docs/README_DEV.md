@@ -1437,6 +1437,8 @@ Key design decisions:
 | Windows | Bridge (Docker Desktop) | Bridge (same network) | `http://whisper-server:8080` |
 | WSL2 | `network_mode: host` | Bridge + port mapping | `http://localhost:8080` |
 
+> **Vulkan is Linux-only in practice (Issue #101).** The networking matrix above describes the URL routing that `dockerManager.ts` would use, but `/dev/dri` GPU passthrough is not available on Docker Desktop's Linux VM (Windows/macOS) or under WSL2 (which exposes `/dev/dxg`, not Mesa render nodes). `dockerManager.ts::checkVulkanSupport` blocks the Vulkan profile on non-Linux platforms before Docker is invoked. Cross-platform Vulkan would require WSL2 `/dev/dxg` paravirtualization work, tracked separately if pursued.
+
 The dashboard's `dockerManager.ts` automatically sets `WHISPERCPP_SERVER_URL` based on `process.platform` when the vulkan runtime profile is selected. The backend resolves the server URL with this priority:
 
 1. `WHISPERCPP_SERVER_URL` environment variable

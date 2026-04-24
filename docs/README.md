@@ -82,7 +82,7 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 ### 1.1 Features
 
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup*
-- **Multiple Models available**: On **Docker/Linux/Windows**: *WhisperX* ([`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU via Vulkan). On **Apple Silicon (Metal)**: [*MLX Whisper*](https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16) (tiny → large-v3-turbo), [*MLX Parakeet v3*](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3), [*MLX Canary v2*](https://huggingface.co/mlx-community/canary-1b-v2), and [*MLX VibeVoice-ASR*](https://huggingface.co/mlx-community/VibeVoice-ASR-bf16) - all running natively without Docker
+- **Multiple Models available**: On **Docker/Linux/Windows**: *WhisperX* ([`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU via Vulkan — Linux only). On **Apple Silicon (Metal)**: [*MLX Whisper*](https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16) (tiny → large-v3-turbo), [*MLX Parakeet v3*](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3), [*MLX Canary v2*](https://huggingface.co/mlx-community/canary-1b-v2), and [*MLX VibeVoice-ASR*](https://huggingface.co/mlx-community/VibeVoice-ASR-bf16) - all running natively without Docker
 - **Speaker Diarization**: Speaker identification & diarization (subtitling) for Whisper, NeMo, and VibeVoice models; Whisper and NeMo use PyAnnote for diarization while VibeVoice does it by itself (not available for whisper.cpp models). On Apple Silicon, [*Sortformer*](https://huggingface.co/mlx-community/diar_sortformer_4spk-v1-fp32) provides Metal-native diarization for up to 4 speakers - no HuggingFace token required
 - **Parallel Processing**: If your VRAM budget allows it, transcribe & diarize a recording at the same time - speeding up processing time significantly
 - **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [51 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
@@ -318,7 +318,7 @@ This works by running a second helper container (called whisper-server) alongsid
 - An AMD GPU with Vulkan support (RDNA1 or newer, e.g. RX 5500 XT, RX 6600, RX 7800 XT)
 - Or an Intel GPU with Vulkan support (Arc A-series or integrated Xe graphics)
 - Docker installed (Podman is not yet supported for Vulkan mode)
-- Linux is recommended; macOS and Windows should work but are untested
+- **Linux only.** Docker Desktop on Windows and macOS runs containers in a Linux VM without `/dev/dri` GPU passthrough, so the Vulkan sidecar cannot reach your GPU there. Use the CPU profile on those platforms (or GPU/CUDA on Windows with NVIDIA hardware).
 
 **How to set it up:**
 

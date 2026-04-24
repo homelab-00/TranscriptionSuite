@@ -640,6 +640,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   : 'Metal (MLX) is not available on this machine. Select a different runtime.'}
             </p>
           )}
+          {appSettings.runtimeProfile === 'vulkan' && platform && platform !== 'linux' && (
+            <p className="text-xs text-red-400">
+              Vulkan requires Linux — Docker Desktop on Windows/macOS has no{' '}
+              <span className="font-mono">/dev/dri</span> GPU passthrough. Select CPU, or GPU (CUDA)
+              if you have NVIDIA hardware.
+            </p>
+          )}
         </div>
       </Section>
       <Section title="Window">
