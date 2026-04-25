@@ -88,6 +88,24 @@
   --color-white: #ffffff;
 }
 
+/*
+ * Issue #87 — User-facing Blur effects kill switch.
+ * When the user disables blur in Settings then App, the html element gains
+ * a data attribute (data-blur-effects=off) which is set by SettingsModal
+ * on change and re-applied synchronously at boot by dashboard/index.tsx.
+ * This single rule neutralizes every backdrop blur regardless of source —
+ * Tailwind utilities, inline styles, custom CSS, or pseudo-elements. The
+ * priority override is justified: this is an explicit user-controlled
+ * escape valve, exactly the use case where such a forced override fits.
+ */
+:root[data-blur-effects='off'],
+:root[data-blur-effects='off'] *,
+:root[data-blur-effects='off'] *::before,
+:root[data-blur-effects='off'] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 /* Tailwind v4 maps bg-gradient-* to oklab interpolation; force mockup-like sRGB behavior. */
 .bg-gradient-to-b {
   --tw-gradient-position: to bottom;

@@ -429,6 +429,10 @@ const store = new Store({
     'app.modelSelectionOnboardingCompleted': false,
     'output.hideTimestamps': false,
     'ui.sidebarCollapsed': false,
+    // Issue #87 — user-facing escape valve for backdrop-blur CPU/GPU cost.
+    // Default true preserves the iOS-glass design; users can opt out per
+    // installation via Settings → App → Blur effects.
+    'ui.blurEffectsEnabled': true,
     'server.host': 'localhost',
     'server.port': 9786,
     'server.https': false,

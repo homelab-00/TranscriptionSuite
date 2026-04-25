@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   X,
   ChevronDown,
@@ -36,6 +36,7 @@ import { useConfirm } from '../../src/hooks/useConfirm';
 import { isMLXModel, isVibeVoiceASRModel } from '../../src/services/modelCapabilities';
 import { mergeConfigUpdates } from '../../src/utils/configTree';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
+import { readPersistedBlurEffects } from '../../src/utils/blurEffectsBoot';
 import type { AuthToken, LLMModel } from '../../src/api/types';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { ServerConfigEditor } from './ServerConfigEditor';
@@ -147,7 +148,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     updateCheckCustomHours: 24,
     runtimeProfile: 'cpu' as RuntimeProfile,
     pasteAtCursor: false,
+    blurEffectsEnabled: true,
   });
+  // Issue #87 — track the LAST SAVED Blur effects value so we can revert any
+  // unsaved live-preview DOM changes if the modal closes via X without Save.
+  // Lazy-initialised from the same localStorage source the boot probe in
+  // dashboard/index.tsx reads, so the ref agrees with the attribute the boot
+  // probe actually applied. Without this, the load effect close branch would
+  // fire on initial component mount (the modal is unconditionally rendered
+  // by App.tsx with isOpen=false) and incorrectly remove the boot probe DOM
+  // attribute, re-enabling blur for users who have disabled it. Updated in
+  // the load effect (when reading from config) and in handleSave (after the
+  // persisted write). The toggle onChange applies the change to the DOM
+  // immediately for live preview; this ref is the rollback target.
+  const savedBlurEffectsRef = useRef<boolean>(readPersistedBlurEffects());
   const [shortcutSettings, setShortcutSettings] = useState<{
     startRecording: string;
     stopTranscribe: string;
@@ -316,6 +330,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 hfToken: (cfg['server.hfToken'] as string) ?? prev.hfToken,
                 hideTimestamps: (cfg['output.hideTimestamps'] as boolean) ?? prev.hideTimestamps,
               }));
+              const loadedBlurEffectsEnabled = (cfg['ui.blurEffectsEnabled'] as boolean) ?? true;
+              savedBlurEffectsRef.current = loadedBlurEffectsEnabled;
               setAppSettings((prev) => ({
                 ...prev,
                 autoCopy: (cfg['app.autoCopy'] as boolean) ?? prev.autoCopy,
@@ -332,6 +348,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 runtimeProfile:
                   (cfg['server.runtimeProfile'] as RuntimeProfile) ?? prev.runtimeProfile,
                 pasteAtCursor: (cfg['app.pasteAtCursor'] as boolean) ?? prev.pasteAtCursor,
+                blurEffectsEnabled: loadedBlurEffectsEnabled,
               }));
               setShortcutSettings((prev) => ({
                 ...prev,
@@ -377,6 +394,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     } else {
       setIsVisible(false);
       timer = setTimeout(() => setIsRendered(false), 300);
+      // Issue #87 — revert any unsaved live-preview Blur effects DOM change
+      // back to the last-saved baseline. After Save, savedBlurEffectsRef
+      // matches the new state so this revert is a no-op; after close via X
+      // it restores the visible state to the actually-persisted choice.
+      if (savedBlurEffectsRef.current) {
+        delete document.documentElement.dataset.blurEffects;
+      } else {
+        document.documentElement.dataset.blurEffects = 'off';
+      }
     }
     // Subscribe to portal shortcut changes
     let unsubPortal: (() => void) | undefined;
@@ -446,11 +472,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['app.updateCheckCustomHours', appSettings.updateCheckCustomHours],
         ['server.runtimeProfile', appSettings.runtimeProfile],
         ['app.pasteAtCursor', appSettings.pasteAtCursor],
+        ['ui.blurEffectsEnabled', appSettings.blurEffectsEnabled],
         ['shortcuts.startRecording', shortcutSettings.startRecording.trim()],
         ['shortcuts.stopTranscribe', shortcutSettings.stopTranscribe.trim()],
       ];
       await Promise.all(entries.map(([k, v]) => api.config.set(k, v)));
     }
+
+    // Issue #87 — Mirror the Blur effects choice to localStorage so the
+    // synchronous bootstrap probe in `dashboard/index.tsx` can read it
+    // before first render on next launch (electron-store is async via IPC).
+    // Without this, a user who has just turned blur OFF would still see a
+    // flash-of-blur on the next cold start.
+    try {
+      localStorage.setItem(
+        'ts-config:ui.blurEffectsEnabled',
+        JSON.stringify(appSettings.blurEffectsEnabled),
+      );
+    } catch {
+      // Non-fatal — electron-store remains the canonical source of truth.
+    }
+    savedBlurEffectsRef.current = appSettings.blurEffectsEnabled;
 
     // Sync API client with new config so connection target updates immediately
     await apiClient.syncFromConfig();
@@ -657,6 +699,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             setIsDirty(true);
           }}
           label="Start minimized to system tray"
+        />
+      </Section>
+      <Section title="Appearance">
+        <AppleSwitch
+          checked={appSettings.blurEffectsEnabled}
+          onChange={(v) => {
+            setAppSettings((prev) => ({ ...prev, blurEffectsEnabled: v }));
+            setIsDirty(true);
+            // Live preview — apply the DOM attribute immediately so the user
+            // sees the effect before clicking Save. If they close via X
+            // without saving, the load-effect close branch reverts to the
+            // last-saved baseline tracked by `savedBlurEffectsRef`.
+            if (v) {
+              delete document.documentElement.dataset.blurEffects;
+            } else {
+              document.documentElement.dataset.blurEffects = 'off';
+            }
+          }}
+          label="Blur effects"
+          description="Disable backdrop blur to reduce CPU/GPU usage. May help on older Mac, Linux, or low-power devices."
         />
       </Section>
       <Section title="Keyboard Shortcuts">

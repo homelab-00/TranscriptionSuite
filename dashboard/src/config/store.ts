@@ -71,6 +71,12 @@ export interface ClientConfig {
   /** UI preferences */
   ui: {
     sidebarCollapsed: boolean;
+    /**
+     * Issue #87 — when false, a global CSS override on `<html
+     * data-blur-effects="off">` neutralizes every `backdrop-filter` rule
+     * (Tailwind utilities, inline styles, custom CSS). Default true.
+     */
+    blurEffectsEnabled: boolean;
   };
 }
 
@@ -132,6 +138,7 @@ const DEFAULT_CONFIG: ClientConfig = {
   },
   ui: {
     sidebarCollapsed: false,
+    blurEffectsEnabled: true,
   },
 };
 
