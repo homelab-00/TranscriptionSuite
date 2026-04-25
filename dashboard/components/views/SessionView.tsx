@@ -48,6 +48,7 @@ import {
   isCanaryModel,
   isWhisperModel,
   pickDefaultLanguage,
+  supportsAutoDetect,
   CANARY_TRANSLATION_TARGETS,
 } from '../../src/services/modelCapabilities';
 import { isModelDisabled } from '../../src/services/modelSelection';
@@ -676,6 +677,22 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   const handleStartRecording = useCallback(() => {
     if (!canStartRecording || mainModelDisabled) return;
+    // gh-102: refuse to start when the active model requires an explicit
+    // source language but the dashboard cannot resolve one. Without this,
+    // the WS `start` frame would omit `language` and the Canary backend
+    // would surface the cryptic "received None" toast (gh-81 fail-loud
+    // guard). Block here with a clear message instead.
+    const resolvedLang = resolveLanguage(mainLanguage);
+    if (resolvedLang === undefined && !supportsAutoDetect(activeModel)) {
+      toast.error('Source language required', {
+        description: languagesLoading
+          ? 'Loading languages — please try again in a moment.'
+          : mainLanguage
+            ? `"${mainLanguage}" is not a valid source language for the active model. Pick a language from the Source Language dropdown.`
+            : 'No source language is selected. Pick a language from the Source Language dropdown.',
+      });
+      return;
+    }
     transcription.reset();
     const isSystemAudio = audioSource === 'system';
     const mainTranslateActive = isCanaryMainBidi ? mainBidiTarget !== 'Off' : mainTranslate;
@@ -698,7 +715,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         }
       }
       transcription.start({
-        language: resolveLanguage(mainLanguage),
+        language: resolvedLang,
         deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
         translate: mainTranslateActive,
         translationTarget: mainTranslateTarget,
@@ -726,6 +743,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
     sysDevice,
     sinkNameMap,
     captureGain,
+    activeModel,
+    languagesLoading,
   ]);
 
   const handleStopRecording = useCallback(() => {
@@ -783,6 +802,23 @@ export const SessionView: React.FC<SessionViewProps> = ({
     (checked: boolean) => {
       if (checked) {
         if (liveModelDisabled || !liveModeWhisperOnlyCompatible) return;
+        // gh-102: same guard as handleStartRecording — refuse to start live
+        // mode when the active live model needs an explicit source language
+        // and the dashboard cannot resolve one. The current UI gates live
+        // mode to Whisper-only models (which do support auto-detect), so
+        // this is mostly defense-in-depth, but the guard keeps the contract
+        // honest if that gate is ever loosened.
+        const resolvedLiveLang = resolveLanguage(liveLanguage);
+        if (resolvedLiveLang === undefined && !supportsAutoDetect(activeLiveModel)) {
+          toast.error('Source language required', {
+            description: languagesLoading
+              ? 'Loading languages — please try again in a moment.'
+              : liveLanguage
+                ? `"${liveLanguage}" is not a valid source language for the active live model. Pick a language from the Live Source Language dropdown.`
+                : 'No source language is selected. Pick a language from the Live Source Language dropdown.',
+          });
+          return;
+        }
         const isSystemAudio = audioSource === 'system';
         const liveTranslateActive = isCanaryLiveBidi ? liveBidiTarget !== 'Off' : liveTranslate;
         const liveTranslateTarget = isCanaryLiveBidi
@@ -810,7 +846,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           }
 
           live.start({
-            language: resolveLanguage(liveLanguage),
+            language: resolvedLiveLang,
             deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
             translate: liveTranslateActive,
             translationTarget: liveTranslateTarget,
@@ -848,6 +884,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
       sysDevice,
       sinkNameMap,
       captureGain,
+      activeLiveModel,
+      languagesLoading,
     ],
   );
 

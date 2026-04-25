@@ -30,10 +30,6 @@ interface LanguagesQueryData {
 const PLACEHOLDER_LANGUAGES: Array<{ code: string; name: string }> = [
   { code: 'auto', name: 'Auto Detect' },
 ];
-const PLACEHOLDER: LanguagesQueryData = {
-  languages: PLACEHOLDER_LANGUAGES,
-  backendType: null,
-};
 
 /** Derive a stable cache key from the model name (backend type). */
 function cacheKey(model: string | null | undefined): string {
@@ -58,7 +54,15 @@ function buildList(raw: Record<string, string>): Array<{ code: string; name: str
 export function useLanguages(modelName?: string | null): LanguagesState {
   const key = cacheKey(modelName);
 
-  const { data, isLoading, error } = useQuery({
+  // No `placeholderData` (see GitHub issue 102). With a static placeholder,
+  // React Query reports `isLoading=false` while the real fetch is still in
+  // flight (placeholder is treated as resolved data). The SessionView snap
+  // effect would then run against a one-element placeholder list and
+  // silently rewrite a user's persisted Spanish to English on Canary. We
+  // instead expose an honest `loading` flag and let callers fall back to
+  // PLACEHOLDER_LANGUAGES via `data?.languages ?? ...` when they need a
+  // non-empty list during the initial load.
+  const { data, error } = useQuery({
     queryKey: ['languages', key],
     queryFn: async () => {
       const data = await apiClient.getLanguages();
@@ -68,13 +72,19 @@ export function useLanguages(modelName?: string | null): LanguagesState {
       } satisfies LanguagesQueryData;
     },
     staleTime: 60_000,
-    placeholderData: PLACEHOLDER,
   });
 
   return {
     languages: data?.languages ?? PLACEHOLDER_LANGUAGES,
     backendType: data?.backendType ?? null,
-    loading: isLoading,
+    // `data === undefined` is the only honest "no real server data yet"
+    // signal: it covers initial fetch, cache-miss key swap, and the
+    // post-error-before-any-data state (where react-query sets
+    // status='error' with isPending=false / isLoading=false). Earlier
+    // versions OR'd `isLoading || isPending`, which still reported
+    // `loading=false` after an error blip during the very first fetch and
+    // let the SessionView snap effect run against `PLACEHOLDER_LANGUAGES`.
+    loading: data === undefined,
     error: error instanceof Error ? error.message : error ? 'Failed to load languages' : null,
   };
 }

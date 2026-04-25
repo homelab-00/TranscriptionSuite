@@ -140,6 +140,12 @@ vi.mock('../../src/services/modelCapabilities', () => ({
   filterLanguagesForModel: (langs: unknown[]) => langs,
   isCanaryModel: () => false,
   isWhisperModel: () => true,
+  // gh-102: SessionView now consults supportsAutoDetect when guarding the
+  // start-recording / live-toggle entry points. Default mock matches Whisper
+  // (auto-detect supported).
+  supportsAutoDetect: () => true,
+  pickDefaultLanguage: (options: string[]) =>
+    options.includes('English') ? 'English' : (options[0] ?? 'Auto Detect'),
   CANARY_TRANSLATION_TARGETS: [],
 }));
 
