@@ -134,6 +134,7 @@ export interface AutoUpdaterLike extends EventEmitter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   logger: any;
   checkForUpdates(): Promise<{
+    isUpdateAvailable?: boolean;
     updateInfo?: UpdateInfoLike;
     cancellationToken?: CancellationToken;
   } | null>;
@@ -227,7 +228,11 @@ export class UpdateInstaller {
 
     this.setStatus({ state: 'checking' });
 
-    let result: { updateInfo?: UpdateInfoLike; cancellationToken?: CancellationToken } | null;
+    let result: {
+      isUpdateAvailable?: boolean;
+      updateInfo?: UpdateInfoLike;
+      cancellationToken?: CancellationToken;
+    } | null;
     try {
       result = await this.updater.checkForUpdates();
     } catch (err) {
@@ -236,7 +241,18 @@ export class UpdateInstaller {
       return { ok: false, reason: 'error', message };
     }
 
-    if (!result || !result.updateInfo) {
+    // electron-updater always populates `result.updateInfo` (it carries the
+    // latest release info regardless of whether it is newer than the running
+    // version). The actual signal is `result.isUpdateAvailable`. Issue #105:
+    // a Download click against a stale banner would otherwise skate past the
+    // `!updateInfo` guard, transition the installer to `downloading`, and
+    // eventually error from `downloadUpdate("Please check update first")`.
+    //
+    // The strict `=== false` (vs. `!result.isUpdateAvailable`) is intentional:
+    // older electron-updater versions and minimal stubs may omit the field
+    // (`undefined`), and we want the legacy `!updateInfo` fallback to remain
+    // the sole gate for those callers. Do not "simplify" to `!isUpdateAvailable`.
+    if (!result || !result.updateInfo || result.isUpdateAvailable === false) {
       this.setStatus({ state: 'idle' });
       return { ok: false, reason: 'no-update-available' };
     }

@@ -129,6 +129,58 @@ describe('UpdateInstaller', () => {
     expect(history.map((s) => s.state)).toEqual(['checking', 'idle']);
   });
 
+  // Issue #105: electron-updater always populates `updateInfo` (it carries
+  // the latest release info even when the running version equals it). The
+  // real signal is `isUpdateAvailable`. Without this guard, a Download click
+  // against stale state would skate past the `!updateInfo` check, transition
+  // the installer to `downloading`, and eventually error from
+  // `downloadUpdate("Please check update first")`.
+  it('startDownload: isUpdateAvailable=false with populated updateInfo → idle (Issue #105)', async () => {
+    updater.__checkResult = {
+      isUpdateAvailable: false,
+      updateInfo: { version: '1.3.3' },
+    };
+    const history = statusHistory(inst);
+
+    const result = await inst.startDownload();
+
+    expect(result).toEqual({ ok: false, reason: 'no-update-available' });
+    expect(history.map((s) => s.state)).toEqual(['checking', 'idle']);
+    // Critical: downloadUpdate must NOT have been invoked. The bug was that
+    // the installer entered the download path and electron-updater's
+    // `downloadUpdate` rejected with "Please check update first" only after
+    // the user-visible `downloading` flicker.
+    expect(updater.downloadUpdate).not.toHaveBeenCalled();
+    // Defense against a future refactor that collapses both no-update guards
+    // into one condition that drops a term: assert exactly one check call.
+    expect(updater.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  // Backward-compat: older electron-updater versions and minimal mocks
+  // omit `isUpdateAvailable`. The strict `=== false` guard must let those
+  // through and the legacy `!updateInfo` path remains the sole gate. This
+  // test pins that behaviour so a future "simplify to !isUpdateAvailable"
+  // refactor breaks here.
+  it('startDownload: isUpdateAvailable=undefined with updateInfo proceeds to download', async () => {
+    const token = new FakeCancellationToken();
+    updater.__checkResult = {
+      // isUpdateAvailable intentionally omitted
+      updateInfo: { version: '1.4.0' },
+      cancellationToken: token,
+    };
+
+    const downloadPromise = inst.startDownload();
+    await new Promise((r) => setImmediate(r));
+    expect(inst.getStatus().state).toBe('downloading');
+
+    updater.emit('update-downloaded', { version: '1.4.0' });
+    updater.__downloadResolver();
+    const result = await downloadPromise;
+
+    expect(result).toEqual({ ok: true });
+    expect(updater.downloadUpdate).toHaveBeenCalledTimes(1);
+  });
+
   it('startDownload: newer version transitions checking → downloading, updates progress via events', async () => {
     const token = new FakeCancellationToken();
     updater.__checkResult = { updateInfo: { version: '1.3.3' }, cancellationToken: token };

@@ -6,12 +6,20 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 // electron must be mocked at module-resolution time because updateManager
 // imports Notification + app for the notification path.
+//
+// `versionRef` is hoisted so it lives in the same execution slot as the
+// mock factory, but stays mutable between tests. Issue #105 tests need to
+// drive `app.getVersion()` to specific values to exercise the getStatus
+// re-derivation; existing tests still see '1.0.0' as long as the ref is
+// reset before each block that varies it.
+const versionRef = vi.hoisted(() => ({ value: '1.0.0' }));
+
 vi.mock('electron', () => ({
   Notification: class {
     show() {}
   },
   app: {
-    getVersion: () => '1.0.0',
+    getVersion: () => versionRef.value,
   },
 }));
 
@@ -293,5 +301,181 @@ describe('UpdateManager.checkServer — legacy 404 handling', () => {
     // can diagnose. We only remap the legacy case because that one has a
     // known, recurring, first-release-state cause.
     expect(result.server.error).toMatch(/GHCR tags request returned 404/);
+  });
+});
+
+// ─── Issue #105: getStatus re-derives against running app.getVersion() ─────
+
+// Top-level safety net: any test in any describe block that mutates
+// `versionRef.value` cannot leak into the next test. The new describe
+// below relies on per-test mutation, but this guard also defends future
+// describe blocks that may add similar tests without their own afterEach.
+afterEach(() => {
+  versionRef.value = '1.0.0';
+});
+
+describe('UpdateManager.getStatus — re-derives app status against runtime version', () => {
+  let manager: UpdateManager;
+  let store: ReturnType<typeof makeFakeStore>;
+
+  beforeEach(() => {
+    store = makeFakeStore();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    manager = new UpdateManager(store as any);
+  });
+
+  afterEach(() => {
+    manager.destroy();
+  });
+
+  it('returns null when no status has ever been persisted', () => {
+    versionRef.value = '1.3.3';
+    expect(manager.getStatus()).toBeNull();
+  });
+
+  it('flips updateAvailable to false when the running version matches persisted latest (Issue #105 upgrade race)', () => {
+    // Simulate a persisted status from before the user upgraded: the prior
+    // run was on 1.3.2 and recorded the GitHub release 1.3.3 as available.
+    store.data['updates.lastStatus'] = {
+      lastChecked: '2026-04-25T00:00:00.000Z',
+      app: {
+        current: '1.3.2',
+        latest: '1.3.3',
+        updateAvailable: true,
+        error: null,
+        releaseNotes: '## v1.3.3\n- example notes',
+      },
+      server: {
+        current: '1.0.0',
+        latest: '1.0.0',
+        updateAvailable: false,
+        error: null,
+        releaseNotes: null,
+      },
+    };
+    versionRef.value = '1.3.3';
+
+    const status = manager.getStatus();
+    expect(status).not.toBeNull();
+    expect(status!.app.current).toBe('1.3.3');
+    expect(status!.app.updateAvailable).toBe(false);
+    // `latest` stays so SettingsModal can still render "1.3.3 — up to date".
+    expect(status!.app.latest).toBe('1.3.3');
+    // releaseNotes / error pass through untouched — only the two derived
+    // fields are recomputed.
+    expect(status!.app.releaseNotes).toBe('## v1.3.3\n- example notes');
+    expect(status!.app.error).toBeNull();
+  });
+
+  it('keeps updateAvailable true when persisted latest is genuinely newer than the running version', () => {
+    store.data['updates.lastStatus'] = {
+      lastChecked: '2026-04-25T00:00:00.000Z',
+      app: {
+        current: '1.3.3',
+        latest: '1.4.0',
+        updateAvailable: true,
+        error: null,
+        releaseNotes: null,
+      },
+      server: {
+        current: null,
+        latest: null,
+        updateAvailable: false,
+        error: null,
+        releaseNotes: null,
+      },
+    };
+    versionRef.value = '1.3.3';
+
+    const status = manager.getStatus();
+    expect(status!.app.current).toBe('1.3.3');
+    expect(status!.app.updateAvailable).toBe(true);
+    expect(status!.app.latest).toBe('1.4.0');
+  });
+
+  it('flips updateAvailable to false when the running version is unparsable (pre-release)', () => {
+    // parseSemVer is strict X.Y.Z — a pre-release tag in the running app
+    // version returns null and must NOT default to "update available".
+    store.data['updates.lastStatus'] = {
+      lastChecked: '2026-04-25T00:00:00.000Z',
+      app: {
+        current: '1.3.3',
+        latest: '1.3.3',
+        updateAvailable: false,
+        error: null,
+        releaseNotes: null,
+      },
+      server: {
+        current: null,
+        latest: null,
+        updateAvailable: false,
+        error: null,
+        releaseNotes: null,
+      },
+    };
+    versionRef.value = '1.4.0-beta.1';
+
+    const status = manager.getStatus();
+    expect(status!.app.current).toBe('1.4.0-beta.1');
+    expect(status!.app.updateAvailable).toBe(false);
+  });
+
+  it('flips updateAvailable to false when persisted latest is missing (older-shape pre-fix record)', () => {
+    // Defend against a partially-shaped persisted record from a version
+    // before this fix landed: only `current` and `updateAvailable: true`,
+    // no `latest`. The re-derivation must not trust the stale boolean.
+    store.data['updates.lastStatus'] = {
+      lastChecked: '2026-04-25T00:00:00.000Z',
+      app: {
+        current: '1.3.2',
+        // latest: null — pre-fix shape may have stored null/undefined here
+        latest: null,
+        updateAvailable: true,
+        error: null,
+        releaseNotes: null,
+      },
+      server: {
+        current: null,
+        latest: null,
+        updateAvailable: false,
+        error: null,
+        releaseNotes: null,
+      },
+    } as unknown as Record<string, unknown>;
+    versionRef.value = '1.3.3';
+
+    const status = manager.getStatus();
+    expect(status!.app.current).toBe('1.3.3');
+    expect(status!.app.updateAvailable).toBe(false);
+  });
+
+  it('passes the server slice through unchanged (server staleness is out of scope)', () => {
+    store.data['updates.lastStatus'] = {
+      lastChecked: '2026-04-25T00:00:00.000Z',
+      app: {
+        current: '1.3.2',
+        latest: '1.3.3',
+        updateAvailable: true,
+        error: null,
+        releaseNotes: null,
+      },
+      server: {
+        current: '0.9.0',
+        latest: '1.0.0',
+        updateAvailable: true,
+        error: 'cached error',
+        releaseNotes: null,
+      },
+    };
+    versionRef.value = '1.3.3';
+
+    const status = manager.getStatus();
+    expect(status!.server).toEqual({
+      current: '0.9.0',
+      latest: '1.0.0',
+      updateAvailable: true,
+      error: 'cached error',
+      releaseNotes: null,
+    });
   });
 });

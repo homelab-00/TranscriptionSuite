@@ -272,9 +272,34 @@ export class UpdateManager {
     return status;
   }
 
-  /** Return the last persisted status (or null if never checked). */
+  /** Return the last persisted status (or null if never checked).
+   *
+   * Re-derives `app.current` and `app.updateAvailable` against the running
+   * `app.getVersion()` so a persisted status from a previous app run cannot
+   * outvote runtime truth. Without this, an upgrade race (Issue #105) would
+   * leave `updateAvailable: true, latest: '1.3.3'` from the pre-upgrade
+   * 1.3.2 check visible until the next periodic check completes — long
+   * enough to paint a stale banner and open the modal at `v1.3.3 → v1.3.3`.
+   * The server slice is left as-is; its `current` is read fresh from
+   * `dockerManager.listImages()` at check time and is not subject to the
+   * same staleness window.
+   */
   getStatus(): UpdateStatus | null {
-    return (this.store.get('updates.lastStatus') as UpdateStatus) ?? null;
+    const stored = (this.store.get('updates.lastStatus') as UpdateStatus) ?? null;
+    if (!stored) return null;
+    const currentVersion = app.getVersion();
+    const currentSv = parseSemVer(currentVersion);
+    const latestSv = stored.app.latest ? parseSemVer(stored.app.latest) : null;
+    const updateAvailable =
+      currentSv !== null && latestSv !== null && compareSemVer(latestSv, currentSv) > 0;
+    return {
+      ...stored,
+      app: {
+        ...stored.app,
+        current: currentVersion,
+        updateAvailable,
+      },
+    };
   }
 
   /** Stop the timer (called on app quit). */
