@@ -1,10 +1,14 @@
 /**
- * useNotebookWatcher — manages the notebook folder-watch toggle and IPC bridge.
+ * useNotebookWatcher — manages the notebook folder-watch toggle.
  *
  * Mirror of useSessionWatcher but for notebook-auto jobs.
  * Auto-watch jobs include file creation timestamps so they land on the
  * correct calendar date in the notebook.
  * - Polls folder accessibility every 10s when watch is active (4.1).
+ *
+ * The watcher:filesDetected IPC subscription lives in `useWatcherFilesBridge`
+ * (mounted once at the app root). Subscribing here too caused duplicate
+ * imports once both watcher hooks were mounted — see Issue #94.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -16,7 +20,6 @@ export function useNotebookWatcher() {
   const notebookWatchActive = useImportQueueStore((s) => s.notebookWatchActive);
   const setNotebookWatchPath = useImportQueueStore((s) => s.setNotebookWatchPath);
   const setNotebookWatchActive = useImportQueueStore((s) => s.setNotebookWatchActive);
-  const handleFilesDetected = useImportQueueStore((s) => s.handleFilesDetected);
   const appendWatchLog = useImportQueueStore((s) => s.appendWatchLog);
 
   const [notebookWatchAccessible, setNotebookWatchAccessible] = useState(true);
@@ -27,16 +30,6 @@ export function useNotebookWatcher() {
       if (savedPath) setNotebookWatchPath(savedPath);
     });
   }, [setNotebookWatchPath]);
-
-  // Register the push listener from main process
-  // Both session and notebook share the same IPC channel; handleFilesDetected
-  // routes by payload.type so no extra filtering is needed here.
-  useEffect(() => {
-    const electronAPI = (window as any).electronAPI;
-    if (!electronAPI?.watcher?.onFilesDetected) return;
-    const cleanup = electronAPI.watcher.onFilesDetected(handleFilesDetected);
-    return cleanup;
-  }, [handleFilesDetected]);
 
   // Start / stop watcher when active state or path changes
   useEffect(() => {

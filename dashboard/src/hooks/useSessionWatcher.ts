@@ -1,11 +1,14 @@
 /**
- * useSessionWatcher — manages the session folder-watch toggle and IPC bridge.
+ * useSessionWatcher — manages the session folder-watch toggle.
  *
  * - Loads the persisted watch path from config on mount.
- * - Registers the watcher:filesDetected push listener and routes events to the store.
  * - Starts/stops the watcher via IPC when the active toggle changes.
  * - The active toggle is ALWAYS false on mount (ephemeral state).
  * - Polls folder accessibility every 10s when watch is active (4.1).
+ *
+ * The watcher:filesDetected IPC subscription lives in `useWatcherFilesBridge`
+ * (mounted once at the app root). Subscribing here too caused duplicate
+ * imports once both watcher hooks were mounted — see Issue #94.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -17,7 +20,6 @@ export function useSessionWatcher() {
   const sessionWatchActive = useImportQueueStore((s) => s.sessionWatchActive);
   const setSessionWatchPath = useImportQueueStore((s) => s.setSessionWatchPath);
   const setSessionWatchActive = useImportQueueStore((s) => s.setSessionWatchActive);
-  const handleFilesDetected = useImportQueueStore((s) => s.handleFilesDetected);
   const appendWatchLog = useImportQueueStore((s) => s.appendWatchLog);
 
   const [sessionWatchAccessible, setSessionWatchAccessible] = useState(true);
@@ -28,14 +30,6 @@ export function useSessionWatcher() {
       if (savedPath) setSessionWatchPath(savedPath);
     });
   }, [setSessionWatchPath]);
-
-  // Register the push listener from main process
-  useEffect(() => {
-    const electronAPI = (window as any).electronAPI;
-    if (!electronAPI?.watcher?.onFilesDetected) return;
-    const cleanup = electronAPI.watcher.onFilesDetected(handleFilesDetected);
-    return cleanup;
-  }, [handleFilesDetected]);
 
   // Start / stop watcher when active state or path changes
   useEffect(() => {
