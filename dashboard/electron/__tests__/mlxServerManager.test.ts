@@ -12,11 +12,20 @@ import { EventEmitter } from 'events';
 
 // ── Hoisted mocks ──────────────────────────────────────────────────────────
 
-const { mockSpawn, mockExistsSync, mockMkdirSync, mockSymlinkSync } = vi.hoisted(() => ({
+const {
+  mockSpawn,
+  mockExistsSync,
+  mockMkdirSync,
+  mockSymlinkSync,
+  mockCopyFileSync,
+  mockWriteFileSync,
+} = vi.hoisted(() => ({
   mockSpawn: vi.fn(),
   mockExistsSync: vi.fn().mockReturnValue(false),
   mockMkdirSync: vi.fn(),
   mockSymlinkSync: vi.fn(),
+  mockCopyFileSync: vi.fn(),
+  mockWriteFileSync: vi.fn(),
 }));
 
 vi.mock('child_process', () => ({
@@ -32,10 +41,14 @@ vi.mock('fs', async (importOriginal) => {
       existsSync: mockExistsSync,
       mkdirSync: mockMkdirSync,
       symlinkSync: mockSymlinkSync,
+      copyFileSync: mockCopyFileSync,
+      writeFileSync: mockWriteFileSync,
     },
     existsSync: mockExistsSync,
     mkdirSync: mockMkdirSync,
     symlinkSync: mockSymlinkSync,
+    copyFileSync: mockCopyFileSync,
+    writeFileSync: mockWriteFileSync,
   };
 });
 
@@ -159,5 +172,83 @@ describe('[P2] MLXServerManager', () => {
     // Logs should contain the exit message
     const logs = manager.getLogs();
     expect(logs.some((l: string) => l.includes('exited with code 1'))).toBe(true);
+  });
+});
+
+// ── gh-86 #3 — sink-injection coverage ────────────────────────────────────
+
+describe('[P2] MLXServerManager with injected log sink', () => {
+  let manager: MLXServerManager;
+  let mockWindow: ReturnType<typeof makeMockWindow>;
+  let sinkAppend: ReturnType<typeof vi.fn>;
+  let sinkFlush: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWindow = makeMockWindow();
+    sinkAppend = vi.fn();
+    sinkFlush = vi.fn();
+    manager = new MLXServerManager(() => mockWindow as never, {
+      append: sinkAppend as (line: string) => void,
+      flush: sinkFlush as () => void,
+    });
+    mockExistsSync.mockImplementation((p: string) => {
+      if (typeof p !== 'string') return false;
+      return p.includes('uvicorn') || p.includes('python3') || p.endsWith('/server');
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('routes stdout lines to sink.append (not direct webContents.send)', async () => {
+    const child = makeChildProcess();
+    mockSpawn.mockReturnValue(child);
+
+    await manager.start({ port: 8000 });
+    child.stdout.emit('data', Buffer.from('hello world\n'));
+
+    expect(sinkAppend).toHaveBeenCalledWith('hello world');
+    // Direct mlx:logLine sends should NOT happen when a sink is injected.
+    const logLineSends = mockWindow.send.mock.calls.filter((call) => call[0] === 'mlx:logLine');
+    expect(logLineSends).toHaveLength(0);
+  });
+
+  it('routes stderr lines through the sink with the [stderr] prefix', async () => {
+    const child = makeChildProcess();
+    mockSpawn.mockReturnValue(child);
+
+    await manager.start({ port: 8000 });
+    child.stderr.emit('data', Buffer.from('boom\n'));
+
+    expect(sinkAppend).toHaveBeenCalledWith('[stderr] boom');
+  });
+
+  it('routes internal manager messages (start, exit) through the sink', async () => {
+    const child = makeChildProcess();
+    mockSpawn.mockReturnValue(child);
+
+    await manager.start({ port: 8000 });
+    child.emit('exit', 1, null);
+
+    // Pre-existing bug pre-gh-86 #3: these internal messages only hit the
+    // in-memory ring and never reached the renderer. With sink injection they
+    // now flow through the sink as well.
+    const appendedLines: string[] = sinkAppend.mock.calls.map((call) => call[0] as string);
+    expect(appendedLines.some((l) => l.includes('Starting uvicorn on port 8000'))).toBe(true);
+    expect(appendedLines.some((l) => l.includes('exited with code 1'))).toBe(true);
+  });
+
+  it('still preserves the in-memory ring buffer alongside the sink', async () => {
+    const child = makeChildProcess();
+    mockSpawn.mockReturnValue(child);
+
+    await manager.start({ port: 8000 });
+    child.stdout.emit('data', Buffer.from('ring-line\n'));
+
+    // Ring buffer is the source for getLogs(tail) and must keep working.
+    expect(manager.getLogs()).toContain('ring-line');
+    expect(sinkAppend).toHaveBeenCalledWith('ring-line');
   });
 });

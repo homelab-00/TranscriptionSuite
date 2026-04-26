@@ -15,6 +15,7 @@ import { ChildProcess, spawn } from 'child_process';
 import { app, BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { MlxLogSink } from './mlxLogSink.js';
 
 export type MLXServerStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
 
@@ -33,9 +34,11 @@ export class MLXServerManager {
   private _status: MLXServerStatus = 'stopped';
   private _logs: string[] = [];
   private _getWindow: () => BrowserWindow | null;
+  private _sink: MlxLogSink | null;
 
-  constructor(getWindow: () => BrowserWindow | null) {
+  constructor(getWindow: () => BrowserWindow | null, sink?: MlxLogSink) {
     this._getWindow = getWindow;
+    this._sink = sink ?? null;
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -209,7 +212,6 @@ export class MLXServerManager {
       const lines = data.toString().split('\n').filter(Boolean);
       for (const line of lines) {
         this._appendLog(line);
-        this._emit('mlx:logLine', line);
         // Transition to running only when the server reports it is ready
         // to accept connections (lifespan complete, model loaded).
         if (this._status === 'starting' && line.includes('startup complete')) {
@@ -223,7 +225,6 @@ export class MLXServerManager {
       const lines = data.toString().split('\n').filter(Boolean);
       for (const line of lines) {
         this._appendLog(`[stderr] ${line}`);
-        this._emit('mlx:logLine', `[stderr] ${line}`);
         // uvicorn also signals readiness on stderr.
         if (this._status === 'starting' && line.includes('Application startup complete')) {
           this._setStatus('running');
@@ -331,6 +332,15 @@ export class MLXServerManager {
     this._logs.push(line);
     if (this._logs.length > MAX_LOG_LINES) {
       this._logs = this._logs.slice(-MAX_LOG_LINES);
+    }
+    // Route every line through the injected sink (which handles disk
+    // persistence + buffering until the renderer is ready) when present.
+    // When absent (no-sink fallback for unit tests), preserve the legacy
+    // direct-IPC behavior so existing tests continue to pass.
+    if (this._sink) {
+      this._sink.append(line);
+    } else {
+      this._emit('mlx:logLine', line);
     }
   }
 

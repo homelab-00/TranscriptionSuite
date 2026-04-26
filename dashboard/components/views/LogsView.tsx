@@ -23,22 +23,73 @@ export const LogsView: React.FC<LogsViewProps> = ({ runtimeProfile }) => {
       setMlxLogLines([]);
       return;
     }
-    const mlx = (window as any).electronAPI?.mlx;
-    if (!mlx) return;
 
-    // Load the existing log buffer from the main process.
-    mlx
-      .getLogs(500)
-      .then((lines: string[]) => {
-        setMlxLogLines(lines);
-      })
-      .catch(() => {});
+    // Bounded retry: preload may not have exposed `electronAPI.mlx` yet at
+    // first effect run (especially during dev hot-reload or when LogsView
+    // mounts before the contextBridge bind completes). Poll every 250 ms up
+    // to 10 attempts (~2.5 s budget); after that, give up with a warning.
+    let unsub: (() => void) | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 10;
+    const POLL_INTERVAL_MS = 250;
 
-    // Subscribe to real-time lines.
-    const unsub = mlx.onLogLine((line: string) => {
-      setMlxLogLines((prev) => [...prev, line]);
-    });
-    return unsub;
+    const tryAttach = (): boolean => {
+      const mlx = (window as any).electronAPI?.mlx;
+      if (!mlx) return false;
+      if (cancelled) return true;
+
+      // Defensive: a malformed preload binding (e.g. `mlx` exposed as a partial
+      // object missing `getLogs` / `onLogLine`) would otherwise throw inside the
+      // setInterval callback. Node does NOT auto-clear timers on uncaught
+      // callback exceptions, which would leak a 250 ms error spam loop. Treat
+      // any throw here as terminal — log once and stop polling.
+      try {
+        mlx
+          .getLogs(500)
+          .then((lines: string[]) => {
+            if (!cancelled) setMlxLogLines(lines);
+          })
+          .catch(() => {});
+
+        unsub = mlx.onLogLine((line: string) => {
+          if (!cancelled) setMlxLogLines((prev) => [...prev, line]);
+        });
+        return true;
+      } catch (err) {
+        console.warn('[LogsView] failed to attach mlx subscription:', err);
+        return true;
+      }
+    };
+
+    if (!tryAttach()) {
+      pollTimer = setInterval(() => {
+        attempts += 1;
+        if (tryAttach()) {
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+          return;
+        }
+        if (attempts >= MAX_ATTEMPTS) {
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+          console.warn(
+            '[LogsView] electronAPI.mlx not available after retry — Metal logs unavailable',
+          );
+        }
+      }, POLL_INTERVAL_MS);
+    }
+
+    return () => {
+      cancelled = true;
+      if (pollTimer) clearInterval(pollTimer);
+      if (unsub) unsub();
+    };
   }, [isMetal]);
 
   // Build structured log entries from raw Docker output lines.

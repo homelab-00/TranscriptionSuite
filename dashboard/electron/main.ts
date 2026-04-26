@@ -24,6 +24,7 @@ import Store from 'electron-store';
 import { CONTAINER_NAME, dockerManager, type StartContainerOptions } from './dockerManager.js';
 import { StartupEventWatcher } from './startupEventWatcher.js';
 import { MLXServerManager, type MLXStartOptions } from './mlxServerManager.js';
+import { createMlxLogSink, type MlxLogSink } from './mlxLogSink.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
 import { UpdateInstaller } from './updateInstaller.js';
@@ -108,11 +109,17 @@ const CLIENT_LOG_FILE = 'client-debug.log';
 const CLIENT_SESSION_MARKER = '══════ CLIENT START';
 const MAX_CLIENT_LOG_SESSIONS = 5;
 const MAX_CLIENT_LOG_LINES = 10_000;
+// MLX bare-metal logs are persisted alongside client-debug.log but in a
+// separate file so independent rotation budgets prevent a chatty MLX run
+// from evicting client-log history (and vice-versa).
+const MLX_LOG_FILE = 'mlx-server.log';
+const MLX_SESSION_MARKER = '══════ MLX SERVER START';
 const STOP_SERVER_ON_QUIT_TIMEOUT_MS = 30_000;
 const LEGACY_ELECTRON_DEBUG_LOG_FILE = path.resolve(__dirname, '../electron-debug.log');
 const MAIN_PROCESS_LOG_SOURCE = 'Electron';
 const MAIN_PROCESS_LOG_REMAINDER_MAX = 32_768;
 let clientLogFileSessionInitialized = false;
+let mlxLogFileSessionInitialized = false;
 let mainWindow: BrowserWindow | null = null;
 
 type ClientLogType = 'info' | 'success' | 'error' | 'warning';
@@ -187,6 +194,47 @@ function ensureClientLogFilePath(): string {
       console.warn('[Main] Failed to rotate client log:', err);
     }
     clientLogFileSessionInitialized = true;
+  }
+
+  return logFilePath;
+}
+
+function ensureMlxLogFilePath(): string {
+  const logDir = path.join(app.getPath('userData'), CLIENT_LOG_DIR);
+  fs.mkdirSync(logDir, { recursive: true });
+  const logFilePath = path.join(logDir, MLX_LOG_FILE);
+
+  if (!mlxLogFileSessionInitialized) {
+    try {
+      let existing = '';
+      try {
+        existing = fs.readFileSync(logFilePath, 'utf-8');
+      } catch {
+        // File doesn't exist yet — fine.
+      }
+
+      const marker = `${MLX_SESSION_MARKER} ${new Date().toISOString()} ══════\n`;
+      const combined = existing + marker;
+
+      // Reuse MAX_CLIENT_LOG_SESSIONS / MAX_CLIENT_LOG_LINES so rotation rules
+      // stay in sync with client-debug.log without redefining limits.
+      const parts = combined.split(MLX_SESSION_MARKER);
+      const sessionTrimmed =
+        parts.length > MAX_CLIENT_LOG_SESSIONS
+          ? MLX_SESSION_MARKER + parts.slice(-MAX_CLIENT_LOG_SESSIONS).join(MLX_SESSION_MARKER)
+          : combined;
+
+      const sessionLines = sessionTrimmed.split('\n');
+      const trimmed =
+        sessionLines.length > MAX_CLIENT_LOG_LINES
+          ? sessionLines.slice(-MAX_CLIENT_LOG_LINES).join('\n')
+          : sessionTrimmed;
+
+      fs.writeFileSync(logFilePath, trimmed, 'utf-8');
+    } catch (err) {
+      console.warn('[Main] Failed to rotate MLX log:', err);
+    }
+    mlxLogFileSessionInitialized = true;
   }
 
   return logFilePath;
@@ -480,7 +528,12 @@ const trayManager = new TrayManager(isDev, () => mainWindow);
 
 const watcherManager = new WatcherManager(() => mainWindow);
 
-const mlxServerManager = new MLXServerManager(() => mainWindow ?? null);
+const mlxLogSink: MlxLogSink = createMlxLogSink({
+  getWindow: () => mainWindow,
+  getLogFilePath: ensureMlxLogFilePath,
+});
+
+const mlxServerManager = new MLXServerManager(() => mainWindow ?? null, mlxLogSink);
 
 // ─── Update Manager ─────────────────────────────────────────────────────────
 
@@ -783,6 +836,7 @@ function createWindow(): void {
   // Flush any log entries buffered before the renderer was ready.
   mainWindow.webContents.on('did-finish-load', () => {
     flushEarlyLogBuffer();
+    mlxLogSink.flush();
   });
 
   // M6 stable-launch confirmation is handled by the
