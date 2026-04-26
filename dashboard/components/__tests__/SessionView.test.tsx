@@ -150,7 +150,10 @@ vi.mock('../../src/services/modelCapabilities', () => ({
 }));
 
 vi.mock('../../src/services/modelSelection', () => ({
-  isModelDisabled: () => false,
+  // gh-86 #1: tests for the recording-disabled-reason surface need to flip
+  // `mainModelDisabled` per-test, so the mock is a `vi.fn()` (not a plain
+  // arrow) — existing tests still get `false` by default.
+  isModelDisabled: vi.fn(() => false),
 }));
 
 vi.mock('../../src/hooks/useClipboard', () => ({
@@ -184,6 +187,7 @@ vi.mock('../../src/types/runtime', () => ({
 
 import { SessionView } from '../views/SessionView';
 import { SessionTab } from '../../types';
+import { isModelDisabled } from '../../src/services/modelSelection';
 
 function createWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -292,5 +296,128 @@ describe('[P2] SessionView', () => {
     // Copy and Download buttons may appear more than once in the DOM
     expect(screen.getAllByText('Copy').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Download').length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ── Issue #86 #1 — Start Recording disabled-reason surface ──────────────────
+
+describe('Start Recording disabled-reason surface', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTranscription.status = 'idle';
+    mockTranscription.result = null;
+    mockTranscription.error = null;
+    mockTranscription.vadActive = false;
+    mockTranscription.processingProgress = null;
+
+    vi.mocked(isModelDisabled).mockReturnValue(false);
+
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockResolvedValue(undefined),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+      },
+      audio: { listSinks: vi.fn().mockResolvedValue([]) },
+      tray: { onAction: vi.fn().mockReturnValue(vi.fn()) },
+      notifications: { show: vi.fn() },
+    };
+  });
+
+  it('shows "Server is not running" warning when clientRunning is false', () => {
+    const props = { ...baseProps, clientRunning: false };
+    render(React.createElement(SessionView, props), { wrapper: createWrapper() });
+
+    const warning = screen.getByTestId('recording-disabled-reason');
+    expect(warning).toBeDefined();
+    expect(warning.textContent).toBe('Server is not running — start it from the Server view.');
+  });
+
+  it('shows "Server is starting or model is loading" warning when reachable but not ready', () => {
+    const props = {
+      ...baseProps,
+      clientRunning: true,
+      serverConnection: { ...baseProps.serverConnection, reachable: true, ready: false },
+    };
+    render(React.createElement(SessionView, props), { wrapper: createWrapper() });
+
+    const warning = screen.getByTestId('recording-disabled-reason');
+    expect(warning).toBeDefined();
+    expect(warning.textContent).toBe(
+      'Server is starting or model is loading — check the Server view for progress.',
+    );
+  });
+
+  it('does NOT show recording-disabled-reason when mainModelDisabled is true', () => {
+    vi.mocked(isModelDisabled).mockReturnValue(true);
+    // Server reachable + ready so the ONLY gate firing is mainModelDisabled
+    // (which has its own dedicated warning at SessionView lines 1529-1535).
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    expect(screen.queryByTestId('recording-disabled-reason')).toBeNull();
+    expect(screen.getByText('Main model not selected.')).toBeDefined();
+  });
+
+  it('does NOT show recording-disabled-reason when all gates clear and Start button is enabled', () => {
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    expect(screen.queryByTestId('recording-disabled-reason')).toBeNull();
+    const startButton = screen.getByText('Start Recording').closest('button');
+    expect(startButton?.disabled).toBe(false);
+  });
+
+  it('does NOT show recording-disabled-reason when Stop button is shown (canStartRecording false)', () => {
+    mockTranscription.status = 'recording';
+    // Even with bad server state, the Stop button branch hides the new warning.
+    const props = { ...baseProps, clientRunning: false };
+    render(React.createElement(SessionView, props), { wrapper: createWrapper() });
+
+    expect(screen.queryByTestId('recording-disabled-reason')).toBeNull();
+    expect(screen.getByText('Stop Recording')).toBeDefined();
+  });
+
+  // Review-cycle additions — Matrix row 6 (multi-gate) + GPU-error noise.
+
+  it('shows server-not-running warning even when mainModelDisabled is true (matrix row 6)', () => {
+    // Matrix row 6: with multiple gates firing, BOTH warnings render — the
+    // new server-state warning above and the existing model warning below.
+    // Pre-patch this case produced a silent disabled button (the new warning
+    // was suppressed by `!mainModelDisabled`); patch drops that gate.
+    // Note: in production, `!clientRunning` typically forces
+    // `serverConnection.ready === false`, which hides the existing model
+    // warning naturally. The test sets `ready: true` (baseProps default) to
+    // verify the patched gate; that artificial pairing exercises the gate
+    // logic without depending on App.tsx-side derivation.
+    vi.mocked(isModelDisabled).mockReturnValue(true);
+    const props = { ...baseProps, clientRunning: false };
+    render(React.createElement(SessionView, props), { wrapper: createWrapper() });
+
+    const warning = screen.getByTestId('recording-disabled-reason');
+    expect(warning.textContent).toBe('Server is not running — start it from the Server view.');
+    // Existing model warning ALSO renders (its gate is independent of the
+    // server-state warning).
+    expect(screen.getByText('Main model not selected.')).toBeDefined();
+  });
+
+  it('does NOT show recording-disabled-reason when gpu_error is set (red GPU warning owns the surface)', () => {
+    const props = {
+      ...baseProps,
+      clientRunning: true,
+      serverConnection: {
+        ...baseProps.serverConnection,
+        reachable: true,
+        ready: false,
+        details: {
+          status: 'unhealthy',
+          gpu_error: 'CUDA initialization failed',
+          gpu_error_action: 'GPU unavailable — restart your computer.',
+        },
+      },
+    };
+    render(React.createElement(SessionView, props), { wrapper: createWrapper() });
+
+    expect(screen.queryByTestId('recording-disabled-reason')).toBeNull();
   });
 });

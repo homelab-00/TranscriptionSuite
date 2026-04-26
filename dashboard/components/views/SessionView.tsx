@@ -325,6 +325,18 @@ export const SessionView: React.FC<SessionViewProps> = ({
       return `"${activeLiveModel}" is not a faster-whisper model — Live Mode requires a faster-whisper model`;
     return '';
   })();
+  // Issue #86 #1 — surface the reason the Start Recording button is gated by
+  // server-state conditions (`!clientRunning` / `!serverConnection.ready`).
+  // `mainModelDisabled` and remote-mode auth keep their dedicated warnings
+  // at lines 1529-1544; this covers the two server-state cases that had no
+  // inline explanation and left the Mac M4Pro reporter staring at a silent
+  // disabled button.
+  const recordingDisabledReason = (() => {
+    if (!clientRunning) return 'Server is not running — start it from the Server view.';
+    if (!serverConnection.ready)
+      return 'Server is starting or model is loading — check the Server view for progress.';
+    return '';
+  })();
 
   // Filter language options per model — Parakeet models only support 25 languages
   const mainLanguageOptions = useMemo(
@@ -1542,6 +1554,24 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         </span>
                       </div>
                     )}
+                    {/* gh-86 #1: review-cycle patches — drop `!mainModelDisabled`
+                        gate (existing model warning needs `serverConnection.ready`,
+                        so the two warnings are naturally non-overlapping; the prior
+                        gate created a silent-disabled gap when both fired); also
+                        suppress when `gpu_error` is set so the red GPU warning
+                        above owns that surface (the "loading" text would be
+                        misleading when the model can't load at all). */}
+                    {canStartRecording &&
+                      recordingDisabledReason !== '' &&
+                      !serverConnection.details?.gpu_error && (
+                        <div
+                          data-testid="recording-disabled-reason"
+                          className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300"
+                        >
+                          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                          <span>{recordingDisabledReason}</span>
+                        </div>
+                      )}
                     <div className="flex items-center gap-2">
                       {canStartRecording ? (
                         <Button

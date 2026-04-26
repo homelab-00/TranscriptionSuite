@@ -53,7 +53,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-26T12:45:53.605Z
+    generated_at: 2026-04-26T17:53:14.243Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -225,6 +225,7 @@ foundation:
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+        - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - shadow-2xl
         - shadow-accent-cyan/20
         - shadow-accent-cyan/40
@@ -298,6 +299,7 @@ foundation:
         - max-w-[55%]
         - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
+        - min-w-[3ch]
         - min-w-[5rem]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
@@ -312,6 +314,7 @@ foundation:
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+        - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - text-[10px]
         - text-[11px]
         - text-[8px]
@@ -757,11 +760,13 @@ utility_allowlist:
     - mt-1.5
     - mt-10
     - mt-2
+    - mt-2.5
     - mt-3
     - mt-4
     - mt-6
     - mt-8
     - mt-auto
+    - mx-0.5
     - mx-1
     - mx-2
     - mx-auto
@@ -781,6 +786,7 @@ utility_allowlist:
     - outline-none
     - overflow-auto
     - overflow-hidden
+    - overflow-visible
     - overflow-x-auto
     - overflow-y-auto
     - p-0.5
@@ -1051,6 +1057,7 @@ utility_allowlist:
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]
     - min-h-[calc(100vh-30rem)]
+    - min-w-[3ch]
     - min-w-[5rem]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
@@ -1065,6 +1072,7 @@ utility_allowlist:
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+    - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
     - text-[10px]
     - text-[11px]
     - text-[8px]
