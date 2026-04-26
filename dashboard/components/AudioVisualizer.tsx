@@ -161,6 +161,10 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
     return cleanup;
   }, [analyserNode, amplitudeScale, isActive]);
 
+  // Idle SVG branch (Issue #87 — restores character without re-introducing per-frame JS)
+  // fires only when there is no analyser AND the rAF loop is gated off
+  const isIdleNoAnalyser = !isActive && !analyserNode;
+
   return (
     <div
       className={`relative w-full overflow-hidden rounded-xl border border-white/5 bg-black/20 shadow-inner ${className}`}
@@ -174,7 +178,45 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
           backgroundSize: '20px 20px',
         }}
       ></div>
-      <canvas ref={canvasRef} className="block h-full w-full" />
+      {isIdleNoAnalyser ? (
+        <svg
+          data-testid="audio-visualizer-idle-svg"
+          className="block h-full w-full"
+          viewBox="0 0 800 200"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          <path
+            className="idle-wave-cyan"
+            d="M 0 100 Q 50 60 100 100 T 200 100 T 300 100 T 400 100 T 500 100 T 600 100 T 700 100 T 800 100"
+            fill="none"
+            stroke="rgba(34,211,238,0.6)"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+          <path
+            className="idle-wave-magenta"
+            d="M 0 100 Q 50 130 100 100 T 200 100 T 300 100 T 400 100 T 500 100 T 600 100 T 700 100 T 800 100"
+            fill="none"
+            stroke="rgba(217,70,239,0.5)"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+          <path
+            className="idle-wave-orange"
+            d="M 0 100 Q 50 80 100 100 T 200 100 T 300 100 T 400 100 T 500 100 T 600 100 T 700 100 T 800 100"
+            fill="none"
+            stroke="rgba(251,146,60,0.3)"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+      ) : (
+        <canvas ref={canvasRef} className="block h-full w-full" />
+      )}
     </div>
   );
 };

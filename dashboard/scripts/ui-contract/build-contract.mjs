@@ -80,23 +80,23 @@ const componentSpecs = {
   },
   AudioVisualizer: {
     required_tokens: ['colors', 'motion', 'radii', 'shadows'],
-    allowed_variants: { mode: ['embedded', 'fullscreen'] },
+    allowed_variants: { mode: ['embedded', 'fullscreen', 'idle-svg'] },
     structural_invariants: [
       {
         id: 'canvas-layering',
-        rule: 'Canvas visualizer keeps grid overlay, bordered surface, and rounded container hierarchy.',
+        rule: 'Visualizer keeps grid overlay, bordered surface, and rounded container hierarchy regardless of inner element (canvas or idle SVG).',
       },
     ],
     behavior_rules: [
       {
         id: 'raf-loop',
-        rule: 'Visualizer animation must run via requestAnimationFrame and retain layered cyan/magenta/orange wave rendering.',
+        rule: 'Active visualizer animation runs via requestAnimationFrame; idle visualizer animation runs via declarative CSS keyframes on SVG paths. Both paths retain the layered cyan/magenta/orange palette.',
       },
     ],
     state_rules: [
       {
         id: 'responsive-resize',
-        rule: 'Canvas dimensions must track parent element resize behavior before drawing frames.',
+        rule: 'Visualizer dimensions track parent element resize — canvas via window resize listener, idle SVG via viewBox.',
       },
     ],
   },

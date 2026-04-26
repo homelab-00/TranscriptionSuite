@@ -169,6 +169,65 @@ body {
   background: transparent;
 }
 
+/* Issue #87 — idle visualizer keyframes; transform/opacity only (compositor-thread, no JS) and transform-box:fill-box pins origin to each path's box, not SVG root. */
+@keyframes idle-wave-cyan {
+  0%,
+  100% {
+    transform: translateY(-8px) scaleY(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translateY(8px) scaleY(1.1);
+    opacity: 0.75;
+  }
+}
+@keyframes idle-wave-magenta {
+  0%,
+  100% {
+    transform: translateY(6px) scaleY(0.95);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translateY(-6px) scaleY(1.05);
+    opacity: 0.6;
+  }
+}
+@keyframes idle-wave-orange {
+  0%,
+  100% {
+    transform: translateY(-3px) scaleY(1);
+    opacity: 0.2;
+  }
+  50% {
+    transform: translateY(3px) scaleY(0.95);
+    opacity: 0.35;
+  }
+}
+.idle-wave-cyan {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: idle-wave-cyan 4s ease-in-out infinite;
+}
+.idle-wave-magenta {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: idle-wave-magenta 4s ease-in-out infinite;
+  animation-delay: -1.3s;
+}
+.idle-wave-orange {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: idle-wave-orange 5s ease-in-out infinite;
+  animation-delay: -2.7s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .idle-wave-cyan,
+  .idle-wave-magenta,
+  .idle-wave-orange {
+    animation: none;
+  }
+}
+
 /* Dropdown fade-in animation.
  * Keeps the element invisible during the initial ~20ms delay so that
  * Floating UI (headlessui anchor positioning, async Promise chain) can

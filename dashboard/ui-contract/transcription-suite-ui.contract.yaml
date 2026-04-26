@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.21
+  spec_version: 1.0.22
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -7,8 +7,10 @@ meta:
     repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
     source_files:
       - App.tsx
+      - components/__tests__/AudioVisualizer.test.tsx
       - components/__tests__/NotebookView.test.tsx
       - components/__tests__/ServerView.test.tsx
+      - components/__tests__/SessionView.canary-language.test.tsx
       - components/__tests__/SessionView.test.tsx
       - components/AudioVisualizer.tsx
       - components/PopOutWindow.tsx
@@ -51,7 +53,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-21T06:30:02.289Z
+    generated_at: 2026-04-26T04:52:14.837Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -147,6 +149,7 @@ foundation:
         - rgba(239,68,68,0.6)
         - rgba(244,63,94,0.15)
         - rgba(251, 146, 60, 0.3)
+        - rgba(251,146,60,0.3)
         - rgba(251,146,60,0.5)
         - rgba(255, 255, 255, 0.1)
         - rgba(255, 255, 255, 0.2)
@@ -252,6 +255,9 @@ foundation:
         - ease-out
       keyframes:
         - dropdown-appear
+        - idle-wave-cyan
+        - idle-wave-magenta
+        - idle-wave-orange
         - slideInLeft
         - slideInRight
         - slideUpFromBottomEdge
@@ -1130,6 +1136,9 @@ inline_style_allowlist:
     - visible
   keyframes:
     - dropdown-appear
+    - idle-wave-cyan
+    - idle-wave-magenta
+    - idle-wave-orange
     - slideInLeft
     - slideInRight
     - slideUpFromBottomEdge
@@ -1396,15 +1405,16 @@ component_contracts:
       mode:
         - embedded
         - fullscreen
+        - idle-svg
     structural_invariants:
       - id: canvas-layering
-        rule: Canvas visualizer keeps grid overlay, bordered surface, and rounded container hierarchy.
+        rule: Visualizer keeps grid overlay, bordered surface, and rounded container hierarchy regardless of inner element (canvas or idle SVG).
     behavior_rules:
       - id: raf-loop
-        rule: Visualizer animation must run via requestAnimationFrame and retain layered cyan/magenta/orange wave rendering.
+        rule: Active visualizer animation runs via requestAnimationFrame; idle visualizer animation runs via declarative CSS keyframes on SVG paths. Both paths retain the layered cyan/magenta/orange palette.
     state_rules:
       - id: responsive-resize
-        rule: Canvas dimensions must track parent element resize behavior before drawing frames.
+        rule: Visualizer dimensions track parent element resize — canvas via window resize listener, idle SVG via viewBox.
   BugReportModal:
     file: components/views/BugReportModal.tsx
     required_tokens:
