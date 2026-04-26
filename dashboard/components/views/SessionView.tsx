@@ -325,16 +325,25 @@ export const SessionView: React.FC<SessionViewProps> = ({
       return `"${activeLiveModel}" is not a faster-whisper model — Live Mode requires a faster-whisper model`;
     return '';
   })();
-  // Issue #86 #1 — surface the reason the Start Recording button is gated by
-  // server-state conditions (`!clientRunning` / `!serverConnection.ready`).
-  // `mainModelDisabled` and remote-mode auth keep their dedicated warnings
-  // at lines 1529-1544; this covers the two server-state cases that had no
-  // inline explanation and left the Mac M4Pro reporter staring at a silent
-  // disabled button.
+  // gh-86 #1 follow-up — `isLive` is referenced both by the IIFE below and the
+  // Start Recording disabled-prop further down; hoisted here so a single
+  // predicate definition feeds both, instead of duplicating the live-status
+  // check inline. Originally declared in the "Live Mode State" block below.
+  const isLive = live.status !== 'idle' && live.status !== 'error';
+  // Issue #86 #1 (+ follow-up) — surface the reason the Start Recording button
+  // is gated. The disabled-prop covers four conditions; this IIFE surfaces an
+  // inline amber warning for three of them (`mainModelDisabled` keeps its own
+  // warning rendered next to the model dropdown). Server-state gates win
+  // priority because they are the root cause when both fire — no amount of
+  // stopping Live Mode recovers a dead server. The `isLive` branch closes the
+  // gh-86 #1 follow-up: `isLive && canStartRecording === true` is the normal
+  // state any time the user starts Live Mode while main transcription is idle,
+  // because the two state machines are independent.
   const recordingDisabledReason = (() => {
     if (!clientRunning) return 'Server is not running — start it from the Server view.';
     if (!serverConnection.ready)
       return 'Server is starting or model is loading — check the Server view for progress.';
+    if (isLive) return 'Live Mode is active — stop Live Mode to start recording.';
     return '';
   })();
 
@@ -357,8 +366,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Output formatting
   const [hideTimestamps, setHideTimestamps] = useState(false);
 
-  // Live Mode State
-  const isLive = live.status !== 'idle' && live.status !== 'error';
+  // Live Mode State (`isLive` hoisted above for use by recordingDisabledReason)
   const [liveLanguage, setLiveLanguage] = useState('English');
   const [liveTranslate, setLiveTranslate] = useState(false);
   // Bidirectional translation target (used when Canary + source=English)

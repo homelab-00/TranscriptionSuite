@@ -420,4 +420,79 @@ describe('Start Recording disabled-reason surface', () => {
 
     expect(screen.queryByTestId('recording-disabled-reason')).toBeNull();
   });
+
+  // gh-86 #1 follow-up — fourth disable gate (`isLive`) was previously silent
+  // because `recordingDisabledReason` only covered the two server-state gates.
+  // `isLive && canStartRecording === true` is the normal state when the user
+  // starts Live Mode without a main transcription running (independent state
+  // machines — see the `canStartRecording` derivation in SessionView.tsx).
+
+  // `LiveStatus` positive set (`isLive === true`): 'connecting' | 'starting' |
+  // 'listening' | 'processing' (defined in dashboard/src/hooks/useLiveMode.ts).
+  // Parameterize across the full set so a future addition or exclusion is
+  // caught — covers the most-common WS-handshake transients ('connecting',
+  // 'starting') AND the steady-state ('listening') AND the post-utterance
+  // pause ('processing'). Each case also asserts the warning↔disablement
+  // coupling so a regression that surfaced the warning while leaving the
+  // button enabled (or vice versa) does NOT pass silently.
+  it.each(['connecting', 'starting', 'listening', 'processing'] as const)(
+    'shows "Live Mode is active" warning AND disables Start button when live.status is "%s"',
+    (status) => {
+      const props = {
+        ...baseProps,
+        live: { ...baseLiveState, status },
+      };
+      render(React.createElement(SessionView, props), { wrapper: createWrapper() });
+
+      const warning = screen.getByTestId('recording-disabled-reason');
+      expect(warning.textContent).toBe('Live Mode is active — stop Live Mode to start recording.');
+      const startButton = screen.getByText('Start Recording').closest('button');
+      expect(startButton?.disabled).toBe(true);
+    },
+  );
+
+  it('server-not-running message wins priority when both server and isLive gates fire', () => {
+    // Locks in IIFE priority order: clientRunning → serverConnection.ready →
+    // isLive. Server-down is the root cause; stopping Live Mode would not
+    // re-enable Start Recording while the server is dead, so the server
+    // message must win.
+    const props = {
+      ...baseProps,
+      clientRunning: false,
+      live: { ...baseLiveState, status: 'listening' as const },
+    };
+    render(React.createElement(SessionView, props), { wrapper: createWrapper() });
+
+    const warning = screen.getByTestId('recording-disabled-reason');
+    expect(warning.textContent).toBe('Server is not running — start it from the Server view.');
+  });
+
+  it('server-starting message wins priority over isLive', () => {
+    // Mirror of the above for the second server-state gate.
+    const props = {
+      ...baseProps,
+      clientRunning: true,
+      serverConnection: { ...baseProps.serverConnection, reachable: true, ready: false },
+      live: { ...baseLiveState, status: 'listening' as const },
+    };
+    render(React.createElement(SessionView, props), { wrapper: createWrapper() });
+
+    const warning = screen.getByTestId('recording-disabled-reason');
+    expect(warning.textContent).toBe(
+      'Server is starting or model is loading — check the Server view for progress.',
+    );
+  });
+
+  it('does NOT show recording-disabled-reason when live.status is "error" (counts as not-live)', () => {
+    // Locks in the negative half of `isLive` — error state should NOT trigger
+    // the live-mode message. Without this test, a refactor of `isLive` could
+    // surface a misleading warning during a live-mode failure.
+    const props = {
+      ...baseProps,
+      live: { ...baseLiveState, status: 'error' as const },
+    };
+    render(React.createElement(SessionView, props), { wrapper: createWrapper() });
+
+    expect(screen.queryByTestId('recording-disabled-reason')).toBeNull();
+  });
 });
