@@ -630,7 +630,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     modelsLoaded: isAsrModelsLoaded,
     isLocalConnection: !isRemoteMode,
     isUploading,
-    onStartRecording: () => transcription.start(),
+    onStartRecording: () => handleStartRecording(),
     onStopRecording: () => {
       if (isLive) live.stop();
       else transcription.stop();

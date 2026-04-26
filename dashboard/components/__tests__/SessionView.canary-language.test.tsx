@@ -192,6 +192,7 @@ vi.mock('../../src/types/runtime', () => ({
 
 import { SessionView } from '../views/SessionView';
 import { SessionTab } from '../../types';
+import { useTraySync } from '../../src/hooks/useTraySync';
 
 function createWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -367,5 +368,77 @@ describe('SessionView — Canary language guards (gh-102)', () => {
     // was called from the snap effect on placeholder data.)
     const mainLanguageWrites = setConfigCalls.filter((c) => c.key === 'session.mainLanguage');
     expect(mainLanguageWrites).toEqual([]);
+  });
+
+  // Tray-menu Start Recording must run the same gh-102 guard the on-screen
+  // button has. Pre-fix the tray callback was `() => transcription.start()`,
+  // bypassing the guard and producing the cryptic backend "received None"
+  // toast on Canary. The fix routes the tray through handleStartRecording.
+  it('refuses Start Recording from tray menu when Canary is active and resolveLanguage returns undefined', async () => {
+    mockGetConfig.mockImplementation(async (key: string) => {
+      if (key === 'session.mainLanguage') return 'Auto Detect';
+      return undefined;
+    });
+
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Wait for the render with resolved persisted config / loaded languages
+    // to settle before we snapshot the tray callback — otherwise
+    // mock.calls.at(-1) can grab a stale-closure render where state hadn't
+    // yet propagated. Mirrors the on-screen tests' findByText pattern.
+    await screen.findByText('Start Recording');
+
+    const trayDeps = vi.mocked(useTraySync).mock.calls.at(-1)?.[0];
+    expect(trayDeps).toBeDefined();
+
+    await act(async () => {
+      trayDeps!.onStartRecording?.();
+    });
+
+    expect(mockTranscription.start).not.toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledTimes(1);
+    const [title, opts] = mockToastError.mock.calls[0] as [string, { description?: string }];
+    expect(title).toMatch(/source language required/i);
+    expect(String(opts?.description ?? '')).toMatch(/loading languages/i);
+  });
+
+  it('starts recording from tray menu with language="es" when Canary is active and Spanish is selected', async () => {
+    mockGetConfig.mockImplementation(async (key: string) => {
+      if (key === 'session.mainLanguage') return 'Spanish';
+      return undefined;
+    });
+
+    mockLanguageSet = {
+      languages: NEMO_LANGUAGES_FOR_TEST,
+      loading: false,
+    };
+
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Wait for the render with resolved persisted config / loaded languages
+    // to settle before we snapshot the tray callback — otherwise
+    // mock.calls.at(-1) can grab a stale-closure render where state hadn't
+    // yet propagated. Mirrors the on-screen tests' findByText pattern.
+    await screen.findByText('Start Recording');
+
+    const trayDeps = vi.mocked(useTraySync).mock.calls.at(-1)?.[0];
+    expect(trayDeps).toBeDefined();
+
+    await act(async () => {
+      trayDeps!.onStartRecording?.();
+    });
+
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(mockTranscription.start).toHaveBeenCalledTimes(1);
+    const startArgs = mockTranscription.start.mock.calls[0][0] as { language?: string };
+    expect(startArgs.language).toBe('es');
   });
 });
