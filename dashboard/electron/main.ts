@@ -461,6 +461,8 @@ const store = new Store({
     'app.starPopupShown': false,
     'folderWatch.sessionPath': '',
     'folderWatch.notebookPath': '',
+    'folderWatch.sessionWatchActive': false,
+    'folderWatch.notebookWatchActive': false,
   },
 });
 
