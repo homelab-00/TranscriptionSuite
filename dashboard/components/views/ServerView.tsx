@@ -1305,6 +1305,37 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     });
   }, [docker, keepConfigDirectory, keepDataVolume, keepModelsVolume]);
 
+  // Issue 103: shared by the "Fetch Fresh Image" button and the in-banner
+  // Retry button so a user can re-attempt without re-navigating after a
+  // failure. The activity-store entry tracks the same dlId for both paths.
+  // (Avoid issue-number references with a leading hash in scanned files —
+  //  the UI-contract color regex matches 3-digit hex shorthand and would
+  //  pollute the literal palette.)
+  const handleFetchFreshImage = useCallback(async (): Promise<void> => {
+    if (!selectedTagForActions) return;
+    const dlId = `docker-image-${selectedTagForActions}`;
+    const store = useActivityStore.getState();
+    store.addActivity({
+      id: dlId,
+      category: 'download',
+      label: `Server Image (${selectedTagForActions})`,
+      legacyType: 'docker-image',
+    });
+    try {
+      await docker.pullImage(selectedTagForActions);
+      useActivityStore
+        .getState()
+        .updateActivity(dlId, { status: 'complete', completedAt: Date.now() });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Pull failed';
+      useActivityStore.getState().updateActivity(dlId, {
+        status: 'error',
+        error: msg,
+        completedAt: Date.now(),
+      });
+    }
+  }, [docker, selectedTagForActions]);
+
   return (
     <>
       <div className="custom-scrollbar h-full w-full overflow-y-auto">
@@ -1583,29 +1614,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     <Button
                       variant="secondary"
                       className="h-10 w-full"
-                      onClick={async () => {
-                        const dlId = `docker-image-${selectedTagForActions}`;
-                        const store = useActivityStore.getState();
-                        store.addActivity({
-                          id: dlId,
-                          category: 'download',
-                          label: `Server Image (${selectedTagForActions})`,
-                          legacyType: 'docker-image',
-                        });
-                        try {
-                          await docker.pullImage(selectedTagForActions);
-                          useActivityStore
-                            .getState()
-                            .updateActivity(dlId, { status: 'complete', completedAt: Date.now() });
-                        } catch (err: unknown) {
-                          const msg = err instanceof Error ? err.message : 'Pull failed';
-                          useActivityStore.getState().updateActivity(dlId, {
-                            status: 'error',
-                            error: msg,
-                            completedAt: Date.now(),
-                          });
-                        }
-                      }}
+                      onClick={handleFetchFreshImage}
                       disabled={docker.operating}
                     >
                       {docker.pulling ? (
@@ -1640,8 +1649,19 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   </div>
                 </div>
                 {docker.operationError && (
-                  <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                    {docker.operationError}
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                    <span className="min-w-0 flex-1">{docker.operationError}</span>
+                    {selectedTagForActions && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={handleFetchFreshImage}
+                        disabled={docker.operating || docker.pulling}
+                      >
+                        Retry
+                      </Button>
+                    )}
                   </div>
                 )}
                 <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-white/5 pt-4">

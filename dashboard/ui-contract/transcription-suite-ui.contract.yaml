@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.22
+  spec_version: 1.0.24
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -53,7 +53,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-26T04:52:14.837Z
+    generated_at: 2026-04-26T12:45:53.605Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:

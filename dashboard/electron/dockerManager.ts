@@ -962,6 +962,21 @@ let pullProcess: ChildProcess | null = null;
 /** Active sidecar pull process — independent from main image pull */
 let sidecarPullProcess: ChildProcess | null = null;
 
+/** Pending retry timer for transient pull-error backoff (Issue #103). */
+let pullRetryTimer: NodeJS.Timeout | null = null;
+
+/**
+ * True if the active `pullImage` cycle was cancelled mid-flight (in-attempt
+ * or in-backoff). Reset to false at the start of each new `pullImage` call.
+ */
+let pullCancelled = false;
+
+/**
+ * Resolver of the in-flight retry-backoff promise; held so `cancelPull()` can
+ * wake the loop immediately instead of waiting for the timer to elapse.
+ */
+let pullBackoffResolve: (() => void) | null = null;
+
 /**
  * List local Docker images matching our repo.
  *
@@ -1139,6 +1154,120 @@ async function listImages(): Promise<DockerImage[]> {
   }
 }
 
+// ─── Pull error classification & retry policy (Issue #103) ──────────────────
+
+/**
+ * Hard cap on `pullImage` attempts (1 initial + 2 retries). The image is
+ * 5–10 GB, so longer cycles add minutes for no benefit on a sub-second blip.
+ */
+const MAX_PULL_ATTEMPTS = 3;
+
+/** Backoff (ms) before each retry attempt. Length is `MAX_PULL_ATTEMPTS - 1`. */
+const PULL_BACKOFF_MS = [2000, 5000];
+
+const TRANSIENT_PULL_SIGNALS = [
+  'eof',
+  'connection reset',
+  'connection refused',
+  'i/o timeout',
+  'context deadline exceeded',
+  'tls handshake',
+  'temporary failure',
+  'unexpected eof',
+  'no route to host',
+  'no such host', // DNS lookup failure — distinct from "no such image"
+  'network is unreachable',
+];
+
+const AUTH_PULL_SIGNALS = ['unauthorized', 'denied', 'authentication required', ' 401', ' 403'];
+
+// Note: do NOT add 'no such' here — it collides with DNS transients
+// like 'no such host'. The signals below are unambiguous for not-found.
+const NOT_FOUND_PULL_SIGNALS = ['manifest unknown', 'not found', ' 404'];
+
+const DISK_FULL_PULL_SIGNALS = ['no space left', 'enospc', 'disk full'];
+
+export type PullErrorKind =
+  | 'transient'
+  | 'auth'
+  | 'not_found'
+  | 'disk_full'
+  | 'unknown'
+  | 'cancelled';
+
+export interface ClassifiedPullError {
+  kind: PullErrorKind;
+  friendly: string;
+  retriable: boolean;
+}
+
+/**
+ * Classify a pull failure into a known kind and produce a one-sentence
+ * user-facing message. Pure function — no side effects, reads no module state.
+ *
+ * Issue #103: a transient network EOF on the GHCR manifest used to bubble up
+ * to the renderer as raw Go-style stderr. This classifier maps it to a short
+ * message and a `retriable` flag so the caller can decide to retry. Order of
+ * checks matters: more-specific permanent classes win over the transient
+ * catch-all so an `"unauthorized: ... eof"` stderr is NOT retried.
+ */
+export function classifyPullError(
+  stderr: string,
+  code: number | null,
+  cancelled = false,
+): ClassifiedPullError {
+  if (cancelled) {
+    return { kind: 'cancelled', friendly: 'Pull cancelled.', retriable: false };
+  }
+  const haystack = stderr.toLowerCase();
+  if (AUTH_PULL_SIGNALS.some((s) => haystack.includes(s))) {
+    return {
+      kind: 'auth',
+      friendly:
+        'Registry rejected the request. The image may be private or your runtime needs login.',
+      retriable: false,
+    };
+  }
+  if (NOT_FOUND_PULL_SIGNALS.some((s) => haystack.includes(s))) {
+    return {
+      kind: 'not_found',
+      friendly: 'Image tag not found on the registry.',
+      retriable: false,
+    };
+  }
+  if (DISK_FULL_PULL_SIGNALS.some((s) => haystack.includes(s))) {
+    return {
+      kind: 'disk_full',
+      friendly: 'Not enough disk space to pull the image.',
+      retriable: false,
+    };
+  }
+  if (TRANSIENT_PULL_SIGNALS.some((s) => haystack.includes(s))) {
+    return {
+      kind: 'transient',
+      friendly:
+        'Network connection interrupted while downloading. Check your internet and try again.',
+      retriable: true,
+    };
+  }
+  // No signal AND no exit code AND not cancelled → process died unexpectedly.
+  // Treat as a transient blip; the retry loop will surface a friendly error
+  // if it persists across all attempts.
+  if (code === null) {
+    return {
+      kind: 'transient',
+      friendly:
+        'Network connection interrupted while downloading. Check your internet and try again.',
+      retriable: true,
+    };
+  }
+  return {
+    kind: 'unknown',
+    friendly: `Pull failed (exit code ${code}).`,
+    retriable: false,
+  };
+}
+
 /**
  * Pull an image tag from the registry.
  * Uses spawn instead of exec so the process can be cancelled.
@@ -1146,56 +1275,137 @@ async function listImages(): Promise<DockerImage[]> {
  * Pulls from the repo selected by the persisted `server.useLegacyGpu` setting
  * (Issue #83). A mid-session toggle requires a restart to take effect — this
  * is by design (Never rule: "Dashboard uses one image-repo at a time").
+ *
+ * Issue #103: bounded retry on transient (network-class) failures, with the
+ * final error translated into a one-sentence friendly message before reject.
+ * Retries fire only when `classifyPullError` returns `retriable: true`.
  */
 async function pullImage(tag: string): Promise<string> {
   const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore());
   const bin = await runtimeBin();
-  return new Promise((resolve, reject) => {
-    cancelPull(); // kill any existing pull first
+  const env = buildProcessEnv(undefined, detectedRuntimeKind ?? undefined);
 
-    const proc = spawn(bin, ['pull', `${imageRepo}:${tag}`], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
-    });
-    pullProcess = proc;
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout?.on('data', (data: Buffer) => {
-      stdout += data.toString();
-    });
-    proc.stderr?.on('data', (data: Buffer) => {
-      stderr += data.toString();
-    });
-
-    proc.on('close', (code) => {
-      if (pullProcess === proc) pullProcess = null;
-      if (code === 0) {
-        resolve(stdout.trim());
-      } else {
-        reject(new Error(stderr.trim() || `Pull exited with code ${code}`));
-      }
-    });
-
-    proc.on('error', (err) => {
-      if (pullProcess === proc) pullProcess = null;
-      reject(err);
-    });
-  });
-}
-
-/**
- * Cancel an in-progress image pull.
- * Returns true if a pull was actually cancelled.
- */
-function cancelPull(): boolean {
+  // Reset cycle state and stamp out any zombie prior process / retry timer.
+  if (pullRetryTimer) {
+    clearTimeout(pullRetryTimer);
+    pullRetryTimer = null;
+  }
   if (pullProcess) {
     pullProcess.kill('SIGTERM');
     pullProcess = null;
-    return true;
   }
-  return false;
+  pullBackoffResolve = null;
+  pullCancelled = false;
+
+  type AttemptResult =
+    | { ok: true; stdout: string }
+    | { ok: false; code: number | null; stderr: string };
+
+  const runOne = (): Promise<AttemptResult> =>
+    new Promise((resolve) => {
+      const proc = spawn(bin, ['pull', `${imageRepo}:${tag}`], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env,
+      });
+      pullProcess = proc;
+
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout?.on('data', (data: Buffer) => {
+        stdout += data.toString();
+      });
+      proc.stderr?.on('data', (data: Buffer) => {
+        stderr += data.toString();
+      });
+
+      proc.on('close', (code) => {
+        if (pullProcess === proc) pullProcess = null;
+        if (code === 0) {
+          resolve({ ok: true, stdout: stdout.trim() });
+        } else {
+          resolve({ ok: false, code, stderr: stderr.trim() });
+        }
+      });
+
+      proc.on('error', (err) => {
+        if (pullProcess === proc) pullProcess = null;
+        // Spawn-time errors (e.g. ENOENT for missing runtime) come through
+        // here. Surface as a null-code failure so the classifier handles it.
+        resolve({ ok: false, code: null, stderr: err.message });
+      });
+    });
+
+  for (let attempt = 1; attempt <= MAX_PULL_ATTEMPTS; attempt++) {
+    if (pullCancelled) {
+      throw new Error('Pull cancelled.');
+    }
+
+    const result = await runOne();
+
+    if (pullCancelled) {
+      throw new Error('Pull cancelled.');
+    }
+
+    if (result.ok === true) {
+      return result.stdout;
+    }
+
+    const { stderr: failureStderr, code: failureCode } = result;
+    const classified = classifyPullError(failureStderr, failureCode);
+    const isLastAttempt = attempt >= MAX_PULL_ATTEMPTS;
+
+    if (!classified.retriable || isLastAttempt) {
+      console.warn(
+        `[DockerManager] pullImage: final failure (${classified.kind}) after ${attempt} attempt(s). Raw stderr:\n${failureStderr}`,
+      );
+      throw new Error(classified.friendly);
+    }
+
+    const backoff = PULL_BACKOFF_MS[attempt - 1] ?? 5000;
+    console.warn(
+      `[DockerManager] pullImage: attempt ${attempt}/${MAX_PULL_ATTEMPTS} failed (${classified.kind}); retrying in ${backoff}ms`,
+    );
+
+    // Wait for backoff OR cancellation, whichever comes first.
+    await new Promise<void>((resolve) => {
+      pullBackoffResolve = resolve;
+      pullRetryTimer = setTimeout(() => {
+        pullRetryTimer = null;
+        pullBackoffResolve = null;
+        resolve();
+      }, backoff);
+    });
+
+    if (pullCancelled) {
+      throw new Error('Pull cancelled.');
+    }
+  }
+  // Loop body always returns or throws — this is a safety net for the type
+  // checker; reaching it would be a bug.
+  throw new Error('Pull failed.');
+}
+
+/**
+ * Cancel an in-progress image pull (active spawn or pending retry backoff).
+ * Returns true if anything was cancelled.
+ */
+function cancelPull(): boolean {
+  const wasActive = pullProcess !== null || pullRetryTimer !== null;
+  pullCancelled = true;
+  if (pullRetryTimer) {
+    clearTimeout(pullRetryTimer);
+    pullRetryTimer = null;
+  }
+  if (pullBackoffResolve) {
+    pullBackoffResolve();
+    pullBackoffResolve = null;
+  }
+  if (pullProcess) {
+    pullProcess.kill('SIGTERM');
+    pullProcess = null;
+  }
+  return wasActive;
 }
 
 /**
