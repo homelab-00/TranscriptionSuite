@@ -159,10 +159,30 @@ export const SessionImportTab: React.FC = () => {
       .catch(() => {});
   }, []);
 
-  // Sync outputDir, diarizedFormat, and hideTimestamps to the unified Zustand store
+  // Sync per-tab settings to the unified Zustand store. Folder Watch jobs read
+  // these in handleFilesDetected so auto-imported files honor the user's UI
+  // toggles (Issue #93). Raw values are stored — derivation rules
+  // (multitrack ? false : enableDiarization, etc.) live in the store handler.
   useEffect(() => {
-    updateSessionConfig({ outputDir, diarizedFormat, hideTimestamps });
-  }, [outputDir, diarizedFormat, hideTimestamps, updateSessionConfig]);
+    updateSessionConfig({
+      outputDir,
+      diarizedFormat,
+      hideTimestamps,
+      enableDiarization: diarization,
+      enableWordTimestamps: wordTimestamps,
+      parallelDiarization,
+      multitrack,
+    });
+  }, [
+    outputDir,
+    diarizedFormat,
+    hideTimestamps,
+    diarization,
+    wordTimestamps,
+    parallelDiarization,
+    multitrack,
+    updateSessionConfig,
+  ]);
 
   useEffect(() => {
     if (!supportsExplicitWordTimestampToggle) {

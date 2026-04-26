@@ -44,6 +44,18 @@ export interface SessionConfig {
   outputDir: string;
   diarizedFormat: 'srt' | 'ass';
   hideTimestamps: boolean;
+  /** Toggles bridged from SessionImportTab so Folder Watch jobs honor them (Issue #93) */
+  enableDiarization: boolean;
+  enableWordTimestamps: boolean;
+  parallelDiarization: boolean;
+  multitrack: boolean;
+}
+
+export interface NotebookConfig {
+  /** Toggles bridged from NotebookView import tab so Folder Watch jobs honor them (Issue #93) */
+  enableDiarization: boolean;
+  enableWordTimestamps: boolean;
+  parallelDiarization: boolean;
 }
 
 export interface NotebookCallbacks {
@@ -78,6 +90,7 @@ interface ImportQueueState extends WatcherState {
   jobs: UnifiedImportJob[];
   isPaused: boolean;
   sessionConfig: SessionConfig;
+  notebookConfig: NotebookConfig;
   notebookCallbacks: NotebookCallbacks;
 
   // Actions
@@ -101,6 +114,7 @@ interface ImportQueueState extends WatcherState {
   clearFinished: () => void;
   clearAll: () => void;
   updateSessionConfig: (patch: Partial<SessionConfig>) => void;
+  updateNotebookConfig: (patch: Partial<NotebookConfig>) => void;
   updateNotebookCallbacks: (callbacks: NotebookCallbacks) => void;
 
   // Watcher actions
@@ -410,7 +424,20 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
   // State
   jobs: [],
   isPaused: false,
-  sessionConfig: { outputDir: '', diarizedFormat: 'srt', hideTimestamps: false },
+  sessionConfig: {
+    outputDir: '',
+    diarizedFormat: 'srt',
+    hideTimestamps: false,
+    enableDiarization: true,
+    enableWordTimestamps: true,
+    parallelDiarization: false,
+    multitrack: false,
+  },
+  notebookConfig: {
+    enableDiarization: true,
+    enableWordTimestamps: true,
+    parallelDiarization: false,
+  },
   notebookCallbacks: {},
 
   // Watcher state
@@ -501,6 +528,10 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
     set((s) => ({ sessionConfig: { ...s.sessionConfig, ...patch } }));
   },
 
+  updateNotebookConfig: (patch) => {
+    set((s) => ({ notebookConfig: { ...s.notebookConfig, ...patch } }));
+  },
+
   updateNotebookCallbacks: (callbacks) => {
     set({ notebookCallbacks: callbacks });
   },
@@ -542,16 +573,32 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
       return;
     }
 
+    // Source toggle state from per-tab configs so auto-watch jobs honor the
+    // user's UI selections. Mirrors the manual-import derivation in
+    // SessionImportTab.handleFiles / NotebookImportTab.handleFiles (Issue #93).
+    const state = useImportQueueStore.getState();
+
     if (type === 'notebook') {
+      const { enableDiarization, enableWordTimestamps, parallelDiarization } = state.notebookConfig;
       // Add each notebook file individually so we can attach its creation timestamp.
       // This ensures the entry lands on the correct calendar date.
       for (const meta of fileMeta) {
-        useImportQueueStore.getState().addFiles([meta.path], 'notebook-auto', {
+        state.addFiles([meta.path], 'notebook-auto', {
           file_created_at: meta.createdAt,
+          enable_diarization: enableDiarization,
+          enable_word_timestamps: enableWordTimestamps,
+          parallel_diarization: enableDiarization ? parallelDiarization : undefined,
         });
       }
     } else {
-      useImportQueueStore.getState().addFiles(files, 'session-auto');
+      const { enableDiarization, enableWordTimestamps, parallelDiarization, multitrack } =
+        state.sessionConfig;
+      state.addFiles(files, 'session-auto', {
+        enable_diarization: multitrack ? false : enableDiarization,
+        enable_word_timestamps: enableWordTimestamps,
+        parallel_diarization: enableDiarization && !multitrack ? parallelDiarization : undefined,
+        multitrack: multitrack || undefined,
+      });
     }
 
     toast.success(`${files.length} file${files.length === 1 ? '' : 's'} auto-queued from ${label}`);

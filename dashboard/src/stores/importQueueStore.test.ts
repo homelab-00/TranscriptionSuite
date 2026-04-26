@@ -43,12 +43,28 @@ function resetStore() {
   useImportQueueStore.setState({
     jobs: [],
     isPaused: false,
-    sessionConfig: { outputDir: '', diarizedFormat: 'srt', hideTimestamps: false },
+    sessionConfig: {
+      outputDir: '',
+      diarizedFormat: 'srt',
+      hideTimestamps: false,
+      enableDiarization: true,
+      enableWordTimestamps: true,
+      parallelDiarization: false,
+      multitrack: false,
+    },
+    notebookConfig: {
+      enableDiarization: true,
+      enableWordTimestamps: true,
+      parallelDiarization: false,
+    },
     notebookCallbacks: {},
     sessionWatchPath: '',
     sessionWatchActive: false,
     notebookWatchPath: '',
     notebookWatchActive: false,
+    watcherServerConnected: true,
+    watchLog: [],
+    avgProcessingMs: 0,
   });
 }
 
@@ -263,6 +279,16 @@ describe('importQueueStore', () => {
     });
   });
 
+  // ── updateNotebookConfig ───────────────────────────────────────────────
+
+  describe('updateNotebookConfig', () => {
+    it('merges partial config', () => {
+      getState().updateNotebookConfig({ enableDiarization: false });
+      expect(getState().notebookConfig.enableDiarization).toBe(false);
+      expect(getState().notebookConfig.enableWordTimestamps).toBe(true);
+    });
+  });
+
   // ── updateNotebookCallbacks ────────────────────────────────────────────
 
   describe('updateNotebookCallbacks', () => {
@@ -270,6 +296,143 @@ describe('importQueueStore', () => {
       const onSuccess = vi.fn();
       getState().updateNotebookCallbacks({ onJobSuccess: onSuccess });
       expect(getState().notebookCallbacks.onJobSuccess).toBe(onSuccess);
+    });
+  });
+
+  // ── handleFilesDetected (Issue #93 — Folder Watch toggle propagation) ──
+  //
+  // The auto-watch path (session-auto / notebook-auto) MUST source toggle
+  // state from the per-tab configs so user-facing UI selections actually
+  // reach the backend. Each test asserts on the captured `options` of the
+  // resulting job.
+
+  describe('handleFilesDetected', () => {
+    // Inspecting real addFiles (rather than a spy) is safe under
+    // vi.useFakeTimers — processQueue is scheduled via setTimeout(0) and
+    // never fires synchronously, so the mocked apiClient is unreachable.
+    function lastJobOptions() {
+      const { jobs } = getState();
+      return jobs[jobs.length - 1].options;
+    }
+
+    it('session: passes diarization=true and parallel value when toggle is ON', () => {
+      getState().updateSessionConfig({
+        enableDiarization: true,
+        enableWordTimestamps: true,
+        parallelDiarization: true,
+        multitrack: false,
+      });
+      getState().handleFilesDetected({
+        type: 'session',
+        files: ['/watch/a.wav'],
+        count: 1,
+        fileMeta: [],
+      });
+      expect(lastJobOptions()).toMatchObject({
+        enable_diarization: true,
+        enable_word_timestamps: true,
+        parallel_diarization: true,
+      });
+      expect(lastJobOptions()?.multitrack).toBeUndefined();
+    });
+
+    it('session: multitrack ON forces enable_diarization=false and drops parallel', () => {
+      getState().updateSessionConfig({
+        enableDiarization: true,
+        parallelDiarization: true,
+        multitrack: true,
+      });
+      getState().handleFilesDetected({
+        type: 'session',
+        files: ['/watch/multi.wav'],
+        count: 1,
+        fileMeta: [],
+      });
+      expect(lastJobOptions()).toMatchObject({
+        enable_diarization: false,
+        multitrack: true,
+      });
+      expect(lastJobOptions()?.parallel_diarization).toBeUndefined();
+    });
+
+    it('session: diarization OFF and timestamps OFF flow through', () => {
+      getState().updateSessionConfig({
+        enableDiarization: false,
+        enableWordTimestamps: false,
+        parallelDiarization: false,
+        multitrack: false,
+      });
+      getState().handleFilesDetected({
+        type: 'session',
+        files: ['/watch/plain.wav'],
+        count: 1,
+        fileMeta: [],
+      });
+      expect(lastJobOptions()).toMatchObject({
+        enable_diarization: false,
+        enable_word_timestamps: false,
+      });
+      expect(lastJobOptions()?.parallel_diarization).toBeUndefined();
+      expect(lastJobOptions()?.multitrack).toBeUndefined();
+    });
+
+    it('notebook: passes diarization toggle and preserves file_created_at', () => {
+      getState().updateNotebookConfig({
+        enableDiarization: true,
+        enableWordTimestamps: true,
+        parallelDiarization: true,
+      });
+      getState().handleFilesDetected({
+        type: 'notebook',
+        files: ['/watch/note.wav'],
+        count: 1,
+        fileMeta: [{ path: '/watch/note.wav', createdAt: '2026-04-26T10:00:00Z' }],
+      });
+      expect(lastJobOptions()).toMatchObject({
+        file_created_at: '2026-04-26T10:00:00Z',
+        enable_diarization: true,
+        enable_word_timestamps: true,
+        parallel_diarization: true,
+      });
+    });
+
+    it('notebook: diarization OFF drops parallel_diarization', () => {
+      getState().updateNotebookConfig({
+        enableDiarization: false,
+        parallelDiarization: true,
+      });
+      getState().handleFilesDetected({
+        type: 'notebook',
+        files: ['/watch/note2.wav'],
+        count: 1,
+        fileMeta: [{ path: '/watch/note2.wav', createdAt: '2026-04-26T11:00:00Z' }],
+      });
+      expect(lastJobOptions()?.enable_diarization).toBe(false);
+      expect(lastJobOptions()?.parallel_diarization).toBeUndefined();
+    });
+
+    it('uses defaults when notebook tab has not synced its toggles', () => {
+      getState().handleFilesDetected({
+        type: 'notebook',
+        files: ['/watch/default.wav'],
+        count: 1,
+        fileMeta: [{ path: '/watch/default.wav', createdAt: '2026-04-26T12:00:00Z' }],
+      });
+      expect(lastJobOptions()).toMatchObject({
+        enable_diarization: true,
+        enable_word_timestamps: true,
+      });
+    });
+
+    it('skips when watcherServerConnected is false', () => {
+      useImportQueueStore.setState({ watcherServerConnected: false });
+      getState().handleFilesDetected({
+        type: 'session',
+        files: ['/watch/x.wav'],
+        count: 1,
+        fileMeta: [],
+      });
+      expect(getState().jobs).toHaveLength(0);
     });
   });
 

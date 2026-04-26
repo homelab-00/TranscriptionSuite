@@ -1323,6 +1323,7 @@ const ImportTab = ({
   const avgProcessingMs = useImportQueueStore((s) => s.avgProcessingMs);
   const watchLog = useImportQueueStore((s) => s.watchLog);
   const clearWatchLog = useImportQueueStore((s) => s.clearWatchLog);
+  const updateNotebookConfig = useImportQueueStore((s) => s.updateNotebookConfig);
 
   const {
     notebookWatchPath,
@@ -1416,6 +1417,17 @@ const ImportTab = ({
       })
       .catch(() => {});
   }, []);
+
+  // Sync toggle state to the unified store so notebook-auto (Folder Watch)
+  // jobs honor these UI selections (Issue #93). Manual notebook-normal jobs
+  // still pass options directly via handleFiles.
+  useEffect(() => {
+    updateNotebookConfig({
+      enableDiarization: diarization,
+      enableWordTimestamps: wordTimestamps,
+      parallelDiarization,
+    });
+  }, [diarization, wordTimestamps, parallelDiarization, updateNotebookConfig]);
 
   // Constraint: diarization ON → force timestamps ON
   const handleDiarizationChange = useCallback((enabled: boolean) => {
