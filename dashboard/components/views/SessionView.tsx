@@ -633,9 +633,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
     onStartRecording: () => handleStartRecording(),
     onStopRecording: () => {
       if (isLive) live.stop();
-      else transcription.stop();
+      else handleStopRecording();
     },
-    onCancelRecording: () => transcription.reset(),
+    onCancelRecording: () => handleCancelProcessing(),
     onToggleMute: () => {
       if (transcription.status === 'recording' || transcription.status === 'connecting') {
         transcription.toggleMute();

@@ -16,7 +16,7 @@
 
 import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const CANARY_MODEL = 'nvidia/canary-1b-v2';
@@ -193,6 +193,7 @@ vi.mock('../../src/types/runtime', () => ({
 import { SessionView } from '../views/SessionView';
 import { SessionTab } from '../../types';
 import { useTraySync } from '../../src/hooks/useTraySync';
+import { apiClient } from '../../src/api/client';
 
 function createWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -245,7 +246,22 @@ const NEMO_LANGUAGES_FOR_TEST: Array<{ code: string; name: string }> = [
   { code: 'de', name: 'German' },
 ];
 
+// Captured at module load so we can restore navigator.platform between tests
+// that stub it via Object.defineProperty (the gh-102 followup #2 tray
+// Stop/Cancel cases). Without this restore, the last per-test stub would
+// poison subsequent tests if vitest's pool config ever shares jsdom across
+// files (`pool: 'threads'` / `singleThread: true`), or if `--shuffle` is used
+// to reorder tests within this file.
+const ORIGINAL_NAVIGATOR_PLATFORM = navigator.platform;
+
 describe('SessionView — Canary language guards (gh-102)', () => {
+  afterEach(() => {
+    Object.defineProperty(navigator, 'platform', {
+      value: ORIGINAL_NAVIGATOR_PLATFORM,
+      configurable: true,
+    });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockTranscription.status = 'idle';
@@ -264,7 +280,14 @@ describe('SessionView — Canary language guards (gh-102)', () => {
         set: vi.fn().mockResolvedValue(undefined),
       },
       docker: { readComposeEnvValue: vi.fn().mockResolvedValue('false') },
-      audio: { listSinks: vi.fn().mockResolvedValue([]) },
+      audio: {
+        listSinks: vi.fn().mockResolvedValue([]),
+        // mockResolvedValue(undefined) matches the surrounding async-IPC convention
+        // — production currently doesn't await these but the IPC bridge returns Promises,
+        // so any future `await` site won't trip on `.then()` of undefined.
+        removeMonitorLoopback: vi.fn().mockResolvedValue(undefined),
+        disableSystemAudioLoopback: vi.fn().mockResolvedValue(undefined),
+      },
       tray: { onAction: vi.fn().mockReturnValue(vi.fn()) },
       notifications: { show: vi.fn() },
     };
@@ -440,5 +463,117 @@ describe('SessionView — Canary language guards (gh-102)', () => {
     expect(mockTranscription.start).toHaveBeenCalledTimes(1);
     const startArgs = mockTranscription.start.mock.calls[0][0] as { language?: string };
     expect(startArgs.language).toBe('es');
+  });
+
+  // ── Tray Stop / Cancel routed through their handlers (gh-102 followup #2) ──
+  //
+  // Pre-fix the tray callbacks bypassed handleStopRecording (skipping Linux
+  // loopback / Win+Mac system-audio cleanup) and handleCancelProcessing
+  // (leaving orphan transcription jobs running on the server during
+  // `processing` — a CLAUDE.md data-loss-class regression). The fix routes
+  // them through the existing handlers via wrapped arrows (TDZ — same
+  // pattern as the gh-102 Start Recording fix at SessionView.tsx:633).
+
+  it('tray Stop on Linux while recording calls handleStopRecording (transcription.stop + removeMonitorLoopback)', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64', configurable: true });
+    mockTranscription.status = 'recording';
+
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const trayDeps = vi.mocked(useTraySync).mock.calls.at(-1)?.[0];
+    expect(trayDeps).toBeDefined();
+
+    await act(async () => {
+      trayDeps!.onStopRecording?.();
+    });
+
+    expect(mockTranscription.stop).toHaveBeenCalledTimes(1);
+    const audio = (
+      window as unknown as { electronAPI: { audio: Record<string, ReturnType<typeof vi.fn>> } }
+    ).electronAPI.audio;
+    expect(audio.removeMonitorLoopback).toHaveBeenCalledTimes(1);
+    expect(audio.disableSystemAudioLoopback).not.toHaveBeenCalled();
+  });
+
+  it('tray Stop on non-Linux while recording calls handleStopRecording (transcription.stop + disableSystemAudioLoopback)', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Win32', configurable: true });
+    mockTranscription.status = 'recording';
+
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const trayDeps = vi.mocked(useTraySync).mock.calls.at(-1)?.[0];
+    expect(trayDeps).toBeDefined();
+
+    await act(async () => {
+      trayDeps!.onStopRecording?.();
+    });
+
+    expect(mockTranscription.stop).toHaveBeenCalledTimes(1);
+    const audio = (
+      window as unknown as { electronAPI: { audio: Record<string, ReturnType<typeof vi.fn>> } }
+    ).electronAPI.audio;
+    expect(audio.disableSystemAudioLoopback).toHaveBeenCalledTimes(1);
+    expect(audio.removeMonitorLoopback).not.toHaveBeenCalled();
+  });
+
+  it('tray Cancel during processing calls apiClient.cancelTranscription then transcription.reset and loopback cleanup', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64', configurable: true });
+    mockTranscription.status = 'processing';
+
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const trayDeps = vi.mocked(useTraySync).mock.calls.at(-1)?.[0];
+    expect(trayDeps).toBeDefined();
+
+    // onCancelRecording is typed `() => void` but at runtime returns the
+    // Promise from handleCancelProcessing. Cast and await so the handler's
+    // try/finally completes before assertions.
+    await act(async () => {
+      await (trayDeps!.onCancelRecording?.() as unknown as Promise<void> | undefined);
+    });
+
+    expect(vi.mocked(apiClient.cancelTranscription)).toHaveBeenCalledTimes(1);
+    expect(mockTranscription.reset).toHaveBeenCalledTimes(1);
+    const audio = (
+      window as unknown as { electronAPI: { audio: Record<string, ReturnType<typeof vi.fn>> } }
+    ).electronAPI.audio;
+    expect(audio.removeMonitorLoopback).toHaveBeenCalledTimes(1);
+  });
+
+  it('tray Cancel during recording skips apiClient.cancelTranscription but still runs reset and loopback cleanup', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64', configurable: true });
+    mockTranscription.status = 'recording';
+
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const trayDeps = vi.mocked(useTraySync).mock.calls.at(-1)?.[0];
+    expect(trayDeps).toBeDefined();
+
+    await act(async () => {
+      await (trayDeps!.onCancelRecording?.() as unknown as Promise<void> | undefined);
+    });
+
+    expect(vi.mocked(apiClient.cancelTranscription)).not.toHaveBeenCalled();
+    expect(mockTranscription.reset).toHaveBeenCalledTimes(1);
+    const audio = (
+      window as unknown as { electronAPI: { audio: Record<string, ReturnType<typeof vi.fn>> } }
+    ).electronAPI.audio;
+    expect(audio.removeMonitorLoopback).toHaveBeenCalledTimes(1);
   });
 });
