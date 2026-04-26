@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from server.api.routes.utils import get_client_name, sanitize_for_log
 from server.config import get_config
 from server.core.stt.backends.factory import detect_backend_type
-from server.core.subtitle_export import build_subtitle_cues, render_ass, render_srt
+from server.core.subtitle_export import _to_float, build_subtitle_cues, render_ass, render_srt
 from server.database.backup import DatabaseBackupManager
 
 # NOTE: audio_utils is imported lazily inside upload_and_transcribe() to avoid
@@ -913,168 +913,187 @@ async def export_recording(
             detail="Unsupported export format. Supported formats: txt, srt, ass.",
         )
 
-    recording = get_recording(recording_id)
-    if not recording:
-        raise HTTPException(status_code=404, detail="Recording not found")
-
-    segments = get_segments(recording_id)
-    words = get_words(recording_id)
-
-    # Parse recording date
-    recorded_at = recording.get("recorded_at", "")
     try:
-        rec_dt = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
-        date_str = rec_dt.strftime("%B %d, %Y at %I:%M %p")
-    except (ValueError, AttributeError):
-        date_str = recorded_at
+        recording = get_recording(recording_id)
+        if not recording:
+            raise HTTPException(status_code=404, detail="Recording not found")
 
-    # Format duration
-    duration = recording.get("duration_seconds", 0)
-    if duration < 60:
-        duration_str = f"{int(duration)} seconds"
-    elif duration < 3600:
-        mins = int(duration // 60)
-        secs = int(duration % 60)
-        duration_str = f"{mins} min {secs} sec"
-    else:
-        hours = int(duration // 3600)
-        mins = int((duration % 3600) // 60)
-        duration_str = f"{hours} hr {mins} min"
+        segments = get_segments(recording_id)
+        words = get_words(recording_id)
 
-    title = recording.get("title") or recording.get("filename") or "Recording"
-    has_diarization = bool(recording.get("has_diarization"))
-    has_words = len(words) > 0
-    is_pure_note = (not has_diarization) and (not has_words)
+        # Parse recording date
+        recorded_at = recording.get("recorded_at", "")
+        try:
+            rec_dt = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+            date_str = rec_dt.strftime("%B %d, %Y at %I:%M %p")
+        except (ValueError, AttributeError):
+            date_str = recorded_at or ""
 
-    if is_pure_note and requested_format != "txt":
-        raise HTTPException(
-            status_code=400,
-            detail="This recording only supports TXT export. SRT/ASS require word timestamps or diarization.",
-        )
-
-    if (not is_pure_note) and requested_format == "txt":
-        raise HTTPException(
-            status_code=400,
-            detail="This recording supports subtitle export only. Use SRT or ASS.",
-        )
-
-    if requested_format == "txt":
-        # Human-readable text export
-        lines = []
-        lines.append("=" * 60)
-        lines.append("TRANSCRIPTION EXPORT")
-        lines.append("=" * 60)
-        lines.append("")
-        lines.append(f"Title: {title}")
-        lines.append(f"Date: {date_str}")
-        lines.append(f"Duration: {duration_str}")
-        lines.append(f"Word Count: {recording.get('word_count', 0)}")
-        if has_diarization:
-            lines.append("Speaker Diarization: Yes")
-        lines.append("")
-
-        if recording.get("summary"):
-            lines.append("-" * 40)
-            lines.append("SUMMARY")
-            lines.append("-" * 40)
-            lines.append(recording["summary"])
-            lines.append("")
-
-        lines.append("-" * 40)
-        lines.append("TRANSCRIPTION")
-        lines.append("-" * 40)
-        lines.append("")
-
-        if has_diarization and segments:
-            # Group by speaker with timestamps
-            current_speaker = None
-            for seg in segments:
-                speaker = seg.get("speaker") or "Unknown"
-                start = seg.get("start_time", 0)
-                text = seg.get("text", "").strip()
-
-                # Format timestamp
-                mins = int(start // 60)
-                secs = int(start % 60)
-                timestamp = f"[{mins:02d}:{secs:02d}]"
-
-                if speaker != current_speaker:
-                    lines.append("")
-                    lines.append(f"{speaker}:")
-                    current_speaker = speaker
-
-                lines.append(f"  {timestamp} {text}")
+        # Format duration — coerce so a NULL duration_seconds doesn't crash arithmetic (Issue #98).
+        duration = _to_float(recording.get("duration_seconds"), default=0.0)
+        if duration < 60:
+            duration_str = f"{int(duration)} seconds"
+        elif duration < 3600:
+            mins = int(duration // 60)
+            secs = int(duration % 60)
+            duration_str = f"{mins} min {secs} sec"
         else:
-            # Simple text output with timestamps
-            for seg in segments:
-                start = seg.get("start_time", 0)
-                text = seg.get("text", "").strip()
-                mins = int(start // 60)
-                secs = int(start % 60)
-                lines.append(f"[{mins:02d}:{secs:02d}] {text}")
+            hours = int(duration // 3600)
+            mins = int((duration % 3600) // 60)
+            duration_str = f"{hours} hr {mins} min"
 
-        # Add word-level timestamps section if present
-        if words:
+        title = recording.get("title") or recording.get("filename") or "Recording"
+        has_diarization = bool(recording.get("has_diarization"))
+        has_words = len(words) > 0
+        is_pure_note = (not has_diarization) and (not has_words)
+
+        if is_pure_note and requested_format != "txt":
+            raise HTTPException(
+                status_code=400,
+                detail="This recording only supports TXT export. SRT/ASS require word timestamps or diarization.",
+            )
+
+        if (not is_pure_note) and requested_format == "txt":
+            raise HTTPException(
+                status_code=400,
+                detail="This recording supports subtitle export only. Use SRT or ASS.",
+            )
+
+        if requested_format == "txt":
+            # Human-readable text export
+            lines = []
+            lines.append("=" * 60)
+            lines.append("TRANSCRIPTION EXPORT")
+            lines.append("=" * 60)
             lines.append("")
+            lines.append(f"Title: {title}")
+            lines.append(f"Date: {date_str}")
+            lines.append(f"Duration: {duration_str}")
+            lines.append(f"Word Count: {recording.get('word_count') or 0}")
+            if has_diarization:
+                lines.append("Speaker Diarization: Yes")
+            lines.append("")
+
+            if recording.get("summary"):
+                lines.append("-" * 40)
+                lines.append("SUMMARY")
+                lines.append("-" * 40)
+                lines.append(recording["summary"])
+                lines.append("")
+
             lines.append("-" * 40)
-            lines.append("WORD-LEVEL TIMESTAMPS")
+            lines.append("TRANSCRIPTION")
             lines.append("-" * 40)
             lines.append("")
 
-            word_lines = []
-            for w in words:
-                word = w.get("word", "")
-                start = w.get("start_time", 0)
-                end = w.get("end_time", 0)
-                conf = w.get("confidence")
-                conf_str = f" ({conf:.2f})" if conf is not None else ""
-                word_lines.append(f"{word} [{start:.2f}s-{end:.2f}s]{conf_str}")
+            if has_diarization and segments:
+                # Group by speaker with timestamps
+                current_speaker = None
+                for seg in segments:
+                    speaker = seg.get("speaker") or "Unknown"
+                    start = _to_float(seg.get("start_time"), default=0.0)
+                    text = str(seg.get("text") or "").strip()
 
-            # Group words into lines of ~80 chars
-            current_line = []
-            current_len = 0
-            for wl in word_lines:
-                if current_len + len(wl) + 2 > 80 and current_line:
+                    # Format timestamp
+                    mins = int(start // 60)
+                    secs = int(start % 60)
+                    timestamp = f"[{mins:02d}:{secs:02d}]"
+
+                    if speaker != current_speaker:
+                        lines.append("")
+                        lines.append(f"{speaker}:")
+                        current_speaker = speaker
+
+                    lines.append(f"  {timestamp} {text}")
+            else:
+                # Simple text output with timestamps
+                for seg in segments:
+                    start = _to_float(seg.get("start_time"), default=0.0)
+                    text = str(seg.get("text") or "").strip()
+                    mins = int(start // 60)
+                    secs = int(start % 60)
+                    lines.append(f"[{mins:02d}:{secs:02d}] {text}")
+
+            # Add word-level timestamps section if present
+            if words:
+                lines.append("")
+                lines.append("-" * 40)
+                lines.append("WORD-LEVEL TIMESTAMPS")
+                lines.append("-" * 40)
+                lines.append("")
+
+                word_lines = []
+                for w in words:
+                    word = str(w.get("word") or "")
+                    start = _to_float(w.get("start_time"), default=0.0)
+                    end = _to_float(w.get("end_time"), default=0.0)
+                    conf = w.get("confidence")
+                    conf_str = f" ({conf:.2f})" if isinstance(conf, (int, float)) else ""
+                    word_lines.append(f"{word} [{start:.2f}s-{end:.2f}s]{conf_str}")
+
+                # Group words into lines of ~80 chars
+                current_line = []
+                current_len = 0
+                for wl in word_lines:
+                    if current_len + len(wl) + 2 > 80 and current_line:
+                        lines.append("  ".join(current_line))
+                        current_line = [wl]
+                        current_len = len(wl)
+                    else:
+                        current_line.append(wl)
+                        current_len += len(wl) + 2
+                if current_line:
                     lines.append("  ".join(current_line))
-                    current_line = [wl]
-                    current_len = len(wl)
-                else:
-                    current_line.append(wl)
-                    current_len += len(wl) + 2
-            if current_line:
-                lines.append("  ".join(current_line))
 
-        lines.append("")
-        lines.append("=" * 60)
-        lines.append("End of Export")
-        lines.append("=" * 60)
+            lines.append("")
+            lines.append("=" * 60)
+            lines.append("End of Export")
+            lines.append("=" * 60)
 
-        content = "\n".join(lines)
-        filename = f"{title.replace(' ', '_')}_export.txt"
-        media_type = "text/plain; charset=utf-8"
-    else:
-        cues = build_subtitle_cues(
-            segments=segments,
-            words=words,
-            has_diarization=has_diarization,
-        )
-
-        if requested_format == "srt":
-            content = render_srt(cues)
-            filename = f"{title.replace(' ', '_')}_export.srt"
-            media_type = "application/x-subrip; charset=utf-8"
+            content = "\n".join(lines)
+            filename = f"{title.replace(' ', '_')}_export.txt"
+            media_type = "text/plain; charset=utf-8"
         else:
-            content = render_ass(cues, title=title)
-            filename = f"{title.replace(' ', '_')}_export.ass"
-            media_type = "text/x-ass; charset=utf-8"
+            cues = build_subtitle_cues(
+                segments=segments,
+                words=words,
+                has_diarization=has_diarization,
+            )
 
-    return Response(
-        content=content,
-        media_type=media_type,
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-        },
-    )
+            if requested_format == "srt":
+                content = render_srt(cues)
+                filename = f"{title.replace(' ', '_')}_export.srt"
+                media_type = "application/x-subrip; charset=utf-8"
+            else:
+                content = render_ass(cues, title=title)
+                filename = f"{title.replace(' ', '_')}_export.ass"
+                media_type = "text/x-ass; charset=utf-8"
+
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+    except HTTPException:
+        # Intentional 400/404 responses — pass through unchanged.
+        raise
+    except Exception as e:
+        # Issue #98: surface the real cause to the client instead of FastAPI's
+        # generic "Internal server error" envelope so users can report something
+        # actionable. Full traceback still lands in the server log.
+        logger.error(
+            "Export failed for recording %s (format=%s): %s",
+            recording_id,
+            requested_format,
+            e,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Export failed: {type(e).__name__}: {e}",
+        ) from e
 
 
 def _get_backup_manager() -> DatabaseBackupManager:
