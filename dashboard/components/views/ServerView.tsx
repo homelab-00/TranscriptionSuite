@@ -84,6 +84,9 @@ interface ServerViewProps {
 const DIARIZATION_SORTFORMER_OPTION = 'Sortformer (Metal; ≤ 4 speakers)';
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
+// Mac Metal gating: pyannote.audio 4.x has no working MPS path
+// (pyannote/pyannote-audio#1886, #1337, #1091 — all closed wontfix).
+const PYANNOTE_REPO_PATTERN = /^pyannote\//i;
 
 // GGML model options for Vulkan sidecar — computed once from registry.
 const GGML_MODELS = getModelsByFamily('whispercpp');
@@ -290,6 +293,18 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       LIVE_MODEL_CUSTOM_OPTION,
     ];
   }, []);
+  // Diarization options: omit pyannote on Mac Metal — pyannote.audio MPS path is broken upstream.
+  const diarizationOptions = useMemo(
+    () =>
+      isMetal
+        ? [DIARIZATION_SORTFORMER_OPTION, DIARIZATION_MODEL_CUSTOM_OPTION]
+        : [
+            DIARIZATION_SORTFORMER_OPTION,
+            DIARIZATION_DEFAULT_MODEL,
+            DIARIZATION_MODEL_CUSTOM_OPTION,
+          ],
+    [isMetal],
+  );
 
   // Auth token display in Instance Settings
   const [showAuthToken, setShowAuthToken] = useState(false);
@@ -943,6 +958,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     setLiveModelSelection(FALLBACK_LIVE_WHISPER_MODEL);
     setLiveCustomModel('');
   }, [activeLiveModel, localSelectionsHydrated]);
+
+  // Mac Metal: auto-migrate persisted Pyannote diarization choice to Sortformer.
+  // Single effect handles both initial mount AND mid-session profile toggles
+  // (runtimeProfile is hydrated by a separate effect, so we cannot extend the
+  // diarization Promise.all chain). The state change is persisted by the
+  // existing auto-persist effect at line ~1019. See pyannote/pyannote-audio#1886.
+  useEffect(() => {
+    if (!isMetal || !diarizationHydrated) return;
+    if (diarizationModelSelection !== DIARIZATION_DEFAULT_MODEL) return;
+    setDiarizationModelSelection(DIARIZATION_SORTFORMER_OPTION);
+  }, [isMetal, diarizationHydrated, diarizationModelSelection]);
 
   // Metal mode: auto-switch a non-MLX main model to the MLX default.
   useEffect(() => {
@@ -2269,14 +2295,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <CustomSelect
                   value={diarizationModelSelection}
                   onChange={setDiarizationModelSelection}
-                  options={[
-                    DIARIZATION_SORTFORMER_OPTION,
-                    DIARIZATION_DEFAULT_MODEL,
-                    DIARIZATION_MODEL_CUSTOM_OPTION,
-                  ]}
+                  options={diarizationOptions}
                   className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                   disabled={isRunning}
                 />
+                {isMetal && (
+                  <p className="text-xs text-slate-500 italic">
+                    Pyannote diarization is not supported on Apple Silicon (pyannote.audio MPS path
+                    is broken upstream — see pyannote/pyannote-audio#1886). Sortformer (Metal) is
+                    the recommended diarizer on Mac.
+                  </p>
+                )}
                 {diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION && (
                   <input
                     type="text"
@@ -2287,6 +2316,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                   />
                 )}
+                {isMetal &&
+                  diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION &&
+                  PYANNOTE_REPO_PATTERN.test(diarizationCustomModel.trim()) && (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                      <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                      <span>
+                        Custom pyannote repos are not supported on Apple Silicon — switch to
+                        Sortformer.
+                      </span>
+                    </div>
+                  )}
               </div>
             </GlassCard>
           </div>
