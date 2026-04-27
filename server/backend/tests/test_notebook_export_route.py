@@ -42,7 +42,10 @@ async def test_pure_note_txt_export_allowed(monkeypatch) -> None:
     response = await notebook.export_recording(1, format="txt")
 
     assert response.status_code == 200
-    assert response.headers["Content-Disposition"].endswith('_export.txt"')
+    # Issue #106: Content-Disposition now carries both an ASCII fallback and a
+    # UTF-8 RFC 6266 form, so the legacy filename="..." chunk is a substring
+    # rather than the entire trailing slice of the header.
+    assert '_export.txt"' in response.headers["Content-Disposition"]
     assert "TRANSCRIPTION EXPORT" in response.body.decode("utf-8")
 
 
@@ -105,10 +108,10 @@ async def test_timestamp_capable_note_subtitle_export_allowed(
     assert response.status_code == 200
     if fmt == "srt":
         assert "-->" in output
-        assert response.headers["Content-Disposition"].endswith('_export.srt"')
+        assert '_export.srt"' in response.headers["Content-Disposition"]
     else:
         assert "[Events]" in output
-        assert response.headers["Content-Disposition"].endswith('_export.ass"')
+        assert '_export.ass"' in response.headers["Content-Disposition"]
 
 
 @pytest.mark.asyncio
@@ -147,6 +150,43 @@ async def test_json_export_rejected_for_any_note() -> None:
         await notebook.export_recording(999, format="json")
 
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_export_with_greek_title_uses_rfc5987(monkeypatch) -> None:
+    """Issue #106: export Content-Disposition must survive non-ASCII titles."""
+    recording = {
+        "id": 3,
+        "title": "Συνομιλία",
+        "filename": "synomilia.mp3",
+        "recorded_at": "2026-01-10T11:00:00",
+        "duration_seconds": 12.0,
+        "word_count": 4,
+        "has_diarization": 0,
+        "summary": None,
+    }
+    segments = [
+        {
+            "segment_index": 0,
+            "text": "γειά σου κόσμε",
+            "start_time": 0.0,
+            "end_time": 12.0,
+            "speaker": None,
+        }
+    ]
+    _patch_notebook_data(monkeypatch, recording, segments, words=[])
+
+    response = await notebook.export_recording(3, format="txt")
+
+    assert response.status_code == 200
+    cd = response.headers["Content-Disposition"]
+    # ASCII fallback: 'Συνομιλία' (9 letters) → 9 '?' chars, then '_export.txt'.
+    assert 'filename="?????????_export.txt"' in cd
+    # UTF-8 form preserves the Greek title via percent-encoding.
+    assert "filename*=UTF-8''" in cd
+    assert "%CE%A3" in cd  # leading 'Σ' percent-encoded
+    # Header must round-trip through Latin-1 — Uvicorn's encoding requirement.
+    cd.encode("latin-1")
 
 
 # Issue #98 regression coverage: NULL numeric columns and unexpected exceptions
