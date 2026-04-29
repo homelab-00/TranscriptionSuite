@@ -149,6 +149,115 @@ export function checkVulkanSupport(
   return null;
 }
 
+// ─── GPU Preflight (NVIDIA, Linux) ─────────────────────────────────────────
+// Runs the cheap subset of scripts/diagnose-gpu.sh at dashboard startup so
+// the GpuHealthCard can warn about misconfigurations before the container
+// is started. Pure function — all OS access is injected for testability.
+
+export interface GpuPreflightCheck {
+  name: string;
+  pass: boolean;
+  /** Documented NVIDIA fix command. Present only when pass=false. */
+  fixCommand?: string;
+  /** External URL with more context. Present only when pass=false. */
+  docsUrl?: string;
+}
+
+export interface GpuPreflightResult {
+  status: 'healthy' | 'warning' | 'unknown';
+  checks: GpuPreflightCheck[];
+}
+
+export interface GpuPreflightDeps {
+  fsExists: (path: string) => boolean;
+  readDir: (path: string) => string[];
+  /** Returns mtime (epoch seconds) or null when the path cannot be stat'd. */
+  statMtime: (path: string) => number | null;
+  /** Returns lsmod stdout (one module name per line). Empty string on failure. */
+  runLsmod: () => string;
+}
+
+const NVIDIA_DRIVER_MTIME_PATHS: readonly string[] = ['/lib/modules', '/usr/lib/modules'];
+const CDI_SPEC_PATH = '/etc/cdi/nvidia.yaml';
+
+function newestDriverMtime(statMtime: GpuPreflightDeps['statMtime']): number | null {
+  // Conservative heuristic: try a handful of distro-typical roots. The actual
+  // recursive walk lives in the IPC handler — we just take what it produces.
+  let newest: number | null = null;
+  for (const root of NVIDIA_DRIVER_MTIME_PATHS) {
+    const mt = statMtime(root);
+    if (mt !== null && (newest === null || mt > newest)) {
+      newest = mt;
+    }
+  }
+  return newest;
+}
+
+export function validateGpuPreflight(
+  platform: NodeJS.Platform,
+  deps: GpuPreflightDeps,
+): GpuPreflightResult {
+  if (platform !== 'linux') {
+    return { status: 'unknown', checks: [] };
+  }
+
+  const checks: GpuPreflightCheck[] = [];
+
+  // Check 1: CDI spec exists
+  const cdiExists = deps.fsExists(CDI_SPEC_PATH);
+  checks.push({
+    name: 'CDI spec exists',
+    pass: cdiExists,
+    fixCommand: cdiExists ? undefined : `sudo nvidia-ctk cdi generate --output=${CDI_SPEC_PATH}`,
+    docsUrl: cdiExists
+      ? undefined
+      : 'https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html',
+  });
+
+  // Check 2: CDI spec newer than driver (only meaningful when both mtimes available)
+  const cdiMtime = cdiExists ? deps.statMtime(CDI_SPEC_PATH) : null;
+  const driverMtime = newestDriverMtime(deps.statMtime);
+  let cdiFresh = true;
+  if (cdiMtime !== null && driverMtime !== null && cdiMtime < driverMtime) {
+    cdiFresh = false;
+  }
+  checks.push({
+    name: 'CDI spec newer than driver',
+    pass: cdiFresh,
+    fixCommand: cdiFresh ? undefined : `sudo nvidia-ctk cdi generate --output=${CDI_SPEC_PATH}`,
+  });
+
+  // Check 3: /dev/char symlinks for major 195 (NVIDIA)
+  const charEntries = deps.fsExists('/dev/char') ? deps.readDir('/dev/char') : [];
+  const hasNvidiaSymlinks = charEntries.some((e) => e.startsWith('195:'));
+  checks.push({
+    name: '/dev/char NVIDIA symlinks',
+    pass: hasNvidiaSymlinks,
+    fixCommand: hasNvidiaSymlinks
+      ? undefined
+      : 'sudo nvidia-ctk system create-dev-char-symlinks --create-all',
+    docsUrl: hasNvidiaSymlinks
+      ? undefined
+      : 'https://github.com/NVIDIA/nvidia-container-toolkit/issues/48',
+  });
+
+  // Check 4: nvidia_uvm kernel module loaded
+  const lsmodLines = deps
+    .runLsmod()
+    .split('\n')
+    .map((l) => l.trim());
+  const uvmLoaded = lsmodLines.includes('nvidia_uvm');
+  checks.push({
+    name: 'nvidia_uvm module loaded',
+    pass: uvmLoaded,
+    fixCommand: uvmLoaded ? undefined : 'sudo modprobe nvidia_uvm',
+  });
+
+  const status: GpuPreflightResult['status'] = checks.every((c) => c.pass) ? 'healthy' : 'warning';
+
+  return { status, checks };
+}
+
 /**
  * Resolve compose directory.
  *
