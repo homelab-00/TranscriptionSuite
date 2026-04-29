@@ -514,6 +514,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             extra={
                 "error": gpu_health["error"],
                 "nvidia_smi": gpu_health.get("nvidia_smi", "N/A"),
+                "recovery_hint": gpu_health.get("recovery_hint"),
             },
         )
         app.state.gpu_error = gpu_health
