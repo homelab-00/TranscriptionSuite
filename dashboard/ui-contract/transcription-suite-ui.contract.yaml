@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.26
+  spec_version: 1.0.27
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -8,6 +8,7 @@ meta:
     source_files:
       - App.tsx
       - components/__tests__/AudioVisualizer.test.tsx
+      - components/__tests__/LogsView.test.tsx
       - components/__tests__/NotebookView.test.tsx
       - components/__tests__/ServerView.test.tsx
       - components/__tests__/SessionView.canary-language.test.tsx
@@ -34,11 +35,13 @@ meta:
       - components/ui/StatusLight.tsx
       - components/ui/UpdateBanner.tsx
       - components/ui/UpdateModal.tsx
+      - components/views/__tests__/GpuHealthCard.test.tsx
       - components/views/AboutModal.tsx
       - components/views/AddNoteModal.tsx
       - components/views/AudioNoteModal.tsx
       - components/views/BugReportModal.tsx
       - components/views/FullscreenVisualizer.tsx
+      - components/views/GpuHealthCard.tsx
       - components/views/LogsView.tsx
       - components/views/ModelManagerTab.tsx
       - components/views/ModelManagerView.tsx
@@ -53,7 +56,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-26T18:55:24.053Z
+    generated_at: 2026-04-29T06:01:02.317Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -97,10 +100,13 @@ foundation:
         - "#1886"
         - "#1e293b"
         - "#1e3a5f"
+        - "#1f8a3a"
+        - "#222"
         - "#22c55e"
         - "#22d3ee"
         - "#2563eb"
         - "#334155"
+        - "#3a1313"
         - "#3b82f6"
         - "#475569"
         - "#4ade80"
@@ -112,11 +118,15 @@ foundation:
         - "#7f1d1d"
         - "#818cf8"
         - "#86efac"
+        - "#888"
         - "#94a3b8"
         - "#a855f7"
+        - "#b53030"
+        - "#b88a00"
         - "#cbd5e1"
         - "#d946ef"
         - "#e2e8f0"
+        - "#eee"
         - "#ef4444"
         - "#f0abfc"
         - "#f43f5e"
@@ -124,6 +134,7 @@ foundation:
         - "#f97316"
         - "#fb7185"
         - "#fb923c"
+        - "#fbb"
         - "#fbbf24"
         - "#fca5a5"
         - "#fed7aa"
@@ -1085,20 +1096,33 @@ utility_allowlist:
     - w-[var(--button-width)]
 inline_style_allowlist:
   allowed_properties:
+    - alignItems
     - animation
     - animationDelay
+    - background
     - backgroundAttachment
     - backgroundColor
     - backgroundImage
     - backgroundSize
+    - border
+    - borderRadius
+    - color
     - containIntrinsicSize
     - contentVisibility
     - display
+    - flex
+    - fontSize
+    - fontWeight
+    - gap
     - gridTemplateRows
     - height
     - left
+    - marginBottom
+    - marginTop
     - maskImage
     - opacity
+    - overflowX
+    - padding
     - top
     - transform
     - undefined
@@ -1106,6 +1130,11 @@ inline_style_allowlist:
     - width
   allowed_literals:
     - "#0f172a"
+    - "#222"
+    - "#3a1313"
+    - "#888"
+    - "#eee"
+    - "#fbb"
     - ${100 / visibleSlots}%
     - ${item.progress}%
     - ${percent}%
@@ -1115,27 +1144,44 @@ inline_style_allowlist:
     - 0.4s
     - 0%
     - "1"
+    - "10"
     - "100"
     - 100%
+    - "12"
     - 120px
+    - "13"
     - 16%
     - 1px
+    - 1px solid ${STATE_COLOR[state]}
     - 1rem
     - 20px
     - 20px 20px
+    - "222"
     - "225"
     - "253"
+    - "3"
     - 30%
     - "339"
     - 39%
+    - "4"
     - 49%
+    - 4px
+    - 4px 8px
     - 50%
+    - "500"
+    - "6"
+    - "600"
     - 7%
+    - "8"
+    - "888"
+    - 8px
     - "90"
     - auto
     - auto 120px
     - auto repeat(${gridRows}, 1fr)
+    - center
     - fixed
+    - flex
     - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
     - linear-gradient(to bottom, black 50%, transparent 100%)
     - linear-gradient(to top, black 50%, transparent 100%)
@@ -1536,6 +1582,23 @@ component_contracts:
     state_rules:
       - id: open-accent
         rule: Open state title accent remains magenta and chevron rotates with white highlighted background.
+  CopyableCommand:
+    file: components/views/GpuHealthCard.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   CustomModelRow:
     file: components/views/ModelManagerTab.tsx
     required_tokens:
@@ -1657,6 +1720,23 @@ component_contracts:
     state_rules:
       - id: header-optional
         rule: Title/action header is optional but when present must retain h-14 bordered header pattern.
+  GpuHealthCard:
+    file: components/views/GpuHealthCard.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   HistoryPicker:
     file: components/views/NotebookView.tsx
     required_tokens:
