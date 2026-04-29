@@ -220,6 +220,57 @@ class TestCudaHealthCheck:
         mock_time.sleep.assert_called_once_with(0.5)
         assert mock_torch.cuda.init.call_count == 2
 
+    def test_error_999_unrecoverable_includes_recovery_hint(self):
+        """When error 999 fails all retries, result includes a recovery_hint."""
+        mock_torch = MagicMock()
+        mock_torch.cuda.init.side_effect = RuntimeError("CUDA unknown error")
+
+        with (
+            patch.object(au, "torch", mock_torch),
+            patch.object(au, "HAS_TORCH", True),
+            patch.object(au, "_capture_nvidia_smi", return_value="ok"),
+            patch.object(au, "time"),
+        ):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "unrecoverable"
+        hint = result.get("recovery_hint")
+        assert hint is not None
+        assert "error 999" in hint.lower() or "cuda unknown" in hint.lower()
+        assert "diagnose-gpu.sh" in hint
+
+    def test_error_999_recovered_omits_recovery_hint(self):
+        """If error 999 recovers on retry, no recovery_hint is added."""
+        mock_props = MagicMock()
+        mock_props.name = "NVIDIA RTX 3060"
+        mock_props.total_mem = 12 * 1024**3
+
+        mock_torch = MagicMock()
+        mock_torch.cuda.init.side_effect = [RuntimeError("CUDA unknown error"), None]
+        mock_torch.cuda.get_device_properties.return_value = mock_props
+
+        with (
+            patch.object(au, "torch", mock_torch),
+            patch.object(au, "HAS_TORCH", True),
+            patch.object(au, "time"),
+        ):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "healthy"
+        assert "recovery_hint" not in result
+
+    def test_non_999_unrecoverable_omits_recovery_hint(self):
+        """A non-999 error path that still yields a non-healthy status must not
+        carry the error-999-specific recovery_hint."""
+        mock_torch = MagicMock()
+        mock_torch.cuda.init.side_effect = RuntimeError("no CUDA-capable device")
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            result = au.cuda_health_check()
+
+        assert result["status"] == "no_cuda"
+        assert "recovery_hint" not in result
+
 
 # ── check_cuda_available with probe flag ─────────────────────────────────
 
