@@ -15,7 +15,7 @@
  *                 podman-compose.gpu.yml         (CDI device passthrough, Podman)
  */
 
-import { execFile, execFileSync, spawn, ChildProcess } from 'child_process';
+import { execFile, execFileSync, execSync, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -256,6 +256,106 @@ export function validateGpuPreflight(
   const status: GpuPreflightResult['status'] = checks.every((c) => c.pass) ? 'healthy' : 'warning';
 
   return { status, checks };
+}
+
+/**
+ * Real-OS wrapper around validateGpuPreflight() — used by the
+ * docker:validateGpuPreflight IPC handler. Kept separate from the pure
+ * function so tests can inject without touching fs/exec.
+ */
+export function runGpuPreflight(): GpuPreflightResult {
+  // Lazy-import fs so the unit tests can mock electron without dragging in
+  // real fs operations during validateGpuPreflight() unit tests.
+  // (validateGpuPreflight() itself is pure; this wrapper is the impure shell.)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require('fs') as typeof import('fs');
+
+  const deps: GpuPreflightDeps = {
+    fsExists: (p) => {
+      try {
+        return fs.existsSync(p);
+      } catch {
+        return false;
+      }
+    },
+    readDir: (p) => {
+      try {
+        return fs.readdirSync(p);
+      } catch {
+        return [];
+      }
+    },
+    statMtime: (p) => {
+      try {
+        // For driver-module roots, walk one level deep and find the newest
+        // nvidia*.ko* file mtime. (The bash diagnose script does the same.)
+        // For everything else, just stat the path itself.
+        if (p === '/lib/modules' || p === '/usr/lib/modules') {
+          return newestNvidiaKoMtime(p, fs);
+        }
+        return Math.floor(fs.statSync(p).mtimeMs / 1000);
+      } catch {
+        return null;
+      }
+    },
+    runLsmod: () => {
+      try {
+        // lsmod is column-formatted: "Module  Size  Used by". The pure
+        // function expects one module name per line. Extract column 1
+        // and skip the header row.
+        const raw = execSync('lsmod', { timeout: 2000, encoding: 'utf8' });
+        const lines = raw.split('\n');
+        return lines
+          .slice(1) // drop header
+          .map((line) => line.split(/\s+/)[0] ?? '')
+          .filter((name) => name.length > 0)
+          .join('\n');
+      } catch {
+        return '';
+      }
+    },
+  };
+
+  return validateGpuPreflight(process.platform, deps);
+}
+
+/**
+ * Recursively walk a kernel-module root looking for nvidia*.ko[.zst] files
+ * and return the newest mtime (epoch seconds), or null if none found.
+ * Bounded depth to avoid runaway walks.
+ */
+function newestNvidiaKoMtime(root: string, fs: typeof import('fs')): number | null {
+  let newest: number | null = null;
+  const stack: Array<{ path: string; depth: number }> = [{ path: root, depth: 0 }];
+  const MAX_DEPTH = 6;
+  while (stack.length > 0) {
+    const entry = stack.pop();
+    if (!entry || entry.depth > MAX_DEPTH) continue;
+    let children: string[];
+    try {
+      children = fs.readdirSync(entry.path);
+    } catch {
+      continue;
+    }
+    for (const name of children) {
+      const childPath = `${entry.path}/${name}`;
+      let stat;
+      try {
+        stat = fs.statSync(childPath);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        stack.push({ path: childPath, depth: entry.depth + 1 });
+      } else if (/^nvidia.*\.ko(\..*)?$/.test(name)) {
+        const epoch = Math.floor(stat.mtimeMs / 1000);
+        if (newest === null || epoch > newest) {
+          newest = epoch;
+        }
+      }
+    }
+  }
+  return newest;
 }
 
 /**
@@ -3113,6 +3213,7 @@ export const dockerManager = {
   retryDetection,
   getRuntimeKind,
   checkGpu,
+  runGpuPreflight,
   listImages,
   pullImage,
   cancelPull,

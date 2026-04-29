@@ -141,6 +141,15 @@ export interface ElectronAPI {
     getDetectionGuidance: () => Promise<string | null>;
     getComposeAvailable: () => Promise<boolean>;
     checkGpu: () => Promise<{ gpu: boolean; toolkit: boolean; vulkan: boolean }>;
+    validateGpuPreflight: () => Promise<{
+      status: 'healthy' | 'warning' | 'unknown';
+      checks: Array<{
+        name: string;
+        pass: boolean;
+        fixCommand?: string;
+        docsUrl?: string;
+      }>;
+    }>;
     listImages: () => Promise<
       Array<{ tag: string; fullName: string; size: string; created: string; id: string }>
     >;
@@ -473,6 +482,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('docker:getDetectionGuidance') as Promise<string | null>,
     getComposeAvailable: () => ipcRenderer.invoke('docker:getComposeAvailable') as Promise<boolean>,
     checkGpu: () => ipcRenderer.invoke('docker:checkGpu'),
+    validateGpuPreflight: () => ipcRenderer.invoke('docker:validateGpuPreflight'),
     listImages: () => ipcRenderer.invoke('docker:listImages'),
     listRemoteTags: () =>
       ipcRenderer.invoke('docker:listRemoteTags') as Promise<
