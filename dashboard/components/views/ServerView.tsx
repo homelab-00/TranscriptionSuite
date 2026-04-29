@@ -34,9 +34,11 @@ import { NvidiaIcon } from '../ui/icons/NvidiaIcon';
 import { AmdIcon } from '../ui/icons/AmdIcon';
 import { IntelIcon } from '../ui/icons/IntelIcon';
 import { AppleIcon } from '../ui/icons/AppleIcon';
+import { GpuHealthCard } from './GpuHealthCard';
 
 import { useActivityStore } from '../../src/stores/activityStore';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
+import { useServerStatus } from '../../src/hooks/useServerStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
@@ -1154,6 +1156,93 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     vulkan: boolean;
   } | null>(cachedGpuInfo ?? null);
 
+  // ─── GPU Health Card state (NVIDIA Linux only) ─────────────────────────────
+  // Phase 2 of the CUDA error 999 recovery plan. Three pieces of state feed the
+  // GpuHealthCard rendered below the setup checklist:
+  //   - gpuPreflight: result of dockerManager.validateGpuPreflight() — cheap
+  //     host checks (CDI spec, /dev/char symlinks, nvidia_uvm). Drives the
+  //     yellow "may be misconfigured" state when a check fails.
+  //   - gpuBackendError: structured object built from useServerStatus()'s
+  //     gpuError + gpuErrorRecoveryHint when /api/status reports a GPU failure.
+  //     Drives the red "fell back to CPU" state with the recovery hint visible.
+  //   - hostPlatform: read once from electronAPI.app.getPlatform() so the card
+  //     can gate on Linux without depending on navigator.platform (which may
+  //     report 'Linux x86_64' or be absent in jsdom test mounts).
+  const [gpuPreflight, setGpuPreflight] = useState<{
+    status: 'healthy' | 'warning' | 'unknown';
+    checks: Array<{
+      name: string;
+      pass: boolean;
+      fixCommand?: string;
+      docsUrl?: string;
+    }>;
+  } | null>(null);
+  const [gpuBackendError, setGpuBackendError] = useState<{
+    status: 'unrecoverable';
+    error: string;
+    recovery_hint?: string;
+  } | null>(null);
+  const [hostPlatform, setHostPlatform] = useState<string>('unknown');
+
+  // Subscribe to backend GPU error via the existing useServerStatus poll
+  // (polls /api/status every 10s through React Query). When the backend
+  // reports gpuError, build the structured object the GpuHealthCard expects.
+  // The recovery_hint is only present when cuda_health_check matched the
+  // error-999 fingerprint; we pass it through verbatim.
+  const { gpuError, gpuErrorRecoveryHint } = useServerStatus();
+  useEffect(() => {
+    if (gpuError) {
+      setGpuBackendError({
+        status: 'unrecoverable',
+        error: gpuError,
+        recovery_hint: gpuErrorRecoveryHint ?? undefined,
+      });
+    } else {
+      setGpuBackendError(null);
+    }
+  }, [gpuError, gpuErrorRecoveryHint]);
+
+  // Read host platform once via electronAPI bridge. Synchronous in production
+  // (preload returns process.platform directly); defaults to 'unknown' for
+  // jsdom/test mounts that don't expose getPlatform.
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    const getPlatformFn = api?.app?.getPlatform;
+    if (typeof getPlatformFn !== 'function') return;
+    try {
+      const p = getPlatformFn();
+      if (typeof p === 'string' && p) setHostPlatform(p);
+    } catch {
+      // Best-effort: leave hostPlatform as 'unknown'; card will not render.
+    }
+  }, []);
+
+  // Run-diagnostic handler for the "Run Full Diagnostic" button on the card.
+  // Invokes the docker:runGpuDiagnostic IPC (added in Task 10) which spawns
+  // scripts/diagnose-gpu.sh and returns the log path. Surfaces the result via
+  // window.alert as the simplest first-cut UI; can be promoted to a modal
+  // later if UX feedback warrants it.
+  const handleRunGpuDiagnostic = useCallback((): void => {
+    const api = (window as any).electronAPI;
+    if (!api?.docker?.runGpuDiagnostic) return;
+    api.docker
+      .runGpuDiagnostic()
+      .then((res: { status: string; logPath?: string; manualCommand?: string }) => {
+        if (res.status === 'started' && res.logPath) {
+          window.alert(
+            `GPU diagnostic started.\n\nLog file: ${res.logPath}\n\nTail it with:\n  tail -f "${res.logPath}"`,
+          );
+        } else if (res.status === 'script-missing' && res.manualCommand) {
+          window.alert(`Diagnostic script not bundled. Run it manually:\n\n  ${res.manualCommand}`);
+        } else if (res.status === 'unsupported') {
+          window.alert('GPU diagnostic is for Linux NVIDIA hosts only.');
+        }
+      })
+      .catch(() => {
+        window.alert('Failed to start GPU diagnostic — see console.');
+      });
+  }, []);
+
   // Load dismissed state and GPU info on mount (GPU check cached per session)
   useEffect(() => {
     const api = (window as any).electronAPI;
@@ -1209,6 +1298,17 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               api.config?.set('server.gpuAutoDetectDone', true);
             })
             .catch(() => {});
+          // Phase 2 GPU health: when an NVIDIA GPU was detected, run the cheap
+          // host-side preflight (CDI spec, /dev/char symlinks, nvidia_uvm,
+          // mtime drift). The result drives the GpuHealthCard yellow state.
+          // Silently no-op on non-Linux or when the IPC isn't exposed
+          // (older preload builds, jsdom test mounts).
+          if (info.gpu && api?.docker?.validateGpuPreflight) {
+            api.docker
+              .validateGpuPreflight()
+              .then((p: typeof gpuPreflight) => setGpuPreflight(p))
+              .catch(() => setGpuPreflight(null));
+          }
         })
         .catch(() => {
           cachedGpuInfo = null;
@@ -1482,6 +1582,23 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 </div>
               )}
             </div>
+          )}
+
+          {/*
+            GPU Health card (NVIDIA Linux only). Sits adjacent to the setup
+            checklist so all hardware/runtime status is colocated at the top
+            of the wizard. Self-gates: returns null when gpuDetected is false,
+            so the outer Linux + NVIDIA conditional is the authoritative gate.
+            See: dashboard/components/views/GpuHealthCard.tsx
+            Plan:  docs/superpowers/plans/2026-04-29-cuda-error-999-recovery.md
+          */}
+          {hostPlatform === 'linux' && (gpuInfo?.gpu ?? false) && (
+            <GpuHealthCard
+              gpuDetected={true}
+              preflight={gpuPreflight}
+              backendError={gpuBackendError}
+              onRunDiagnostic={handleRunGpuDiagnostic}
+            />
           )}
 
           {/* 1. Docker Image or Inference Server (metal) Card */}

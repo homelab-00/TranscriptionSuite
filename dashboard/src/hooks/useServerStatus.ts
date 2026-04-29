@@ -20,6 +20,12 @@ export interface ServerConnectionInfo {
   error: string | null;
   /** GPU error string when CUDA is in a failed state, null otherwise */
   gpuError: string | null;
+  /**
+   * Diagnostic recovery hint surfaced for the error-999 unrecoverable
+   * fingerprint. Present only when both `gpuError` is set and the backend
+   * matched the error-999 heuristic; null otherwise. Used by GpuHealthCard.
+   */
+  gpuErrorRecoveryHint: string | null;
   /** Force an immediate re-check */
   refresh: () => void;
 }
@@ -37,6 +43,7 @@ export function deriveStatus(
       ready: false,
       error: null,
       gpuError: null,
+      gpuErrorRecoveryHint: null,
     };
   }
 
@@ -50,6 +57,7 @@ export function deriveStatus(
       ready: false,
       error: result.error,
       gpuError: null,
+      gpuErrorRecoveryHint: null,
     };
   }
 
@@ -66,6 +74,7 @@ export function deriveStatus(
       ready: false,
       error: result.error,
       gpuError: result.status.gpu_error,
+      gpuErrorRecoveryHint: result.status.gpu_error_recovery_hint ?? null,
     };
   }
 
@@ -79,6 +88,7 @@ export function deriveStatus(
       ready: true,
       error: result.error,
       gpuError: null,
+      gpuErrorRecoveryHint: null,
     };
   }
 
@@ -91,6 +101,7 @@ export function deriveStatus(
     ready: false,
     error: result.error,
     gpuError: null,
+    gpuErrorRecoveryHint: null,
   };
 }
 
