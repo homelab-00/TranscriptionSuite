@@ -48,9 +48,9 @@ const STATE_LABEL: Record<CardState, string> = {
 };
 
 const STATE_CONTAINER: Record<CardState, string> = {
-  green: 'border-green-500/20 bg-green-500/5',
-  yellow: 'border-accent-orange/20 bg-accent-orange/5',
-  red: 'border-red-500/20 bg-red-500/5',
+  green: 'border-green-500/20 bg-green-500/10',
+  yellow: 'border-accent-orange/20 bg-accent-orange/10',
+  red: 'border-red-500/20 bg-red-500/10',
 };
 
 const STATE_BODY_TEXT: Record<CardState, string> = {

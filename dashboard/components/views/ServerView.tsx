@@ -1492,7 +1492,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           {/* Setup checklist — shown on first run or when prerequisites are missing */}
           {showChecklist && (
             <div
-              className={`overflow-hidden rounded-xl border transition-all duration-300 ${allPassed ? 'border-green-500/20 bg-green-500/5' : 'border-accent-orange/20 bg-accent-orange/5'}`}
+              className={`overflow-hidden rounded-xl border transition-all duration-300 ${allPassed ? 'border-green-500/20 bg-green-500/10' : 'border-accent-orange/20 bg-accent-orange/10'}`}
             >
               <button
                 onClick={() => setSetupExpanded(!setupExpanded)}

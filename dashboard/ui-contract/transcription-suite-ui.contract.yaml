@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.33
+  spec_version: 1.0.34
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -58,7 +58,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-29T16:22:32.485Z
+    generated_at: 2026-04-29T17:21:15.825Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -440,7 +440,6 @@ utility_allowlist:
     - bg-accent-magenta/10
     - bg-accent-orange
     - bg-accent-orange/10
-    - bg-accent-orange/5
     - bg-accent-rose/5
     - bg-amber-400/10
     - bg-amber-400/20
@@ -469,7 +468,6 @@ utility_allowlist:
     - bg-glass-surface
     - bg-green-500
     - bg-green-500/10
-    - bg-green-500/5
     - bg-linear-to-b
     - bg-linear-to-br
     - bg-linear-to-r
