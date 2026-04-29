@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.27
+  spec_version: 1.0.28
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -56,7 +56,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-29T06:01:02.317Z
+    generated_at: 2026-04-29T06:09:26.668Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -100,13 +100,10 @@ foundation:
         - "#1886"
         - "#1e293b"
         - "#1e3a5f"
-        - "#1f8a3a"
-        - "#222"
         - "#22c55e"
         - "#22d3ee"
         - "#2563eb"
         - "#334155"
-        - "#3a1313"
         - "#3b82f6"
         - "#475569"
         - "#4ade80"
@@ -118,15 +115,11 @@ foundation:
         - "#7f1d1d"
         - "#818cf8"
         - "#86efac"
-        - "#888"
         - "#94a3b8"
         - "#a855f7"
-        - "#b53030"
-        - "#b88a00"
         - "#cbd5e1"
         - "#d946ef"
         - "#e2e8f0"
-        - "#eee"
         - "#ef4444"
         - "#f0abfc"
         - "#f43f5e"
@@ -134,7 +127,6 @@ foundation:
         - "#f97316"
         - "#fb7185"
         - "#fb923c"
-        - "#fbb"
         - "#fbbf24"
         - "#fca5a5"
         - "#fed7aa"
@@ -477,6 +469,8 @@ utility_allowlist:
     - bg-linear-to-br
     - bg-linear-to-r
     - bg-linear-to-t
+    - bg-neutral-700
+    - bg-neutral-900
     - bg-orange-500
     - bg-orange-500/10
     - bg-purple-500
@@ -486,6 +480,7 @@ utility_allowlist:
     - bg-red-500/10
     - bg-red-500/25
     - bg-red-500/5
+    - bg-red-900/50
     - bg-slate-400/10
     - bg-slate-500
     - bg-slate-500/10
@@ -524,6 +519,7 @@ utility_allowlist:
     - border-amber-400/40
     - border-amber-500/20
     - border-amber-500/30
+    - border-amber-600
     - border-b
     - border-b-2
     - border-blue-500/20
@@ -533,6 +529,7 @@ utility_allowlist:
     - border-glass-100
     - border-glass-border
     - border-green-500/30
+    - border-green-600
     - border-l
     - border-l-2
     - border-l-accent-magenta
@@ -549,6 +546,7 @@ utility_allowlist:
     - border-red-400/40
     - border-red-500/20
     - border-red-500/25
+    - border-red-700
     - border-slate-400/30
     - border-slate-900
     - border-t
@@ -662,6 +660,7 @@ utility_allowlist:
     - hover:bg-cyan-400/30
     - hover:bg-glass-100
     - hover:bg-glass-300
+    - hover:bg-neutral-600
     - hover:bg-red-500/10
     - hover:bg-red-500/20
     - hover:bg-red-500/35
@@ -740,6 +739,7 @@ utility_allowlist:
     - mb-1
     - mb-1.5
     - mb-2
+    - mb-2.5
     - mb-3
     - mb-4
     - mb-6
@@ -770,6 +770,7 @@ utility_allowlist:
     - mr-1.5
     - mr-2
     - mr-4
+    - mt-0
     - mt-0.5
     - mt-1
     - mt-1.5
@@ -948,6 +949,7 @@ utility_allowlist:
     - text-amber-400
     - text-amber-400/60
     - text-amber-400/80
+    - text-amber-600
     - text-base
     - text-black
     - text-blue-400
@@ -958,17 +960,22 @@ utility_allowlist:
     - text-emerald-400
     - text-green-400
     - text-green-400/70
+    - text-green-600
     - text-indigo-400
     - text-left
     - text-lg
+    - text-neutral-100
+    - text-neutral-400
     - text-orange-400
     - text-orange-500
     - text-purple-400
     - text-red-100
+    - text-red-200
     - text-red-200/90
     - text-red-300
     - text-red-400
     - text-red-400/80
+    - text-red-700
     - text-right
     - text-slate-200
     - text-slate-300
@@ -1096,33 +1103,20 @@ utility_allowlist:
     - w-[var(--button-width)]
 inline_style_allowlist:
   allowed_properties:
-    - alignItems
     - animation
     - animationDelay
-    - background
     - backgroundAttachment
     - backgroundColor
     - backgroundImage
     - backgroundSize
-    - border
-    - borderRadius
-    - color
     - containIntrinsicSize
     - contentVisibility
     - display
-    - flex
-    - fontSize
-    - fontWeight
-    - gap
     - gridTemplateRows
     - height
     - left
-    - marginBottom
-    - marginTop
     - maskImage
     - opacity
-    - overflowX
-    - padding
     - top
     - transform
     - undefined
@@ -1130,11 +1124,6 @@ inline_style_allowlist:
     - width
   allowed_literals:
     - "#0f172a"
-    - "#222"
-    - "#3a1313"
-    - "#888"
-    - "#eee"
-    - "#fbb"
     - ${100 / visibleSlots}%
     - ${item.progress}%
     - ${percent}%
@@ -1144,44 +1133,27 @@ inline_style_allowlist:
     - 0.4s
     - 0%
     - "1"
-    - "10"
     - "100"
     - 100%
-    - "12"
     - 120px
-    - "13"
     - 16%
     - 1px
-    - 1px solid ${STATE_COLOR[state]}
     - 1rem
     - 20px
     - 20px 20px
-    - "222"
     - "225"
     - "253"
-    - "3"
     - 30%
     - "339"
     - 39%
-    - "4"
     - 49%
-    - 4px
-    - 4px 8px
     - 50%
-    - "500"
-    - "6"
-    - "600"
     - 7%
-    - "8"
-    - "888"
-    - 8px
     - "90"
     - auto
     - auto 120px
     - auto repeat(${gridRows}, 1fr)
-    - center
     - fixed
-    - flex
     - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
     - linear-gradient(to bottom, black 50%, transparent 100%)
     - linear-gradient(to top, black 50%, transparent 100%)

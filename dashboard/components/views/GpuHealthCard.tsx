@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Button } from '../ui/Button';
+import { writeToClipboard } from '../../src/hooks/useClipboard';
 
 export interface GpuPreflightCheckProp {
   name: string;
@@ -42,36 +44,50 @@ const STATE_LABEL: Record<CardState, string> = {
   red: 'GPU unavailable — fell back to CPU',
 };
 
-const STATE_COLOR: Record<CardState, string> = {
-  green: '#1f8a3a',
-  yellow: '#b88a00',
-  red: '#b53030',
+const STATE_BORDER: Record<CardState, string> = {
+  green: 'border-green-600',
+  yellow: 'border-amber-600',
+  red: 'border-red-700',
+};
+
+const STATE_TEXT: Record<CardState, string> = {
+  green: 'text-green-600',
+  yellow: 'text-amber-600',
+  red: 'text-red-700',
 };
 
 function CopyableCommand({ cmd }: { cmd: string }): React.ReactElement {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<number | undefined>(undefined);
+
   const handleCopy = (): void => {
-    void navigator.clipboard.writeText(cmd).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    });
+    writeToClipboard(cmd)
+      .then(() => {
+        setCopied(true);
+        if (timerRef.current) window.clearTimeout(timerRef.current);
+        timerRef.current = window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {
+        /* silent — matches LogsView pattern */
+      });
   };
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-      <code
-        style={{
-          padding: '4px 8px',
-          background: '#222',
-          color: '#eee',
-          borderRadius: 4,
-          fontSize: 12,
-          flex: 1,
-          overflowX: 'auto',
-        }}
-      >
+    <div className="mt-1 flex items-center gap-2">
+      <code className="flex-1 overflow-x-auto rounded bg-neutral-900 px-2 py-1 text-xs text-neutral-100">
         {cmd}
       </code>
-      <button type="button" onClick={handleCopy} style={{ fontSize: 12 }}>
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="rounded bg-neutral-700 px-2 py-1 text-xs text-neutral-100 hover:bg-neutral-600"
+      >
         {copied ? 'Copied' : 'Copy'}
       </button>
     </div>
@@ -92,43 +108,30 @@ export function GpuHealthCard({
   return (
     <section
       aria-labelledby="gpu-health-title"
-      style={{
-        border: `1px solid ${STATE_COLOR[state]}`,
-        borderRadius: 6,
-        padding: 12,
-        marginTop: 12,
-      }}
+      className={`mt-3 rounded-md border p-3 ${STATE_BORDER[state]}`}
     >
-      <h3 id="gpu-health-title" style={{ marginTop: 0, color: STATE_COLOR[state] }}>
+      <h3 id="gpu-health-title" className={`mt-0 ${STATE_TEXT[state]}`}>
         GPU Health (NVIDIA)
       </h3>
-      <p style={{ fontSize: 12, marginTop: 0, color: '#888' }}>
+      <p className="mt-0 text-xs text-neutral-400">
         This card appears only on systems with an NVIDIA GPU. AMD / Intel / Apple Silicon setups do
         not need it.
       </p>
 
-      <p style={{ fontWeight: 600 }}>{STATE_LABEL[state]}</p>
+      <p className="font-semibold">{STATE_LABEL[state]}</p>
 
       {state === 'red' && backendError?.recovery_hint ? (
-        <p
-          style={{
-            background: '#3a1313',
-            padding: 8,
-            borderRadius: 4,
-            color: '#fbb',
-            fontSize: 13,
-          }}
-        >
+        <p className="rounded bg-red-900/50 p-2 text-sm text-red-200">
           {backendError.recovery_hint}
         </p>
       ) : null}
 
       {failedChecks.length > 0 ? (
-        <div style={{ marginTop: 12 }}>
-          <p style={{ marginBottom: 4, fontWeight: 500 }}>Failing checks:</p>
+        <div className="mt-3">
+          <p className="mb-1 font-medium">Failing checks:</p>
           {failedChecks.map((check) => (
-            <div key={check.name} style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 13 }}>
+            <div key={check.name} className="mb-2.5">
+              <div className="text-sm">
                 ✗ {check.name}
                 {check.docsUrl ? (
                   <>
@@ -145,10 +148,10 @@ export function GpuHealthCard({
         </div>
       ) : null}
 
-      <div style={{ marginTop: 12 }}>
-        <button type="button" onClick={onRunDiagnostic}>
+      <div className="mt-3">
+        <Button variant="secondary" size="sm" onClick={onRunDiagnostic}>
           Run Full Diagnostic
-        </button>
+        </Button>
       </div>
     </section>
   );
