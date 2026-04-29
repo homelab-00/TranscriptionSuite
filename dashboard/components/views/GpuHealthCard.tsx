@@ -25,6 +25,8 @@ export interface GpuHealthCardProps {
   preflight: GpuPreflightProp | null;
   backendError: GpuBackendErrorProp | null;
   onRunDiagnostic: () => void;
+  /** When true, the Run Full Diagnostic button is disabled and shows a "Running…" label. */
+  running?: boolean;
 }
 
 type CardState = 'green' | 'yellow' | 'red';
@@ -99,6 +101,7 @@ export function GpuHealthCard({
   preflight,
   backendError,
   onRunDiagnostic,
+  running = false,
 }: GpuHealthCardProps): React.ReactElement | null {
   if (!gpuDetected) return null;
 
@@ -149,8 +152,8 @@ export function GpuHealthCard({
       ) : null}
 
       <div className="mt-3">
-        <Button variant="secondary" size="sm" onClick={onRunDiagnostic}>
-          Run Full Diagnostic
+        <Button variant="secondary" size="sm" onClick={onRunDiagnostic} disabled={running}>
+          {running ? 'Running diagnostic…' : 'Run Full Diagnostic'}
         </Button>
       </div>
     </section>
