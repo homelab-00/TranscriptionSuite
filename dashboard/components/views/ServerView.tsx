@@ -35,6 +35,7 @@ import { AmdIcon } from '../ui/icons/AmdIcon';
 import { IntelIcon } from '../ui/icons/IntelIcon';
 import { AppleIcon } from '../ui/icons/AppleIcon';
 import { GpuHealthCard } from './GpuHealthCard';
+import { GpuDiagnosticModal, type GpuDiagnosticResultProp } from './GpuDiagnosticModal';
 
 import { useActivityStore } from '../../src/stores/activityStore';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
@@ -1218,29 +1219,38 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   }, []);
 
   // Run-diagnostic handler for the "Run Full Diagnostic" button on the card.
-  // Invokes the docker:runGpuDiagnostic IPC (added in Task 10) which spawns
-  // scripts/diagnose-gpu.sh and returns the log path. Surfaces the result via
-  // window.alert as the simplest first-cut UI; can be promoted to a modal
-  // later if UX feedback warrants it.
+  // Awaits the docker:runGpuDiagnostic IPC, which spawns scripts/diagnose-gpu.sh,
+  // waits for it to finish, parses the log, and returns a structured summary.
+  // Result is surfaced in <GpuDiagnosticModal> below — replaces the original
+  // window.alert flow.
+  const [diagnosticRunning, setDiagnosticRunning] = useState(false);
+  const [diagnosticResult, setDiagnosticResult] = useState<GpuDiagnosticResultProp | null>(null);
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false);
+
   const handleRunGpuDiagnostic = useCallback((): void => {
     const api = (window as any).electronAPI;
-    if (!api?.docker?.runGpuDiagnostic) return;
+    if (!api?.docker?.runGpuDiagnostic || diagnosticRunning) return;
+    setDiagnosticRunning(true);
     api.docker
       .runGpuDiagnostic()
-      .then((res: { status: string; logPath?: string; manualCommand?: string }) => {
-        if (res.status === 'started' && res.logPath) {
-          window.alert(
-            `GPU diagnostic started.\n\nLog file: ${res.logPath}\n\nTail it with:\n  tail -f "${res.logPath}"`,
-          );
-        } else if (res.status === 'script-missing' && res.manualCommand) {
-          window.alert(`Diagnostic script not bundled. Run it manually:\n\n  ${res.manualCommand}`);
-        } else if (res.status === 'unsupported') {
-          window.alert('GPU diagnostic is for Linux NVIDIA hosts only.');
+      .then((res: GpuDiagnosticResultProp) => {
+        if (res.status === 'unsupported') {
+          toast.message('GPU diagnostic is for Linux NVIDIA hosts only.');
+          return;
         }
+        setDiagnosticResult(res);
+        setDiagnosticOpen(true);
       })
       .catch(() => {
-        window.alert('Failed to start GPU diagnostic — see console.');
+        toast.error('Failed to run GPU diagnostic — see console.');
+      })
+      .finally(() => {
+        setDiagnosticRunning(false);
       });
+  }, [diagnosticRunning]);
+
+  const handleCloseDiagnostic = useCallback((): void => {
+    setDiagnosticOpen(false);
   }, []);
 
   // Load dismissed state and GPU info on mount (GPU check cached per session)
@@ -1482,7 +1492,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           {/* Setup checklist — shown on first run or when prerequisites are missing */}
           {showChecklist && (
             <div
-              className={`overflow-hidden rounded-xl border transition-all duration-300 ${allPassed ? 'border-green-500/20 bg-green-500/5' : 'border-accent-orange/20 bg-accent-orange/5'}`}
+              className={`overflow-hidden rounded-xl border transition-all duration-300 ${allPassed ? 'border-green-500/20 bg-green-500/10' : 'border-accent-orange/20 bg-accent-orange/10'}`}
             >
               <button
                 onClick={() => setSetupExpanded(!setupExpanded)}
@@ -1600,8 +1610,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               preflight={gpuPreflight}
               backendError={gpuBackendError}
               onRunDiagnostic={handleRunGpuDiagnostic}
+              running={diagnosticRunning}
             />
           )}
+
+          <GpuDiagnosticModal
+            isOpen={diagnosticOpen}
+            result={diagnosticResult}
+            onClose={handleCloseDiagnostic}
+          />
 
           {/* 1. Docker Image or Inference Server (metal) Card */}
           {runtimeProfile === 'metal' ? (

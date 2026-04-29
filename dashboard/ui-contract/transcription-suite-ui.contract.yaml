@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.30
+  spec_version: 1.0.34
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -35,12 +35,14 @@ meta:
       - components/ui/StatusLight.tsx
       - components/ui/UpdateBanner.tsx
       - components/ui/UpdateModal.tsx
+      - components/views/__tests__/GpuDiagnosticModal.test.tsx
       - components/views/__tests__/GpuHealthCard.test.tsx
       - components/views/AboutModal.tsx
       - components/views/AddNoteModal.tsx
       - components/views/AudioNoteModal.tsx
       - components/views/BugReportModal.tsx
       - components/views/FullscreenVisualizer.tsx
+      - components/views/GpuDiagnosticModal.tsx
       - components/views/GpuHealthCard.tsx
       - components/views/LogsView.tsx
       - components/views/ModelManagerTab.tsx
@@ -56,7 +58,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-29T11:50:14.967Z
+    generated_at: 2026-04-29T17:21:15.825Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -302,6 +304,7 @@ foundation:
         - h-[85%]
         - h-[85vh]
         - max-h-[80vh]
+        - max-h-[90vh]
         - max-w-[55%]
         - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
@@ -480,7 +483,6 @@ utility_allowlist:
     - bg-red-500/10
     - bg-red-500/25
     - bg-red-500/5
-    - bg-red-900/50
     - bg-slate-400/10
     - bg-slate-500
     - bg-slate-500/10
@@ -519,7 +521,6 @@ utility_allowlist:
     - border-amber-400/40
     - border-amber-500/20
     - border-amber-500/30
-    - border-amber-600
     - border-b
     - border-b-2
     - border-blue-500/20
@@ -528,8 +529,8 @@ utility_allowlist:
     - border-emerald-400/40
     - border-glass-100
     - border-glass-border
+    - border-green-500/20
     - border-green-500/30
-    - border-green-600
     - border-l
     - border-l-2
     - border-l-accent-magenta
@@ -546,7 +547,6 @@ utility_allowlist:
     - border-red-400/40
     - border-red-500/20
     - border-red-500/25
-    - border-red-700
     - border-slate-400/30
     - border-slate-900
     - border-t
@@ -585,6 +585,7 @@ utility_allowlist:
     - flex-none
     - flex-nowrap
     - flex-row-reverse
+    - flex-shrink-0
     - flex-wrap
     - font-bold
     - font-light
@@ -718,6 +719,7 @@ utility_allowlist:
     - lg:p-10
     - lg:p-8
     - line-clamp-2
+    - m-0
     - mask-gradient-right
     - max-h-32
     - max-h-40
@@ -770,7 +772,6 @@ utility_allowlist:
     - mr-1.5
     - mr-2
     - mr-4
-    - mt-0
     - mt-0.5
     - mt-1
     - mt-1.5
@@ -949,7 +950,6 @@ utility_allowlist:
     - text-amber-400
     - text-amber-400/60
     - text-amber-400/80
-    - text-amber-600
     - text-base
     - text-black
     - text-blue-400
@@ -960,12 +960,10 @@ utility_allowlist:
     - text-emerald-400
     - text-green-400
     - text-green-400/70
-    - text-green-600
     - text-indigo-400
     - text-left
     - text-lg
     - text-neutral-100
-    - text-neutral-400
     - text-orange-400
     - text-orange-500
     - text-purple-400
@@ -975,7 +973,6 @@ utility_allowlist:
     - text-red-300
     - text-red-400
     - text-red-400/80
-    - text-red-700
     - text-right
     - text-slate-200
     - text-slate-300
@@ -1075,6 +1072,7 @@ utility_allowlist:
     - h-[85%]
     - h-[85vh]
     - max-h-[80vh]
+    - max-h-[90vh]
     - max-w-[55%]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]
@@ -1692,6 +1690,23 @@ component_contracts:
     state_rules:
       - id: header-optional
         rule: Title/action header is optional but when present must retain h-14 bordered header pattern.
+  GpuDiagnosticModal:
+    file: components/views/GpuDiagnosticModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   GpuHealthCard:
     file: components/views/GpuHealthCard.tsx
     required_tokens:
@@ -1796,6 +1811,23 @@ component_contracts:
         rule: Speaker diarization and word timestamp option switches remain present in fixed order.
   IntelIcon:
     file: components/ui/icons/IntelIcon.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  IssueRow:
+    file: components/views/GpuDiagnosticModal.tsx
     required_tokens:
       - colors
       - motion
@@ -2228,6 +2260,23 @@ component_contracts:
         rule: Session, notebook, and server nav items retain StatusLight indicators, with notebook status sharing the server status source.
   StarPopupModal:
     file: components/views/StarPopupModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  StateIcon:
+    file: components/views/GpuHealthCard.tsx
     required_tokens:
       - colors
       - motion

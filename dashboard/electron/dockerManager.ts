@@ -264,12 +264,11 @@ export function validateGpuPreflight(
  * function so tests can inject without touching fs/exec.
  */
 export function runGpuPreflight(): GpuPreflightResult {
-  // Lazy-import fs so the unit tests can mock electron without dragging in
-  // real fs operations during validateGpuPreflight() unit tests.
-  // (validateGpuPreflight() itself is pure; this wrapper is the impure shell.)
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const fs = require('fs') as typeof import('fs');
-
+  // Use the top-level ESM `fs` import. Electron's main process is bundled as
+  // ESM (electron/tsconfig.json: module=ESNext), so CommonJS `require()` is
+  // not defined at runtime in the packaged AppImage and was throwing
+  // ReferenceError here. validateGpuPreflight() itself stays pure — this
+  // impure wrapper just hands the real fs into the dep struct.
   const deps: GpuPreflightDeps = {
     fsExists: (p) => {
       try {
@@ -319,14 +318,42 @@ export function runGpuPreflight(): GpuPreflightResult {
   return validateGpuPreflight(process.platform, deps);
 }
 
+/**
+ * One row parsed from `[STATUS] #N  Title  detail` in the diagnostic log.
+ * `suggestedCommand` is extracted from `regenerate with: <cmd>` or `fix: <cmd>`
+ * fragments inside `detail`, so the UI can render a copyable command without
+ * the user having to scrape the log themselves.
+ */
+export interface DiagnosticIssue {
+  status: 'PASS' | 'WARN' | 'FAIL' | 'INFO';
+  checkNumber: number;
+  title: string;
+  detail: string;
+  suggestedCommand?: string;
+}
+
+export interface DiagnosticSummary {
+  passCount: number;
+  warnCount: number;
+  failCount: number;
+  /** Only WARN + FAIL rows — what the UI surfaces. */
+  issues: DiagnosticIssue[];
+  /** True when the canonical `PASS: N WARN: N FAIL: N` summary block was found. */
+  parsed: boolean;
+}
+
 export interface RunGpuDiagnosticResult {
-  status: 'started' | 'unsupported' | 'script-missing';
-  /** Absolute path to the log file the script writes (when status=started). */
+  status: 'completed' | 'unsupported' | 'script-missing';
+  /** Absolute path to the log file the script writes (when status=completed). */
   logPath?: string;
-  /** Resolved script path (always present for status=started or script-missing). */
+  /** Resolved script path (always present for status=completed or script-missing). */
   scriptPath?: string;
   /** The exact command string the user could run themselves. */
   manualCommand?: string;
+  /** Parsed log summary (when status=completed). */
+  summary?: DiagnosticSummary;
+  /** Bash exit code (0 = OK / WARN; non-zero = FAIL). Present when status=completed. */
+  exitCode?: number;
 }
 
 function resolveDiagnosticScriptPath(): string {
@@ -339,7 +366,80 @@ function resolveDiagnosticScriptPath(): string {
   return path.resolve(__dirname, '..', '..', 'scripts', 'diagnose-gpu.sh');
 }
 
-export function runGpuDiagnostic(): RunGpuDiagnosticResult {
+// Each diagnostic check line has shape:
+//   [STATUS] #N  Title (≤50 col, padded)  detail
+// `printf '[%s] #%-2s %-50s %s\n'` in the bash script — the %-50s padding
+// guarantees ≥2 spaces between title and detail for every title currently
+// emitted by scripts/diagnose-gpu.sh (max title ~36 chars; budget is 50).
+// We deliberately DO NOT support titles that hit the 50-char budget exactly:
+// using `\s+` instead of `\s{2,}` would let the lazy title group stop at
+// the first space and break titles that contain spaces themselves.
+const DIAG_ROW_RE = /^\[(PASS|WARN|FAIL|INFO)\]\s+#(\d+)\s+(.+?)\s{2,}(.*)$/;
+// Pull the actionable command out of detail strings like
+//   "CDI spec is older than driver modules — regenerate with: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml"
+//   "missing — fix: sudo nvidia-ctk system create-dev-char-symlinks --create-all (also add udev rule per …)"
+// Stops at " (" to drop trailing parentheticals; otherwise consumes to EOL.
+const DIAG_CMD_RE = /\b(?:regenerate with|fix):\s+(.+?)(?:\s+\([^)]*\)\s*$|\s*$)/i;
+const DIAG_SUMMARY_RE = /^PASS:\s*(\d+)\s+WARN:\s*(\d+)\s+FAIL:\s*(\d+)\s*$/m;
+
+/**
+ * Pure parser for `scripts/diagnose-gpu.sh` log output. Exported so the unit
+ * tests can hit it without spawning bash. WARN and FAIL rows are surfaced;
+ * PASS/INFO rows are counted only.
+ */
+export function parseDiagnosticLog(content: string): DiagnosticSummary {
+  const issues: DiagnosticIssue[] = [];
+  let passCount = 0;
+  let warnCount = 0;
+  let failCount = 0;
+  let parsed = false;
+
+  const summaryMatch = content.match(DIAG_SUMMARY_RE);
+  if (summaryMatch) {
+    parsed = true;
+    passCount = Number(summaryMatch[1]);
+    warnCount = Number(summaryMatch[2]);
+    failCount = Number(summaryMatch[3]);
+  }
+
+  for (const rawLine of content.split('\n')) {
+    const m = DIAG_ROW_RE.exec(rawLine);
+    if (!m) continue;
+    const [, status, num, title, detail] = m as unknown as [
+      string,
+      DiagnosticIssue['status'],
+      string,
+      string,
+      string,
+    ];
+    if (status === 'PASS' || status === 'INFO') continue;
+    const cmdMatch = DIAG_CMD_RE.exec(detail);
+    issues.push({
+      status: status as DiagnosticIssue['status'],
+      checkNumber: Number(num),
+      title: title.trim(),
+      detail: detail.trim(),
+      suggestedCommand: cmdMatch ? cmdMatch[1].trim() : undefined,
+    });
+  }
+
+  // Fallback when the canonical Summary block is missing: count what we saw
+  // ourselves so the modal still shows something useful.
+  if (!parsed) {
+    for (const rawLine of content.split('\n')) {
+      const m = DIAG_ROW_RE.exec(rawLine);
+      if (!m) continue;
+      const status = m[1];
+      if (status === 'PASS') passCount++;
+      else if (status === 'WARN') warnCount++;
+      else if (status === 'FAIL') failCount++;
+    }
+  }
+
+  return { passCount, warnCount, failCount, issues, parsed };
+}
+
+export async function runGpuDiagnostic(): Promise<RunGpuDiagnosticResult> {
   if (process.platform !== 'linux') {
     return { status: 'unsupported' };
   }
@@ -363,20 +463,63 @@ export function runGpuDiagnostic(): RunGpuDiagnosticResult {
   const ts = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
   const suffix = crypto.randomBytes(3).toString('hex');
   const logPath = path.join(dir, `gpu-diagnostic-${ts}-${suffix}.log`);
-  const out = fs.openSync(logPath, 'wx', 0o600);
 
-  const child = spawn('bash', [scriptPath], {
-    stdio: ['ignore', out, out],
-    detached: true,
-    cwd: dir,
+  // Wait for the child to exit so the renderer can show parsed results in
+  // one go. The script is read-only and bounded (~11 cheap checks, no docker
+  // pulls — image-pull guard is already inside the script). Typical wall
+  // time on a healthy host is <2s; the renderer shows a "Running…" spinner
+  // while we await.
+  //
+  // Open the fd inside the Promise so a synchronous open() failure or a
+  // 'error' event from spawn (e.g. bash not on PATH) still hits the cleanup
+  // path — out-of-scope of the original closeSync block, which only ran on
+  // 'exit'. Otherwise an 'error' before 'exit' would leak the fd.
+  const exitCode: number = await new Promise((resolve) => {
+    let out: number | undefined;
+    try {
+      out = fs.openSync(logPath, 'wx', 0o600);
+    } catch {
+      resolve(-1);
+      return;
+    }
+    const cleanup = (): void => {
+      if (out === undefined) return;
+      try {
+        fs.closeSync(out);
+      } catch {
+        // Best-effort — stdio inheritance may have already closed it.
+      }
+      out = undefined;
+    };
+    const child = spawn('bash', [scriptPath], {
+      stdio: ['ignore', out, out],
+      cwd: dir,
+    });
+    child.on('exit', (code) => {
+      cleanup();
+      resolve(code ?? 0);
+    });
+    child.on('error', () => {
+      cleanup();
+      resolve(-1);
+    });
   });
-  child.unref();
+
+  let summary: DiagnosticSummary;
+  try {
+    const content = await fs.promises.readFile(logPath, 'utf-8');
+    summary = parseDiagnosticLog(content);
+  } catch {
+    summary = { passCount: 0, warnCount: 0, failCount: 0, issues: [], parsed: false };
+  }
 
   return {
-    status: 'started',
+    status: 'completed',
     logPath,
     scriptPath,
     manualCommand: `bash ${scriptPath}`,
+    summary,
+    exitCode,
   };
 }
 

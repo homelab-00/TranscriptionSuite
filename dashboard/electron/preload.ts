@@ -151,10 +151,24 @@ export interface ElectronAPI {
       }>;
     }>;
     runGpuDiagnostic: () => Promise<{
-      status: 'started' | 'unsupported' | 'script-missing';
+      status: 'completed' | 'unsupported' | 'script-missing';
       logPath?: string;
       scriptPath?: string;
       manualCommand?: string;
+      summary?: {
+        passCount: number;
+        warnCount: number;
+        failCount: number;
+        parsed: boolean;
+        issues: Array<{
+          status: 'PASS' | 'WARN' | 'FAIL' | 'INFO';
+          checkNumber: number;
+          title: string;
+          detail: string;
+          suggestedCommand?: string;
+        }>;
+      };
+      exitCode?: number;
     }>;
     listImages: () => Promise<
       Array<{ tag: string; fullName: string; size: string; created: string; id: string }>

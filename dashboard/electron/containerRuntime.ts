@@ -16,7 +16,7 @@
 import { execFile } from 'child_process';
 import net from 'net';
 import { promisify } from 'util';
-import { existsSync } from 'fs';
+import { existsSync, accessSync, constants as fsConstants } from 'fs';
 import path from 'path';
 
 const execFileAsync = promisify(execFile);
@@ -360,11 +360,13 @@ export function resolveRootlessSocket(
 
   if (!existsSync(userSocket)) return null;
 
-  // Only use rootless socket if system socket is not accessible
+  // Only use rootless socket if system socket is not accessible.
+  // Use the top-level ESM imports — `require()` is not defined when the
+  // electron main process is packaged as ESM and silently failed here,
+  // forcing every Linux user onto the rootless socket path.
   let systemAccessible = false;
   try {
-    const fs = require('fs');
-    fs.accessSync(paths.system, fs.constants.R_OK | fs.constants.W_OK);
+    accessSync(paths.system, fsConstants.R_OK | fsConstants.W_OK);
     systemAccessible = true;
   } catch {
     systemAccessible = false;

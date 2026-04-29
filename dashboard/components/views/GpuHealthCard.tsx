@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 
@@ -25,6 +26,8 @@ export interface GpuHealthCardProps {
   preflight: GpuPreflightProp | null;
   backendError: GpuBackendErrorProp | null;
   onRunDiagnostic: () => void;
+  /** When true, the Run Full Diagnostic button is disabled and shows a "Running…" label. */
+  running?: boolean;
 }
 
 type CardState = 'green' | 'yellow' | 'red';
@@ -44,16 +47,16 @@ const STATE_LABEL: Record<CardState, string> = {
   red: 'GPU unavailable — fell back to CPU',
 };
 
-const STATE_BORDER: Record<CardState, string> = {
-  green: 'border-green-600',
-  yellow: 'border-amber-600',
-  red: 'border-red-700',
+const STATE_CONTAINER: Record<CardState, string> = {
+  green: 'border-green-500/20 bg-green-500/10',
+  yellow: 'border-accent-orange/20 bg-accent-orange/10',
+  red: 'border-red-500/20 bg-red-500/10',
 };
 
-const STATE_TEXT: Record<CardState, string> = {
-  green: 'text-green-600',
-  yellow: 'text-amber-600',
-  red: 'text-red-700',
+const STATE_BODY_TEXT: Record<CardState, string> = {
+  green: 'text-green-400',
+  yellow: 'text-accent-orange',
+  red: 'text-red-400',
 };
 
 function CopyableCommand({ cmd }: { cmd: string }): React.ReactElement {
@@ -94,64 +97,93 @@ function CopyableCommand({ cmd }: { cmd: string }): React.ReactElement {
   );
 }
 
+function StateIcon({ state }: { state: CardState }): React.ReactElement {
+  if (state === 'green') return <CheckCircle2 size={18} className="text-green-400" />;
+  if (state === 'yellow') return <AlertTriangle size={18} className="text-accent-orange" />;
+  return <XCircle size={18} className="text-red-400" />;
+}
+
 export function GpuHealthCard({
   gpuDetected,
   preflight,
   backendError,
   onRunDiagnostic,
+  running = false,
 }: GpuHealthCardProps): React.ReactElement | null {
   if (!gpuDetected) return null;
 
   const state = deriveState(preflight, backendError);
   const failedChecks = preflight ? preflight.checks.filter((c) => !c.pass) : [];
+  const totalChecks = preflight ? preflight.checks.length : 0;
+  const passedChecks = totalChecks - failedChecks.length;
+  const headerStatus =
+    state === 'red'
+      ? 'backend error — CPU fallback'
+      : totalChecks > 0
+        ? `${passedChecks}/${totalChecks} checks passed`
+        : 'CUDA operational';
 
   return (
     <section
       aria-labelledby="gpu-health-title"
-      className={`mt-3 rounded-md border p-3 ${STATE_BORDER[state]}`}
+      className={`overflow-hidden rounded-xl border transition-all duration-300 ${STATE_CONTAINER[state]}`}
     >
-      <h3 id="gpu-health-title" className={`mt-0 ${STATE_TEXT[state]}`}>
-        GPU Health (NVIDIA)
-      </h3>
-      <p className="mt-0 text-xs text-neutral-400">
-        This card appears only on systems with an NVIDIA GPU. AMD / Intel / Apple Silicon setups do
-        not need it.
-      </p>
+      <div className="flex items-center gap-3 px-5 py-3.5">
+        <StateIcon state={state} />
+        <h3 id="gpu-health-title" className="m-0 text-sm font-semibold text-white">
+          GPU Health (NVIDIA)
+        </h3>
+        <span className="font-mono text-xs text-slate-500">{headerStatus}</span>
+      </div>
 
-      <p className="font-semibold">{STATE_LABEL[state]}</p>
-
-      {state === 'red' && backendError?.recovery_hint ? (
-        <p className="rounded bg-red-900/50 p-2 text-sm text-red-200">
-          {backendError.recovery_hint}
+      <div className="space-y-2.5 px-5 pb-4">
+        <p className="m-0 text-xs text-slate-400">
+          This card appears only on systems with an NVIDIA GPU. AMD / Intel / Apple Silicon setups
+          do not need it.
         </p>
-      ) : null}
 
-      {failedChecks.length > 0 ? (
-        <div className="mt-3">
-          <p className="mb-1 font-medium">Failing checks:</p>
-          {failedChecks.map((check) => (
-            <div key={check.name} className="mb-2.5">
-              <div className="text-sm">
-                ✗ {check.name}
-                {check.docsUrl ? (
-                  <>
-                    {' — '}
-                    <a href={check.docsUrl} target="_blank" rel="noopener noreferrer">
-                      docs
-                    </a>
-                  </>
-                ) : null}
+        <p className={`m-0 text-sm font-semibold ${STATE_BODY_TEXT[state]}`}>
+          {STATE_LABEL[state]}
+        </p>
+
+        {state === 'red' && backendError?.recovery_hint ? (
+          <p className="m-0 rounded bg-red-500/10 p-2 text-sm text-red-200">
+            {backendError.recovery_hint}
+          </p>
+        ) : null}
+
+        {failedChecks.length > 0 ? (
+          <div className="pt-1">
+            <p className="m-0 mb-1 text-sm font-medium text-white">Failing checks:</p>
+            {failedChecks.map((check) => (
+              <div key={check.name} className="mb-2.5">
+                <div className="text-sm text-slate-300">
+                  ✗ {check.name}
+                  {check.docsUrl ? (
+                    <>
+                      {' — '}
+                      <a
+                        href={check.docsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-accent-cyan hover:underline"
+                      >
+                        docs
+                      </a>
+                    </>
+                  ) : null}
+                </div>
+                {check.fixCommand ? <CopyableCommand cmd={check.fixCommand} /> : null}
               </div>
-              {check.fixCommand ? <CopyableCommand cmd={check.fixCommand} /> : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
+            ))}
+          </div>
+        ) : null}
 
-      <div className="mt-3">
-        <Button variant="secondary" size="sm" onClick={onRunDiagnostic}>
-          Run Full Diagnostic
-        </Button>
+        <div className="pt-1">
+          <Button variant="secondary" size="sm" onClick={onRunDiagnostic} disabled={running}>
+            {running ? 'Running diagnostic…' : 'Run Full Diagnostic'}
+          </Button>
+        </div>
       </div>
     </section>
   );
