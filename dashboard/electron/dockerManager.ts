@@ -352,14 +352,23 @@ export function runGpuDiagnostic(): RunGpuDiagnosticResult {
     };
   }
 
+  // Per-user diagnostics directory inside the Electron userData root, NOT in
+  // multi-user /tmp. Restrictive 0o700 dir + O_EXCL+0o600 file (the 'wx' flag)
+  // mean only this user can read or pre-create the log — closes the symlink-
+  // attack surface flagged by CodeQL js/insecure-temporary-file. Random suffix
+  // on the filename makes same-second back-to-back clicks not collide on the
+  // O_EXCL check.
+  const dir = path.join(app.getPath('userData'), 'gpu-diagnostics');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const ts = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
-  const logPath = path.join(os.tmpdir(), `gpu-diagnostic-${ts}.log`);
-  const out = fs.openSync(logPath, 'w');
+  const suffix = crypto.randomBytes(3).toString('hex');
+  const logPath = path.join(dir, `gpu-diagnostic-${ts}-${suffix}.log`);
+  const out = fs.openSync(logPath, 'wx', 0o600);
 
   const child = spawn('bash', [scriptPath], {
     stdio: ['ignore', out, out],
     detached: true,
-    cwd: os.tmpdir(),
+    cwd: dir,
   });
   child.unref();
 
