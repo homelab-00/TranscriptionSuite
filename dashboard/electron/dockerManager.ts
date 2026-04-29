@@ -264,12 +264,11 @@ export function validateGpuPreflight(
  * function so tests can inject without touching fs/exec.
  */
 export function runGpuPreflight(): GpuPreflightResult {
-  // Lazy-import fs so the unit tests can mock electron without dragging in
-  // real fs operations during validateGpuPreflight() unit tests.
-  // (validateGpuPreflight() itself is pure; this wrapper is the impure shell.)
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const fs = require('fs') as typeof import('fs');
-
+  // Use the top-level ESM `fs` import. Electron's main process is bundled as
+  // ESM (electron/tsconfig.json: module=ESNext), so CommonJS `require()` is
+  // not defined at runtime in the packaged AppImage and was throwing
+  // ReferenceError here. validateGpuPreflight() itself stays pure — this
+  // impure wrapper just hands the real fs into the dep struct.
   const deps: GpuPreflightDeps = {
     fsExists: (p) => {
       try {
