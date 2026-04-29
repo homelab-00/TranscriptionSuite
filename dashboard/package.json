@@ -134,6 +134,14 @@
       {
         "from": "../server/config.yaml",
         "to": "config.yaml"
+      },
+      {
+        "from": "../scripts/diagnose-gpu.sh",
+        "to": "scripts/diagnose-gpu.sh"
+      },
+      {
+        "from": "../scripts/README-gpu-diagnostic.md",
+        "to": "scripts/README-gpu-diagnostic.md"
       }
     ],
     "afterPack": "./scripts/afterPack.cjs",

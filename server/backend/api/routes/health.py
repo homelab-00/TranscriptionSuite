@@ -94,5 +94,12 @@ async def get_status(request: Request) -> dict[str, Any]:
     if gpu_error is not None:
         response["gpu_error"] = gpu_error.get("error", "Unknown GPU error")
         response["gpu_error_action"] = "Please restart your computer to reset the GPU driver."
+        # Surface the diagnostic recovery_hint (added by Task 4) so the
+        # dashboard's GpuHealthCard can display it verbatim in the red state.
+        # Optional — only present for the error-999 unrecoverable fingerprint;
+        # absent for other failure modes. Backward compatible (additive only).
+        recovery_hint = gpu_error.get("recovery_hint")
+        if recovery_hint:
+            response["gpu_error_recovery_hint"] = recovery_hint
 
     return response

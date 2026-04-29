@@ -222,6 +222,7 @@ const baseProps = {
     ready: true,
     error: null,
     gpuError: null,
+    gpuErrorRecoveryHint: null,
     refresh: vi.fn(),
   },
   clientRunning: true,

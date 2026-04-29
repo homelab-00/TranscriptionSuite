@@ -15,7 +15,7 @@
  *                 podman-compose.gpu.yml         (CDI device passthrough, Podman)
  */
 
-import { execFile, execFileSync, spawn, ChildProcess } from 'child_process';
+import { execFile, execFileSync, execSync, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -147,6 +147,276 @@ export function checkVulkanSupport(
     );
   }
   return null;
+}
+
+// ─── GPU Preflight (NVIDIA, Linux) ─────────────────────────────────────────
+// Runs the cheap subset of scripts/diagnose-gpu.sh at dashboard startup so
+// the GpuHealthCard can warn about misconfigurations before the container
+// is started. Pure function — all OS access is injected for testability.
+
+export interface GpuPreflightCheck {
+  name: string;
+  pass: boolean;
+  /** Documented NVIDIA fix command. Present only when pass=false. */
+  fixCommand?: string;
+  /** External URL with more context. Present only when pass=false. */
+  docsUrl?: string;
+}
+
+export interface GpuPreflightResult {
+  status: 'healthy' | 'warning' | 'unknown';
+  checks: GpuPreflightCheck[];
+}
+
+export interface GpuPreflightDeps {
+  fsExists: (path: string) => boolean;
+  readDir: (path: string) => string[];
+  /** Returns mtime (epoch seconds) or null when the path cannot be stat'd. */
+  statMtime: (path: string) => number | null;
+  /** Returns lsmod stdout (one module name per line). Empty string on failure. */
+  runLsmod: () => string;
+}
+
+const NVIDIA_DRIVER_MTIME_PATHS: readonly string[] = ['/lib/modules', '/usr/lib/modules'];
+const CDI_SPEC_PATH = '/etc/cdi/nvidia.yaml';
+
+function newestDriverMtime(statMtime: GpuPreflightDeps['statMtime']): number | null {
+  // Conservative heuristic: try a handful of distro-typical roots. The actual
+  // recursive walk lives in the IPC handler — we just take what it produces.
+  let newest: number | null = null;
+  for (const root of NVIDIA_DRIVER_MTIME_PATHS) {
+    const mt = statMtime(root);
+    if (mt !== null && (newest === null || mt > newest)) {
+      newest = mt;
+    }
+  }
+  return newest;
+}
+
+export function validateGpuPreflight(
+  platform: NodeJS.Platform,
+  deps: GpuPreflightDeps,
+): GpuPreflightResult {
+  if (platform !== 'linux') {
+    return { status: 'unknown', checks: [] };
+  }
+
+  const checks: GpuPreflightCheck[] = [];
+
+  // Check 1: CDI spec exists
+  const cdiExists = deps.fsExists(CDI_SPEC_PATH);
+  checks.push({
+    name: 'CDI spec exists',
+    pass: cdiExists,
+    fixCommand: cdiExists ? undefined : `sudo nvidia-ctk cdi generate --output=${CDI_SPEC_PATH}`,
+    docsUrl: cdiExists
+      ? undefined
+      : 'https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html',
+  });
+
+  // Check 2: CDI spec newer than driver (only meaningful when both mtimes available)
+  const cdiMtime = cdiExists ? deps.statMtime(CDI_SPEC_PATH) : null;
+  const driverMtime = newestDriverMtime(deps.statMtime);
+  let cdiFresh = true;
+  if (cdiMtime !== null && driverMtime !== null && cdiMtime < driverMtime) {
+    cdiFresh = false;
+  }
+  checks.push({
+    name: 'CDI spec newer than driver',
+    pass: cdiFresh,
+    fixCommand: cdiFresh ? undefined : `sudo nvidia-ctk cdi generate --output=${CDI_SPEC_PATH}`,
+  });
+
+  // Check 3: /dev/char symlinks for major 195 (NVIDIA)
+  const charEntries = deps.fsExists('/dev/char') ? deps.readDir('/dev/char') : [];
+  const hasNvidiaSymlinks = charEntries.some((e) => e.startsWith('195:'));
+  checks.push({
+    name: '/dev/char NVIDIA symlinks',
+    pass: hasNvidiaSymlinks,
+    fixCommand: hasNvidiaSymlinks
+      ? undefined
+      : 'sudo nvidia-ctk system create-dev-char-symlinks --create-all',
+    docsUrl: hasNvidiaSymlinks
+      ? undefined
+      : 'https://github.com/NVIDIA/nvidia-container-toolkit/issues/48',
+  });
+
+  // Check 4: nvidia_uvm kernel module loaded
+  const lsmodLines = deps
+    .runLsmod()
+    .split('\n')
+    .map((l) => l.trim());
+  const uvmLoaded = lsmodLines.includes('nvidia_uvm');
+  checks.push({
+    name: 'nvidia_uvm module loaded',
+    pass: uvmLoaded,
+    fixCommand: uvmLoaded ? undefined : 'sudo modprobe nvidia_uvm',
+  });
+
+  const status: GpuPreflightResult['status'] = checks.every((c) => c.pass) ? 'healthy' : 'warning';
+
+  return { status, checks };
+}
+
+/**
+ * Real-OS wrapper around validateGpuPreflight() — used by the
+ * docker:validateGpuPreflight IPC handler. Kept separate from the pure
+ * function so tests can inject without touching fs/exec.
+ */
+export function runGpuPreflight(): GpuPreflightResult {
+  // Lazy-import fs so the unit tests can mock electron without dragging in
+  // real fs operations during validateGpuPreflight() unit tests.
+  // (validateGpuPreflight() itself is pure; this wrapper is the impure shell.)
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require('fs') as typeof import('fs');
+
+  const deps: GpuPreflightDeps = {
+    fsExists: (p) => {
+      try {
+        return fs.existsSync(p);
+      } catch {
+        return false;
+      }
+    },
+    readDir: (p) => {
+      try {
+        return fs.readdirSync(p);
+      } catch {
+        return [];
+      }
+    },
+    statMtime: (p) => {
+      try {
+        // For driver-module roots, walk one level deep and find the newest
+        // nvidia*.ko* file mtime. (The bash diagnose script does the same.)
+        // For everything else, just stat the path itself.
+        if (p === '/lib/modules' || p === '/usr/lib/modules') {
+          return newestNvidiaKoMtime(p, fs);
+        }
+        return Math.floor(fs.statSync(p).mtimeMs / 1000);
+      } catch {
+        return null;
+      }
+    },
+    runLsmod: () => {
+      try {
+        // lsmod is column-formatted: "Module  Size  Used by". The pure
+        // function expects one module name per line. Extract column 1
+        // and skip the header row.
+        const raw = execSync('lsmod', { timeout: 2000, encoding: 'utf8' });
+        const lines = raw.split('\n');
+        return lines
+          .slice(1) // drop header
+          .map((line) => line.split(/\s+/)[0] ?? '')
+          .filter((name) => name.length > 0)
+          .join('\n');
+      } catch {
+        return '';
+      }
+    },
+  };
+
+  return validateGpuPreflight(process.platform, deps);
+}
+
+export interface RunGpuDiagnosticResult {
+  status: 'started' | 'unsupported' | 'script-missing';
+  /** Absolute path to the log file the script writes (when status=started). */
+  logPath?: string;
+  /** Resolved script path (always present for status=started or script-missing). */
+  scriptPath?: string;
+  /** The exact command string the user could run themselves. */
+  manualCommand?: string;
+}
+
+function resolveDiagnosticScriptPath(): string {
+  // Packaged: <app>/resources/scripts/diagnose-gpu.sh
+  // Dev: <repo>/scripts/diagnose-gpu.sh (relative to dist-electron/dockerManager.js)
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'scripts', 'diagnose-gpu.sh');
+  }
+  // __dirname at runtime is dist-electron/; the repo's scripts/ is two levels up.
+  return path.resolve(__dirname, '..', '..', 'scripts', 'diagnose-gpu.sh');
+}
+
+export function runGpuDiagnostic(): RunGpuDiagnosticResult {
+  if (process.platform !== 'linux') {
+    return { status: 'unsupported' };
+  }
+  const scriptPath = resolveDiagnosticScriptPath();
+  if (!fs.existsSync(scriptPath)) {
+    return {
+      status: 'script-missing',
+      scriptPath,
+      manualCommand: `bash ${scriptPath}`,
+    };
+  }
+
+  // Per-user diagnostics directory inside the Electron userData root, NOT in
+  // multi-user /tmp. Restrictive 0o700 dir + O_EXCL+0o600 file (the 'wx' flag)
+  // mean only this user can read or pre-create the log — closes the symlink-
+  // attack surface flagged by CodeQL js/insecure-temporary-file. Random suffix
+  // on the filename makes same-second back-to-back clicks not collide on the
+  // O_EXCL check.
+  const dir = path.join(app.getPath('userData'), 'gpu-diagnostics');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const ts = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
+  const suffix = crypto.randomBytes(3).toString('hex');
+  const logPath = path.join(dir, `gpu-diagnostic-${ts}-${suffix}.log`);
+  const out = fs.openSync(logPath, 'wx', 0o600);
+
+  const child = spawn('bash', [scriptPath], {
+    stdio: ['ignore', out, out],
+    detached: true,
+    cwd: dir,
+  });
+  child.unref();
+
+  return {
+    status: 'started',
+    logPath,
+    scriptPath,
+    manualCommand: `bash ${scriptPath}`,
+  };
+}
+
+/**
+ * Recursively walk a kernel-module root looking for nvidia*.ko[.zst] files
+ * and return the newest mtime (epoch seconds), or null if none found.
+ * Bounded depth to avoid runaway walks.
+ */
+function newestNvidiaKoMtime(root: string, fs: typeof import('fs')): number | null {
+  let newest: number | null = null;
+  const stack: Array<{ path: string; depth: number }> = [{ path: root, depth: 0 }];
+  const MAX_DEPTH = 6;
+  while (stack.length > 0) {
+    const entry = stack.pop();
+    if (!entry || entry.depth > MAX_DEPTH) continue;
+    let children: string[];
+    try {
+      children = fs.readdirSync(entry.path);
+    } catch {
+      continue;
+    }
+    for (const name of children) {
+      const childPath = `${entry.path}/${name}`;
+      let stat;
+      try {
+        stat = fs.statSync(childPath);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        stack.push({ path: childPath, depth: entry.depth + 1 });
+      } else if (/^nvidia.*\.ko(\..*)?$/.test(name)) {
+        const epoch = Math.floor(stat.mtimeMs / 1000);
+        if (newest === null || epoch > newest) {
+          newest = epoch;
+        }
+      }
+    }
+  }
+  return newest;
 }
 
 /**
@@ -3004,6 +3274,8 @@ export const dockerManager = {
   retryDetection,
   getRuntimeKind,
   checkGpu,
+  runGpuPreflight,
+  runGpuDiagnostic,
   listImages,
   pullImage,
   cancelPull,

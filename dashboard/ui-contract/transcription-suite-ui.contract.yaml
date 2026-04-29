@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.26
+  spec_version: 1.0.30
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -8,6 +8,7 @@ meta:
     source_files:
       - App.tsx
       - components/__tests__/AudioVisualizer.test.tsx
+      - components/__tests__/LogsView.test.tsx
       - components/__tests__/NotebookView.test.tsx
       - components/__tests__/ServerView.test.tsx
       - components/__tests__/SessionView.canary-language.test.tsx
@@ -34,11 +35,13 @@ meta:
       - components/ui/StatusLight.tsx
       - components/ui/UpdateBanner.tsx
       - components/ui/UpdateModal.tsx
+      - components/views/__tests__/GpuHealthCard.test.tsx
       - components/views/AboutModal.tsx
       - components/views/AddNoteModal.tsx
       - components/views/AudioNoteModal.tsx
       - components/views/BugReportModal.tsx
       - components/views/FullscreenVisualizer.tsx
+      - components/views/GpuHealthCard.tsx
       - components/views/LogsView.tsx
       - components/views/ModelManagerTab.tsx
       - components/views/ModelManagerView.tsx
@@ -53,7 +56,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-26T18:55:24.053Z
+    generated_at: 2026-04-29T11:50:14.967Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -466,6 +469,8 @@ utility_allowlist:
     - bg-linear-to-br
     - bg-linear-to-r
     - bg-linear-to-t
+    - bg-neutral-700
+    - bg-neutral-900
     - bg-orange-500
     - bg-orange-500/10
     - bg-purple-500
@@ -475,6 +480,7 @@ utility_allowlist:
     - bg-red-500/10
     - bg-red-500/25
     - bg-red-500/5
+    - bg-red-900/50
     - bg-slate-400/10
     - bg-slate-500
     - bg-slate-500/10
@@ -513,6 +519,7 @@ utility_allowlist:
     - border-amber-400/40
     - border-amber-500/20
     - border-amber-500/30
+    - border-amber-600
     - border-b
     - border-b-2
     - border-blue-500/20
@@ -522,6 +529,7 @@ utility_allowlist:
     - border-glass-100
     - border-glass-border
     - border-green-500/30
+    - border-green-600
     - border-l
     - border-l-2
     - border-l-accent-magenta
@@ -538,6 +546,7 @@ utility_allowlist:
     - border-red-400/40
     - border-red-500/20
     - border-red-500/25
+    - border-red-700
     - border-slate-400/30
     - border-slate-900
     - border-t
@@ -651,6 +660,7 @@ utility_allowlist:
     - hover:bg-cyan-400/30
     - hover:bg-glass-100
     - hover:bg-glass-300
+    - hover:bg-neutral-600
     - hover:bg-red-500/10
     - hover:bg-red-500/20
     - hover:bg-red-500/35
@@ -729,6 +739,7 @@ utility_allowlist:
     - mb-1
     - mb-1.5
     - mb-2
+    - mb-2.5
     - mb-3
     - mb-4
     - mb-6
@@ -759,6 +770,7 @@ utility_allowlist:
     - mr-1.5
     - mr-2
     - mr-4
+    - mt-0
     - mt-0.5
     - mt-1
     - mt-1.5
@@ -937,6 +949,7 @@ utility_allowlist:
     - text-amber-400
     - text-amber-400/60
     - text-amber-400/80
+    - text-amber-600
     - text-base
     - text-black
     - text-blue-400
@@ -947,17 +960,22 @@ utility_allowlist:
     - text-emerald-400
     - text-green-400
     - text-green-400/70
+    - text-green-600
     - text-indigo-400
     - text-left
     - text-lg
+    - text-neutral-100
+    - text-neutral-400
     - text-orange-400
     - text-orange-500
     - text-purple-400
     - text-red-100
+    - text-red-200
     - text-red-200/90
     - text-red-300
     - text-red-400
     - text-red-400/80
+    - text-red-700
     - text-right
     - text-slate-200
     - text-slate-300
@@ -1536,6 +1554,23 @@ component_contracts:
     state_rules:
       - id: open-accent
         rule: Open state title accent remains magenta and chevron rotates with white highlighted background.
+  CopyableCommand:
+    file: components/views/GpuHealthCard.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   CustomModelRow:
     file: components/views/ModelManagerTab.tsx
     required_tokens:
@@ -1657,6 +1692,23 @@ component_contracts:
     state_rules:
       - id: header-optional
         rule: Title/action header is optional but when present must retain h-14 bordered header pattern.
+  GpuHealthCard:
+    file: components/views/GpuHealthCard.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   HistoryPicker:
     file: components/views/NotebookView.tsx
     required_tokens:

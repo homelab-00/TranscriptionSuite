@@ -28,6 +28,13 @@ export interface ServerStatus {
   gpu_memory?: string;
   gpu_error?: string;
   gpu_error_action?: string;
+  /**
+   * Diagnostic hint surfaced when the backend's CUDA health check
+   * returns the error-999 "unrecoverable" fingerprint. Present only on
+   * the error-999 path; absent for other GPU failure modes.
+   * Consumed by the GpuHealthCard on the Server tab.
+   */
+  gpu_error_recovery_hint?: string;
   diarization_available?: boolean;
   active_connections?: number;
   tls_enabled?: boolean;

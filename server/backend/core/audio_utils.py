@@ -251,17 +251,25 @@ def cuda_health_check(device_index: int = 0) -> dict[str, Any]:
             # All retries exhausted — mark as unrecoverable.
             _cuda_probe_failed = True
             smi_output = _capture_nvidia_smi()
+            recovery_hint = (
+                "GPU init failed with error 999 (CUDA unknown). This is "
+                "almost always host-side: missing /dev/char symlinks, stale "
+                "CDI spec, nvidia_uvm not loaded, or systemd cgroup driver "
+                "interference. Run scripts/diagnose-gpu.sh on the host for "
+                "details and the recommended fix."
+            )
             logger.error(
                 "CUDA health check: unrecoverable GPU state after %d retries",
                 len(_error_999_delays),
                 exc_info=last_exc,
-                extra={"nvidia_smi": smi_output},
+                extra={"nvidia_smi": smi_output, "recovery_hint": recovery_hint},
             )
             return {
                 "status": "unrecoverable",
                 "error": str(last_exc),
                 "nvidia_smi": smi_output,
                 "attempts": len(_error_999_delays) + 1,
+                "recovery_hint": recovery_hint,
             }
 
         # Non-999 transient error — single retry after a short delay.
