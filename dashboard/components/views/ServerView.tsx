@@ -1298,17 +1298,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               api.config?.set('server.gpuAutoDetectDone', true);
             })
             .catch(() => {});
-          // Phase 2 GPU health: when an NVIDIA GPU was detected, run the cheap
-          // host-side preflight (CDI spec, /dev/char symlinks, nvidia_uvm,
-          // mtime drift). The result drives the GpuHealthCard yellow state.
-          // Silently no-op on non-Linux or when the IPC isn't exposed
-          // (older preload builds, jsdom test mounts).
-          if (info.gpu && api?.docker?.validateGpuPreflight) {
-            api.docker
-              .validateGpuPreflight()
-              .then((p: typeof gpuPreflight) => setGpuPreflight(p))
-              .catch(() => setGpuPreflight(null));
-          }
         })
         .catch(() => {
           cachedGpuInfo = null;
@@ -1316,6 +1305,19 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         });
     }
   }, []);
+
+  // Re-fetch GPU preflight whenever an NVIDIA GPU is detected — including
+  // re-mounts of ServerView where cachedGpuInfo was already populated by
+  // an earlier mount (in which case the GPU-detection effect skips).
+  useEffect(() => {
+    if (!gpuInfo?.gpu) return;
+    const api = (window as any).electronAPI;
+    if (!api?.docker?.validateGpuPreflight) return;
+    api.docker
+      .validateGpuPreflight()
+      .then((p: typeof gpuPreflight) => setGpuPreflight(p))
+      .catch(() => setGpuPreflight(null));
+  }, [gpuInfo?.gpu]);
 
   // Setup checks — gated by the currently selected runtime profile
   const rtName = docker.runtimeKind ?? 'Docker';

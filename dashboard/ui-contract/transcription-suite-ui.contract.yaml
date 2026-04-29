@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.29
+  spec_version: 1.0.30
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -56,7 +56,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-29T06:21:17.814Z
+    generated_at: 2026-04-29T11:50:14.967Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -220,8 +220,10 @@ foundation:
       classes:
         - shadow
         - shadow-[0_0_10px_#22d3ee]
+        - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
@@ -300,14 +302,17 @@ foundation:
         - h-[85%]
         - h-[85vh]
         - max-h-[80vh]
+        - max-w-[55%]
         - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
         - min-w-[3ch]
         - min-w-[5rem]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
+        - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
@@ -447,6 +452,7 @@ utility_allowlist:
     - bg-black/70
     - bg-black/75
     - bg-blue-400
+    - bg-blue-500
     - bg-blue-500/10
     - bg-cyan-400/10
     - bg-cyan-400/20
@@ -465,7 +471,9 @@ utility_allowlist:
     - bg-linear-to-t
     - bg-neutral-700
     - bg-neutral-900
+    - bg-orange-500
     - bg-orange-500/10
+    - bg-purple-500
     - bg-purple-500/10
     - bg-red-400/10
     - bg-red-500
@@ -495,6 +503,7 @@ utility_allowlist:
     - border
     - border-2
     - border-4
+    - border-accent-amber/30
     - border-accent-cyan/10
     - border-accent-cyan/20
     - border-accent-cyan/30
@@ -503,6 +512,8 @@ utility_allowlist:
     - border-accent-magenta/20
     - border-accent-magenta/5
     - border-accent-orange/20
+    - border-accent-orange/25
+    - border-accent-rose/20
     - border-amber-400/20
     - border-amber-400/30
     - border-amber-400/40
@@ -738,6 +749,7 @@ utility_allowlist:
     - md:grid-cols-4
     - md:items-center
     - md:items-end
+    - md:justify-between
     - min-h-0
     - min-h-32
     - min-h-full
@@ -751,6 +763,7 @@ utility_allowlist:
     - ml-0.5
     - ml-1
     - ml-2
+    - ml-3
     - ml-auto
     - ml-model
     - mr-1
@@ -824,6 +837,7 @@ utility_allowlist:
     - pr-20
     - pr-3
     - pr-4
+    - pr-5
     - pr-6
     - pr-8
     - pt-0
@@ -912,6 +926,7 @@ utility_allowlist:
     - space-y-1
     - space-y-1.5
     - space-y-2
+    - space-y-2.5
     - space-y-3
     - space-y-4
     - space-y-6
@@ -924,6 +939,7 @@ utility_allowlist:
     - text-accent-cyan/80
     - text-accent-magenta
     - text-accent-orange
+    - text-accent-rose
     - text-accent-violet
     - text-amber-100
     - text-amber-200
@@ -955,6 +971,7 @@ utility_allowlist:
     - text-purple-400
     - text-red-100
     - text-red-200
+    - text-red-200/90
     - text-red-300
     - text-red-400
     - text-red-400/80
@@ -968,6 +985,7 @@ utility_allowlist:
     - text-slate-700
     - text-slate-900
     - text-sm
+    - text-violet-400
     - text-white
     - text-white/60
     - text-white/90
@@ -1057,6 +1075,7 @@ utility_allowlist:
     - h-[85%]
     - h-[85vh]
     - max-h-[80vh]
+    - max-w-[55%]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]
     - min-h-[calc(100vh-30rem)]
@@ -1064,8 +1083,10 @@ utility_allowlist:
     - min-w-[5rem]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
+    - shadow-[0_0_15px_rgba(251,146,60,0.5)]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+    - shadow-[0_0_15px_rgba(34,211,238,0.5)]
     - shadow-[0_0_18px_rgba(239,68,68,0.35)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
