@@ -1168,6 +1168,10 @@ ipcMain.handle('docker:validateGpuPreflight', async () => {
   return dockerManager.runGpuPreflight();
 });
 
+ipcMain.handle('docker:runGpuDiagnostic', async () => {
+  return dockerManager.runGpuDiagnostic();
+});
+
 ipcMain.handle('docker:listImages', async () => {
   return dockerManager.listImages();
 });

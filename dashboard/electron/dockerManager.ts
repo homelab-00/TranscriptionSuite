@@ -319,6 +319,58 @@ export function runGpuPreflight(): GpuPreflightResult {
   return validateGpuPreflight(process.platform, deps);
 }
 
+export interface RunGpuDiagnosticResult {
+  status: 'started' | 'unsupported' | 'script-missing';
+  /** Absolute path to the log file the script writes (when status=started). */
+  logPath?: string;
+  /** Resolved script path (always present for status=started or script-missing). */
+  scriptPath?: string;
+  /** The exact command string the user could run themselves. */
+  manualCommand?: string;
+}
+
+function resolveDiagnosticScriptPath(): string {
+  // Packaged: <app>/resources/scripts/diagnose-gpu.sh
+  // Dev: <repo>/scripts/diagnose-gpu.sh (relative to dist-electron/dockerManager.js)
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'scripts', 'diagnose-gpu.sh');
+  }
+  // __dirname at runtime is dist-electron/; the repo's scripts/ is two levels up.
+  return path.resolve(__dirname, '..', '..', 'scripts', 'diagnose-gpu.sh');
+}
+
+export function runGpuDiagnostic(): RunGpuDiagnosticResult {
+  if (process.platform !== 'linux') {
+    return { status: 'unsupported' };
+  }
+  const scriptPath = resolveDiagnosticScriptPath();
+  if (!fs.existsSync(scriptPath)) {
+    return {
+      status: 'script-missing',
+      scriptPath,
+      manualCommand: `bash ${scriptPath}`,
+    };
+  }
+
+  const ts = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
+  const logPath = path.join(os.tmpdir(), `gpu-diagnostic-${ts}.log`);
+  const out = fs.openSync(logPath, 'w');
+
+  const child = spawn('bash', [scriptPath], {
+    stdio: ['ignore', out, out],
+    detached: true,
+    cwd: os.tmpdir(),
+  });
+  child.unref();
+
+  return {
+    status: 'started',
+    logPath,
+    scriptPath,
+    manualCommand: `bash ${scriptPath}`,
+  };
+}
+
 /**
  * Recursively walk a kernel-module root looking for nvidia*.ko[.zst] files
  * and return the newest mtime (epoch seconds), or null if none found.
@@ -3214,6 +3266,7 @@ export const dockerManager = {
   getRuntimeKind,
   checkGpu,
   runGpuPreflight,
+  runGpuDiagnostic,
   listImages,
   pullImage,
   cancelPull,
