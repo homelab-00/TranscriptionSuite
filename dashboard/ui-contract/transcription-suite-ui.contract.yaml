@@ -11,6 +11,7 @@ meta:
       - components/__tests__/LogsView.test.tsx
       - components/__tests__/NotebookView.test.tsx
       - components/__tests__/ServerView.test.tsx
+      - components/__tests__/SessionImportTab.canary-language.test.tsx
       - components/__tests__/SessionView.canary-language.test.tsx
       - components/__tests__/SessionView.test.tsx
       - components/AudioVisualizer.tsx
@@ -58,7 +59,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-29T17:21:15.825Z
+    generated_at: 2026-04-29T21:36:52.369Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -233,7 +234,6 @@ foundation:
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
-        - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - shadow-2xl
         - shadow-accent-cyan/20
         - shadow-accent-cyan/40
@@ -308,7 +308,6 @@ foundation:
         - max-w-[55%]
         - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
-        - min-w-[3ch]
         - min-w-[5rem]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
@@ -323,7 +322,6 @@ foundation:
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
-        - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - text-[10px]
         - text-[11px]
         - text-[8px]
@@ -441,6 +439,7 @@ utility_allowlist:
     - bg-accent-orange
     - bg-accent-orange/10
     - bg-accent-rose/5
+    - bg-accent-violet/15
     - bg-amber-400/10
     - bg-amber-400/20
     - bg-amber-400/5
@@ -777,13 +776,11 @@ utility_allowlist:
     - mt-1.5
     - mt-10
     - mt-2
-    - mt-2.5
     - mt-3
     - mt-4
     - mt-6
     - mt-8
     - mt-auto
-    - mx-0.5
     - mx-1
     - mx-2
     - mx-auto
@@ -803,7 +800,6 @@ utility_allowlist:
     - outline-none
     - overflow-auto
     - overflow-hidden
-    - overflow-visible
     - overflow-x-auto
     - overflow-y-auto
     - p-0.5
@@ -930,6 +926,7 @@ utility_allowlist:
     - space-y-2.5
     - space-y-3
     - space-y-4
+    - space-y-5
     - space-y-6
     - space-y-8
     - sticky
@@ -942,10 +939,12 @@ utility_allowlist:
     - text-accent-orange
     - text-accent-rose
     - text-accent-violet
+    - text-accent-violet/80
     - text-amber-100
     - text-amber-200
     - text-amber-300
     - text-amber-300/60
+    - text-amber-300/70
     - text-amber-300/80
     - text-amber-400
     - text-amber-400/60
@@ -1014,6 +1013,7 @@ utility_allowlist:
     - transition-opacity
     - transition-shadow
     - transition-transform
+    - translate-to-English
     - translate-x-4
     - translate-x-5
     - truncate
@@ -1071,13 +1071,13 @@ utility_allowlist:
     - ease-[cubic-bezier(0.33,1,0.68,1)]
     - h-[85%]
     - h-[85vh]
+    - lg:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]
     - max-h-[80vh]
     - max-h-[90vh]
     - max-w-[55%]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]
     - min-h-[calc(100vh-30rem)]
-    - min-w-[3ch]
     - min-w-[5rem]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
@@ -1092,7 +1092,6 @@ utility_allowlist:
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
-    - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
     - text-[10px]
     - text-[11px]
     - text-[8px]

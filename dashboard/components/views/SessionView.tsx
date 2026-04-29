@@ -359,9 +359,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Main Transcription State
   const [mainLanguage, setMainLanguage] = useState('Auto Detect');
-  const [mainTranslate, setMainTranslate] = useState(false);
+  const [mainTranslate, setMainTranslateRaw] = useState(false);
   // Bidirectional translation target (used when Canary + source=English)
-  const [mainBidiTarget, setMainBidiTarget] = useState('Off');
+  const [mainBidiTarget, setMainBidiTargetRaw] = useState('Off');
 
   // Output formatting
   const [hideTimestamps, setHideTimestamps] = useState(false);
@@ -371,6 +371,21 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [liveTranslate, setLiveTranslate] = useState(false);
   // Bidirectional translation target (used when Canary + source=English)
   const [liveBidiTarget, setLiveBidiTarget] = useState('Off');
+
+  // gh-102 followup: persist mainTranslate / mainBidiTarget so the file-import
+  // surface (SessionImportTab) can read the same source-of-truth as the
+  // live-recording leg. Without persistence the import POST would never see
+  // the translation parity that handleStartRecording produces from in-memory
+  // state.
+  const setMainTranslate = useCallback((value: boolean) => {
+    setMainTranslateRaw(value);
+    void setConfig('session.mainTranslate', value).catch(() => {});
+  }, []);
+
+  const setMainBidiTarget = useCallback((value: string) => {
+    setMainBidiTargetRaw(value);
+    void setConfig('session.mainBidiTarget', value).catch(() => {});
+  }, []);
 
   // Canary bidirectional mode: when Canary model + source=English, show target dropdown
   const isCanaryMainBidi = isCanaryModel(activeModel) && mainLanguage === 'English';
@@ -386,6 +401,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
         savedMainLanguage,
         savedLiveLanguage,
         savedHideTimestamps,
+        savedMainTranslate,
+        savedMainBidiTarget,
       ] = await Promise.all([
         getConfig<'mic' | 'system'>('session.audioSource'),
         getConfig<string>('session.micDevice'),
@@ -393,6 +410,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
         getConfig<string>('session.mainLanguage'),
         getConfig<string>('session.liveLanguage'),
         getConfig<boolean>('output.hideTimestamps'),
+        getConfig<boolean>('session.mainTranslate'),
+        getConfig<string>('session.mainBidiTarget'),
       ]);
       if (!active) return;
 
@@ -417,6 +436,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
         setLiveLanguage(savedLiveLanguage);
       }
       if (savedHideTimestamps != null) setHideTimestamps(savedHideTimestamps);
+      // gh-102 followup: rehydrate translate/bidi state so the file-import
+      // surface and the live-recording surface always see the same selection
+      // after reload. Use the raw setters here to avoid re-persisting on hydrate.
+      if (typeof savedMainTranslate === 'boolean') setMainTranslateRaw(savedMainTranslate);
+      if (typeof savedMainBidiTarget === 'string' && savedMainBidiTarget) {
+        setMainBidiTargetRaw(savedMainBidiTarget);
+      }
     })().catch(() => {});
 
     return () => {
@@ -483,9 +509,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
     void setConfig('session.liveLanguage', language).catch(() => {});
   }, []);
 
-  // Reset translate toggles when model changes to one that doesn't support it
+  // Reset translate toggles when model changes to one that does not support it.
+  // Uses the raw setter so a model-driven reset stays in-memory only — calling
+  // the persisting wrapper here would clobber the user-saved preference on
+  // every swap through a non-translation backend (Parakeet, Whisper turbo, …).
   useEffect(() => {
-    if (!canTranslate) setMainTranslate(false);
+    if (!canTranslate) setMainTranslateRaw(false);
   }, [canTranslate]);
 
   useEffect(() => {
