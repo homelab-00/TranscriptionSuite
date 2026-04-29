@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.32
+  spec_version: 1.0.33
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -58,7 +58,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-29T15:41:42.402Z
+    generated_at: 2026-04-29T16:22:32.485Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -440,6 +440,7 @@ utility_allowlist:
     - bg-accent-magenta/10
     - bg-accent-orange
     - bg-accent-orange/10
+    - bg-accent-orange/5
     - bg-accent-rose/5
     - bg-amber-400/10
     - bg-amber-400/20
@@ -468,6 +469,7 @@ utility_allowlist:
     - bg-glass-surface
     - bg-green-500
     - bg-green-500/10
+    - bg-green-500/5
     - bg-linear-to-b
     - bg-linear-to-br
     - bg-linear-to-r
@@ -483,7 +485,6 @@ utility_allowlist:
     - bg-red-500/10
     - bg-red-500/25
     - bg-red-500/5
-    - bg-red-900/50
     - bg-slate-400/10
     - bg-slate-500
     - bg-slate-500/10
@@ -522,7 +523,6 @@ utility_allowlist:
     - border-amber-400/40
     - border-amber-500/20
     - border-amber-500/30
-    - border-amber-600
     - border-b
     - border-b-2
     - border-blue-500/20
@@ -531,8 +531,8 @@ utility_allowlist:
     - border-emerald-400/40
     - border-glass-100
     - border-glass-border
+    - border-green-500/20
     - border-green-500/30
-    - border-green-600
     - border-l
     - border-l-2
     - border-l-accent-magenta
@@ -549,7 +549,6 @@ utility_allowlist:
     - border-red-400/40
     - border-red-500/20
     - border-red-500/25
-    - border-red-700
     - border-slate-400/30
     - border-slate-900
     - border-t
@@ -722,6 +721,7 @@ utility_allowlist:
     - lg:p-10
     - lg:p-8
     - line-clamp-2
+    - m-0
     - mask-gradient-right
     - max-h-32
     - max-h-40
@@ -774,7 +774,6 @@ utility_allowlist:
     - mr-1.5
     - mr-2
     - mr-4
-    - mt-0
     - mt-0.5
     - mt-1
     - mt-1.5
@@ -953,7 +952,6 @@ utility_allowlist:
     - text-amber-400
     - text-amber-400/60
     - text-amber-400/80
-    - text-amber-600
     - text-base
     - text-black
     - text-blue-400
@@ -964,12 +962,10 @@ utility_allowlist:
     - text-emerald-400
     - text-green-400
     - text-green-400/70
-    - text-green-600
     - text-indigo-400
     - text-left
     - text-lg
     - text-neutral-100
-    - text-neutral-400
     - text-orange-400
     - text-orange-500
     - text-purple-400
@@ -979,7 +975,6 @@ utility_allowlist:
     - text-red-300
     - text-red-400
     - text-red-400/80
-    - text-red-700
     - text-right
     - text-slate-200
     - text-slate-300
@@ -2267,6 +2262,23 @@ component_contracts:
         rule: Session, notebook, and server nav items retain StatusLight indicators, with notebook status sharing the server status source.
   StarPopupModal:
     file: components/views/StarPopupModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  StateIcon:
+    file: components/views/GpuHealthCard.tsx
     required_tokens:
       - colors
       - motion
