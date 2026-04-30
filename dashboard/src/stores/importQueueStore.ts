@@ -16,6 +16,7 @@ import type {
   UploadResponse,
 } from '../api/types';
 import { resolveTranscriptionOutput } from '../services/transcriptionFormatters';
+import { supportsAutoDetect } from '../services/modelCapabilities';
 import { getConfig } from '../config/store';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -49,6 +50,9 @@ export interface SessionConfig {
   enableWordTimestamps: boolean;
   parallelDiarization: boolean;
   multitrack: boolean;
+  /** Source-language display name (e.g. "Spanish", "Auto Detect") bridged from
+   *  SessionImportTab so Folder Watch jobs honor the user's picker (gh-102 #3) */
+  language?: string;
 }
 
 export interface NotebookConfig {
@@ -56,6 +60,16 @@ export interface NotebookConfig {
   enableDiarization: boolean;
   enableWordTimestamps: boolean;
   parallelDiarization: boolean;
+  /** Source-language display name bridged from NotebookView ImportTab (gh-102 #3) */
+  language?: string;
+}
+
+export interface LanguagesCacheState {
+  /** Active main transcriber model from the most recent useLanguages() push. */
+  model: string | null;
+  languages: Array<{ code: string; name: string }>;
+  /** True until useLanguages() resolves real server data the first time. */
+  loading: boolean;
 }
 
 export interface NotebookCallbacks {
@@ -92,6 +106,9 @@ interface ImportQueueState extends WatcherState {
   sessionConfig: SessionConfig;
   notebookConfig: NotebookConfig;
   notebookCallbacks: NotebookCallbacks;
+  /** Languages cache pushed by useLanguages() consumers so handleFilesDetected
+   *  can resolve a display name → code without calling a hook (gh-102 #3) */
+  languagesCache: LanguagesCacheState;
 
   // Actions
   addFiles: (
@@ -116,6 +133,9 @@ interface ImportQueueState extends WatcherState {
   updateSessionConfig: (patch: Partial<SessionConfig>) => void;
   updateNotebookConfig: (patch: Partial<NotebookConfig>) => void;
   updateNotebookCallbacks: (callbacks: NotebookCallbacks) => void;
+  /** gh-102 #3 — pushed by useLanguages() consumers in SessionImportTab and
+   *  NotebookView ImportTab so non-React store actions can resolve language. */
+  setLanguagesCache: (cache: LanguagesCacheState) => void;
 
   // Watcher actions
   setSessionWatchPath: (path: string) => void;
@@ -449,6 +469,15 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
   watchLog: [],
   avgProcessingMs: 0,
 
+  // gh-102 #3 — initial cache is "loading" with empty list. Populated by
+  // useLanguages() consumers (SessionImportTab, NotebookView ImportTab) via
+  // setLanguagesCache. Folder Watch pauses while loading or pre-populated.
+  languagesCache: {
+    model: null,
+    languages: [],
+    loading: true,
+  },
+
   // ─── Queue Actions ───────────────────────────────────────────────────────
 
   addFiles: (files, type, options) => {
@@ -536,6 +565,10 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
     set({ notebookCallbacks: callbacks });
   },
 
+  setLanguagesCache: (cache) => {
+    set({ languagesCache: cache });
+  },
+
   // ─── Watcher Actions ──────────────────────────────────────────────────────
 
   setSessionWatchPath: (_path) => {
@@ -578,6 +611,42 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
     // SessionImportTab.handleFiles / NotebookImportTab.handleFiles (Issue #93).
     const state = useImportQueueStore.getState();
 
+    // gh-102 #3 — resolve persisted Source Language display name → code via
+    // the languages cache. Pause the entire detection batch when languages
+    // haven't loaded yet, OR when the active model lacks auto-detect (Canary,
+    // MLX-Canary) and the resolve fails. Reuses the folder-watch warn-toast +
+    // appendWatchLog channel established by the watcherServerConnected guard.
+    const cfg = type === 'session' ? state.sessionConfig : state.notebookConfig;
+    const cache = state.languagesCache;
+
+    // Pause when the cache is unpopulated. `cache.model === null` covers both
+    // the initial state and any window before a useLanguages() consumer has
+    // pushed real data. Using model-identity (not languages.length) avoids a
+    // false "loaded-but-empty" misclassification: empty list with loading=false
+    // would be a server contract violation, not a loading state, and should
+    // fall through to the explicit-required guard below where Canary still
+    // pauses (correct behavior) and Whisper proceeds with auto-detect.
+    if (cache.loading || cache.model === null) {
+      const msg = 'Folder Watch paused — languages still loading';
+      toast.warning(msg);
+      useImportQueueStore.getState().appendWatchLog({ message: msg, level: 'warn' });
+      return;
+    }
+
+    const requestedDisplayName = cfg.language;
+    const isAutoDetect = !requestedDisplayName || requestedDisplayName === 'Auto Detect';
+    const resolvedCode = isAutoDetect
+      ? undefined
+      : cache.languages.find((l) => l.name === requestedDisplayName)?.code;
+    const requiresExplicit = cache.model !== null && !supportsAutoDetect(cache.model);
+
+    if (requiresExplicit && resolvedCode === undefined) {
+      const msg = 'Folder Watch paused — Source Language required for the active model';
+      toast.warning(msg);
+      useImportQueueStore.getState().appendWatchLog({ message: msg, level: 'warn' });
+      return;
+    }
+
     if (type === 'notebook') {
       const { enableDiarization, enableWordTimestamps, parallelDiarization } = state.notebookConfig;
       // Add each notebook file individually so we can attach its creation timestamp.
@@ -588,6 +657,7 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
           enable_diarization: enableDiarization,
           enable_word_timestamps: enableWordTimestamps,
           parallel_diarization: enableDiarization ? parallelDiarization : undefined,
+          language: resolvedCode,
         });
       }
     } else {
@@ -598,6 +668,7 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
         enable_word_timestamps: enableWordTimestamps,
         parallel_diarization: enableDiarization && !multitrack ? parallelDiarization : undefined,
         multitrack: multitrack || undefined,
+        language: resolvedCode,
       });
     }
 

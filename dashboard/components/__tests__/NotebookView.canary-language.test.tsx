@@ -128,6 +128,7 @@ vi.mock('../../src/stores/importQueueStore', () => {
     resumeQueue: vi.fn(),
     updateNotebookCallbacks: vi.fn(),
     updateNotebookConfig: vi.fn(),
+    setLanguagesCache: vi.fn(),
     clearWatchLog: vi.fn(),
   };
   return {

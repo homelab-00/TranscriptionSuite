@@ -68,6 +68,7 @@ export const SessionImportTab: React.FC = () => {
   const pauseQueue = useImportQueueStore((s) => s.pauseQueue);
   const resumeQueue = useImportQueueStore((s) => s.resumeQueue);
   const updateSessionConfig = useImportQueueStore((s) => s.updateSessionConfig);
+  const setLanguagesCache = useImportQueueStore((s) => s.setLanguagesCache);
   const watcherServerConnected = useImportQueueStore((s) => s.watcherServerConnected);
   const avgProcessingMs = useImportQueueStore((s) => s.avgProcessingMs);
   const watchLog = useImportQueueStore((s) => s.watchLog);
@@ -210,8 +211,9 @@ export const SessionImportTab: React.FC = () => {
 
   // Sync per-tab settings to the unified Zustand store. Folder Watch jobs read
   // these in handleFilesDetected so auto-imported files honor the user's UI
-  // toggles (Issue #93). Raw values are stored — derivation rules
-  // (multitrack ? false : enableDiarization, etc.) live in the store handler.
+  // toggles (Issue #93) and source language picker (gh-102 #3). Raw values
+  // are stored — derivation rules (multitrack ? false : enableDiarization,
+  // etc.) live in the store handler.
   useEffect(() => {
     updateSessionConfig({
       outputDir,
@@ -221,6 +223,7 @@ export const SessionImportTab: React.FC = () => {
       enableWordTimestamps: wordTimestamps,
       parallelDiarization,
       multitrack,
+      language: mainLanguage,
     });
   }, [
     outputDir,
@@ -230,8 +233,22 @@ export const SessionImportTab: React.FC = () => {
     wordTimestamps,
     parallelDiarization,
     multitrack,
+    mainLanguage,
     updateSessionConfig,
   ]);
+
+  // gh-102 #3 — push useLanguages() results into the global languagesCache so
+  // handleFilesDetected (a non-React store action) can resolve display name →
+  // code. Both this view and NotebookView ImportTab call useLanguages with the
+  // same activeModel, so React Query dedupes; either consumer's write produces
+  // an idempotent cache state.
+  useEffect(() => {
+    setLanguagesCache({
+      model: activeModel,
+      languages,
+      loading: languagesLoading,
+    });
+  }, [activeModel, languages, languagesLoading, setLanguagesCache]);
 
   useEffect(() => {
     if (!supportsExplicitWordTimestampToggle) {

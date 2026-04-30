@@ -1329,6 +1329,7 @@ const ImportTab = ({
   const watchLog = useImportQueueStore((s) => s.watchLog);
   const clearWatchLog = useImportQueueStore((s) => s.clearWatchLog);
   const updateNotebookConfig = useImportQueueStore((s) => s.updateNotebookConfig);
+  const setLanguagesCache = useImportQueueStore((s) => s.setLanguagesCache);
 
   const {
     notebookWatchPath,
@@ -1478,15 +1479,29 @@ const ImportTab = ({
   }, []);
 
   // Sync toggle state to the unified store so notebook-auto (Folder Watch)
-  // jobs honor these UI selections (Issue #93). Manual notebook-normal jobs
-  // still pass options directly via handleFiles.
+  // jobs honor these UI selections (Issue #93) and the source language picker
+  // (gh-102 #3). Manual notebook-normal jobs still pass options directly via
+  // handleFiles.
   useEffect(() => {
     updateNotebookConfig({
       enableDiarization: diarization,
       enableWordTimestamps: wordTimestamps,
       parallelDiarization,
+      language: mainLanguage,
     });
-  }, [diarization, wordTimestamps, parallelDiarization, updateNotebookConfig]);
+  }, [diarization, wordTimestamps, parallelDiarization, mainLanguage, updateNotebookConfig]);
+
+  // gh-102 #3 — push useLanguages() results into the global languagesCache so
+  // handleFilesDetected (a non-React store action) can resolve display name →
+  // code. Mirror of the SessionImportTab effect; React Query dedupes the
+  // underlying fetch since both views use the same activeModel cache key.
+  useEffect(() => {
+    setLanguagesCache({
+      model: activeModel,
+      languages,
+      loading: languagesLoading,
+    });
+  }, [activeModel, languages, languagesLoading, setLanguagesCache]);
 
   // Constraint: diarization ON → force timestamps ON
   const handleDiarizationChange = useCallback((enabled: boolean) => {
