@@ -6,6 +6,14 @@ import { AppleSwitch } from '../ui/AppleSwitch';
 import { GlassCard } from '../ui/GlassCard';
 import { useImportQueueStore } from '../../src/stores/importQueueStore';
 import { apiClient } from '../../src/api/client';
+import { useAdminStatus } from '../../src/hooks/useAdminStatus';
+import { useLanguages } from '../../src/hooks/useLanguages';
+import { getConfig } from '../../src/config/store';
+import {
+  isCanaryModel,
+  supportsAutoDetect,
+  supportsTranslation,
+} from '../../src/services/modelCapabilities';
 import { toast } from 'sonner';
 
 interface AddNoteModalProps {
@@ -45,6 +53,27 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // gh-102 followup #2: notebook-upload surface honors the same Source
+  // Language and translation selection persisted by SessionView. Mirrors the
+  // SessionImportTab load pattern (SessionImportTab.tsx:122–183 / 163–183) —
+  // the persisted picker is the single source of truth, no duplicate UI here.
+  const [mainLanguage, setMainLanguage] = useState<string>('Auto Detect');
+  const [mainTranslate, setMainTranslate] = useState<boolean>(false);
+  const [mainBidiTarget, setMainBidiTarget] = useState<string>('Off');
+
+  const admin = useAdminStatus();
+  const activeModel: string | null =
+    admin.status?.config?.main_transcriber?.model ??
+    admin.status?.config?.transcription?.model ??
+    null;
+  const { languages, loading: languagesLoading } = useLanguages(activeModel);
+  // Mirror SessionImportTab.tsx:129–130 — same predicate shape so the
+  // notebook surface produces the same translation envelope handleFiles
+  // produces for live recording / session-import.
+  const isCanaryMainBidi = isCanaryModel(activeModel) && mainLanguage === 'English';
+  const canTranslate = supportsTranslation(activeModel);
+
   const selectedDateKey =
     initialDate && DATE_KEY_RE.test(initialDate) ? initialDate : formatDateKey(new Date());
   const selectedDateLabel = new Date(`${selectedDateKey}T00:00:00`).toLocaleDateString([], {
@@ -78,6 +107,43 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
     }
   }, [supportsExplicitWordTimestampToggle]);
 
+  // gh-102 followup #2: hydrate the persisted Source Language picker
+  // selection (and Canary bidi state) from config. Mirrors
+  // SessionImportTab.tsx:163–183 so all import surfaces converge on the same
+  // source-of-truth on every mount and every config change driven by setConfig
+  // writes from SessionView.
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const [savedMainLanguage, savedMainTranslate, savedMainBidiTarget] = await Promise.all([
+        getConfig<string>('session.mainLanguage'),
+        getConfig<boolean>('session.mainTranslate'),
+        getConfig<string>('session.mainBidiTarget'),
+      ]);
+      if (!active) return;
+      if (typeof savedMainLanguage === 'string' && savedMainLanguage) {
+        setMainLanguage(savedMainLanguage);
+      }
+      if (typeof savedMainTranslate === 'boolean') setMainTranslate(savedMainTranslate);
+      if (typeof savedMainBidiTarget === 'string' && savedMainBidiTarget) {
+        setMainBidiTarget(savedMainBidiTarget);
+      }
+    })().catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Resolve language code from display name. Mirrors SessionImportTab.tsx:270–277.
+  const resolveLanguage = useCallback(
+    (name: string): string | undefined => {
+      if (name === 'Auto Detect') return undefined;
+      const match = languages.find((l) => l.name === name);
+      return match?.code;
+    },
+    [languages],
+  );
+
   const handleFiles = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;
     const fileArray = Array.from(files);
@@ -108,6 +174,36 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
       setError('Please select at least one audio file.');
       return;
     }
+
+    // gh-102 followup #2: mirror SessionImportTab.handleFiles guard
+    // (SessionImportTab.tsx:291–301). The Canary backend (canary_backend.py:79)
+    // raises ValueError when `language` is missing. Without this guard,
+    // submitting a notebook upload on Canary with an unresolvable picker
+    // (Auto Detect, languages still loading, stale display name) round-trips
+    // to the backend fail-loud path. Wording matches the live-recording /
+    // session-import guard verbatim so future copy changes propagate via grep.
+    const resolvedLang = resolveLanguage(mainLanguage);
+    if (resolvedLang === undefined && !supportsAutoDetect(activeModel)) {
+      toast.error('Source language required', {
+        description: languagesLoading
+          ? 'Loading languages — please try again in a moment.'
+          : mainLanguage
+            ? `"${mainLanguage}" is not a valid source language for the active model. Pick a language from the Source Language dropdown.`
+            : 'No source language is selected. Pick a language from the Source Language dropdown.',
+      });
+      return;
+    }
+
+    // Translation parity: mirror SessionImportTab.tsx:308–313 so the notebook
+    // surface produces the same envelope live recording / session-import
+    // produce. Canary bidi (English source + non-Off target) drives
+    // translate=true; the regular Whisper translate-to-English toggle is only
+    // honored when the active model supports translation.
+    const mainTranslateActive = isCanaryMainBidi
+      ? mainBidiTarget !== 'Off'
+      : mainTranslate && canTranslate;
+    const mainTranslateTarget = isCanaryMainBidi ? (resolveLanguage(mainBidiTarget) ?? 'en') : 'en';
+
     setIsSubmitting(true);
     setError(null);
 
@@ -120,6 +216,9 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
       const enableWordTimestamps = supportsExplicitWordTimestampToggle ? isTimestampsEnabled : true;
 
       useImportQueueStore.getState().addFiles(selectedFiles, 'notebook-normal', {
+        language: resolvedLang,
+        translation_enabled: mainTranslateActive ? true : undefined,
+        translation_target_language: mainTranslateActive ? mainTranslateTarget : undefined,
         enable_diarization: isDiarizationEnabled,
         enable_word_timestamps: enableWordTimestamps,
         parallel_diarization: isDiarizationEnabled ? parallelDiarization : undefined,
@@ -150,6 +249,14 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
     selectedDateKey,
     supportsExplicitWordTimestampToggle,
     title,
+    activeModel,
+    mainLanguage,
+    mainTranslate,
+    mainBidiTarget,
+    isCanaryMainBidi,
+    canTranslate,
+    languagesLoading,
+    resolveLanguage,
   ]);
 
   useEffect(() => {

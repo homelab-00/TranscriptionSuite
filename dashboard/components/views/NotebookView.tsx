@@ -51,6 +51,11 @@ import { useNotebookWatcher } from '../../src/hooks/useNotebookWatcher';
 import { apiClient } from '../../src/api/client';
 import type { AdminStatus, Recording } from '../../src/api/types';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
+import {
+  isCanaryModel,
+  supportsAutoDetect,
+  supportsTranslation,
+} from '../../src/services/modelCapabilities';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { getConfig, setConfig } from '../../src/config/store';
@@ -1401,11 +1406,65 @@ const ImportTab = ({
   const [parallelDefault, setParallelDefault] = useState<boolean>(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
+  // gh-102 followup #2: notebook-upload surface honors the persisted Source
+  // Language and translation selection from SessionView. Mirrors the
+  // SessionImportTab load pattern (SessionImportTab.tsx:122–183 / 163–183) —
+  // the persisted picker is the single source of truth, no duplicate UI here.
+  const [mainLanguage, setMainLanguage] = useState<string>('Auto Detect');
+  const [mainTranslate, setMainTranslate] = useState<boolean>(false);
+  const [mainBidiTarget, setMainBidiTarget] = useState<string>('Off');
+
+  // Derive activeModel from the existing adminStatus prop (parent already
+  // computes the same thing; we re-derive locally to avoid prop-drilling
+  // the model name).
+  const activeModel: string | null =
+    adminStatus?.config?.main_transcriber?.model ??
+    adminStatus?.config?.transcription?.model ??
+    null;
+  const { languages, loading: languagesLoading } = useLanguages(activeModel);
+  const isCanaryMainBidi = isCanaryModel(activeModel) && mainLanguage === 'English';
+  const canTranslate = supportsTranslation(activeModel);
+
   useEffect(() => {
     if (!supportsExplicitWordTimestampToggle) {
       setWordTimestamps(true);
     }
   }, [supportsExplicitWordTimestampToggle]);
+
+  // gh-102 followup #2: hydrate the persisted Source Language picker selection
+  // (and Canary bidi state) from config. Mirrors SessionImportTab.tsx:163–183
+  // so all import surfaces converge on the same source-of-truth.
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const [savedMainLanguage, savedMainTranslate, savedMainBidiTarget] = await Promise.all([
+        getConfig<string>('session.mainLanguage'),
+        getConfig<boolean>('session.mainTranslate'),
+        getConfig<string>('session.mainBidiTarget'),
+      ]);
+      if (!active) return;
+      if (typeof savedMainLanguage === 'string' && savedMainLanguage) {
+        setMainLanguage(savedMainLanguage);
+      }
+      if (typeof savedMainTranslate === 'boolean') setMainTranslate(savedMainTranslate);
+      if (typeof savedMainBidiTarget === 'string' && savedMainBidiTarget) {
+        setMainBidiTarget(savedMainBidiTarget);
+      }
+    })().catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Resolve language code from display name. Mirrors SessionImportTab.tsx:270–277.
+  const resolveLanguage = useCallback(
+    (name: string): string | undefined => {
+      if (name === 'Auto Detect') return undefined;
+      const match = languages.find((l) => l.name === name);
+      return match?.code;
+    },
+    [languages],
+  );
 
   useEffect(() => {
     apiClient
@@ -1451,7 +1510,38 @@ const ImportTab = ({
   const handleFiles = useCallback(
     (files: FileList | null) => {
       if (!files || files.length === 0) return;
+
+      // gh-102 followup #2: mirror SessionImportTab.handleFiles guard
+      // (SessionImportTab.tsx:291–301). The Canary backend
+      // (canary_backend.py:79) raises ValueError when `language` is missing.
+      // Without this guard, dropping a file on Canary with an unresolvable
+      // picker round-trips to the backend fail-loud path. Wording matches the
+      // live-recording / session-import guard verbatim so future copy changes
+      // propagate via grep.
+      const resolvedLang = resolveLanguage(mainLanguage);
+      if (resolvedLang === undefined && !supportsAutoDetect(activeModel)) {
+        toast.error('Source language required', {
+          description: languagesLoading
+            ? 'Loading languages — please try again in a moment.'
+            : mainLanguage
+              ? `"${mainLanguage}" is not a valid source language for the active model. Pick a language from the Source Language dropdown.`
+              : 'No source language is selected. Pick a language from the Source Language dropdown.',
+        });
+        return;
+      }
+
+      // Translation parity: mirror SessionImportTab.tsx:308–313.
+      const mainTranslateActive = isCanaryMainBidi
+        ? mainBidiTarget !== 'Off'
+        : mainTranslate && canTranslate;
+      const mainTranslateTarget = isCanaryMainBidi
+        ? (resolveLanguage(mainBidiTarget) ?? 'en')
+        : 'en';
+
       addFiles(Array.from(files), 'notebook-normal', {
+        language: resolvedLang,
+        translation_enabled: mainTranslateActive ? true : undefined,
+        translation_target_language: mainTranslateActive ? mainTranslateTarget : undefined,
         enable_diarization: diarization,
         enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
         parallel_diarization: diarization ? parallelDiarization : undefined,
@@ -1475,6 +1565,14 @@ const ImportTab = ({
       wordTimestamps,
       notebookWatchPath,
       showWatchHint,
+      activeModel,
+      mainLanguage,
+      mainTranslate,
+      mainBidiTarget,
+      isCanaryMainBidi,
+      canTranslate,
+      languagesLoading,
+      resolveLanguage,
     ],
   );
 
