@@ -78,6 +78,7 @@ vi.mock('../../src/stores/importQueueStore', () => ({
       notebookWatchActive: false,
       updateNotebookCallbacks: vi.fn(),
       updateNotebookConfig: vi.fn(),
+      setLanguagesCache: vi.fn(),
     };
     return typeof selector === 'function' ? selector(state) : state;
   },

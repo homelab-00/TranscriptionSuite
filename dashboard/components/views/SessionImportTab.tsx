@@ -36,6 +36,12 @@ import { apiClient } from '../../src/api/client';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
 import { getConfig, setConfig } from '../../src/config/store';
 import { useSessionWatcher } from '../../src/hooks/useSessionWatcher';
+import {
+  supportsAutoDetect,
+  supportsTranslation,
+  isCanaryModel,
+} from '../../src/services/modelCapabilities';
+import { toast } from 'sonner';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -62,6 +68,7 @@ export const SessionImportTab: React.FC = () => {
   const pauseQueue = useImportQueueStore((s) => s.pauseQueue);
   const resumeQueue = useImportQueueStore((s) => s.resumeQueue);
   const updateSessionConfig = useImportQueueStore((s) => s.updateSessionConfig);
+  const setLanguagesCache = useImportQueueStore((s) => s.setLanguagesCache);
   const watcherServerConnected = useImportQueueStore((s) => s.watcherServerConnected);
   const avgProcessingMs = useImportQueueStore((s) => s.avgProcessingMs);
   const watchLog = useImportQueueStore((s) => s.watchLog);
@@ -101,10 +108,27 @@ export const SessionImportTab: React.FC = () => {
     admin.status?.config?.main_transcriber?.model ??
     admin.status?.config?.transcription?.model ??
     null;
-  const { backendType } = useLanguages(activeModel);
+  const { backendType, languages, loading: languagesLoading } = useLanguages(activeModel);
   const supportsExplicitWordTimestampToggle = activeModel
     ? supportsExplicitWordTimestampToggleForModel(activeModel)
     : backendType !== 'vibevoice_asr';
+
+  // gh-102 followup: file-import surface honors the same language /
+  // translation selection the live-recording surface persists from
+  // SessionView. We mirror the SessionView load pattern (SessionView.tsx:393–
+  // 412): read session.mainLanguage + session.mainTranslate +
+  // session.mainBidiTarget on mount, then plumb them through addFiles options
+  // in handleFiles. The persisted picker is the single source of truth — no
+  // duplicate UI here.
+  const [mainLanguage, setMainLanguage] = useState<string>('Auto Detect');
+  const [mainTranslate, setMainTranslate] = useState<boolean>(false);
+  const [mainBidiTarget, setMainBidiTarget] = useState<string>('Off');
+
+  // Canary bidirectional mode mirrors SessionView.tsx:376 — same predicate
+  // shape so the import surface produces the same translation envelope as
+  // handleStartRecording (English source + non-Off bidi target → translate).
+  const isCanaryMainBidi = isCanaryModel(activeModel) && mainLanguage === 'English';
+  const canTranslate = supportsTranslation(activeModel);
 
   // Fetch downloads path and hideTimestamps setting on mount
   useEffect(() => {
@@ -131,6 +155,32 @@ export const SessionImportTab: React.FC = () => {
       }
     };
     init();
+  }, []);
+
+  // gh-102 followup: hydrate the persisted Source Language picker selection
+  // (and Canary bidi state) from config. Mirrors SessionView.tsx:393–412 so
+  // both surfaces converge on the same source-of-truth on every mount and
+  // every config change driven by setConfig writes from SessionView.
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const [savedMainLanguage, savedMainTranslate, savedMainBidiTarget] = await Promise.all([
+        getConfig<string>('session.mainLanguage'),
+        getConfig<boolean>('session.mainTranslate'),
+        getConfig<string>('session.mainBidiTarget'),
+      ]);
+      if (!active) return;
+      if (typeof savedMainLanguage === 'string' && savedMainLanguage) {
+        setMainLanguage(savedMainLanguage);
+      }
+      if (typeof savedMainTranslate === 'boolean') setMainTranslate(savedMainTranslate);
+      if (typeof savedMainBidiTarget === 'string' && savedMainBidiTarget) {
+        setMainBidiTarget(savedMainBidiTarget);
+      }
+    })().catch(() => {});
+    return () => {
+      active = false;
+    };
   }, []);
 
   // 4.6 — load manual import count and hint state on mount
@@ -161,8 +211,9 @@ export const SessionImportTab: React.FC = () => {
 
   // Sync per-tab settings to the unified Zustand store. Folder Watch jobs read
   // these in handleFilesDetected so auto-imported files honor the user's UI
-  // toggles (Issue #93). Raw values are stored — derivation rules
-  // (multitrack ? false : enableDiarization, etc.) live in the store handler.
+  // toggles (Issue #93) and source language picker (gh-102 #3). Raw values
+  // are stored — derivation rules (multitrack ? false : enableDiarization,
+  // etc.) live in the store handler.
   useEffect(() => {
     updateSessionConfig({
       outputDir,
@@ -172,6 +223,7 @@ export const SessionImportTab: React.FC = () => {
       enableWordTimestamps: wordTimestamps,
       parallelDiarization,
       multitrack,
+      language: mainLanguage,
     });
   }, [
     outputDir,
@@ -181,8 +233,22 @@ export const SessionImportTab: React.FC = () => {
     wordTimestamps,
     parallelDiarization,
     multitrack,
+    mainLanguage,
     updateSessionConfig,
   ]);
+
+  // gh-102 #3 — push useLanguages() results into the global languagesCache so
+  // handleFilesDetected (a non-React store action) can resolve display name →
+  // code. Both this view and NotebookView ImportTab call useLanguages with the
+  // same activeModel, so React Query dedupes; either consumer's write produces
+  // an idempotent cache state.
+  useEffect(() => {
+    setLanguagesCache({
+      model: activeModel,
+      languages,
+      loading: languagesLoading,
+    });
+  }, [activeModel, languages, languagesLoading, setLanguagesCache]);
 
   useEffect(() => {
     if (!supportsExplicitWordTimestampToggle) {
@@ -217,10 +283,56 @@ export const SessionImportTab: React.FC = () => {
     [supportsExplicitWordTimestampToggle],
   );
 
+  // Resolve language code from display name. Mirrors SessionView.tsx:680.
+  const resolveLanguage = useCallback(
+    (name: string): string | undefined => {
+      if (name === 'Auto Detect') return undefined;
+      const match = languages.find((l) => l.name === name);
+      return match?.code;
+    },
+    [languages],
+  );
+
   const handleFiles = useCallback(
     (files: FileList | null) => {
       if (!files || files.length === 0) return;
+
+      // gh-102 followup: mirror SessionView.handleStartRecording (SessionView.tsx:705–715).
+      // The Canary backend (canary_backend.py:79) raises ValueError when
+      // `language` is missing. Without this guard, dropping a file on Canary
+      // with an unresolvable picker (Auto Detect, languages still loading,
+      // stale display name) round-trips to the backend fail-loud path and
+      // surfaces the cryptic toast the issue 102 reporter screenshotted.
+      // Wording matches the live-recording guard verbatim so future copy
+      // changes propagate via grep.
+      const resolvedLang = resolveLanguage(mainLanguage);
+      if (resolvedLang === undefined && !supportsAutoDetect(activeModel)) {
+        toast.error('Source language required', {
+          description: languagesLoading
+            ? 'Loading languages — please try again in a moment.'
+            : mainLanguage
+              ? `"${mainLanguage}" is not a valid source language for the active model. Pick a language from the Source Language dropdown.`
+              : 'No source language is selected. Pick a language from the Source Language dropdown.',
+        });
+        return;
+      }
+
+      // Translation parity: mirror SessionView.tsx:718–719 so the import
+      // surface produces the same envelope handleStartRecording produces for
+      // live recording. Canary bidi (English source + non-Off target) drives
+      // translate=true; the regular Whisper translate-to-English toggle is
+      // only honored when the active model supports translation.
+      const mainTranslateActive = isCanaryMainBidi
+        ? mainBidiTarget !== 'Off'
+        : mainTranslate && canTranslate;
+      const mainTranslateTarget = isCanaryMainBidi
+        ? (resolveLanguage(mainBidiTarget) ?? 'en')
+        : 'en';
+
       addFiles(Array.from(files), 'session-normal', {
+        language: resolvedLang,
+        translation_enabled: mainTranslateActive ? true : undefined,
+        translation_target_language: mainTranslateActive ? mainTranslateTarget : undefined,
         enable_diarization: multitrack ? false : diarization,
         enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
         parallel_diarization: diarization && !multitrack ? parallelDiarization : undefined,
@@ -246,6 +358,14 @@ export const SessionImportTab: React.FC = () => {
       wordTimestamps,
       sessionWatchPath,
       showWatchHint,
+      activeModel,
+      mainLanguage,
+      mainTranslate,
+      mainBidiTarget,
+      isCanaryMainBidi,
+      canTranslate,
+      languagesLoading,
+      resolveLanguage,
     ],
   );
 
