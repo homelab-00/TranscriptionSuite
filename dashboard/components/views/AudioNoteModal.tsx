@@ -27,6 +27,8 @@ import {
   ChevronDown,
   RotateCw,
   Copy,
+  MoreHorizontal,
+  Download,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
@@ -473,6 +475,16 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     currentTitle: string;
   } | null>(null);
   const [renameValue, setRenameValue] = useState('');
+
+  // GH #96: Recording-level options menu (Rename / Export / Delete) shown in
+  // the modal header. Mirrors the row-level NoteActionMenu in NotebookView so
+  // users can manage the recording without closing the modal first.
+  const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
+  const [recordingRenameDialog, setRecordingRenameDialog] = useState<{
+    currentTitle: string;
+  } | null>(null);
+  const [recordingRenameValue, setRecordingRenameValue] = useState('');
+  const [recordingRenameLoading, setRecordingRenameLoading] = useState(false);
 
   // Chat Sessions — fetched from API when recording is available
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
@@ -1337,6 +1349,101 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     }
   }, [note?.recordingId, dateEditValue, onRecordingMutated, onClose]);
 
+  // GH #96: close the recording-options dropdown on outside click. Mirrors
+  // the modelDropdownOpen pattern above so the two dropdowns behave the same.
+  useEffect(() => {
+    if (!optionsMenuOpen) return;
+    const handler = () => setOptionsMenuOpen(false);
+    const id = setTimeout(() => document.addEventListener('click', handler), 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('click', handler);
+    };
+  }, [optionsMenuOpen]);
+
+  // GH #96 (review): reset recording-options state whenever the modal closes
+  // so a half-open menu / half-typed rename does not persist into the next
+  // session and the document click listener does not leak.
+  useEffect(() => {
+    if (isOpen) return;
+    setOptionsMenuOpen(false);
+    setRecordingRenameDialog(null);
+    setRecordingRenameValue('');
+    setRecordingRenameLoading(false);
+  }, [isOpen]);
+
+  /** Open the recording rename portal, prefilled with the current title. */
+  const handleRecordingRenameOpen = useCallback(() => {
+    const currentTitle = recording?.title ?? note?.title ?? '';
+    setRecordingRenameValue(currentTitle);
+    setRecordingRenameDialog({ currentTitle });
+    setOptionsMenuOpen(false);
+  }, [recording?.title, note?.title]);
+
+  /** Commit a recording rename. No-op when the title is unchanged or empty. */
+  const handleRecordingRenameCommit = useCallback(async () => {
+    if (!recordingRenameDialog || !note?.recordingId) return;
+    if (recordingRenameLoading) return; // GH #96 (review): block double-Enter
+    const trimmed = recordingRenameValue.trim();
+    if (!trimmed || trimmed === recordingRenameDialog.currentTitle) {
+      setRecordingRenameDialog(null);
+      return;
+    }
+    setRecordingRenameLoading(true);
+    try {
+      await apiClient.updateRecordingTitle(note.recordingId, trimmed);
+      onRecordingMutated?.();
+      setRecordingRenameDialog(null);
+    } catch {
+      toast.error('Failed to rename recording.');
+    } finally {
+      setRecordingRenameLoading(false);
+    }
+  }, [
+    recordingRenameDialog,
+    recordingRenameValue,
+    recordingRenameLoading,
+    note?.recordingId,
+    onRecordingMutated,
+  ]);
+
+  /** Open the recording export download for the requested format. */
+  const handleRecordingExport = useCallback(
+    (format: 'txt' | 'srt' | 'ass') => {
+      setOptionsMenuOpen(false);
+      if (!note?.recordingId) return;
+      const url = apiClient.getExportUrl(note.recordingId, format);
+      if (url === null) {
+        toast.error('Remote host not configured. Open Settings → Connection.');
+        return;
+      }
+      // GH #96 (review): noopener,noreferrer prevents the new context from
+      // accessing window.opener and avoids referrer leakage to the export URL.
+      window.open(url, '_blank', 'noopener,noreferrer');
+    },
+    [note?.recordingId],
+  );
+
+  /** Confirm + delete the recording. Closes the modal on success. */
+  const handleRecordingDelete = useCallback(async () => {
+    setOptionsMenuOpen(false);
+    if (!note?.recordingId) return;
+    const ok = await confirm('Delete this recording? This cannot be undone.', {
+      danger: true,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
+    try {
+      await apiClient.deleteRecording(note.recordingId);
+      onRecordingMutated?.();
+      toast.success('Recording deleted.');
+      onClose();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete recording.';
+      toast.error(message);
+    }
+  }, [note?.recordingId, confirm, onRecordingMutated, onClose]);
+
   if (!isRendered || !note || !portalContainer) return createPortal(confirmDialog, document.body);
 
   return (
@@ -1379,6 +1486,52 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                   onClick={handleRenameCommit}
                   className="bg-accent-cyan rounded-lg px-4 py-2 text-sm font-medium text-black hover:bg-cyan-300"
                 >
+                  Rename
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+      {/* GH #96: Recording-rename dialog (separate from the chat-session rename above). */}
+      {recordingRenameDialog &&
+        createPortal(
+          <div className="fixed inset-0 z-10000 flex items-center justify-center p-4">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setRecordingRenameDialog(null)}
+            />
+            <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl">
+              <div className="flex items-center border-b border-white/10 bg-white/5 px-6 py-4">
+                <span className="text-base font-semibold text-white">Rename Recording</span>
+              </div>
+              <div className="bg-black/20 px-6 py-5">
+                <input
+                  autoFocus
+                  type="text"
+                  value={recordingRenameValue}
+                  onChange={(e) => setRecordingRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleRecordingRenameCommit();
+                    if (e.key === 'Escape') setRecordingRenameDialog(null);
+                  }}
+                  className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
+                />
+              </div>
+              <div className="flex justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4">
+                <button
+                  onClick={() => setRecordingRenameDialog(null)}
+                  disabled={recordingRenameLoading}
+                  className="rounded-lg px-4 py-2 text-sm text-slate-400 hover:text-white disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRecordingRenameCommit}
+                  disabled={recordingRenameLoading}
+                  className="bg-accent-cyan flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-black hover:bg-cyan-300 disabled:opacity-50"
+                >
+                  {recordingRenameLoading && <Loader2 size={14} className="animate-spin" />}
                   Rename
                 </button>
               </div>
@@ -1470,6 +1623,65 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                       </Button>
                       <div className="mx-1 h-8 w-px bg-white/10"></div>
                     </>
+                  )}
+                  {/* GH #96: Recording-options menu (Rename / Export / Delete).
+                      Disabled while the recording is still loading so users
+                      can't act on a half-fetched note (matches AC1 / edge-case
+                      matrix). Tokens match the existing chat-session contextMenu
+                      below for visual consistency (bg-slate-900 + border-slate-900). */}
+                  {note.recordingId != null && (
+                    <div className="relative">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (recordingLoading) return;
+                          setOptionsMenuOpen((v) => !v);
+                        }}
+                        disabled={recordingLoading}
+                        title={recordingLoading ? 'Loading recording…' : 'More options'}
+                        className="rounded-full p-2 text-slate-400 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                      >
+                        <MoreHorizontal size={22} />
+                      </button>
+                      {optionsMenuOpen && (
+                        <div
+                          className="animate-in fade-in zoom-in-95 absolute top-full right-0 z-50 mt-2 w-48 overflow-hidden rounded-xl border border-slate-900 bg-slate-900 py-1 shadow-2xl duration-100 select-none"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            onClick={handleRecordingRenameOpen}
+                            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
+                          >
+                            <Edit2 size={14} /> Rename
+                          </button>
+                          <button
+                            onClick={() => handleRecordingExport('txt')}
+                            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
+                          >
+                            <Download size={14} /> Export TXT
+                          </button>
+                          <button
+                            onClick={() => handleRecordingExport('srt')}
+                            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
+                          >
+                            <Download size={14} /> Export SRT
+                          </button>
+                          <button
+                            onClick={() => handleRecordingExport('ass')}
+                            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
+                          >
+                            <Download size={14} /> Export ASS
+                          </button>
+                          <div className="my-1 h-px bg-white/10"></div>
+                          <button
+                            onClick={handleRecordingDelete}
+                            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                          >
+                            <Trash2 size={14} /> Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                   <button
                     onClick={handleCloseAction}

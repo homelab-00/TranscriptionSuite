@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.34
+  spec_version: 1.0.36
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -62,7 +62,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-01T21:35:27.741Z
+    generated_at: 2026-05-01T22:23:14.179Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -233,7 +233,6 @@ foundation:
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
-        - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
         - shadow-2xl
@@ -320,7 +319,6 @@ foundation:
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
-        - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
         - text-[10px]
@@ -648,7 +646,6 @@ utility_allowlist:
     - hover:-translate-y-1
     - hover:bg-accent-cyan
     - hover:bg-accent-cyan/10
-    - hover:bg-accent-cyan/20
     - hover:bg-accent-cyan/30
     - hover:bg-accent-cyan/5
     - hover:bg-amber-400/20
@@ -674,7 +671,6 @@ utility_allowlist:
     - hover:shadow-accent-cyan/40
     - hover:shadow-lg
     - hover:text-accent-cyan
-    - hover:text-accent-cyan/80
     - hover:text-amber-300
     - hover:text-black
     - hover:text-cyan-300
@@ -778,7 +774,6 @@ utility_allowlist:
     - mx-auto
     - my-1
     - my-2
-    - my-4
     - opacity-0
     - opacity-10
     - opacity-30
@@ -817,7 +812,6 @@ utility_allowlist:
     - pl-5
     - pl-6
     - pl-8
-    - pointer-events-auto
     - pointer-events-none
     - pr-10
     - pr-12
@@ -923,7 +917,6 @@ utility_allowlist:
     - text-2xl
     - text-3xl
     - text-accent-cyan
-    - text-accent-cyan/70
     - text-accent-cyan/80
     - text-accent-magenta
     - text-accent-orange
@@ -1077,7 +1070,6 @@ utility_allowlist:
     - shadow-[0_0_18px_rgba(239,68,68,0.35)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
-    - shadow-[0_0_5px_rgba(239,22,238,0.5)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
     - text-[10px]
@@ -1171,8 +1163,8 @@ blur_depth_budgets:
       max: 8
       reason: Four mutually-exclusive confirmation dialogs (overlay + panel each); only one mounts at a time.
     components/views/AudioNoteModal.tsx:
-      max: 5
-      reason: Sibling visualizer overlays + modal chrome stack only when the modal is open.
+      max: 7
+      reason: Sibling visualizer overlays + modal chrome + GH
     components/views/BugReportModal.tsx:
       max: 4
       reason: Modal overlay + panel + nested input/preview surfaces.
