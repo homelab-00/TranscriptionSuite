@@ -7,8 +7,11 @@ meta:
     repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
     source_files:
       - App.tsx
+      - components/__tests__/AddNoteModal.canary-language.test.tsx
+      - components/__tests__/AddNoteModal.initialFiles.test.tsx
       - components/__tests__/AudioVisualizer.test.tsx
       - components/__tests__/LogsView.test.tsx
+      - components/__tests__/NotebookView.canary-language.test.tsx
       - components/__tests__/NotebookView.test.tsx
       - components/__tests__/ServerView.test.tsx
       - components/__tests__/SessionImportTab.canary-language.test.tsx
@@ -59,7 +62,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-04-29T21:36:52.369Z
+    generated_at: 2026-05-01T21:35:27.741Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -231,7 +234,6 @@ foundation:
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
-        - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
         - shadow-2xl
@@ -319,7 +321,6 @@ foundation:
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
-        - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
         - text-[10px]
@@ -461,8 +462,6 @@ utility_allowlist:
     - bg-cyan-400/70
     - bg-emerald-400/10
     - bg-glass-100
-    - bg-glass-100/30
-    - bg-glass-100/50
     - bg-glass-200
     - bg-glass-surface
     - bg-green-500
@@ -665,11 +664,9 @@ utility_allowlist:
     - hover:bg-red-500/20
     - hover:bg-red-500/35
     - hover:bg-white/10
-    - hover:bg-white/2
     - hover:bg-white/5
     - hover:bg-white/8
     - hover:bg-yellow-400/30
-    - hover:border-accent-cyan/50
     - hover:border-white/10
     - hover:border-white/20
     - hover:opacity-85
@@ -711,13 +708,10 @@ utility_allowlist:
     - left-3
     - left-4
     - left-8
-    - lg:col-span-2
     - lg:flex
     - lg:grid-cols-2
-    - lg:grid-cols-3
     - lg:p-10
     - lg:p-8
-    - line-clamp-2
     - m-0
     - mask-gradient-right
     - max-h-32
@@ -758,7 +752,6 @@ utility_allowlist:
     - min-w-100
     - min-w-25
     - min-w-32.5
-    - min-w-36
     - min-w-42.5
     - min-w-6
     - ml-0.5
@@ -780,7 +773,6 @@ utility_allowlist:
     - mt-4
     - mt-6
     - mt-8
-    - mt-auto
     - mx-1
     - mx-2
     - mx-auto
@@ -819,10 +811,8 @@ utility_allowlist:
     - pb-2
     - pb-4
     - pb-8
-    - pl-0
     - pl-1
     - pl-12
-    - pl-2
     - pl-4
     - pl-5
     - pl-6
@@ -959,7 +949,6 @@ utility_allowlist:
     - text-emerald-400
     - text-green-400
     - text-green-400/70
-    - text-indigo-400
     - text-left
     - text-lg
     - text-neutral-100
@@ -1089,7 +1078,6 @@ utility_allowlist:
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
     - shadow-[0_0_5px_rgba(239,22,238,0.5)]
-    - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
     - text-[10px]

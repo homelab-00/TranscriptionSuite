@@ -21,6 +21,7 @@ interface AddNoteModalProps {
   onClose: () => void;
   initialTime?: number; // e.g. 10 for 10:00
   initialDate?: string; // e.g. 2026-02-17
+  initialFiles?: File[]; // GH #92: pre-populated when opened via per-hour drag-and-drop
   supportsExplicitWordTimestampToggle?: boolean;
 }
 
@@ -37,6 +38,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
   onClose,
   initialTime,
   initialDate,
+  initialFiles,
   supportsExplicitWordTimestampToggle = true,
 }) => {
   const [isRendered, setIsRendered] = useState(false);
@@ -265,15 +267,23 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
 
     if (isOpen) {
       setIsRendered(true);
-      // Set default title based on time
-      if (initialTime !== undefined) {
-        const timeStr = `${initialTime.toString().padStart(2, '0')}:00`;
-        setTitle(`${timeStr} Recording`);
+      // GH #92: when files are preloaded via drag-and-drop on a time slot,
+      // seed selectedFiles and prefer the first file's name as the default
+      // title (matches the in-modal drop behavior in handleFiles).
+      if (initialFiles && initialFiles.length > 0) {
+        setSelectedFiles(initialFiles);
+        const firstName = initialFiles[0].name.replace(/\.[^.]+$/, '');
+        setTitle(firstName);
       } else {
-        setTitle('New Recording');
+        // Set default title based on time
+        if (initialTime !== undefined) {
+          const timeStr = `${initialTime.toString().padStart(2, '0')}:00`;
+          setTitle(`${timeStr} Recording`);
+        } else {
+          setTitle('New Recording');
+        }
+        setSelectedFiles([]);
       }
-      // Reset state on open
-      setSelectedFiles([]);
       setError(null);
       setIsSubmitting(false);
 
@@ -301,7 +311,13 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
       clearTimeout(timer);
       cancelAnimationFrame(rafId);
     };
-  }, [isOpen, initialTime]);
+    // GH #92 review: do NOT include `initialFiles` (or `initialTime`) in
+    // deps. They are captured at the time the modal opens; re-running this
+    // effect on every parent re-render that produces a new array reference
+    // would clobber the user's edits to title/selectedFiles mid-flight.
+    // Seeding intentionally happens only on the isOpen→true transition.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   if (!isRendered) return null;
 
