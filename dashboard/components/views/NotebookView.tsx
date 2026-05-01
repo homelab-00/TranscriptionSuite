@@ -60,6 +60,22 @@ import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { getConfig, setConfig } from '../../src/config/store';
 
+// GH #92: same allow-list as AddNoteModal's <input accept="…"> below — keep
+// the two in sync so per-hour drag-drop and the modal's browse/drop accept
+// the same formats.
+const AUDIO_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.webm', '.opus'];
+
+const isAudioFile = (file: File): boolean => {
+  const lower = file.name.toLowerCase();
+  return AUDIO_EXTENSIONS.some((ext) => lower.endsWith(ext));
+};
+
+const filterAudioFiles = (files: FileList | File[]): { audio: File[]; rejectedCount: number } => {
+  const list = Array.from(files);
+  const audio = list.filter(isAudioFile);
+  return { audio, rejectedCount: list.length - audio.length };
+};
+
 interface NotebookViewProps {
   activeTab: NotebookTab;
 }
@@ -77,6 +93,9 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ activeTab }) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<number | undefined>(undefined);
   const [selectedDateSlot, setSelectedDateSlot] = useState<string | undefined>(undefined);
+  // GH #92: files preloaded by drop-on-slot. Cleared when user opens the
+  // modal via the "+" button so the click flow stays empty.
+  const [selectedInitialFiles, setSelectedInitialFiles] = useState<File[] | undefined>(undefined);
 
   const handleNoteClick = (noteData: any) => {
     setSelectedNote(noteData);
@@ -86,8 +105,26 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ activeTab }) => {
   const handleAddNote = (time: number, dateKey: string) => {
     setSelectedTimeSlot(time);
     setSelectedDateSlot(dateKey);
+    setSelectedInitialFiles(undefined);
     setIsAddModalOpen(true);
   };
+
+  // GH #92: invoked when audio files are dropped directly on a time slot.
+  // Filters non-audio at the call site (TimeSection) so we only ever receive
+  // a non-empty File[] here.
+  const handleDropFilesAtSlot = useCallback((time: number, dateKey: string, files: File[]) => {
+    setSelectedTimeSlot(time);
+    setSelectedDateSlot(dateKey);
+    setSelectedInitialFiles(files);
+    setIsAddModalOpen(true);
+  }, []);
+
+  // GH #92: clear initialFiles on close so the next "+" click (or stale
+  // reopen) never sees files from a previous drop session.
+  const handleAddModalClose = useCallback(() => {
+    setIsAddModalOpen(false);
+    setSelectedInitialFiles(undefined);
+  }, []);
 
   const bumpCalendarRefresh = useCallback(() => {
     setCalendarRefreshNonce((prev) => prev + 1);
@@ -127,6 +164,7 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ activeTab }) => {
           <CalendarTab
             onNoteClick={handleNoteClick}
             onAddNote={handleAddNote}
+            onDropFilesAtSlot={handleDropFilesAtSlot}
             refreshNonce={calendarRefreshNonce}
           />
         );
@@ -155,9 +193,10 @@ export const NotebookView: React.FC<NotebookViewProps> = ({ activeTab }) => {
       {/* Add New Note Overlay */}
       <AddNoteModal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={handleAddModalClose}
         initialTime={selectedTimeSlot}
         initialDate={selectedDateSlot}
+        initialFiles={selectedInitialFiles}
         supportsExplicitWordTimestampToggle={supportsExplicitWordTimestampToggle}
       />
     </>
@@ -614,6 +653,9 @@ const TimeSection: React.FC<{
   onZoomChange: (slots: number) => void;
   onNoteClick: (note: EventData) => void;
   onAddNote: (hour: number) => void;
+  // GH #92: invoked when audio files are dropped on a specific hour row.
+  // Caller is responsible for filtering / toasting on non-audio drops.
+  onDropFilesAtSlot: (hour: number, files: FileList) => void;
   onRefresh: () => void;
 }> = ({
   title,
@@ -626,6 +668,7 @@ const TimeSection: React.FC<{
   onZoomChange,
   onNoteClick,
   onAddNote,
+  onDropFilesAtSlot,
   onRefresh,
 }) => {
   const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
@@ -636,6 +679,11 @@ const TimeSection: React.FC<{
     trigger: MenuTrigger;
   } | null>(null);
   const isCompact = visibleSlots >= 4;
+  // GH #92: highlight the hour row currently under the user's drag cursor.
+  // dragOver fires repeatedly so setting on dragOver (mirroring the existing
+  // import-tab pattern at line ~1670) keeps the state accurate; clear on
+  // dragLeave or drop.
+  const [dragOverHour, setDragOverHour] = useState<number | null>(null);
 
   // Audio preview state
   const [previewingId, setPreviewingId] = useState<string | null>(null);
@@ -751,11 +799,46 @@ const TimeSection: React.FC<{
         <div className="h-full">
           {hours.map((hour) => {
             const hourEvents = events.filter((e) => Math.floor(e.startTime) === hour);
+            const isDropTarget = dragOverHour === hour;
             return (
               <div
                 key={hour}
-                className="group relative flex border-b border-white/5 transition-colors duration-300 last:border-0 hover:bg-white/2"
+                className={`group relative flex border-b transition-colors duration-300 last:border-0 ${
+                  isDropTarget
+                    ? 'border-accent-cyan/40 bg-accent-cyan/5'
+                    : 'border-white/5 hover:bg-white/2'
+                }`}
                 style={{ height: `${100 / visibleSlots}%` }}
+                onDragOver={(e) => {
+                  // GH #92: only react to OS file drags. Skipping internal
+                  // drags (text selections, image drags, intra-page drags)
+                  // avoids highlighting the row + hijacking events that the
+                  // user did not intend as a file drop.
+                  if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+                  // Must preventDefault to enable a drop on this row (HTML5
+                  // DnD spec). Setting dropEffect='copy' shows the correct
+                  // cursor affordance on Windows / Chrome.
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'copy';
+                  if (dragOverHour !== hour) setDragOverHour(hour);
+                }}
+                onDragLeave={(e) => {
+                  // Only clear if we're truly leaving the row, not just
+                  // crossing into a child element. relatedTarget is the
+                  // element being entered; if it's still inside the row,
+                  // ignore the leave.
+                  const next = e.relatedTarget as Node | null;
+                  if (next && e.currentTarget.contains(next)) return;
+                  setDragOverHour((current) => (current === hour ? null : current));
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDragOverHour(null);
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    onDropFilesAtSlot(hour, e.dataTransfer.files);
+                  }
+                }}
               >
                 <div className="sticky left-0 z-20 w-16 shrink-0 pt-6 pr-4 text-right select-none">
                   <span className="font-mono text-xs font-medium text-slate-500">
@@ -903,8 +986,12 @@ const recordingToEvent = (rec: Recording): EventData => {
 const CalendarTab: React.FC<{
   onNoteClick: (note: any) => void;
   onAddNote: (hour: number, dateKey: string) => void;
+  // GH #92: bridges per-hour drops up to NotebookView. Receives the raw
+  // FileList; this function filters to audio extensions and toasts on
+  // rejection before calling the parent.
+  onDropFilesAtSlot: (hour: number, dateKey: string, files: File[]) => void;
   refreshNonce: number;
-}> = ({ onNoteClick, onAddNote, refreshNonce }) => {
+}> = ({ onNoteClick, onAddNote, onDropFilesAtSlot, refreshNonce }) => {
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -1026,6 +1113,26 @@ const CalendarTab: React.FC<{
   const addNoteDateKey = selectedDay ?? formatDateKey(new Date());
   const today = new Date();
   const todayKey = formatDateKey(today);
+
+  // GH #92: filter the raw FileList from a per-hour drop and forward to the
+  // parent. Toasts here so the wording is centralized for both Morning and
+  // Afternoon TimeSections.
+  const handleDropAtHour = useCallback(
+    (hour: number, files: FileList) => {
+      const { audio, rejectedCount } = filterAudioFiles(files);
+      if (audio.length === 0) {
+        toast.error('No audio files in drop', {
+          description: 'Supports MP3, WAV, M4A, FLAC, OGG, WebM, Opus.',
+        });
+        return;
+      }
+      if (rejectedCount > 0) {
+        toast.warning(`${rejectedCount} non-audio file${rejectedCount === 1 ? '' : 's'} ignored`);
+      }
+      onDropFilesAtSlot(hour, addNoteDateKey, audio);
+    },
+    [addNoteDateKey, onDropFilesAtSlot],
+  );
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 gap-6 lg:grid-cols-3">
@@ -1152,6 +1259,7 @@ const CalendarTab: React.FC<{
           onZoomChange={setVisibleSlots}
           onNoteClick={onNoteClick}
           onAddNote={(hour) => onAddNote(hour, addNoteDateKey)}
+          onDropFilesAtSlot={handleDropAtHour}
           onRefresh={calendar.refresh}
         />
         <TimeSection
@@ -1165,6 +1273,7 @@ const CalendarTab: React.FC<{
           onZoomChange={setVisibleSlots}
           onNoteClick={onNoteClick}
           onAddNote={(hour) => onAddNote(hour, addNoteDateKey)}
+          onDropFilesAtSlot={handleDropAtHour}
           onRefresh={calendar.refresh}
         />
       </div>

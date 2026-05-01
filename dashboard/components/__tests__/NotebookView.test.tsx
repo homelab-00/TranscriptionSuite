@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -116,7 +116,7 @@ vi.mock('../../src/utils/transcriptionBackend', () => ({
 
 // sonner toast
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
 }));
 
 // useConfirm
@@ -181,5 +181,120 @@ describe('[P2] NotebookView', () => {
     // Import tab also shows the heading
     expect(screen.getByText('Audio Notebook')).toBeDefined();
     expect(container).toBeDefined();
+  });
+});
+
+// ── GH #92: drop audio files directly onto a Notebook hour row ─────────────
+
+describe('[GH #92] NotebookView per-hour drag-and-drop', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    document.body.innerHTML = '';
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockResolvedValue(undefined),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+  });
+
+  function buildAudioFile(name = 'note.mp3'): File {
+    return new File([new Uint8Array([0])], name, { type: 'audio/mpeg' });
+  }
+
+  function buildTextFile(name = 'unrelated.txt'): File {
+    return new File([new Uint8Array([0])], name, { type: 'text/plain' });
+  }
+
+  /** Build a synthetic dataTransfer.files FileList containing the given files. */
+  function buildFileList(files: File[]): FileList {
+    const list = {
+      length: files.length,
+      item: (i: number) => files[i] ?? null,
+      [Symbol.iterator]: function* () {
+        for (const f of files) yield f;
+      },
+    } as unknown as FileList;
+    files.forEach((f, i) => {
+      (list as unknown as Record<number, File>)[i] = f;
+    });
+    return list;
+  }
+
+  /** Find an hour row by its time label (e.g. "10:00"). */
+  function findHourRow(label: string): HTMLElement {
+    const span = Array.from(document.querySelectorAll('span')).find((s) => s.textContent === label);
+    if (!span) throw new Error(`Hour label ${label} not found in NotebookView`);
+    // The hour row is the closest ancestor with the per-hour drag handlers.
+    // The label sits inside the sticky-left column which is a direct child of
+    // the row div; one parentElement up gets us to the row.
+    const stickyCol = span.parentElement;
+    if (!stickyCol) throw new Error('hour label has no parent');
+    const row = stickyCol.parentElement;
+    if (!row) throw new Error('sticky column has no row parent');
+    return row as HTMLElement;
+  }
+
+  it('opens AddNoteModal preloaded with files when audio is dropped on an hour row', async () => {
+    render(React.createElement(NotebookView, { activeTab: NotebookTab.CALENDAR }), {
+      wrapper: createWrapper(),
+    });
+
+    const row = findHourRow('10:00');
+    const file = buildAudioFile('lecture.mp3');
+
+    await act(async () => {
+      fireEvent.drop(row, {
+        dataTransfer: { files: buildFileList([file]) },
+      });
+      await Promise.resolve();
+    });
+
+    // Modal renders into document.body via createPortal. Header text is
+    // unique to the New Audio Note modal.
+    expect(screen.getByText('New Audio Note')).toBeDefined();
+    // The dropped file appears in the selected files list.
+    expect(screen.getByText('lecture.mp3')).toBeDefined();
+  });
+
+  it('filters mixed drops down to audio files only', async () => {
+    render(React.createElement(NotebookView, { activeTab: NotebookTab.CALENDAR }), {
+      wrapper: createWrapper(),
+    });
+
+    const row = findHourRow('14:00');
+    const audio1 = buildAudioFile('a.mp3');
+    const audio2 = buildAudioFile('b.wav');
+    const text = buildTextFile();
+
+    await act(async () => {
+      fireEvent.drop(row, {
+        dataTransfer: { files: buildFileList([audio1, text, audio2]) },
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('New Audio Note')).toBeDefined();
+    expect(screen.getByText('a.mp3')).toBeDefined();
+    expect(screen.getByText('b.wav')).toBeDefined();
+    expect(screen.queryByText('unrelated.txt')).toBeNull();
+  });
+
+  it('does not open the modal when only non-audio files are dropped', async () => {
+    render(React.createElement(NotebookView, { activeTab: NotebookTab.CALENDAR }), {
+      wrapper: createWrapper(),
+    });
+
+    const row = findHourRow('11:00');
+    const text = buildTextFile();
+
+    await act(async () => {
+      fireEvent.drop(row, {
+        dataTransfer: { files: buildFileList([text]) },
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('New Audio Note')).toBeNull();
   });
 });
