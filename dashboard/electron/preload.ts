@@ -152,6 +152,7 @@ export interface ElectronAPI {
       vulkan: boolean;
       wslSupport?: WslSupport;
     }>;
+    resetGpuCache: () => Promise<void>;
     hasVulkanWsl2SidecarImage: () => Promise<boolean>;
     validateGpuPreflight: () => Promise<{
       status: 'healthy' | 'warning' | 'unknown';
@@ -514,6 +515,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('docker:getDetectionGuidance') as Promise<string | null>,
     getComposeAvailable: () => ipcRenderer.invoke('docker:getComposeAvailable') as Promise<boolean>,
     checkGpu: () => ipcRenderer.invoke('docker:checkGpu'),
+    resetGpuCache: () => ipcRenderer.invoke('docker:resetGpuCache') as Promise<void>,
     hasVulkanWsl2SidecarImage: () =>
       ipcRenderer.invoke('docker:hasVulkanWsl2SidecarImage') as Promise<boolean>,
     validateGpuPreflight: () => ipcRenderer.invoke('docker:validateGpuPreflight'),

@@ -32,7 +32,12 @@ import {
   resolveRootlessSocket,
   getSocketPaths,
 } from './containerRuntime.js';
-import { type WslSupport, type WslDetectDeps, detectWslGpuPassthrough } from './wslDetect.js';
+import {
+  type WslSupport,
+  type WslDetectDeps,
+  detectWslGpuPassthrough,
+  resetWslSupportCache,
+} from './wslDetect.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -148,12 +153,15 @@ export const VULKAN_WSL2_SIDECAR_IMAGE = 'transcriptionsuite/whisper-cpp-vulkan-
  *     3. GPU passthrough not detected — `/dev/dxg` or the WSL user-mode driver
  *        bundle was not reachable from a probe container.
  */
-export function checkVulkanSupport(
-  platform: NodeJS.Platform,
-  exists: (p: string) => boolean,
-  wslSupport?: WslSupport,
-  profile: 'vulkan' | 'vulkan-wsl2' = 'vulkan',
-): string | null {
+export interface CheckVulkanSupportOptions {
+  platform: NodeJS.Platform;
+  exists: (p: string) => boolean;
+  wslSupport?: WslSupport;
+  profile?: 'vulkan' | 'vulkan-wsl2';
+}
+
+export function checkVulkanSupport(opts: CheckVulkanSupportOptions): string | null {
+  const { platform, exists, wslSupport, profile = 'vulkan' } = opts;
   if (profile === 'vulkan-wsl2') {
     if (platform !== 'win32') {
       return (
@@ -1346,7 +1354,10 @@ async function exec(
       cwd: opts?.cwd,
       env: buildProcessEnv(opts?.env, detectedRuntimeKind ?? undefined),
       maxBuffer: 10 * 1024 * 1024, // 10MB
-      timeout: opts?.timeoutMs ?? 120_000, // default 2 minutes; callers can shorten
+      // `?? 120_000` would treat an explicit `0` as "instant timeout" (execFile
+      // semantics). Coerce 0/negative to the 2-minute default so the helper's
+      // contract matches the natural "0 means no override" reading.
+      timeout: opts?.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : 120_000,
     });
     return stdout.trim();
   } catch (err: any) {
@@ -2064,12 +2075,12 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   if (runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2') {
     const fs = await import('fs');
     const gpuInfo = runtimeProfile === 'vulkan-wsl2' ? await checkGpu() : undefined;
-    const vulkanError = checkVulkanSupport(
-      process.platform,
-      (p) => fs.existsSync(p),
-      gpuInfo?.wslSupport,
-      runtimeProfile,
-    );
+    const vulkanError = checkVulkanSupport({
+      platform: process.platform,
+      exists: (p) => fs.existsSync(p),
+      wslSupport: gpuInfo?.wslSupport,
+      profile: runtimeProfile,
+    });
     if (vulkanError) {
       throw new Error(vulkanError);
     }
@@ -3131,6 +3142,19 @@ async function checkGpu(): Promise<{
 }
 
 /**
+ * Clear all GPU-detection caches so the next `checkGpu()` re-probes from
+ * scratch. Used by the "Re-detect GPU" affordance after a Docker Desktop
+ * WSL2 ↔ Hyper-V backend toggle (or any other change the dashboard can't
+ * observe directly). Cheap — just nulls module-level state.
+ */
+function resetGpuCache(): void {
+  resetWslSupportCache();
+  // Force `checkGpu()` to re-detect the toolkit mode (CDI vs legacy) too —
+  // a user who installs nvidia-container-toolkit mid-session benefits.
+  detectedGpuMode = null;
+}
+
+/**
  * Build the dependency injection bundle for `detectWslGpuPassthrough`.
  * Kept inside dockerManager so the wslDetect module stays free of
  * runtime/binary-resolution logic and remains trivially unit-testable.
@@ -3149,8 +3173,26 @@ function getWslDetectDeps(): WslDetectDeps {
       const bin = await runtimeBin();
       return exec(bin, ['info'], { timeoutMs: 15_000 });
     },
+    runDockerInfoJson: async () => {
+      const bin = await runtimeBin();
+      // `--format '{{json .}}'` returns the structured object the parser
+      // prefers (vs grep'ing labels). doDetect falls back to runDockerInfo
+      // if this returns malformed output, so a future Docker tweak can't
+      // regress detection.
+      return exec(bin, ['info', '--format', '{{json .}}'], { timeoutMs: 15_000 });
+    },
     runDockerProbe: async () => {
       const bin = await runtimeBin();
+      // Defensive cleanup: a prior dashboard hard-kill (Electron crash, OS
+      // forced shutdown) during the 15s probe window can leave the named
+      // --rm container stuck in "Created" or "Exited" state, which would
+      // make the next probe fail with "container name already in use".
+      // Tolerate the error regardless — first-run / clean-state is the norm.
+      try {
+        await exec(bin, ['rm', '-f', PROBE_CONTAINER_NAME], { timeoutMs: 5_000 });
+      } catch {
+        // Container didn't exist — expected on a clean session.
+      }
       // Pre-check: only run the probe if the alpine image is already cached
       // locally. This avoids surprise network pulls and silent timeouts.
       try {
@@ -3652,6 +3694,7 @@ export const dockerManager = {
   retryDetection,
   getRuntimeKind,
   checkGpu,
+  resetGpuCache,
   runGpuPreflight,
   runGpuDiagnostic,
   listImages,

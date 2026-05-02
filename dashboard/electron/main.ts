@@ -1164,6 +1164,12 @@ ipcMain.handle('docker:checkGpu', async () => {
   return dockerManager.checkGpu();
 });
 
+ipcMain.handle('docker:resetGpuCache', async () => {
+  // Clears the wslDetect single-flight cache and detectedGpuMode so the next
+  // checkGpu() re-probes from scratch — used by the "Re-detect GPU" button.
+  dockerManager.resetGpuCache();
+});
+
 ipcMain.handle('docker:validateGpuPreflight', async () => {
   return dockerManager.runGpuPreflight();
 });

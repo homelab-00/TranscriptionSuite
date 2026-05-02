@@ -13,7 +13,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import {
   parseDockerInfoForWsl,
+  parseDockerInfoJsonForWsl,
   detectWslGpuPassthrough,
+  resetWslSupportCache,
+  // eslint-disable-next-line @typescript-eslint/no-deprecated
   _resetWslSupportCacheForTests,
 } from '../wslDetect.js';
 
@@ -89,11 +92,69 @@ describe('[GH-101 follow-up] parseDockerInfoForWsl', () => {
   });
 });
 
+// ── parseDockerInfoJsonForWsl: structured-output parser (deferred item #2) ──
+
+describe('[GH-101 deferred-cleanup] parseDockerInfoJsonForWsl', () => {
+  it('Docker Desktop with WSL2 backend (JSON): available=true', () => {
+    const stdout = JSON.stringify({
+      OperatingSystem: 'Docker Desktop',
+      KernelVersion: '5.15.167.4-microsoft-standard-WSL2',
+      Architecture: 'x86_64',
+    });
+    expect(parseDockerInfoJsonForWsl(stdout)).toEqual({ available: true });
+  });
+
+  it('Docker Desktop with Hyper-V backend (JSON): available=false (kernel mismatch)', () => {
+    const stdout = JSON.stringify({
+      OperatingSystem: 'Docker Desktop',
+      KernelVersion: '5.10.16.3-microsoft-standard',
+    });
+    const result = parseDockerInfoJsonForWsl(stdout);
+    expect(result.available).toBe(false);
+    expect(result.reason).toMatch(/Hyper-V backend/);
+  });
+
+  it('Native Linux Docker engine (JSON): available=false (not Docker Desktop)', () => {
+    const stdout = JSON.stringify({
+      OperatingSystem: 'Ubuntu 24.04.1 LTS',
+      KernelVersion: '6.8.0-50-generic',
+    });
+    const result = parseDockerInfoJsonForWsl(stdout);
+    expect(result.available).toBe(false);
+    expect(result.reason).toMatch(/not running as Docker Desktop/);
+  });
+
+  it('Malformed JSON: returns reason="malformed JSON output" (sentinel for fallback)', () => {
+    const result = parseDockerInfoJsonForWsl('not-json-at-all');
+    expect(result.available).toBe(false);
+    expect(result.reason).toBe('malformed JSON output');
+  });
+
+  it('JSON with non-object root (e.g. an array): triggers fallback sentinel', () => {
+    const result = parseDockerInfoJsonForWsl('[1,2,3]');
+    expect(result.available).toBe(false);
+    expect(result.reason).toBe('malformed JSON output');
+  });
+
+  it('JSON missing OperatingSystem field: treats as not Docker Desktop', () => {
+    const stdout = JSON.stringify({ KernelVersion: '5.15-microsoft-standard-WSL2' });
+    const result = parseDockerInfoJsonForWsl(stdout);
+    expect(result.available).toBe(false);
+    expect(result.reason).toMatch(/not running as Docker Desktop/);
+  });
+
+  it('Empty string: returns empty-output reason (matches text parser)', () => {
+    const result = parseDockerInfoJsonForWsl('');
+    expect(result.available).toBe(false);
+    expect(result.reason).toMatch(/empty output/);
+  });
+});
+
 // ── detectWslGpuPassthrough: dispatcher ────────────────────────────────────
 
 describe('[GH-101 follow-up] detectWslGpuPassthrough', () => {
   beforeEach(() => {
-    _resetWslSupportCacheForTests();
+    resetWslSupportCache();
   });
 
   const wsl2Stdout = [
@@ -243,5 +304,117 @@ describe('[GH-101 follow-up] detectWslGpuPassthrough', () => {
       runDockerProbe: probe2,
     });
     expect(second.available).toBe(false); // first cached resolution wins
+  });
+
+  // ── JSON-first detection path (deferred-cleanup item #2) ─────────────────
+
+  it('prefers runDockerInfoJson when provided; text parser is not called', async () => {
+    const text = vi.fn().mockResolvedValue('garbage that text parser would reject');
+    const json = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        OperatingSystem: 'Docker Desktop',
+        KernelVersion: '5.15-microsoft-standard-WSL2',
+      }),
+    );
+    const probe = vi.fn().mockResolvedValue(true);
+
+    const result = await detectWslGpuPassthrough({
+      runDockerInfo: text,
+      runDockerInfoJson: json,
+      runDockerProbe: probe,
+    });
+
+    expect(result).toEqual({ available: true, gpuPassthroughDetected: true });
+    expect(json).toHaveBeenCalledTimes(1);
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it('falls back to text parser when JSON output is malformed', async () => {
+    const text = vi.fn().mockResolvedValue(wsl2Stdout);
+    const json = vi.fn().mockResolvedValue('not-actual-json');
+    const probe = vi.fn().mockResolvedValue(true);
+
+    const result = await detectWslGpuPassthrough({
+      runDockerInfo: text,
+      runDockerInfoJson: json,
+      runDockerProbe: probe,
+    });
+
+    expect(result).toEqual({ available: true, gpuPassthroughDetected: true });
+    expect(json).toHaveBeenCalledTimes(1);
+    expect(text).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to text parser when JSON dep rejects', async () => {
+    const text = vi.fn().mockResolvedValue(wsl2Stdout);
+    const json = vi.fn().mockRejectedValue(new Error('docker info --format failed'));
+    const probe = vi.fn().mockResolvedValue(true);
+
+    const result = await detectWslGpuPassthrough({
+      runDockerInfo: text,
+      runDockerInfoJson: json,
+      runDockerProbe: probe,
+    });
+
+    expect(result.available).toBe(true);
+    expect(text).toHaveBeenCalledTimes(1);
+  });
+
+  it('JSON path with kernel mismatch resolves negative without consulting text parser', async () => {
+    const text = vi.fn();
+    const json = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        OperatingSystem: 'Docker Desktop',
+        KernelVersion: '5.10.16-hyperv',
+      }),
+    );
+    const probe = vi.fn();
+
+    const result = await detectWslGpuPassthrough({
+      runDockerInfo: text,
+      runDockerInfoJson: json,
+      runDockerProbe: probe,
+    });
+
+    expect(result.available).toBe(false);
+    expect(result.reason).toMatch(/Hyper-V backend/);
+    expect(text).not.toHaveBeenCalled();
+    expect(probe).not.toHaveBeenCalled();
+  });
+});
+
+// ── Public reset alias (deferred-cleanup item #1) ──────────────────────────
+
+describe('[GH-101 deferred-cleanup] resetWslSupportCache (public API)', () => {
+  it('resetWslSupportCache and _resetWslSupportCacheForTests reference the same function', () => {
+    // Pin the back-compat alias so a future "rename and remove" PR catches the
+    // breakage. Suppress the deprecation hint here on purpose — that's the
+    // entire point of the test.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    expect(_resetWslSupportCacheForTests).toBe(resetWslSupportCache);
+  });
+
+  it('clears the cache so a subsequent call re-invokes the deps', async () => {
+    const dockerInfo = vi
+      .fn()
+      .mockResolvedValue(
+        ['Operating System: Docker Desktop', 'Kernel Version: 5.15-microsoft-standard-WSL2'].join(
+          '\n',
+        ),
+      );
+    const probe = vi.fn().mockResolvedValue(true);
+
+    resetWslSupportCache();
+    await detectWslGpuPassthrough({ runDockerInfo: dockerInfo, runDockerProbe: probe });
+    expect(dockerInfo).toHaveBeenCalledTimes(1);
+
+    // Without reset, the cache would be reused.
+    await detectWslGpuPassthrough({ runDockerInfo: dockerInfo, runDockerProbe: probe });
+    expect(dockerInfo).toHaveBeenCalledTimes(1);
+
+    // After reset, the next call re-invokes both deps.
+    resetWslSupportCache();
+    await detectWslGpuPassthrough({ runDockerInfo: dockerInfo, runDockerProbe: probe });
+    expect(dockerInfo).toHaveBeenCalledTimes(2);
   });
 });

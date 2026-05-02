@@ -1348,6 +1348,47 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     }
   }, []);
 
+  // ─── Manual GPU re-detection ───────────────────────────────────────────────
+  // GH-101 follow-up: lets the user recover after toggling Docker Desktop's
+  // WSL2 ↔ Hyper-V backend (or installing nvidia-container-toolkit) without
+  // restarting Electron. Calls the IPC to clear the main-process caches
+  // (wslDetect single-flight + detectedGpuMode), then re-runs checkGpu() and
+  // updates state. Does NOT re-run the first-run auto-profile pick — that's
+  // a one-shot decision the user has already made by the time this is shown.
+  const [gpuRedetecting, setGpuRedetecting] = useState(false);
+  const handleRedetectGpu = useCallback((): void => {
+    if (gpuRedetecting) return;
+    const api = (window as any).electronAPI;
+    if (!api?.docker?.checkGpu) return;
+    setGpuRedetecting(true);
+    const resetPromise: Promise<void> = api.docker.resetGpuCache
+      ? api.docker.resetGpuCache().catch(() => {})
+      : Promise.resolve();
+    resetPromise
+      .then(() => {
+        cachedGpuInfo = undefined;
+        return api.docker.checkGpu();
+      })
+      .then(
+        (info: {
+          gpu: boolean;
+          toolkit: boolean;
+          vulkan: boolean;
+          wslSupport?: { available: boolean; gpuPassthroughDetected: boolean; reason?: string };
+        }) => {
+          cachedGpuInfo = info;
+          setGpuInfo(info);
+        },
+      )
+      .catch(() => {
+        cachedGpuInfo = null;
+        setGpuInfo(null);
+      })
+      .finally(() => {
+        setGpuRedetecting(false);
+      });
+  }, [gpuRedetecting]);
+
   // Re-fetch GPU preflight whenever an NVIDIA GPU is detected — including
   // re-mounts of ServerView where cachedGpuInfo was already populated by
   // an earlier mount (in which case the GPU-detection effect skips).
@@ -2010,6 +2051,24 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   <label className="text-xs font-medium tracking-wider whitespace-nowrap text-slate-500 uppercase">
                     Runtime
                   </label>
+                  {/* GH-101 follow-up: re-run GPU detection without restarting
+                      Electron. Hidden until initial detection completes
+                      (gpuInfo !== null) so it never appears in the loading flicker. */}
+                  {gpuInfo !== null && (
+                    <button
+                      type="button"
+                      onClick={handleRedetectGpu}
+                      disabled={gpuRedetecting || isRunning}
+                      title="Re-run GPU detection (use after toggling Docker Desktop's WSL2/Hyper-V backend)"
+                      className={`text-xs whitespace-nowrap underline ${
+                        gpuRedetecting || isRunning
+                          ? 'cursor-not-allowed text-slate-600'
+                          : 'cursor-pointer text-slate-500 hover:text-slate-200'
+                      }`}
+                    >
+                      {gpuRedetecting ? 'Detecting...' : 'Re-detect'}
+                    </button>
+                  )}
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleRuntimeProfileChange('gpu')}
