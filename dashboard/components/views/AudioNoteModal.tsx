@@ -991,6 +991,53 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     );
   };
 
+  // GH #97: Keyboard shortcuts for playback while the modal is open.
+  // Reads audio.paused directly (not React's isPlaying) so the closure can
+  // never go stale between renders, which lets us register the listener once
+  // per modal-open instead of every render.
+  useEffect(() => {
+    if (!isOpen || note?.recordingId == null) return;
+
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+      const audio = audioRef.current;
+      if (!audio) return;
+
+      const key = event.key.toLowerCase();
+      const isPlayPause = event.code === 'Space' || key === 'k';
+      const isBack = key === 'j';
+      const isForward = key === 'l';
+      if (!isPlayPause && !isBack && !isForward) return;
+
+      event.preventDefault();
+
+      if (isPlayPause) {
+        if (audio.paused) {
+          audio.play().catch(() => {
+            setAudioError(
+              'Unable to start playback. Check that the audio file is available and the server is reachable.',
+            );
+          });
+        } else {
+          audio.pause();
+        }
+        return;
+      }
+
+      const delta = isBack ? -10 : 10;
+      audio.currentTime = Math.max(0, Math.min(audio.duration || 0, audio.currentTime + delta));
+    };
+
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [isOpen, note?.recordingId]);
+
   // LLM Chat handler — sends user message and streams assistant response
   const handleSendMessage = useCallback(
     async (overrideText?: string) => {
@@ -1692,11 +1739,11 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                 </div>
               </div>
 
-              {/* Scrollable Body */}
-              <div
-                ref={transcriptContainerRef}
-                className="custom-scrollbar flex-1 space-y-8 overflow-y-auto p-8"
-              >
+              {/* GH #97: Audio Player Card lifted out of the scroll container so the
+                  controls stay visible while useWordHighlighter auto-scrolls the
+                  transcript. flex-none keeps the card a fixed slice of the left
+                  pane; the scrollable body below shrinks to fit (flex-1). */}
+              <div className="flex-none px-8 pt-8 select-none">
                 {/* 1. Audio Player Card */}
                 <div className="group relative overflow-hidden rounded-2xl border border-white/5 bg-black/20 p-6 select-none">
                   {/* Hidden audio element for playback */}
@@ -1732,13 +1779,14 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                       <button
                         onClick={() => handleSeek(-10)}
                         className="text-slate-400 transition-colors hover:text-white"
-                        title="Rewind 10s"
+                        title="Rewind 10s (J)"
                       >
                         <Rewind size={24} />
                       </button>
                       <button
                         onClick={handlePlayPause}
                         disabled={!audioUrl}
+                        title={isPlaying ? 'Pause (Space / K)' : 'Play (Space / K)'}
                         className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-black shadow-[0_0_20px_rgba(255,255,255,0.3)] transition-all hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {isPlaying ? (
@@ -1750,7 +1798,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                       <button
                         onClick={() => handleSeek(10)}
                         className="text-slate-400 transition-colors hover:text-white"
-                        title="Forward 10s"
+                        title="Forward 10s (L)"
                       >
                         <FastForward size={24} />
                       </button>
@@ -1769,7 +1817,13 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                     {audioError && <div className="text-xs text-red-400">{audioError}</div>}
                   </div>
                 </div>
+              </div>
 
+              {/* Scrollable Body */}
+              <div
+                ref={transcriptContainerRef}
+                className="custom-scrollbar flex-1 space-y-8 overflow-y-auto p-8"
+              >
                 {/* 2. AI Summary Section - Editable */}
                 <div
                   className={`overflow-hidden rounded-2xl border border-white/10 transition-all duration-500 ease-in-out ${summaryExpanded ? 'from-accent-magenta/5 bg-linear-to-br to-purple-900/10' : 'bg-glass-100 hover:bg-white/5'}`}
