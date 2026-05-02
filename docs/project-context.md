@@ -171,6 +171,7 @@ durability:
 - **Session-level cache**: `cachedGpuInfo` survives component remount — avoids re-running detection on every render
 - **Profile auto-selection priority**: Metal (Apple Silicon) > NVIDIA GPU (runtime=nvidia) > Vulkan (AMD/Intel via `/dev/dri/renderD128`) > CPU
 - **Vulkan detection**: Linux-only, checks `fs.existsSync('/dev/dri/renderD128')` — no NVIDIA toolkit needed
+- **Vulkan-WSL2 detection (GH-101 follow-up)**: Win32 only, opt-in, **never enters the auto-selection priority chain**. `checkGpu()` invokes `detectWslGpuPassthrough()` once on Win32; the dashboard surfaces a separate "GPU (Vulkan WSL2 — experimental)" Settings button only when both `wslSupport.available` (Docker Desktop with WSL2 backend) and `wslSupport.gpuPassthroughDetected` (`/dev/dxg` reachable via probe container) are true. Requires the locally-built `transcriptionsuite/whisper-cpp-vulkan-wsl2:latest` sidecar image (not published to GHCR; users build via `server/docker/build-vulkan-wsl2.sh`).
 
 #### GGML Model Selection (Vulkan Sidecar)
 - **Registry-driven**: `getModelsByFamily('whispercpp')` from `modelRegistry.ts` — filtered at module level

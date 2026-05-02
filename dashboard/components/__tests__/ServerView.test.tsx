@@ -178,7 +178,8 @@ vi.mock('@headlessui/react', () => {
 
 // Runtime type guard
 vi.mock('../../src/types/runtime', () => ({
-  isRuntimeProfile: (v: unknown) => ['gpu', 'cpu', 'vulkan', 'metal'].includes(v as string),
+  isRuntimeProfile: (v: unknown) =>
+    ['gpu', 'cpu', 'vulkan', 'vulkan-wsl2', 'metal'].includes(v as string),
 }));
 
 // ── Import after mocks ────────────────────────────────────────────────────

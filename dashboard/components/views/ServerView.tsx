@@ -147,9 +147,18 @@ function getString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-// Session-level GPU detection cache — survives view unmount/remount
-let cachedGpuInfo: { gpu: boolean; toolkit: boolean; vulkan: boolean } | null | undefined =
-  undefined; // undefined = not yet checked
+// Session-level GPU detection cache — survives view unmount/remount.
+// `wslSupport` is populated by `checkGpu()` only on Win32 (GH-101 follow-up);
+// it gates the experimental Vulkan-WSL2 runtime profile button below.
+let cachedGpuInfo:
+  | {
+      gpu: boolean;
+      toolkit: boolean;
+      vulkan: boolean;
+      wslSupport?: { available: boolean; gpuPassthroughDetected: boolean; reason?: string };
+    }
+  | null
+  | undefined = undefined; // undefined = not yet checked
 
 function normalizeModelName(value: string): string {
   return value.trim().toLowerCase();
@@ -341,8 +350,23 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         .get('server.runtimeProfile')
         .then((val: unknown) => {
           if (isRuntimeProfile(val)) {
-            setRuntimeProfile(val);
-            if (val === 'vulkan') {
+            // Normalize stale 'vulkan-wsl2' if the profile was persisted on a
+            // Win32 host and the user has since moved the dashboard to Linux
+            // or macOS (GH-101 follow-up). Otherwise the four-button row in
+            // the Instance Settings card would show no active state at all,
+            // and the user would have to dig through Settings to recover.
+            // Falling back to 'cpu' is the safe universal default; the
+            // auto-detect block below will pick a better profile if eligible
+            // (only runs once per machine, gated by `gpuAutoDetectDone`).
+            const normalized: RuntimeProfile =
+              val === 'vulkan-wsl2' && (window as any).electronAPI?.app?.getPlatform?.() !== 'win32'
+                ? 'cpu'
+                : val;
+            setRuntimeProfile(normalized);
+            if (normalized !== val) {
+              api.config?.set?.('server.runtimeProfile', normalized).catch(() => {});
+            }
+            if (normalized === 'vulkan') {
               docker
                 .hasSidecarImage()
                 .then((exists) => setSidecarNeeded(!exists))
@@ -1155,6 +1179,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     gpu: boolean;
     toolkit: boolean;
     vulkan: boolean;
+    wslSupport?: { available: boolean; gpuPassthroughDetected: boolean; reason?: string };
   } | null>(cachedGpuInfo ?? null);
 
   // ─── GPU Health Card state (NVIDIA Linux only) ─────────────────────────────
@@ -1270,51 +1295,99 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (cachedGpuInfo === undefined && api?.docker?.checkGpu) {
       api.docker
         .checkGpu()
-        .then((info: { gpu: boolean; toolkit: boolean; vulkan: boolean }) => {
-          cachedGpuInfo = info;
-          setGpuInfo(info);
-          // Auto-set runtime profile based on hardware detection.
-          // Runs exactly once: on fresh install or upgrade from a version without the flag.
-          // Priority: Metal (Apple Silicon) > NVIDIA GPU > Vulkan (AMD/Intel) > CPU
-          api.config
-            ?.get('server.gpuAutoDetectDone')
-            .then((done: unknown) => {
-              if (done === true) return; // already ran — respect user's stored choice
-              // Determine best profile for this hardware
-              let detected: RuntimeProfile = 'cpu';
-              if (metalSupported) {
-                detected = 'metal';
-              } else if (info.gpu && info.toolkit) {
-                detected = 'gpu';
-              } else if (info.vulkan) {
-                detected = 'vulkan';
-              }
-              handleRuntimeProfileChange(detected);
-              // If Metal was selected, also set the default MLX model
-              if (detected === 'metal') {
-                api.config
-                  ?.get('server.mainModelSelection')
-                  .then((modelVal: unknown) => {
-                    const cur = typeof modelVal === 'string' ? modelVal.trim() : '';
-                    if (!cur || cur === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
-                      setMainModelSelection(MLX_DEFAULT_MODEL);
-                      api.config?.set('server.mainModelSelection', MLX_DEFAULT_MODEL);
-                      api.config?.set('server.mainCustomModel', '');
-                    }
-                  })
-                  .catch(() => {});
-              }
-              // Mark auto-detection as done so it never re-runs
-              api.config?.set('server.gpuAutoDetectDone', true);
-            })
-            .catch(() => {});
-        })
+        .then(
+          (info: {
+            gpu: boolean;
+            toolkit: boolean;
+            vulkan: boolean;
+            wslSupport?: { available: boolean; gpuPassthroughDetected: boolean; reason?: string };
+          }) => {
+            cachedGpuInfo = info;
+            setGpuInfo(info);
+            // Auto-set runtime profile based on hardware detection.
+            // Runs exactly once: on fresh install or upgrade from a version without the flag.
+            // Priority: Metal (Apple Silicon) > NVIDIA GPU > Vulkan (AMD/Intel) > CPU
+            api.config
+              ?.get('server.gpuAutoDetectDone')
+              .then((done: unknown) => {
+                if (done === true) return; // already ran — respect user's stored choice
+                // Determine best profile for this hardware
+                let detected: RuntimeProfile = 'cpu';
+                if (metalSupported) {
+                  detected = 'metal';
+                } else if (info.gpu && info.toolkit) {
+                  detected = 'gpu';
+                } else if (info.vulkan) {
+                  detected = 'vulkan';
+                }
+                handleRuntimeProfileChange(detected);
+                // If Metal was selected, also set the default MLX model
+                if (detected === 'metal') {
+                  api.config
+                    ?.get('server.mainModelSelection')
+                    .then((modelVal: unknown) => {
+                      const cur = typeof modelVal === 'string' ? modelVal.trim() : '';
+                      if (!cur || cur === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
+                        setMainModelSelection(MLX_DEFAULT_MODEL);
+                        api.config?.set('server.mainModelSelection', MLX_DEFAULT_MODEL);
+                        api.config?.set('server.mainCustomModel', '');
+                      }
+                    })
+                    .catch(() => {});
+                }
+                // Mark auto-detection as done so it never re-runs
+                api.config?.set('server.gpuAutoDetectDone', true);
+              })
+              .catch(() => {});
+          },
+        )
         .catch(() => {
           cachedGpuInfo = null;
           setGpuInfo(null);
         });
     }
   }, []);
+
+  // ─── Manual GPU re-detection ───────────────────────────────────────────────
+  // GH-101 follow-up: lets the user recover after toggling Docker Desktop's
+  // WSL2 ↔ Hyper-V backend (or installing nvidia-container-toolkit) without
+  // restarting Electron. Calls the IPC to clear the main-process caches
+  // (wslDetect single-flight + detectedGpuMode), then re-runs checkGpu() and
+  // updates state. Does NOT re-run the first-run auto-profile pick — that's
+  // a one-shot decision the user has already made by the time this is shown.
+  const [gpuRedetecting, setGpuRedetecting] = useState(false);
+  const handleRedetectGpu = useCallback((): void => {
+    if (gpuRedetecting) return;
+    const api = (window as any).electronAPI;
+    if (!api?.docker?.checkGpu) return;
+    setGpuRedetecting(true);
+    const resetPromise: Promise<void> = api.docker.resetGpuCache
+      ? api.docker.resetGpuCache().catch(() => {})
+      : Promise.resolve();
+    resetPromise
+      .then(() => {
+        cachedGpuInfo = undefined;
+        return api.docker.checkGpu();
+      })
+      .then(
+        (info: {
+          gpu: boolean;
+          toolkit: boolean;
+          vulkan: boolean;
+          wslSupport?: { available: boolean; gpuPassthroughDetected: boolean; reason?: string };
+        }) => {
+          cachedGpuInfo = info;
+          setGpuInfo(info);
+        },
+      )
+      .catch(() => {
+        cachedGpuInfo = null;
+        setGpuInfo(null);
+      })
+      .finally(() => {
+        setGpuRedetecting(false);
+      });
+  }, [gpuRedetecting]);
 
   // Re-fetch GPU preflight whenever an NVIDIA GPU is detected — including
   // re-mounts of ServerView where cachedGpuInfo was already populated by
@@ -1978,6 +2051,24 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   <label className="text-xs font-medium tracking-wider whitespace-nowrap text-slate-500 uppercase">
                     Runtime
                   </label>
+                  {/* GH-101 follow-up: re-run GPU detection without restarting
+                      Electron. Hidden until initial detection completes
+                      (gpuInfo !== null) so it never appears in the loading flicker. */}
+                  {gpuInfo !== null && (
+                    <button
+                      type="button"
+                      onClick={handleRedetectGpu}
+                      disabled={gpuRedetecting || isRunning}
+                      title="Re-run GPU detection (use after toggling Docker Desktop's WSL2/Hyper-V backend)"
+                      className={`text-xs whitespace-nowrap underline ${
+                        gpuRedetecting || isRunning
+                          ? 'cursor-not-allowed text-slate-600'
+                          : 'cursor-pointer text-slate-500 hover:text-slate-200'
+                      }`}
+                    >
+                      {gpuRedetecting ? 'Detecting...' : 'Re-detect'}
+                    </button>
+                  )}
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleRuntimeProfileChange('gpu')}
@@ -2030,10 +2121,41 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       <Cpu size={14} />
                       CPU Only
                     </button>
+                    {/* Experimental Vulkan-WSL2 button (GH-101 follow-up) —
+                        only rendered when the dashboard's main-process probe
+                        confirms Docker Desktop is running on the WSL2 backend
+                        AND a tiny container could see /dev/dxg. Sits in-line
+                        with the four-button row to keep selection state
+                        visible at a glance when the profile is active. */}
+                    {gpuInfo?.wslSupport?.gpuPassthroughDetected && hostPlatform === 'win32' && (
+                      <button
+                        onClick={() => handleRuntimeProfileChange('vulkan-wsl2')}
+                        disabled={isRunning}
+                        className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
+                          runtimeProfile === 'vulkan-wsl2'
+                            ? 'bg-accent-rose/15 border-accent-rose/40 text-accent-rose shadow-[0_0_10px_rgba(244,63,94,0.15)]'
+                            : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                        } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                      >
+                        <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                          <AmdIcon size={30} />
+                          <IntelIcon size={30} />
+                        </span>
+                        GPU (Vulkan WSL2)
+                        <span className="bg-accent-orange/20 text-accent-orange ml-1 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
+                          Exp
+                        </span>
+                      </button>
+                    )}
                   </div>
                   {runtimeProfile === 'vulkan' && !isRunning && (
                     <span className="text-xs text-slate-500 italic">
                       AMD/Intel GPU via whisper.cpp — no diarization or live mode
+                    </span>
+                  )}
+                  {runtimeProfile === 'vulkan-wsl2' && !isRunning && (
+                    <span className="text-accent-orange text-xs italic">
+                      Experimental: AMD/Intel GPU via WSL2 + Mesa dzn — see README §2.5.2
                     </span>
                   )}
                   {runtimeProfile === 'cpu' && !isRunning && (

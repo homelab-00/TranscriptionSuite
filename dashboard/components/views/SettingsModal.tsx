@@ -110,6 +110,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [configDir, setConfigDir] = useState<string>('~/.config/TranscriptionSuite');
   const [platform, setPlatform] = useState('');
   const [sessionType, setSessionType] = useState('');
+  // GPU/WSL2 detection result — used to gate the experimental Vulkan-WSL2
+  // runtime profile button on Windows + Docker Desktop with WSL2 backend
+  // (GH-101 follow-up). `undefined` while the modal is loading or if the
+  // last probe rejected; the button is gated on
+  // `gpuInfo?.wslSupport?.gpuPassthroughDetected === true`, so transient
+  // failures simply hide the button rather than misrepresenting state.
+  // The main-process probe is single-flight cached, so reopening the modal
+  // hits the cache without re-probing Docker.
+  const [gpuInfo, setGpuInfo] = useState<
+    | {
+        gpu: boolean;
+        toolkit: boolean;
+        vulkan: boolean;
+        wslSupport?: { available: boolean; gpuPassthroughDetected: boolean; reason?: string };
+      }
+    | undefined
+  >(undefined);
 
   // Token management state
   const [tokens, setTokens] = useState<AuthToken[]>([]);
@@ -297,6 +314,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         // Detect platform and session type for conditional UI hints
         setPlatform(api.app?.getPlatform?.() ?? '');
         setSessionType(api.app?.getSessionType?.() ?? '');
+        // Probe for WSL2 + GPU paravirtualization on Win32 to decide whether
+        // to surface the experimental Vulkan-WSL2 runtime profile button
+        // (GH-101 follow-up). Cached single-flight at the main-process level,
+        // so this is cheap on subsequent opens.
+        api.docker
+          ?.checkGpu?.()
+          .then((info: typeof gpuInfo) => {
+            setGpuInfo(info);
+          })
+          .catch(() => {
+            setGpuInfo(undefined);
+          });
 
         // Load config directory path
         api.app
@@ -664,14 +693,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               CPU Only
             </button>
           </div>
+          {/* Experimental Vulkan-WSL2 button (GH-101 follow-up) — only shown
+              when Docker Desktop's WSL2 backend + /dev/dxg passthrough are
+              both detected. Lives on its own row so the four-tile main row
+              stays compact and the "experimental" framing is unambiguous. */}
+          {gpuInfo?.wslSupport?.gpuPassthroughDetected && platform === 'win32' && (
+            <button
+              onClick={() => {
+                setAppSettings((prev) => ({ ...prev, runtimeProfile: 'vulkan-wsl2' }));
+                setIsDirty(true);
+              }}
+              className={`flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-all ${
+                appSettings.runtimeProfile === 'vulkan-wsl2'
+                  ? 'bg-accent-rose/15 border-accent-rose/40 text-accent-rose'
+                  : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10'
+              }`}
+            >
+              <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                <AmdIcon size={30} />
+                <IntelIcon size={30} />
+              </span>
+              GPU (Vulkan WSL2)
+              <span className="bg-accent-orange/20 text-accent-orange ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
+                Experimental
+              </span>
+            </button>
+          )}
           <p className="text-xs text-slate-500 italic">
             {appSettings.runtimeProfile === 'vulkan'
               ? 'Vulkan mode: Uses whisper.cpp for AMD/Intel GPU acceleration. Requires a GGML model and /dev/dri access. No diarization or live mode.'
-              : appSettings.runtimeProfile === 'cpu'
-                ? 'CPU mode: No GPU required. Works on macOS, Linux, and Windows. Expect slower transcription speeds.'
-                : appSettings.runtimeProfile === 'metal'
-                  ? 'Metal mode: Apple Silicon MLX acceleration. Recommended for M-series Macs running bare-metal.'
-                  : 'GPU mode: Requires NVIDIA GPU with CUDA. Recommended for Linux and Windows with supported hardware.'}
+              : appSettings.runtimeProfile === 'vulkan-wsl2'
+                ? 'Vulkan WSL2 (experimental): AMD/Intel GPU acceleration on Windows + Docker Desktop with WSL2 backend, via Mesa dzn (Vulkan-on-D3D12). Requires the locally-built sidecar image — see README §2.5 for build steps. May silently fall back to CPU rasterizer if dzn cannot enumerate /dev/dxg.'
+                : appSettings.runtimeProfile === 'cpu'
+                  ? 'CPU mode: No GPU required. Works on macOS, Linux, and Windows. Expect slower transcription speeds.'
+                  : appSettings.runtimeProfile === 'metal'
+                    ? 'Metal mode: Apple Silicon MLX acceleration. Recommended for M-series Macs running bare-metal.'
+                    : 'GPU mode: Requires NVIDIA GPU with CUDA. Recommended for Linux and Windows with supported hardware.'}
           </p>
           {appSettings.runtimeProfile === 'metal' && adminStatus !== null && !metalSupported && (
             <p className="text-xs text-red-400">
@@ -685,10 +742,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           {appSettings.runtimeProfile === 'vulkan' && platform && platform !== 'linux' && (
             <p className="text-xs text-red-400">
               Vulkan requires Linux — Docker Desktop on Windows/macOS has no{' '}
-              <span className="font-mono">/dev/dri</span> GPU passthrough. Select CPU, or GPU (CUDA)
-              if you have NVIDIA hardware.
+              <span className="font-mono">/dev/dri</span> GPU passthrough.{' '}
+              {platform === 'win32' && gpuInfo?.wslSupport?.gpuPassthroughDetected
+                ? 'Try the experimental "GPU (Vulkan WSL2)" profile below, or '
+                : 'Select '}
+              CPU
+              {platform === 'win32'
+                ? ', or GPU (CUDA) if you have NVIDIA hardware'
+                : platform === 'darwin'
+                  ? ', GPU (Metal) on Apple Silicon, or GPU (CUDA) if you dual-boot with NVIDIA hardware'
+                  : ''}
+              .
             </p>
           )}
+          {appSettings.runtimeProfile === 'vulkan-wsl2' && platform !== 'win32' && (
+            <p className="text-xs text-red-400">
+              The Vulkan WSL2 profile only applies to Windows + Docker Desktop with the WSL2
+              backend. Switch to {platform === 'linux' ? '"GPU (Vulkan)"' : 'CPU or GPU (Metal)'}.
+            </p>
+          )}
+          {appSettings.runtimeProfile === 'vulkan-wsl2' &&
+            platform === 'win32' &&
+            !gpuInfo?.wslSupport?.gpuPassthroughDetected && (
+              <p className="text-xs text-red-400">
+                {gpuInfo?.wslSupport?.reason ??
+                  'WSL2 GPU passthrough was not detected — make sure Docker Desktop is running with the WSL2 backend and your Windows GPU driver is current.'}
+              </p>
+            )}
         </div>
       </Section>
       <Section title="Window">

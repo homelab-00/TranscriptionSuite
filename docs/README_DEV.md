@@ -1430,14 +1430,29 @@ Key design decisions:
 
 #### Networking by Platform
 
-| Platform | Main container networking | whisper-server networking | URL used |
-|----------|--------------------------|--------------------------|----------|
-| Linux | `network_mode: host` | Bridge + port mapping | `http://localhost:8080` |
-| macOS | Bridge (Docker Desktop) | Bridge (same network) | `http://whisper-server:8080` |
-| Windows | Bridge (Docker Desktop) | Bridge (same network) | `http://whisper-server:8080` |
-| WSL2 | `network_mode: host` | Bridge + port mapping | `http://localhost:8080` |
+| Platform | Profile | Main container networking | whisper-server networking | URL used |
+|----------|---------|--------------------------|--------------------------|----------|
+| Linux | `vulkan` | `network_mode: host` | Bridge + port mapping | `http://localhost:8080` |
+| macOS | (n/a) | Bridge (Docker Desktop) | (Vulkan unsupported) | (n/a) |
+| Windows + WSL2 | `vulkan-wsl2` | Bridge (Docker Desktop) | Bridge (same network) | `http://whisper-server:8080` |
+| Windows + Hyper-V | (n/a) | Bridge (Docker Desktop) | (Vulkan unsupported) | (n/a) |
+| Native Linux WSL2 distro | `vulkan` | `network_mode: host` | Bridge + port mapping | `http://localhost:8080` |
 
-> **Vulkan is Linux-only in practice (Issue #101).** The networking matrix above describes the URL routing that `dockerManager.ts` would use, but `/dev/dri` GPU passthrough is not available on Docker Desktop's Linux VM (Windows/macOS) or under WSL2 (which exposes `/dev/dxg`, not Mesa render nodes). `dockerManager.ts::checkVulkanSupport` blocks the Vulkan profile on non-Linux platforms before Docker is invoked. Cross-platform Vulkan would require WSL2 `/dev/dxg` paravirtualization work, tracked separately if pursued.
+> **Vulkan profile selection (GH-101 follow-up).** Two compose overlays now exist: `docker-compose.vulkan.yml` (Linux-DRI path; mounts `/dev/dri`) and `docker-compose.vulkan-wsl2.yml` (experimental Windows + WSL2 path; mounts `/dev/dxg` + `/usr/lib/wsl` and uses a custom-built sidecar image with Mesa's `dzn` Vulkan-on-D3D12 ICD added — the upstream `whisper.cpp:main-vulkan` does not include dzn). `dockerManager.ts::checkVulkanSupport(platform, exists, wslSupport, profile)` gates each path. The `vulkan-wsl2` profile is opt-in: never auto-selected, only surfaced in Settings when `detectWslGpuPassthrough()` confirms Docker Desktop's WSL2 backend AND a probe container can reach `/dev/dxg`. The custom sidecar image is not published to GHCR — see README §2.5.2 for the local build path.
+
+The WSL2 dataflow inside the sidecar container is:
+
+```
+/dev/dxg (kernel device)
+   ↓
+libdxcore.so + libd3d12.so (mounted from /usr/lib/wsl/lib by Docker Desktop)
+   ↓
+dzn ICD (libvulkan_dzn.so, installed in the custom image only)
+   ↓
+Vulkan loader → whisper.cpp Vulkan compute kernels
+```
+
+If dzn cannot find a D3D12 device through `/dev/dxg`, the Vulkan loader silently falls back to `llvmpipe` (CPU rasterizer). The dashboard cannot detect this without inspecting `vulkaninfo --summary` from inside the sidecar — operators should verify GPU enumeration manually after first start.
 
 The dashboard's `dockerManager.ts` automatically sets `WHISPERCPP_SERVER_URL` based on `process.platform` when the vulkan runtime profile is selected. The backend resolves the server URL with this priority:
 
