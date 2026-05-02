@@ -32,6 +32,7 @@ import {
   resolveRootlessSocket,
   getSocketPaths,
 } from './containerRuntime.js';
+import { type WslSupport, type WslDetectDeps, detectWslGpuPassthrough } from './wslDetect.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -113,24 +114,73 @@ function getStartupEventsFilePath(): string | null {
 const VULKAN_SIDECAR_IMAGE = 'ghcr.io/ggml-org/whisper.cpp:main-vulkan';
 
 /**
- * Pre-flight check for the Vulkan runtime profile (Issue #101).
+ * Vulkan-WSL2 sidecar image — locally-built variant adding Mesa's `dzn`
+ * (Dozen) Vulkan-on-D3D12 ICD that the upstream `main-vulkan` image lacks.
+ * Required for AMD/Intel GPU acceleration on Windows + Docker Desktop with
+ * the WSL2 backend (GH-101 follow-up). Built via
+ * `server/docker/build-vulkan-wsl2.sh`. NOT published to GHCR for v1.3.5 —
+ * users build locally until a real-world AMD validator confirms enumeration.
+ */
+export const VULKAN_WSL2_SIDECAR_IMAGE = 'transcriptionsuite/whisper-cpp-vulkan-wsl2:latest';
+
+/**
+ * Pre-flight check for the Vulkan and Vulkan-WSL2 runtime profiles (Issue #101).
  *
  * Returns an actionable error message if Vulkan cannot work on this host, or
- * `null` when Vulkan is viable. Pure: takes platform and an `exists` predicate
- * so it can be unit-tested without a real filesystem.
+ * `null` when the profile is viable. Pure: takes platform, an `exists`
+ * predicate, optional WSL2 detection result, and the requested profile so it
+ * can be unit-tested without a real filesystem or Docker daemon.
  *
- * Two failure modes:
- *   1. Non-Linux platforms — Docker Desktop on Windows/macOS runs containers
- *      in a Linux VM that does not pass `/dev/dri` through, so the sidecar
- *      device mount in `docker-compose.vulkan.yml` cannot resolve regardless
- *      of the host GPU.
- *   2. Linux without `/dev/dri/renderD128` — common on WSL2 or hosts without
- *      AMD/Intel kernel driver support.
+ * Branches by `profile`:
+ *
+ *   `'vulkan'` (Linux DRI path — original behavior, unchanged):
+ *     1. Non-Linux — Docker Desktop on Windows/macOS runs containers in a Linux
+ *        VM that does not pass `/dev/dri` through, so the sidecar device mount
+ *        in `docker-compose.vulkan.yml` cannot resolve regardless of host GPU.
+ *     2. Linux without `/dev/dri/renderD128` — common on WSL2 or hosts without
+ *        AMD/Intel kernel driver support.
+ *
+ *   `'vulkan-wsl2'` (Windows + WSL2 GPU paravirtualization path, opt-in,
+ *   experimental — GH-101 follow-up):
+ *     1. Not Win32 — this profile only makes sense on Windows.
+ *     2. WSL2 backend not available — Docker Desktop is using Hyper-V backend
+ *        or no Docker is running.
+ *     3. GPU passthrough not detected — `/dev/dxg` or the WSL user-mode driver
+ *        bundle was not reachable from a probe container.
  */
 export function checkVulkanSupport(
   platform: NodeJS.Platform,
   exists: (p: string) => boolean,
+  wslSupport?: WslSupport,
+  profile: 'vulkan' | 'vulkan-wsl2' = 'vulkan',
 ): string | null {
+  if (profile === 'vulkan-wsl2') {
+    if (platform !== 'win32') {
+      return (
+        'Vulkan WSL2 is an opt-in profile for Windows + Docker Desktop with the ' +
+        'WSL2 backend. Switch to the standard "Vulkan" profile (Linux only) or ' +
+        'pick another runtime.'
+      );
+    }
+    if (!wslSupport?.available) {
+      return (
+        wslSupport?.reason ??
+        'Docker Desktop is not running with the WSL2 backend. Switch to WSL2 in ' +
+          'Docker Desktop settings (or start Docker Desktop), then try again.'
+      );
+    }
+    if (!wslSupport.gpuPassthroughDetected) {
+      return (
+        wslSupport.reason ??
+        'GPU passthrough to WSL2 was not detected (/dev/dxg unreachable). ' +
+          'Ensure your Windows GPU driver is current (WDDM 3.0+) and Docker Desktop ' +
+          'is using the WSL2 backend, then try again.'
+      );
+    }
+    return null;
+  }
+
+  // profile === 'vulkan' (default — Linux DRI path)
   if (platform !== 'linux') {
     return (
       'Vulkan runtime is only supported on Linux. Docker Desktop on Windows/macOS ' +
@@ -619,8 +669,12 @@ function getComposeDir(): string {
 }
 
 // Keep in sync with src/types/runtime.ts (canonical) and src/types/electron.d.ts
-/** Runtime profile: GPU (NVIDIA CUDA), Vulkan (AMD/Intel GPU), CPU-only, or Metal (Apple Silicon MLX) */
-export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
+/**
+ * Runtime profile: GPU (NVIDIA CUDA), Vulkan (AMD/Intel GPU on Linux DRI),
+ * Vulkan-WSL2 (AMD/Intel GPU on Windows + Docker Desktop with WSL2 backend —
+ * experimental, opt-in, GH-101 follow-up), CPU-only, or Metal (Apple Silicon MLX).
+ */
+export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'vulkan-wsl2' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 
 const VOLUME_NAMES = {
@@ -1224,6 +1278,17 @@ export function composeFileArgs(
     files.push('docker-compose.vulkan.yml');
   }
 
+  // Vulkan-WSL2 sidecar overlay — opt-in experimental Windows path (GH-101).
+  // Uses the locally-built sidecar image with Mesa's `dzn` Vulkan-on-D3D12 ICD;
+  // mounts /dev/dxg + /usr/lib/wsl for WSL2 GPU paravirtualization.
+  // Defense in depth: only attach the overlay on Win32 even if the profile
+  // value somehow leaked to another platform — the existing checkVulkanSupport
+  // pre-flight rejects this case but compose-file selection should not produce
+  // an unrunnable command if any future caller bypasses the pre-flight.
+  if (runtimeProfile === 'vulkan-wsl2' && process.platform === 'win32') {
+    files.push('docker-compose.vulkan-wsl2.yml');
+  }
+
   // Flatten into compose args
   return files.flatMap((f) => ['-f', f]);
 }
@@ -1274,14 +1339,14 @@ let detectedGpuMode: 'cdi' | 'legacy' | null = null;
 async function exec(
   cmd: string,
   args: string[],
-  opts?: { cwd?: string; env?: Record<string, string> },
+  opts?: { cwd?: string; env?: Record<string, string>; timeoutMs?: number },
 ): Promise<string> {
   try {
     const { stdout } = await execFileAsync(cmd, args, {
       cwd: opts?.cwd,
       env: buildProcessEnv(opts?.env, detectedRuntimeKind ?? undefined),
       maxBuffer: 10 * 1024 * 1024, // 10MB
-      timeout: 120_000, // 2 minutes
+      timeout: opts?.timeoutMs ?? 120_000, // default 2 minutes; callers can shorten
     });
     return stdout.trim();
   } catch (err: any) {
@@ -1994,11 +2059,31 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   // Pre-flight Vulkan validation. Surfaces a clear message before Docker
   // tries to mount /dev/dri (docker-compose.vulkan.yml: devices: /dev/dri).
   // Covers non-Linux platforms (Issue #101) and Linux hosts without DRI.
-  if (runtimeProfile === 'vulkan') {
+  // For 'vulkan-wsl2' (GH-101 follow-up), gates on the cached WSL2 probe and
+  // verifies the locally-built sidecar image is present (no GHCR publish yet).
+  if (runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2') {
     const fs = await import('fs');
-    const vulkanError = checkVulkanSupport(process.platform, (p) => fs.existsSync(p));
+    const gpuInfo = runtimeProfile === 'vulkan-wsl2' ? await checkGpu() : undefined;
+    const vulkanError = checkVulkanSupport(
+      process.platform,
+      (p) => fs.existsSync(p),
+      gpuInfo?.wslSupport,
+      runtimeProfile,
+    );
     if (vulkanError) {
       throw new Error(vulkanError);
+    }
+    if (runtimeProfile === 'vulkan-wsl2') {
+      const imagePresent = await hasVulkanWsl2SidecarImage();
+      if (!imagePresent) {
+        throw new Error(
+          `Vulkan-WSL2 sidecar image "${VULKAN_WSL2_SIDECAR_IMAGE}" was not found locally. ` +
+            'This image is not published to GHCR — build it once with one of: ' +
+            '"powershell -ExecutionPolicy Bypass -File server\\docker\\build-vulkan-wsl2.ps1" ' +
+            'or "bash server/docker/build-vulkan-wsl2.sh" ' +
+            '(see README §2.5.2 Windows + WSL2 for the full setup).',
+        );
+      }
     }
   }
 
@@ -2110,11 +2195,14 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     envUpdates['DIARIZATION_MODEL'] = diarizationModel;
   }
 
-  // Vulkan sidecar: set whisper-server URL based on networking mode and
-  // optionally pass a custom GGML model path.
-  if (runtimeProfile === 'vulkan') {
-    const serverUrl =
-      process.platform === 'linux' ? 'http://localhost:8080' : 'http://whisper-server:8080';
+  // Vulkan + Vulkan-WSL2 sidecar: set whisper-server URL based on networking
+  // mode and optionally pass a custom GGML model path. Vulkan-WSL2 (GH-101
+  // follow-up) always runs Docker Desktop bridge networking on Windows, so
+  // the URL is the Docker DNS name; the legacy Vulkan path is host-network on
+  // Linux and bridge elsewhere.
+  if (runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2') {
+    const useHostNetwork = runtimeProfile === 'vulkan' && process.platform === 'linux';
+    const serverUrl = useHostNetwork ? 'http://localhost:8080' : 'http://whisper-server:8080';
     composeEnv['WHISPERCPP_SERVER_URL'] = serverUrl;
     envUpdates['WHISPERCPP_SERVER_URL'] = serverUrl;
 
@@ -2122,11 +2210,39 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
       composeEnv['WHISPERCPP_MODEL'] = whispercppModel;
       envUpdates['WHISPERCPP_MODEL'] = whispercppModel;
     }
+
+    // Vulkan-WSL2 only: pass through the Mesa adapter selector for systems
+    // with multiple GPUs (NVIDIA + Intel/AMD on the same Windows host).
+    // Empty string lets dzn pick the default adapter — most users won't need
+    // to override this. Read from process env so power users can set it
+    // before launching the dashboard. Empty string is intentional — the env
+    // var must always be present in compose so docker-compose interpolation
+    // doesn't warn about an unset variable.
+    //
+    // Validate strictly before persisting: this string ends up in the .env
+    // file via upsertComposeEnvValues. A value containing newlines or `=`
+    // could inject an extra key. Restrict to the alphabet Microsoft documents
+    // for adapter selection (vendor names like "Nvidia", "AMD", "Intel" plus
+    // common adapter SKUs). Anything else is silently dropped.
+    if (runtimeProfile === 'vulkan-wsl2') {
+      const rawAdapter = process.env.MESA_D3D12_DEFAULT_ADAPTER_NAME ?? '';
+      const adapterName = /^[A-Za-z0-9 _.\-]{0,128}$/.test(rawAdapter) ? rawAdapter : '';
+      if (rawAdapter && !adapterName) {
+        console.warn(
+          '[DockerManager] Ignoring MESA_D3D12_DEFAULT_ADAPTER_NAME with disallowed characters; using default adapter.',
+        );
+      }
+      composeEnv['MESA_D3D12_DEFAULT_ADAPTER_NAME'] = adapterName;
+      envUpdates['MESA_D3D12_DEFAULT_ADAPTER_NAME'] = adapterName;
+    } else {
+      envUpdates['MESA_D3D12_DEFAULT_ADAPTER_NAME'] = '';
+    }
   } else {
     // Clear stale vulkan env vars from a previous profile switch so they
     // don't linger in the .env file.
     envUpdates['WHISPERCPP_SERVER_URL'] = '';
     envUpdates['WHISPERCPP_MODEL'] = '';
+    envUpdates['MESA_D3D12_DEFAULT_ADAPTER_NAME'] = '';
   }
 
   upsertComposeEnvValues(envUpdates);
@@ -2902,9 +3018,18 @@ function unsubscribeFromDownloadEvents(callback: (event: BootstrapDownloadEvent)
 
 /**
  * Check for NVIDIA GPU + container toolkit availability.
- * Returns { gpu: boolean, toolkit: boolean }.
+ * Also probes Docker Desktop on Windows for WSL2 GPU paravirtualization
+ * (GH-101 follow-up) — surfaced via the optional `wslSupport` field, which is
+ * `undefined` on non-Win32 platforms.
+ *
+ * Returns { gpu, toolkit, vulkan, wslSupport? }.
  */
-async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean; vulkan: boolean }> {
+async function checkGpu(): Promise<{
+  gpu: boolean;
+  toolkit: boolean;
+  vulkan: boolean;
+  wslSupport?: WslSupport;
+}> {
   let gpu = false;
   let toolkit = false;
   let vulkan = false;
@@ -2975,7 +3100,117 @@ async function checkGpu(): Promise<{ gpu: boolean; toolkit: boolean; vulkan: boo
     }
   }
 
-  return { gpu, toolkit, vulkan };
+  // Win32 only: probe Docker Desktop for WSL2 backend + /dev/dxg passthrough
+  // (GH-101 follow-up). Result feeds the experimental 'vulkan-wsl2' profile
+  // gating in Settings — never auto-selected by checkGpu(). Single-flight
+  // cached at the wslDetect module level, so repeated calls are cheap.
+  let wslSupport: WslSupport | undefined;
+  if (process.platform === 'win32') {
+    try {
+      wslSupport = await detectWslGpuPassthrough(getWslDetectDeps());
+      if (wslSupport.available && wslSupport.gpuPassthroughDetected) {
+        console.log(
+          '[DockerManager] WSL2 GPU passthrough detected — Vulkan WSL2 profile available',
+        );
+      } else {
+        console.log(
+          `[DockerManager] WSL2 GPU passthrough not available: ${wslSupport.reason ?? 'unknown reason'}`,
+        );
+      }
+    } catch (err: any) {
+      console.warn('[DockerManager] WSL2 detection failed:', err.message);
+      wslSupport = {
+        available: false,
+        gpuPassthroughDetected: false,
+        reason: err instanceof Error ? err.message : 'WSL2 detection failed',
+      };
+    }
+  }
+
+  return { gpu, toolkit, vulkan, wslSupport };
+}
+
+/**
+ * Build the dependency injection bundle for `detectWslGpuPassthrough`.
+ * Kept inside dockerManager so the wslDetect module stays free of
+ * runtime/binary-resolution logic and remains trivially unit-testable.
+ *
+ * The probe is gated on a local `alpine:3` image being already present —
+ * it never triggers a network pull. This avoids hanging the dashboard's
+ * first-run detection for up to 30s on slow or air-gapped networks; if the
+ * image is absent we report a clean "skipped" reason instead.
+ */
+const PROBE_IMAGE = 'alpine:3';
+const PROBE_CONTAINER_NAME = 'transcriptionsuite-wsl-probe';
+
+function getWslDetectDeps(): WslDetectDeps {
+  return {
+    runDockerInfo: async () => {
+      const bin = await runtimeBin();
+      return exec(bin, ['info'], { timeoutMs: 15_000 });
+    },
+    runDockerProbe: async () => {
+      const bin = await runtimeBin();
+      // Pre-check: only run the probe if the alpine image is already cached
+      // locally. This avoids surprise network pulls and silent timeouts.
+      try {
+        await exec(bin, ['image', 'inspect', PROBE_IMAGE], { timeoutMs: 5_000 });
+      } catch {
+        // Image not local — skip probe; gpuPassthroughDetected stays false.
+        return false;
+      }
+      // Throwaway probe with /dev/dxg + /usr/lib/wsl bound. Both binds must
+      // resolve and `libd3d12.so` must exist for gpuPassthroughDetected to
+      // flip true. Named so any leak is identifiable. `--pull=never` ensures
+      // we never reach out to the network even if the image was tagged but
+      // not actually present.
+      try {
+        await exec(
+          bin,
+          [
+            'run',
+            '--rm',
+            '--name',
+            PROBE_CONTAINER_NAME,
+            '--pull=never',
+            '--device',
+            '/dev/dxg',
+            '-v',
+            '/usr/lib/wsl:/usr/lib/wsl:ro',
+            PROBE_IMAGE,
+            'sh',
+            '-c',
+            'test -e /dev/dxg && test -e /usr/lib/wsl/lib/libd3d12.so',
+          ],
+          { timeoutMs: 15_000 },
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  };
+}
+
+/**
+ * Check whether the Vulkan-WSL2 sidecar image (locally-built) is present.
+ * Used by the dashboard to decide whether to surface an actionable error
+ * pointing at `server/docker/build-vulkan-wsl2.sh` before container start.
+ *
+ * Short-circuits with `false` on any non-Win32 platform — the WSL2 image is
+ * Windows-only by design and inspecting it on Linux/macOS would just leak a
+ * Docker error message into logs.
+ */
+async function hasVulkanWsl2SidecarImage(): Promise<boolean> {
+  if (process.platform !== 'win32') {
+    return false;
+  }
+  try {
+    await exec(await runtimeBin(), ['image', 'inspect', VULKAN_WSL2_SIDECAR_IMAGE]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ─── Model Cache Inspection ─────────────────────────────────────────────────
@@ -3424,6 +3659,7 @@ export const dockerManager = {
   cancelPull,
   isPulling,
   hasSidecarImage,
+  hasVulkanWsl2SidecarImage,
   pullSidecarImage,
   cancelSidecarPull,
   isSidecarPulling,

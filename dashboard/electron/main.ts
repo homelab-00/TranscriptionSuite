@@ -1200,6 +1200,10 @@ ipcMain.handle('docker:hasSidecarImage', async () => {
   return dockerManager.hasSidecarImage();
 });
 
+ipcMain.handle('docker:hasVulkanWsl2SidecarImage', async () => {
+  return dockerManager.hasVulkanWsl2SidecarImage();
+});
+
 ipcMain.handle('docker:pullSidecarImage', async () => {
   return dockerManager.pullSidecarImage();
 });

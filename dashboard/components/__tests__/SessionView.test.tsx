@@ -182,7 +182,8 @@ vi.mock('../AudioVisualizer', () => ({
 }));
 
 vi.mock('../../src/types/runtime', () => ({
-  isRuntimeProfile: (v: unknown) => ['gpu', 'cpu', 'vulkan', 'metal'].includes(v as string),
+  isRuntimeProfile: (v: unknown) =>
+    ['gpu', 'cpu', 'vulkan', 'vulkan-wsl2', 'metal'].includes(v as string),
 }));
 
 import { SessionView } from '../views/SessionView';

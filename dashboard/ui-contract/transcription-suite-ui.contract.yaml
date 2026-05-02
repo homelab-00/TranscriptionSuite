@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.36
+  spec_version: 1.0.40
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -62,7 +62,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-01T22:23:14.179Z
+    generated_at: 2026-05-02T10:00:30.542Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -306,7 +306,6 @@ foundation:
         - h-[85vh]
         - max-h-[80vh]
         - max-h-[90vh]
-        - max-w-[55%]
         - min-h-[38px]
         - min-h-[calc(100vh-30rem)]
         - min-w-[5rem]
@@ -453,7 +452,6 @@ utility_allowlist:
     - bg-black/70
     - bg-black/75
     - bg-blue-400
-    - bg-blue-500
     - bg-blue-500/10
     - bg-cyan-400/10
     - bg-cyan-400/20
@@ -470,9 +468,7 @@ utility_allowlist:
     - bg-linear-to-t
     - bg-neutral-700
     - bg-neutral-900
-    - bg-orange-500
     - bg-orange-500/10
-    - bg-purple-500
     - bg-purple-500/10
     - bg-red-400/10
     - bg-red-500
@@ -510,8 +506,6 @@ utility_allowlist:
     - border-accent-magenta/20
     - border-accent-magenta/5
     - border-accent-orange/20
-    - border-accent-orange/25
-    - border-accent-rose/20
     - border-amber-400/20
     - border-amber-400/30
     - border-amber-400/40
@@ -739,8 +733,6 @@ utility_allowlist:
     - md:grid-cols-2
     - md:grid-cols-4
     - md:items-center
-    - md:items-end
-    - md:justify-between
     - min-h-0
     - min-h-32
     - min-h-full
@@ -874,7 +866,6 @@ utility_allowlist:
     - rounded-tl-none
     - rounded-tr-none
     - rounded-xl
-    - select-all
     - select-none
     - selectable-text
     - shadow
@@ -917,10 +908,8 @@ utility_allowlist:
     - text-2xl
     - text-3xl
     - text-accent-cyan
-    - text-accent-cyan/80
     - text-accent-magenta
     - text-accent-orange
-    - text-accent-rose
     - text-accent-violet
     - text-accent-violet/80
     - text-amber-100
@@ -928,7 +917,6 @@ utility_allowlist:
     - text-amber-300
     - text-amber-300/60
     - text-amber-300/70
-    - text-amber-300/80
     - text-amber-400
     - text-amber-400/60
     - text-amber-400/80
@@ -941,16 +929,15 @@ utility_allowlist:
     - text-emerald-200
     - text-emerald-400
     - text-green-400
-    - text-green-400/70
     - text-left
     - text-lg
     - text-neutral-100
+    - text-orange-200
     - text-orange-400
     - text-orange-500
     - text-purple-400
     - text-red-100
     - text-red-200
-    - text-red-200/90
     - text-red-300
     - text-red-400
     - text-red-400/80
@@ -963,7 +950,6 @@ utility_allowlist:
     - text-slate-700
     - text-slate-900
     - text-sm
-    - text-violet-400
     - text-white
     - text-white/60
     - text-white/90
@@ -1056,7 +1042,6 @@ utility_allowlist:
     - lg:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]
     - max-h-[80vh]
     - max-h-[90vh]
-    - max-w-[55%]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]
     - min-h-[calc(100vh-30rem)]

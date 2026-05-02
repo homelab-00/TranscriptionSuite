@@ -16,7 +16,13 @@ type TrayState =
   | 'disconnected';
 
 // Keep in sync with src/types/runtime.ts (canonical) and electron/preload.ts
-type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
+type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'vulkan-wsl2' | 'metal';
+
+interface WslSupport {
+  available: boolean;
+  gpuPassthroughDetected: boolean;
+  reason?: string;
+}
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 type ClientLogType = 'info' | 'success' | 'error' | 'warning';
 
@@ -117,7 +123,13 @@ interface ElectronAPI {
     getRuntimeKind: () => Promise<string | null>;
     getDetectionGuidance: () => Promise<string | null>;
     getComposeAvailable: () => Promise<boolean>;
-    checkGpu: () => Promise<{ gpu: boolean; toolkit: boolean; vulkan: boolean }>;
+    checkGpu: () => Promise<{
+      gpu: boolean;
+      toolkit: boolean;
+      vulkan: boolean;
+      wslSupport?: WslSupport;
+    }>;
+    hasVulkanWsl2SidecarImage: () => Promise<boolean>;
     listImages: () => Promise<
       Array<{ tag: string; fullName: string; size: string; created: string; id: string }>
     >;

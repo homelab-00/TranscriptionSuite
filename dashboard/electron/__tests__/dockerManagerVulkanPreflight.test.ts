@@ -96,3 +96,84 @@ describe('[GH-101] checkVulkanSupport', () => {
     expect(exists).toHaveBeenCalledWith('/dev/dri/renderD128');
   });
 });
+
+describe('[GH-101 follow-up] checkVulkanSupport — vulkan-wsl2 profile', () => {
+  const wslReady = {
+    available: true,
+    gpuPassthroughDetected: true,
+  };
+  const wslHyperV = {
+    available: false,
+    gpuPassthroughDetected: false,
+    reason: 'Docker Desktop is using the Hyper-V backend, not WSL2.',
+  };
+  const wslAvailableNoGpu = {
+    available: true,
+    gpuPassthroughDetected: false,
+    reason: '/dev/dxg unreachable from probe container.',
+  };
+
+  it('Win32 + WSL2 + GPU passthrough: returns null (vulkan-wsl2 viable)', () => {
+    expect(checkVulkanSupport('win32', existsFor(nothing), wslReady, 'vulkan-wsl2')).toBeNull();
+  });
+
+  it('macOS rejects vulkan-wsl2 even with a positive wslSupport bag', () => {
+    const err = checkVulkanSupport('darwin', existsFor(nothing), wslReady, 'vulkan-wsl2');
+    expect(err).toMatch(/Vulkan WSL2 is an opt-in profile for Windows/);
+  });
+
+  it('Linux rejects vulkan-wsl2 (must use the standard "vulkan" profile)', () => {
+    const err = checkVulkanSupport('linux', existsFor(fullDri), wslReady, 'vulkan-wsl2');
+    expect(err).toMatch(/Vulkan WSL2 is an opt-in profile for Windows/);
+  });
+
+  it('Win32 + Hyper-V backend: rejects with reason from probe', () => {
+    const err = checkVulkanSupport('win32', existsFor(nothing), wslHyperV, 'vulkan-wsl2');
+    expect(err).toMatch(/Hyper-V backend/);
+  });
+
+  it('Win32 + WSL2 + no GPU passthrough: surfaces the probe reason verbatim', () => {
+    const err = checkVulkanSupport('win32', existsFor(nothing), wslAvailableNoGpu, 'vulkan-wsl2');
+    expect(err).toMatch(/\/dev\/dxg unreachable/);
+  });
+
+  it('Win32 + missing wslSupport object: rejects gracefully', () => {
+    const err = checkVulkanSupport('win32', existsFor(nothing), undefined, 'vulkan-wsl2');
+    expect(err).toMatch(/Docker Desktop is not running with the WSL2 backend/);
+  });
+
+  it('vulkan-wsl2 branch never queries the filesystem (no /dev/dri probe)', () => {
+    const exists = vi.fn().mockReturnValue(true);
+    checkVulkanSupport('win32', exists, wslReady, 'vulkan-wsl2');
+    expect(exists).not.toHaveBeenCalled();
+  });
+
+  it('Linux Vulkan path is unchanged (wslSupport ignored when profile === "vulkan")', () => {
+    expect(checkVulkanSupport('linux', existsFor(fullDri), wslHyperV, 'vulkan')).toBeNull();
+  });
+
+  it('default profile parameter is "vulkan" (back-compat with v1.3.4 callers)', () => {
+    // No profile arg → vulkan branch — Linux + DRI present should pass.
+    expect(checkVulkanSupport('linux', existsFor(fullDri))).toBeNull();
+    // No profile arg → vulkan branch — Win32 should reject with Linux-only message.
+    const err = checkVulkanSupport('win32', existsFor(fullDri));
+    expect(err).toMatch(/Vulkan runtime is only supported on Linux/);
+  });
+
+  it('Win32 + profile="vulkan" + wslSupport set: still rejects with Linux-only message (wslSupport ignored)', () => {
+    // Project-context invariant: vulkan-wsl2 NEVER auto-selected. The
+    // existing 'vulkan' profile semantics must not change just because the
+    // caller happens to pass a positive wslSupport bag — that bag is for
+    // the 'vulkan-wsl2' branch only.
+    const err = checkVulkanSupport('win32', existsFor(nothing), wslReady, 'vulkan');
+    expect(err).toMatch(/Vulkan runtime is only supported on Linux/);
+  });
+
+  it('darwin + profile="vulkan" still rejects with Linux-only message after the refactor', () => {
+    // Pins the legacy v1.3.4 darwin behavior. Reorderings in the new branch
+    // structure could regress this if someone moves the platform check into
+    // the wrong branch.
+    const err = checkVulkanSupport('darwin', existsFor(fullDri));
+    expect(err).toMatch(/Vulkan runtime is only supported on Linux/);
+  });
+});

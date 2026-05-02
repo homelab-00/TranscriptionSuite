@@ -1,0 +1,90 @@
+# Vulkan-WSL2 sidecar overlay — whisper.cpp with Vulkan-on-D3D12 (dzn) GPU
+# acceleration on Windows + Docker Desktop with the WSL2 backend (GH-101
+# follow-up).
+#
+# This is the experimental opt-in counterpart to docker-compose.vulkan.yml,
+# which is Linux-only because it mounts /dev/dri (the Linux DRM/DRI subsystem
+# that Docker Desktop's WSL2 distro doesn't expose).
+#
+# The image ``transcriptionsuite/whisper-cpp-vulkan-wsl2:latest`` is NOT
+# published to GHCR for v1.3.5. Users build it locally via:
+#
+#   bash server/docker/build-vulkan-wsl2.sh
+#
+# (See README §2.5 "Windows + WSL2 (experimental)" for the full setup.)
+#
+# How it works:
+#   * /dev/dxg is the WSL2 Linux kernel device that brokers GPU-PV through
+#     the Microsoft `dxgkrnl` driver into the Windows host's WDDM stack.
+#   * /usr/lib/wsl is automatically populated by Docker Desktop with the
+#     Microsoft user-mode driver bundle (libd3d12.so, libdxcore.so) — it is
+#     not pre-mounted into arbitrary containers, so we bind it explicitly.
+#   * VK_ICD_FILENAMES forces the Vulkan loader to use Mesa's `dzn` ICD
+#     (Vulkan-on-D3D12 translation), which the upstream main-vulkan image
+#     does not include — only the custom Dockerfile here adds it.
+#
+# Usage:
+#   docker compose \
+#       -f docker-compose.yml \
+#       -f docker-compose.desktop-vm.yml \
+#       -f docker-compose.vulkan-wsl2.yml up -d
+#
+# The dashboard's compose-file selection (dockerManager.ts::composeFileArgs)
+# routes the 'vulkan-wsl2' runtime profile to this overlay automatically.
+
+services:
+  whisper-server:
+    image: transcriptionsuite/whisper-cpp-vulkan-wsl2:latest
+    # The image is built locally only — never auto-pulled from a registry.
+    # Without this, a missing local image causes Compose to attempt a pull
+    # of a non-existent registry tag and fail with a confusing "manifest
+    # unknown" error far from the dashboard's preflight check.
+    pull_policy: never
+    command:
+      - >-
+        n=0;
+        until test -f "$$WHISPER_MODEL"; do
+        n=$$((n+1));
+        if [ "$$n" -ge 180 ]; then
+        echo '[whisper-server] ERROR: Model $$WHISPER_MODEL not found after 30 minutes — exiting so Docker can restart.' >&2;
+        exit 1;
+        fi;
+        echo '[whisper-server] Waiting for model $$WHISPER_MODEL to be downloaded...';
+        sleep 10;
+        done;
+        exec whisper-server --model "$$WHISPER_MODEL" --host 0.0.0.0 --port 8080 --convert
+    restart: unless-stopped
+    volumes:
+      - huggingface-models:/models:ro
+      # Microsoft user-mode driver bundle (libd3d12.so, libdxcore.so).
+      # Bound read-only so the container cannot tamper with WSL host libs.
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    devices:
+      # WSL2 GPU paravirtualization device. Docker Desktop does not auto-bind
+      # this for non-NVIDIA paths; we must request it explicitly.
+      - /dev/dxg:/dev/dxg
+    environment:
+      - WHISPER_MODEL=${WHISPERCPP_MODEL:-/models/ggml-large-v3-turbo.bin}
+      # Make Microsoft's libd3d12.so / libdxcore.so resolvable to dzn at runtime.
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+      # Force the Vulkan loader to use Mesa's dzn ICD (Vulkan-on-D3D12).
+      # Without this, the loader can fall back to llvmpipe (CPU rasterizer)
+      # silently, which would masquerade as GPU acceleration.
+      - VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/dzn_icd.x86_64.json
+      # Optional: Mesa's adapter selector for multi-GPU Windows hosts.
+      # Empty string lets dzn pick the default — power users can override
+      # via the dashboard's process env (e.g. "Nvidia", "Intel", "AMD").
+      - MESA_D3D12_DEFAULT_ADAPTER_NAME=${MESA_D3D12_DEFAULT_ADAPTER_NAME:-}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  transcriptionsuite:
+    depends_on:
+      whisper-server:
+        condition: service_started

@@ -78,7 +78,13 @@ export type CompatResult =
   | { result: 'unknown'; reason: CompatUnknownReason; detail?: string };
 
 // Keep in sync with src/types/runtime.ts (canonical) and src/types/electron.d.ts
-export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'metal';
+export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'vulkan-wsl2' | 'metal';
+
+export interface WslSupport {
+  available: boolean;
+  gpuPassthroughDetected: boolean;
+  reason?: string;
+}
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 export type ClientLogType = 'info' | 'success' | 'error' | 'warning';
 
@@ -140,7 +146,13 @@ export interface ElectronAPI {
     getRuntimeKind: () => Promise<string | null>;
     getDetectionGuidance: () => Promise<string | null>;
     getComposeAvailable: () => Promise<boolean>;
-    checkGpu: () => Promise<{ gpu: boolean; toolkit: boolean; vulkan: boolean }>;
+    checkGpu: () => Promise<{
+      gpu: boolean;
+      toolkit: boolean;
+      vulkan: boolean;
+      wslSupport?: WslSupport;
+    }>;
+    hasVulkanWsl2SidecarImage: () => Promise<boolean>;
     validateGpuPreflight: () => Promise<{
       status: 'healthy' | 'warning' | 'unknown';
       checks: Array<{
@@ -502,6 +514,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('docker:getDetectionGuidance') as Promise<string | null>,
     getComposeAvailable: () => ipcRenderer.invoke('docker:getComposeAvailable') as Promise<boolean>,
     checkGpu: () => ipcRenderer.invoke('docker:checkGpu'),
+    hasVulkanWsl2SidecarImage: () =>
+      ipcRenderer.invoke('docker:hasVulkanWsl2SidecarImage') as Promise<boolean>,
     validateGpuPreflight: () => ipcRenderer.invoke('docker:validateGpuPreflight'),
     runGpuDiagnostic: () => ipcRenderer.invoke('docker:runGpuDiagnostic'),
     listImages: () => ipcRenderer.invoke('docker:listImages'),
