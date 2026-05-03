@@ -86,7 +86,49 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "pip-licenses>=5.5.1",
+    # Day-1 test fixtures (Story 1.1 — Audio Notebook QoL pack epic-foundations)
+    "keyring>=25.0,<26",        # NFR33 — real-keychain integration target (Story 1.7)
+    "keyrings.alt>=5.0",        # NFR34 — file-encrypted fallback for headless Linux
+    "freezegun>=1.5",           # frozen_clock fixture; replaces datetime.now() in tests (NFR54 ban)
+    "pytest-benchmark>=5.0",    # NFR1 — CRUD latency <15% regression budget
+    "ruff>=0.7",                # AC2/AC4 — TID flake8-tidy-imports.banned-api enforcement
 ]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["__pycache__", ".venv"]
+
+[tool.ruff.lint]
+# E/F = pycodestyle errors + Pyflakes; TID = flake8-tidy-imports (TID251 = banned-api).
+# TID is selected globally so the banned-api rule below applies to imports/attribute
+# access by default. Production code under server/** is opted out via per-file-ignores
+# (tests/** stays subject to the ban — that is the discipline gate from AC2).
+select = ["E", "F", "TID"]
+# E501 (line length) is enforced project-wide by formatters, not ruff — matches
+# the convention already in build/pyproject.toml.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Production code legitimately uses time.sleep (model preload backoff),
+# datetime.now (timestamp generation) and httpx.Client (outbound webhooks).
+# The banned-api rule (TID251) is therefore disabled here and applies only to tests/.
+"server/**/*.py" = ["TID251"]
+# Pre-existing test files that use datetime.now() / time.sleep() before Story 1.1
+# landed the banned-api gate. Migrating them to frozen_clock is out of scope here
+# (would touch test logic outside conftest.py — see Story 1.1 task 14.4 audit).
+# These exemptions are tech-debt; new test files MUST NOT be added to this list.
+"tests/test_token_store.py" = ["TID251"]
+"tests/test_ensure_transcription_loaded.py" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Day-1 banned APIs in tests/ — see comment header at the top of tests/conftest.py.
+# If a test legitimately needs one of these (e.g. integration test against a real
+# external HTTP service), add `# noqa: TID251` with a one-line justification.
+"time.sleep".msg = "Use asyncio.Event.wait(timeout=...) or frozen_clock fixture"
+"datetime.datetime.now".msg = "Use frozen_clock fixture"
+"httpx.Client".msg = "Use webhook_mock_receiver or aiohttp TestServer"
+"httpx.AsyncClient".msg = "Use webhook_mock_receiver or aiohttp TestServer"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -32,6 +32,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: ESLint (banned-API enforcement)
+        run: npm run lint
+
       - name: TypeScript + JavaScript checks
         run: npm run typecheck
 
