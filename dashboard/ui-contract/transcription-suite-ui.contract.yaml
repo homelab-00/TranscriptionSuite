@@ -17,6 +17,7 @@ meta:
       - components/__tests__/SessionImportTab.canary-language.test.tsx
       - components/__tests__/SessionView.canary-language.test.tsx
       - components/__tests__/SessionView.test.tsx
+      - components/AriaLiveRegion.tsx
       - components/AudioVisualizer.tsx
       - components/PopOutWindow.tsx
       - components/profiles/__tests__/EmptyProfileForm.test.tsx
@@ -65,7 +66,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-03T16:16:04.005Z
+    generated_at: 2026-05-03T16:27:57.423Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -1358,6 +1359,23 @@ component_contracts:
     state_rules:
       - id: focus-ring
         rule: Focusable switch keeps cyan ring and slate offset ring styling for keyboard visibility.
+  AriaLiveRegion:
+    file: components/AriaLiveRegion.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   AudioNoteModal:
     file: components/views/AudioNoteModal.tsx
     required_tokens:
