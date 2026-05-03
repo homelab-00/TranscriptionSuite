@@ -5,16 +5,12 @@ The big invariant these guard:
     The job_profile_snapshot row commit MUST complete before any worker
     code path that consumes the snapshot can fire. (NFR16, NFR18.)
 
-We can't yet plug the snapshot into the real transcription_jobs INSERT
-path inside this commit — that wiring is part of the Story 1.3 hookup
-into the job-creation site, and the existing job_repository.create_job()
-function takes its current parameter set. The follow-up (still inside
-Sprint 1) is to add an optional snapshot pair to create_job().
-
-For now, the durability invariant is verified at the helper level:
+These tests verify the snapshot-helper-level durability guarantee:
 ``snapshot_profile_at_job_start`` reads from a committed row, so any
-subsequent worker call cannot see uncommitted state. This is the
-load-bearing guarantee.
+subsequent worker call cannot see uncommitted state.
+
+End-to-end coverage of the helper threaded through ``create_job`` lives
+in ``test_create_job_profile_snapshot.py``.
 """
 
 from __future__ import annotations

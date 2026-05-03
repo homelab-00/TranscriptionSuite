@@ -69,7 +69,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-03T16:32:04.425Z
+    generated_at: 2026-05-03T17:04:48.213Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -271,7 +271,6 @@ foundation:
         - ease-[cubic-bezier(0.32,0.72,0,1)]
         - ease-[cubic-bezier(0.33,1,0.68,1)]
         - ease-in-out
-        - ease-out
       keyframes:
         - dropdown-appear
         - idle-wave-cyan
@@ -577,7 +576,6 @@ utility_allowlist:
     - duration-500
     - duration-700
     - ease-in-out
-    - ease-out
     - fade-in
     - fill-mode-forwards
     - fixed

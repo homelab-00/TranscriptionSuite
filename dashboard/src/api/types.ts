@@ -112,6 +112,8 @@ export interface TranscriptionUploadOptions {
   multitrack?: boolean;
   file_created_at?: string;
   title?: string;
+  /** Active recording-profile id (FR18). Snapshotted server-side at job start. */
+  profile_id?: number | null;
 }
 
 export interface LanguagesResponse {

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from server.logging import sanitize_log_value
 
 from .database import get_connection
+from .profile_repository import snapshot_profile_at_job_start
 
 # Adapted from Scriberr (https://github.com/rishikanthc/Scriberr) — job model structure:
 # id, status, audio_path, result, error_message, timestamps pattern.
@@ -25,19 +26,51 @@ def create_job(
     language: str | None,
     task: str,
     translation_target: str | None,
+    profile_id: int | None = None,
 ) -> None:
     """Insert a new job row with status='processing'. Called at transcription start.
 
     Uses INSERT OR IGNORE so duplicate calls are safe.
+
+    When ``profile_id`` is provided, snapshots the profile via
+    :func:`profile_repository.snapshot_profile_at_job_start` and writes the
+    frozen JSON dump + schema version into the row (FR18). The snapshot is
+    immutable for the lifetime of the job — concurrent profile edits cannot
+    affect a running transcription. If the profile is deleted between
+    selection and job-start, the snapshot helper returns ``None`` and we
+    insert without snapshot fields rather than failing the job.
     """
+    snapshot_json: str | None = None
+    snapshot_schema_version: str | None = None
+    if profile_id is not None:
+        snapshot = snapshot_profile_at_job_start(profile_id)
+        if snapshot is not None:
+            snapshot_json, snapshot_schema_version = snapshot
+        else:
+            logger.warning(
+                "create_job: profile_id=%d not found at snapshot time — "
+                "inserting job without profile snapshot",
+                profile_id,
+            )
+
     with get_connection() as conn:
         conn.execute(
             """
             INSERT OR IGNORE INTO transcription_jobs
-                (id, status, source, client_name, language, task, translation_target)
-            VALUES (?, 'processing', ?, ?, ?, ?, ?)
+                (id, status, source, client_name, language, task,
+                 translation_target, job_profile_snapshot, snapshot_schema_version)
+            VALUES (?, 'processing', ?, ?, ?, ?, ?, ?, ?)
             """,
-            (job_id, source, client_name, language, task, translation_target),
+            (
+                job_id,
+                source,
+                client_name,
+                language,
+                task,
+                translation_target,
+                snapshot_json,
+                snapshot_schema_version,
+            ),
         )
         conn.commit()
 

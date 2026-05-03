@@ -83,6 +83,7 @@ async def transcribe_audio(
     expected_speakers: int | None = Form(None),
     parallel_diarization: bool | None = Form(None),
     multitrack: bool = Form(False),
+    profile_id: int | None = Form(None),
 ) -> dict[str, Any]:
     """
     Transcribe an uploaded audio file.
@@ -152,6 +153,7 @@ async def transcribe_audio(
             language=language,
             task="translate" if translation_enabled else "transcribe",
             translation_target=(translation_target_language if translation_enabled else None),
+            profile_id=profile_id,
         )
     except Exception as _e:
         logger.warning(

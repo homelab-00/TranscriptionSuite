@@ -84,77 +84,12 @@ When an item ships, **delete the entry** — git history + the spec file are the
 
 ## Sprint 1 (Issue #104, Audio Notebook QoL pack — epic-foundations + epic-model-profiles)
 
-Sprint 1 landed Stories 1.2–1.9 + 8.1–8.4 (12 stories) on `gh-104-prd`. The
-following items were intentionally deferred to keep the sprint diff focused
-and the AC-tested scope mechanical. Re-triage trigger named for each.
+Sprint 1 landed Stories 1.2–1.9 + 8.1–8.4 (12 stories) on `gh-104-prd`.
+Items 1–5 were closed in the Sprint 1 deferred-items follow-up commit
+(2026-05-03) — see git history for the actual integration. Only the
+explicit Sprint 3 placeholder remains.
 
-### 1. Wire `EmptyProfileForm` into `SettingsModal` (Story 1.5 host integration)
-
-**What:** The `EmptyProfileForm` component is mountable and fully AC-tested,
-but is not yet reachable from any Settings UI surface. AC1.5's narrative
-("Given the user opens Settings → Profiles → 'New profile'…") presumes a
-host modal section.
-
-**Why deferred:** `SettingsModal.tsx` is a complex multi-tab modal; adding a
-"Profiles" tab requires careful state-management plumbing that risks
-regressing the other tabs. Disproportionate to the AC-tested scope.
-
-**Re-triage trigger:** First MVP-cut PR (when the user-facing flow has to be
-demonstrable end-to-end).
-
-### 2. Wire `ProfileSelector` into `Sidebar` (Story 1.6 toolbar integration)
-
-**What:** The `ProfileSelector` component is fully AC-tested but not mounted
-in the `Sidebar` layout.
-
-**Why deferred:** Sidebar layout has multiple persistent elements; inserting
-a new persistent dropdown without breaking the existing visual contract
-needs UX design input.
-
-**Re-triage trigger:** Same as #1 (MVP-cut PR).
-
-### 3. Wire `ModelProfilesPanel` + `ModelProfileSelector` into Settings + Sidebar (Story 8.2 + 8.3 integration)
-
-**What:** Both components are fully AC-tested but not yet wired into the
-existing Settings modal or sidebar toolbar.
-
-**Why deferred:** Same disposition as #1 + #2 — the components are
-deliverable-ready; integration is plumbing that crosses other complex
-surfaces.
-
-**Re-triage trigger:** First MVP-cut PR.
-
-### 4. Lighthouse CI gate (Story 1.8 AC4 full implementation)
-
-**What:** Per design §0 override, AC4's Lighthouse-CI accessibility gate
-was downgraded to `eslint-plugin-jsx-a11y` rules for sprint speed. The full
-Lighthouse CI step (NFR25 — accessibility score ≥ 90) is not yet in
-`.github/workflows/dashboard-quality.yml`.
-
-**Why deferred:** Vite-preview wiring against an Electron-first app is
-brittle; the CI step adds ~90 s + ~40 MB devDep weight per the PRD
-acknowledgement. ESLint jsx-a11y already covers the lint-time portion of
-the AC.
-
-**Re-triage trigger:** MVP-cut PR.
-
-### 5. Story 1.3 hookup into `transcription_jobs` INSERT site
-
-**What:** The `snapshot_profile_at_job_start` helper exists and is
-thoroughly tested at the helper level (FR18 immutability under concurrent
-edit, deterministic serialisation). However, `job_repository.create_job()`
-does NOT yet accept a `profile_id` parameter — the snapshot is not yet
-written into the live INSERT path.
-
-**Why deferred:** The job-creation site is wired into the WebSocket and
-HTTP transcription routes; threading a new optional parameter touches
-multiple call sites and risks regressing the Wave 1 durability work.
-Helper is shipped and ready for integration.
-
-**Re-triage trigger:** First story that needs the snapshot in the running
-worker (Story 5.1 alias propagation; Story 6.1 auto-summary toggle).
-
-### 6. F1 + F4 race-guard implementation (Story 6.11 dependency)
+### 1. F1 + F4 race-guard implementation (Story 6.11 dependency)
 
 **What:** Sprint 1 prepared the data substrate (profile snapshot column,
 review-state table) but did NOT implement the F1↔F4 cross-feature race
