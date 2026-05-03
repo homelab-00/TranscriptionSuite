@@ -50,6 +50,7 @@ from server.api.routes import (  # noqa: E402
     llm,
     notebook,
     openai_audio,
+    profiles,
     search,
     transcription,
     websocket,
@@ -668,6 +669,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
     app.include_router(transcription.router, prefix="/api/transcribe", tags=["Transcription"])
     app.include_router(notebook.router, prefix="/api/notebook", tags=["Audio Notebook"])
+    app.include_router(profiles.router, prefix="/api/profiles", tags=["Profiles"])
     app.include_router(search.router, prefix="/api/search", tags=["Search"])
     app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
