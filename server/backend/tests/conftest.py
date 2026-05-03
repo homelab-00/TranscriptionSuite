@@ -25,8 +25,7 @@ Story 1.1 additions (Audio Notebook QoL pack — epic-foundations):
 #   - httpx.AsyncClient      → use webhook_mock_receiver or aiohttp TestServer
 # Approved alternatives are the fixtures defined in this file. If you have
 # a legitimate exception (e.g. integration test against a real HTTP
-# service), add a `noqa` directive of the form ``noqa`` + ``: TID251``
-# with a one-line justification.
+# service), add `# noqa: TID251` with a one-line justification.
 # ──────────────────────────────────────────────────────────────────────────
 
 from __future__ import annotations
@@ -464,7 +463,9 @@ class _WebhookMockController:
     # internal hook used by the aiohttp handler
     def _consume(self) -> dict[str, Any]:
         if self._redirect_target is not None:
-            return {"status": 302, "redirect": self._redirect_target, "delay": 0}
+            target = self._redirect_target
+            self._redirect_target = None  # one-shot: consumed on first request
+            return {"status": 302, "redirect": target, "delay": 0}
         if self._next_response is not None:
             r = self._next_response
             self._next_response = None

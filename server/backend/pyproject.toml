@@ -102,18 +102,27 @@ extend-exclude = ["__pycache__", ".venv"]
 [tool.ruff.lint]
 # E/F = pycodestyle errors + Pyflakes; TID = flake8-tidy-imports (TID251 = banned-api).
 # TID is selected globally so the banned-api rule below applies to imports/attribute
-# access by default. Production code under server/** is opted out via per-file-ignores
-# (tests/** stays subject to the ban — that is the discipline gate from AC2).
+# access by default. Production directories are opted out via per-file-ignores
+# (tests/** stays subject to the TID251 ban — that is the discipline gate from AC2).
 select = ["E", "F", "TID"]
 # E501 (line length) is enforced project-wide by formatters, not ruff — matches
 # the convention already in build/pyproject.toml.
-ignore = ["E501"]
+# TID252 (prefer absolute over relative imports) is suppressed globally: the project
+# intentionally uses intra-package relative imports throughout production code.
+ignore = ["E501", "TID252"]
 
 [tool.ruff.lint.per-file-ignores]
 # Production code legitimately uses time.sleep (model preload backoff),
-# datetime.now (timestamp generation) and httpx.Client (outbound webhooks).
-# The banned-api rule (TID251) is therefore disabled here and applies only to tests/.
-"server/**/*.py" = ["TID251"]
+# datetime.now (timestamp generation), and httpx.Client (outbound webhooks).
+# TID251 is suppressed for every production directory; the ban applies to tests/ only.
+# (pyproject.toml lives at server/backend/, so paths are relative to that root.)
+"api/**/*.py" = ["TID251"]
+"core/**/*.py" = ["TID251"]
+"database/**/*.py" = ["TID251"]
+"logging/**/*.py" = ["TID251"]
+"config.py" = ["TID251"]
+"config_tree.py" = ["TID251"]
+"__init__.py" = ["TID251"]
 # Pre-existing test files that use datetime.now() / time.sleep() before Story 1.1
 # landed the banned-api gate. Migrating them to frozen_clock is out of scope here
 # (would touch test logic outside conftest.py — see Story 1.1 task 14.4 audit).

@@ -34,7 +34,6 @@ const TEST_FILES = ['**/*.test.ts', '**/*.test.tsx'];
 // to keep Story 1.1 scope minimal. Migration is tech-debt tracked
 // separately; new test files MUST NOT be added to this list.
 const GRANDFATHERED_OFFENDERS = [
-  'electron/__tests__/appState.test.ts',
   'electron/__tests__/compatGuard.test.ts',
   'electron/__tests__/containerRuntime.test.ts',
   'electron/__tests__/startupEventWatcher.test.ts',
