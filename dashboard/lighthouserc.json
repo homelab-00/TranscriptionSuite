@@ -1,0 +1,21 @@
+{
+  "ci": {
+    "collect": {
+      "staticDistDir": "./dist",
+      "numberOfRuns": 1,
+      "settings": {
+        "preset": "desktop",
+        "onlyCategories": ["accessibility"],
+        "skipAudits": ["valid-source-maps"]
+      }
+    },
+    "assert": {
+      "assertions": {
+        "categories:accessibility": ["error", { "minScore": 0.9 }]
+      }
+    },
+    "upload": {
+      "target": "temporary-public-storage"
+    }
+  }
+}

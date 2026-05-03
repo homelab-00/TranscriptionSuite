@@ -747,6 +747,22 @@ const AppInner: React.FC = () => {
         runtimeProfile={runtimeProfile}
         serverReachable={serverConnection.reachable}
         mlxProcessAlive={mlxProcessAlive}
+        liveModeActive={live.status !== 'idle' && live.status !== 'error'}
+        onSwitchModelProfile={async (profile) => {
+          // FR41 — apply the profile's STT model via the existing
+          // server.mainModelSelection config path (which the server
+          // config-watcher picks up to drive model_manager swap).
+          // Language selection stays manual until SessionView wiring
+          // (deferred for a follow-up sprint).
+          const api = (
+            window as {
+              electronAPI?: { config?: { set?: (k: string, v: unknown) => Promise<void> } };
+            }
+          ).electronAPI;
+          if (api?.config?.set !== undefined) {
+            await api.config.set('server.mainModelSelection', profile.sttModel);
+          }
+        }}
       />
 
       {/* Main Content Area */}

@@ -52,6 +52,11 @@ backend-test = [
     "keyrings.alt>=5.0",     # NFR34 — file-encrypted fallback for headless Linux
     "freezegun>=1.5",        # frozen_clock fixture; replaces datetime.now() in tests
     "pytest-benchmark>=5.0", # NFR1 — CRUD latency <15% regression budget
+    # Story 1.2 / 1.3 / 1.9 — migration + repository tests apply real Alembic
+    # upgrades against tmp_path SQLite. Mirror of server/backend/pyproject.toml
+    # runtime deps; keep in sync.
+    "alembic>=1.18.4",
+    "sqlalchemy>=2.0.48",
 ]
 
 [tool.uv]

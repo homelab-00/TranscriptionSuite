@@ -50,6 +50,7 @@ from server.api.routes import (  # noqa: E402
     llm,
     notebook,
     openai_audio,
+    profiles,
     search,
     transcription,
     websocket,
@@ -398,6 +399,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     _log_time("database init_db() complete")
     logger.info("Database initialized")
 
+    # Bootstrap secrets/master.key for the keychain fallback (Story 1.7).
+    # Idempotent — no-op when the file already exists.
+    try:
+        from pathlib import Path as _Path
+
+        from server.utils.config_migration import ensure_master_key
+
+        _project_root = _Path(__file__).resolve().parents[3]
+        ensure_master_key(_project_root / "secrets")
+        _log_time("secrets/master.key ensured")
+    except Exception as exc:  # noqa: BLE001 — bootstrap must not crash startup
+        logger.warning("master.key bootstrap failed (non-fatal): %s", exc)
+
     # Read durability config early so orphan recovery can use it
     _durability_config_early = config.config.get("durability", {})
     _orphan_timeout = _durability_config_early.get("orphan_job_timeout_minutes", 10)
@@ -668,6 +682,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
     app.include_router(transcription.router, prefix="/api/transcribe", tags=["Transcription"])
     app.include_router(notebook.router, prefix="/api/notebook", tags=["Audio Notebook"])
+    app.include_router(profiles.router, prefix="/api/profiles", tags=["Profiles"])
     app.include_router(search.router, prefix="/api/search", tags=["Search"])
     app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])

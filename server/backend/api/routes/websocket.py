@@ -603,6 +603,12 @@ async def handle_client_message(session: TranscriptionSession, message: dict[str
         _language = _msg_data.get("language")
         _translation_enabled = _msg_data.get("translation_enabled", False)
         _translation_target = _msg_data.get("translation_target_language")
+        # Story 1.3 — active recording-profile id snapshotted at job start
+        # (FR18 + ADR-008). Untrusted client input: must be int-or-None.
+        _raw_profile_id = _msg_data.get("profile_id")
+        _profile_id: int | None = (
+            _raw_profile_id if isinstance(_raw_profile_id, int) and _raw_profile_id > 0 else None
+        )
         try:
             _create_job(
                 job_id=session._current_job_id,
@@ -611,6 +617,7 @@ async def handle_client_message(session: TranscriptionSession, message: dict[str
                 language=_language,
                 task="translate" if _translation_enabled else "transcribe",
                 translation_target=_translation_target,
+                profile_id=_profile_id,
             )
         except Exception as _e:
             logger.warning(

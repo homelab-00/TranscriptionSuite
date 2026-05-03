@@ -97,6 +97,8 @@ export function useTranscription(): TranscriptionState {
     translationTarget?: string;
     systemAudio?: boolean;
     monitorDeviceLabel?: string;
+    /** Active recording-profile id (FR18). Snapshotted server-side at job start. */
+    profileId?: number | null;
   }>({});
 
   // Cleanup on unmount — skip disconnect if actively recording/processing
@@ -137,6 +139,8 @@ export function useTranscription(): TranscriptionState {
               language: startOptsRef.current.language,
               translation_enabled: startOptsRef.current.translate ?? false,
               translation_target_language: startOptsRef.current.translationTarget ?? 'en',
+              // Story 1.3 — server snapshots the profile at job start when present.
+              profile_id: startOptsRef.current.profileId ?? null,
             },
           });
           break;
@@ -277,6 +281,7 @@ export function useTranscription(): TranscriptionState {
       translate?: boolean;
       translationTarget?: string;
       systemAudio?: boolean;
+      profileId?: number | null;
     }) => {
       // Reset previous state
       setResult(null);

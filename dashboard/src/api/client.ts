@@ -48,6 +48,45 @@ import type {
 // Re-export types that consumers need
 export type { HealthResponse, ReadyResponse, ServerStatus } from './types';
 
+// ─── Profiles types (Issue #104, Story 1.2) ──────────────────────────────────
+
+export interface ProfilePublicFields {
+  filename_template: string;
+  destination_folder: string;
+  auto_summary_enabled: boolean;
+  auto_export_enabled: boolean;
+  summary_model_id: string | null;
+  summary_prompt_template: string | null;
+  export_format: string;
+}
+
+export interface Profile {
+  id: number;
+  name: string;
+  description: string | null;
+  schema_version: string;
+  public_fields: ProfilePublicFields;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProfileCreatePayload {
+  name: string;
+  description?: string | null;
+  schema_version?: string;
+  public_fields: ProfilePublicFields;
+  /** Plaintext private fields — sent over the wire ONCE; persisted via keychain server-side. */
+  private_fields?: Record<string, string>;
+}
+
+export interface ProfileUpdatePayload {
+  name?: string;
+  description?: string | null;
+  schema_version?: string;
+  public_fields?: ProfilePublicFields;
+  private_fields?: Record<string, string>;
+}
+
 export class APIClient {
   private baseUrl: string;
   private authToken: string | null = null;
@@ -483,6 +522,7 @@ export class APIClient {
     if (options?.expected_speakers)
       fd.append('expected_speakers', String(options.expected_speakers));
     if (options?.multitrack) fd.append('multitrack', 'true');
+    if (options?.profile_id != null) fd.append('profile_id', String(options.profile_id));
     return this.postFormData('/api/transcribe/audio', fd);
   }
 
@@ -621,6 +661,7 @@ export class APIClient {
     if (options?.multitrack) fd.append('multitrack', 'true');
     if (options?.file_created_at) fd.append('file_created_at', options.file_created_at);
     if (options?.title) fd.append('title', options.title);
+    if (options?.profile_id != null) fd.append('profile_id', String(options.profile_id));
     return this.postFormData('/api/notebook/transcribe/upload', fd);
   }
 
@@ -648,6 +689,7 @@ export class APIClient {
     if (options?.parallel_diarization !== undefined)
       fd.append('parallel_diarization', String(options.parallel_diarization));
     if (options?.multitrack) fd.append('multitrack', 'true');
+    if (options?.profile_id != null) fd.append('profile_id', String(options.profile_id));
     return this.postFormData('/api/transcribe/import', fd);
   }
 
@@ -1045,6 +1087,30 @@ export class APIClient {
     } finally {
       reader.releaseLock();
     }
+  }
+
+  // ── Profiles (Issue #104, Story 1.2) ────────────────────────────────────
+  async listProfiles(): Promise<Profile[]> {
+    return this.get<Profile[]>('/api/profiles');
+  }
+  async getProfile(id: number): Promise<Profile> {
+    return this.get<Profile>(`/api/profiles/${id}`);
+  }
+  async createProfile(payload: ProfileCreatePayload): Promise<Profile> {
+    return this.post<Profile>('/api/profiles', payload);
+  }
+  async updateProfile(id: number, payload: ProfileUpdatePayload): Promise<Profile> {
+    return this.put<Profile>(`/api/profiles/${id}`, payload);
+  }
+  async deleteProfile(id: number): Promise<void> {
+    // Server returns 204 No Content; the private del<T> would try to .json()
+    // an empty body. Inline the fetch for the no-content case.
+    this.ensureConfigured(`/api/profiles/${id}`);
+    const res = await fetch(`${this.baseUrl}/api/profiles/${id}`, {
+      method: 'DELETE',
+      headers: this.authHeaders(),
+    });
+    if (!res.ok) throw new APIError(res.status, await res.text(), `/api/profiles/${id}`);
   }
 }
 

@@ -245,3 +245,59 @@ Triggered by `v*` tag push:
 2. **build-windows** — NSIS installer + GPG signature (3x retry)
 3. **build-macos** — DMG + ZIP + GPG signatures
 4. **create-release** — Draft GitHub Release with all artifacts
+
+## Keychain fallback (encrypted-file mode)
+
+The Audio Notebook QoL pack stores private profile fields (webhook tokens,
+API keys, custom auth headers) in the OS-native keychain by default —
+macOS Keychain, Windows DPAPI, or Linux libsecret. On hosts where no OS
+keychain is available (headless Docker, minimal Linux containers, CI
+runners), set the env flag below to enable an explicit file-encrypted
+fallback.
+
+### Enabling the fallback
+
+```bash
+KEYRING_BACKEND_FALLBACK=encrypted_file
+```
+
+The first time this flag is honoured, the server generates
+`secrets/master.key` (32 bytes, hex-encoded, mode 0600) and uses it as
+the password for `keyrings.alt.file.EncryptedKeyring`. Stored values
+land in `secrets/encrypted_keyring.cfg`.
+
+In Docker, bind-mount the `/secrets` directory so the key + encrypted
+store survive container rebuilds:
+
+```yaml
+volumes:
+  - ./secrets:/app/secrets
+```
+
+### Security delta — what the fallback DOES protect against
+
+- **Casual disk inspection** — values are AES-encrypted at rest; opening
+  `encrypted_keyring.cfg` in a text editor reveals nothing useful.
+- **Cloud-sync exposure** — if `secrets/` is excluded from your sync (as
+  it should be), the encrypted store never leaves the host.
+- **Database dumps** — private values are never in `notebook.db`.
+
+### Security delta — what the fallback does NOT protect against
+
+- **Local attacker with `secrets/master.key` access.** The master key is
+  stored unencrypted on the host filesystem. Any process that can read
+  the key file can decrypt every value in `encrypted_keyring.cfg`. The
+  OS-native keychain is the authoritative recommendation for desktop
+  installs because it does not have this property.
+- **Memory inspection.** Decrypted values pass through process memory
+  during use; this is true of any in-process secret store.
+- **Backup tooling that snapshots `secrets/`.** Treat `secrets/master.key`
+  as you would treat a password file: exclude from generic file-system
+  backups, or back up to an audited secret-management system instead.
+
+### Refusing the fallback
+
+If `KEYRING_BACKEND_FALLBACK` is NOT set and no OS keychain is available,
+the keychain wrapper raises `KeychainUnavailableError` with the
+deployment-guide pointer in the message — the server never silently
+stores secrets in plaintext (NFR8).

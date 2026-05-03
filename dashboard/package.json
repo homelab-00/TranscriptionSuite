@@ -15,6 +15,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run ui:contract:check",
+    "lighthouse": "npm run build && npx --yes @lhci/cli@0.13.x autorun --config=./lighthouserc.json",
     "test": "vitest run --passWithNoTests",
     "build:electron": "npm run build && tsc -p electron/tsconfig.json",
     "preview": "vite preview",

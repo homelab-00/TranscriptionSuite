@@ -79,3 +79,23 @@ When an item ships, **delete the entry** — git history + the spec file are the
 **Defense shape:** Run a `docker run --rm <image> /bin/true` smoke test (or check `RepoDigests.length > 0`) after the inspect. Defer because corrupted partial pulls require an interrupted `docker pull` and the Dockerfile build path doesn't pull in pieces — for v1.3.5 every Vulkan-WSL2 user builds locally, so the failure mode is already low-likelihood.
 
 **Re-triage trigger:** First user report of "vulkan-wsl2 starts but whisper-server crashes immediately" OR when the WSL2 sidecar gets a published GHCR tag and users start pulling it (no longer "every user builds locally").
+
+---
+
+## Sprint 1 (Issue #104, Audio Notebook QoL pack — epic-foundations + epic-model-profiles)
+
+Sprint 1 landed Stories 1.2–1.9 + 8.1–8.4 (12 stories) on `gh-104-prd`.
+Items 1–5 were closed in the Sprint 1 deferred-items follow-up commit
+(2026-05-03) — see git history for the actual integration. Only the
+explicit Sprint 3 placeholder remains.
+
+### 1. F1 + F4 race-guard implementation (Story 6.11 dependency)
+
+**What:** Sprint 1 prepared the data substrate (profile snapshot column,
+review-state table) but did NOT implement the F1↔F4 cross-feature race
+guard. That belongs to Story 6.11 (Sprint 3 / epic-auto-actions).
+
+**Why deferred:** Out of scope per epics.md — flagged here so the Sprint 3
+implementer doesn't assume the guard is already in place.
+
+**Re-triage trigger:** Sprint 3 kickoff.
