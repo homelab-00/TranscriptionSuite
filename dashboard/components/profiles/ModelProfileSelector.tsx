@@ -76,6 +76,10 @@ export const ModelProfileSelector: React.FC<ModelProfileSelectorProps> = ({
       await onSwitch(profile);
       setActiveId(nextId);
       await modelProfileStore.setActiveId(nextId);
+    } catch (err) {
+      // onSwitch threw — surface to caller so it can toast. Without this,
+      // the select silently snaps back and the user has no idea why.
+      onRejected?.(`Model switch failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setSwitching(false);
     }

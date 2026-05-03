@@ -141,7 +141,14 @@ async def create_profile_endpoint(body: ProfileCreate) -> ProfileResponse:
             detail=_schema_version_error_detail(exc.received),
         ) from exc
     profile = profile_repository.get_profile(profile_id)
-    assert profile is not None  # Persist-Before-Deliver: row exists post-commit
+    if profile is None:
+        # Should never happen — create_profile commits before returning the
+        # id and the row was just written. Treat as 500 rather than asserting
+        # so we don't lean on Python's `-O` flag for correctness.
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "profile_vanished_post_commit", "id": profile_id},
+        )
     return _to_response(profile)
 
 
@@ -153,19 +160,26 @@ async def update_profile_endpoint(profile_id: int, body: ProfileUpdate) -> Profi
             detail=_schema_version_error_detail(body.schema_version),
         )
 
-    public_fields_payload: dict[str, Any] | None = (
-        body.public_fields.model_dump() if body.public_fields is not None else None
-    )
+    # Only forward fields the caller actually set in the JSON payload —
+    # the repository distinguishes "omitted" (sentinel) from "None"
+    # (clear-to-NULL), so we MUST use exclude_unset semantics here.
+    sent = body.model_fields_set
+    update_kwargs: dict[str, Any] = {}
+    if "name" in sent:
+        update_kwargs["name"] = body.name
+    if "description" in sent:
+        update_kwargs["description"] = body.description
+    if "schema_version" in sent:
+        update_kwargs["schema_version"] = body.schema_version
+    if "public_fields" in sent:
+        update_kwargs["public_fields"] = (
+            body.public_fields.model_dump() if body.public_fields is not None else None
+        )
+    if "private_fields" in sent:
+        update_kwargs["private_field_refs"] = body.private_fields
 
     try:
-        updated = profile_repository.update_profile(
-            profile_id,
-            name=body.name,
-            description=body.description,
-            schema_version=body.schema_version,
-            public_fields=public_fields_payload,
-            private_field_refs=body.private_fields,
-        )
+        updated = profile_repository.update_profile(profile_id, **update_kwargs)
     except UnsupportedSchemaVersionError as exc:
         raise HTTPException(
             status_code=400,
@@ -175,7 +189,11 @@ async def update_profile_endpoint(profile_id: int, body: ProfileUpdate) -> Profi
     if not updated:
         raise HTTPException(status_code=404, detail={"error": "profile_not_found"})
     profile = profile_repository.get_profile(profile_id)
-    assert profile is not None
+    if profile is None:
+        # Race-condition guard — another client deleted the profile between
+        # our UPDATE and our re-SELECT. Surface as 404 since the resource is
+        # genuinely gone from the caller's perspective.
+        raise HTTPException(status_code=404, detail={"error": "profile_not_found"})
     return _to_response(profile)
 
 

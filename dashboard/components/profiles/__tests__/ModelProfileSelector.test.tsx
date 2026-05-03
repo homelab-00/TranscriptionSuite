@@ -125,6 +125,30 @@ describe('ModelProfileSelector', () => {
     expect(onRejected).toHaveBeenCalledWith('Stop live mode before switching the model');
   });
 
+  it('emits onRejected when onSwitch throws (regression: do not swallow errors)', async () => {
+    installFakeBridge({
+      'notebook.modelProfiles': SAMPLE_PROFILES,
+      'notebook.activeModelProfileId': 'mp_fast',
+    });
+    const onSwitch = vi.fn().mockRejectedValue(new Error('GPU OOM'));
+    const onRejected = vi.fn();
+    render(
+      <ModelProfileSelector liveModeActive={false} onSwitch={onSwitch} onRejected={onRejected} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Active model profile')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText('Active model profile'), {
+      target: { value: 'mp_multi' },
+    });
+
+    await waitFor(() => {
+      expect(onRejected).toHaveBeenCalledWith(expect.stringContaining('GPU OOM'));
+    });
+  });
+
   it('shows "Switching model…" spinner while onSwitch is in flight', async () => {
     installFakeBridge({
       'notebook.modelProfiles': SAMPLE_PROFILES,

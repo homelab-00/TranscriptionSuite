@@ -153,6 +153,38 @@ def test_update_profile_returns_false_when_missing(fresh_db: Path) -> None:
     assert profile_repository.update_profile(99999, name="X") is False
 
 
+def test_update_profile_can_clear_description_to_null(fresh_db: Path) -> None:
+    """Regression: passing description=None must SET the column to NULL,
+    not be treated as 'caller omitted this field'. The sentinel pattern
+    distinguishes the two cases."""
+    pid = profile_repository.create_profile(
+        name="HasDesc",
+        description="initial description",
+        schema_version="1.0",
+        public_fields=_minimal_public_fields(),
+    )
+    assert profile_repository.get_profile(pid)["description"] == "initial description"
+
+    # Explicitly clear to None
+    assert profile_repository.update_profile(pid, description=None) is True
+    assert profile_repository.get_profile(pid)["description"] is None
+
+
+def test_update_profile_omitting_description_leaves_it_alone(fresh_db: Path) -> None:
+    """Counterpart to the regression above: omitting `description` from the
+    kwargs must NOT touch the existing value (sentinel-default behavior)."""
+    pid = profile_repository.create_profile(
+        name="Keep",
+        description="keep me",
+        schema_version="1.0",
+        public_fields=_minimal_public_fields(),
+    )
+    profile_repository.update_profile(pid, name="RenameOnly")
+    after = profile_repository.get_profile(pid)
+    assert after["name"] == "RenameOnly"
+    assert after["description"] == "keep me"
+
+
 def test_delete_profile_removes_row(fresh_db: Path) -> None:
     pid = profile_repository.create_profile(
         name="ToDelete",

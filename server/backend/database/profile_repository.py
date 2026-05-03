@@ -122,42 +122,62 @@ def create_profile(
         return int(cur.lastrowid or 0)
 
 
+# Sentinel for "caller did not pass this argument" — distinct from `None`,
+# which is a legitimate value for nullable columns (e.g. clearing description).
+_UNSET: Any = object()
+
+
 def update_profile(
     profile_id: int,
     *,
-    name: str | None = None,
-    description: str | None = None,
-    schema_version: str | None = None,
-    public_fields: dict[str, Any] | None = None,
-    private_field_refs: dict[str, str] | None = None,
+    name: str | None = _UNSET,
+    description: str | None = _UNSET,
+    schema_version: str | None = _UNSET,
+    public_fields: dict[str, Any] | None = _UNSET,
+    private_field_refs: dict[str, str] | None = _UNSET,
 ) -> bool:
-    """Update fields that were passed (None = leave alone).
+    """Update fields that were passed (omitted = leave alone).
+
+    Pass ``description=None`` to clear an existing description back to NULL;
+    the sentinel ``_UNSET`` distinguishes "argument omitted" from
+    "argument is None". Same applies to ``schema_version``,
+    ``public_fields``, ``private_field_refs`` — all nullable on the row.
 
     Returns True if a row was actually updated; False if no row matched.
 
     Last-write-wins semantics (NFR46): no optimistic locking on
-    `updated_at`. The frontend reconciles via stale-cache discovery.
+    ``updated_at``. The frontend reconciles via stale-cache discovery.
     """
-    if schema_version is not None and schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+    if (
+        schema_version is not _UNSET
+        and schema_version is not None
+        and schema_version not in SUPPORTED_SCHEMA_VERSIONS
+    ):
         raise UnsupportedSchemaVersionError(schema_version)
 
     sets: list[str] = []
     params: list[Any] = []
-    if name is not None:
+    if name is not _UNSET:
         sets.append("name = ?")
         params.append(name)
-    if description is not None:
+    if description is not _UNSET:
         sets.append("description = ?")
         params.append(description)
-    if schema_version is not None:
+    if schema_version is not _UNSET:
         sets.append("schema_version = ?")
         params.append(schema_version)
-    if public_fields is not None:
+    if public_fields is not _UNSET:
         sets.append("public_fields_json = ?")
-        params.append(json.dumps(public_fields, sort_keys=True))
-    if private_field_refs is not None:
+        params.append(
+            json.dumps(public_fields, sort_keys=True) if public_fields is not None else None
+        )
+    if private_field_refs is not _UNSET:
         sets.append("private_field_refs_json = ?")
-        params.append(json.dumps(private_field_refs, sort_keys=True))
+        params.append(
+            json.dumps(private_field_refs, sort_keys=True)
+            if private_field_refs is not None
+            else None
+        )
 
     if not sets:
         return False  # nothing to do; caller likely passed an empty payload
