@@ -1,8 +1,28 @@
 ---
 stepsCompleted: ['step-01-init', 'step-02-discovery', 'step-02b-vision', 'step-02c-executive-summary', 'step-03-success', 'step-04-journeys', 'step-05-domain', 'step-06-innovation', 'step-07-project-type', 'step-08-scoping', 'step-09-functional', 'step-10-nonfunctional', 'step-11-polish', 'step-12-complete']
+editStepsCompleted: ['step-e-01-discovery', 'step-e-02-review', 'step-e-03-edit']
 status: 'complete'
 completionDate: '2026-05-03'
-totalLines: 1317
+lastEdited: '2026-05-03'
+totalLines: 1418
+revisionsApplied: ['ADR-009', 'kbd-contract', 'FR15-downscope', 'visual-spec', 'FR15-narrative-cleanup']
+editHistory:
+  - date: '2026-05-03'
+    source: '_bmad-output/planning-artifacts/handoff-prompts-readiness-fixes.md (Prompt 1 of 3)'
+    guidedBy: '_bmad-output/planning-artifacts/implementation-readiness-report-2026-05-03.md'
+    changes:
+      - 'Added ADR-009 (Diarization-review state persistence) to ADR table; appended ADR-009 to Appendix B Speaker Aliasing row'
+      - 'Resolved J4↔J7 keyboard contract conflict by adopting WAI-ARIA Authoring Practices model; added canonical "Diarization-Review Keyboard Contract" subsection'
+      - 'Downscoped FR15 to sane-default empty-profile screen (no multi-step wizard); added wizard to Phase 3 Vision'
+      - 'Added "Visual Affordance Specification (UI Contract)" subsection covering Status Badges, Persistent Banners, Per-Turn Confidence Indicators with primitive reuse + UI contract migration AC'
+  - date: '2026-05-03'
+    source: 'bmad-validate-prd Step v-11 (holistic quality) — minor finding follow-up'
+    guidedBy: '_bmad-output/planning-artifacts/validation-report-2026-05-03.md'
+    changes:
+      - 'J2 Opening Scene: replaced "30-second setup wizard CTA" narrative with sane-defaults + inline help banner narrative (consistent with downscoped FR15)'
+      - 'J2 Reveals: replaced "hybrid wizard CTA" with "FR15 sane-default empty-profile screen with inline help banner"'
+      - 'Journey Requirements Summary: updated "Profile setup UI (field-first with optional wizard)" row to "field-first with sane defaults + inline help banner"; added FR15 anchor'
+      - 'Phase 2 Configurator UI scope: replaced "field-first + optional wizard" with "field-first + sane defaults + inline help banner (FR15)"'
 newDependencies:
   backend:
     - 'keyring >= 25.0, < 26 (OS keychain wrapper for FR49)'
@@ -441,9 +461,11 @@ per piece, lives in Obsidian. Has been using Audio Notebook for a month.
 Saw the v1.4 release notes and decided to invest 5 minutes in setup.
 
 **Opening scene.** Maria opens Settings → Profiles. The empty-profile screen
-shows a small CTA: *"First time? Try the 30-second setup wizard →"* (hybrid
-field-first + optional wizard). Maria knows what she wants; she ignores the
-wizard and works the fields directly.
+shows fields pre-populated with sane defaults — today's filename template,
+her OS Documents folder as destination — and a single inline help banner:
+*"Edit any field below to customize, or save as-is to use the defaults."*
+*(FR15 — field-first flow; multi-step wizard deferred to Vision)*. Maria
+knows what she wants; she overrides the defaults directly.
 
 **Rising action.** She fills the fields:
 - Filename template: `{date} {title} interview.txt` *(F2 placeholders)*
@@ -481,9 +503,9 @@ Maria would see this immediately and choose to retry, adjust prompt, or accept.
 deletion as J1.
 
 **Reveals:** F2 extensible placeholder grammar (R-EL2), R-EL14 live preview,
-F1 auto-actions, F4 alias propagation, hybrid wizard CTA, R-EL16/R-EL17
-distinct success states, R-EL21 profile snapshot at job-start,
-Persist-Before-Deliver.
+F1 auto-actions, F4 alias propagation, FR15 sane-default empty-profile
+screen with inline help banner, R-EL16/R-EL17 distinct success states,
+R-EL21 profile snapshot at job-start, Persist-Before-Deliver.
 
 ---
 
@@ -549,8 +571,12 @@ state persists *(R-EL19)*.
   *(R-EL15 confidence-filter)*
 - Bulk action: **"Mark all visible as auto-accept best guess"** *(R-EL15
   bulk-accept)*
-- Keyboard navigation: ↑/↓ to move between turns, ←/→ to switch attribution,
-  Enter to accept, Esc to skip *(R-EL15 keyboard)*
+- Keyboard navigation follows the **WAI-ARIA Authoring Practices** composite-widget model:
+  - **Tab / Shift+Tab** traverse between turns (focusable elements)
+  - **↑/↓** move selection within a focused turn-list (composite widget)
+  - **←/→** switch attribution within a focused turn
+  - **Enter** accept; **Esc** skip; **Space** bulk-accept visible turns
+  *(R-EL15 keyboard, FR26 — canonical spec: see "Diarization-Review Keyboard Contract" in Project-Type Specific Requirements)*
 
 He filters to bottom-5% (3 turns), corrects them manually. Bulk-accepts the
 remaining 44 as "best guess is fine." Clicks **"Run summary now."**
@@ -696,7 +722,7 @@ Capabilities revealed by these 7 journeys, mapped to features:
 | Plain-text export with sensible defaults | 1 | F3 + F2 default template |
 | Explicit Download buttons + OS-default destination | 1 | F6 |
 | Audio dedup on import by content hash | 1 | R-EL23 |
-| Profile setup UI (field-first with optional wizard) | 2 | F1 + F2 + Profile system |
+| Profile setup UI (field-first with sane defaults + inline help banner) | 2 | F1 + F2 + Profile system + FR15 |
 | Live filename preview in profile setup | 2, 6 | R-EL14 |
 | Extensible filename placeholders | 2, 5 | F2 + R-EL2 |
 | Auto-summary, auto-export, save-back-to-recording | 2, 3, 5 | F1 + Persist-Before-Deliver |
@@ -757,6 +783,7 @@ the **deltas** the QoL pack introduces.
 | **ADR-006 — Webhook deliveries persisted in `webhook_deliveries` table** | Persist webhook attempts (status, attempt_count, last_error, payload_json) before firing | Same Persist-Before-Deliver discipline as transcriptions; survives app crashes; future migration to a real queue is just swapping the dispatcher |
 | **ADR-007 — React Query invalidation as profile-state propagation** | Profiles are React Query entities; `activeProfileId` is Zustand; edits trigger `queryClient.invalidateQueries(['profiles', id])` | Avoids inventing a pub/sub system; consistent with project-context.md conventions |
 | **ADR-008 — Crash recovery rehydrates profile snapshot** | Mid-flight transcription resumed by `transcription_job_tracker` re-loads JSON snapshot blob from job row before continuing | Preserves Persist-Before-Deliver under app restart; profile-snapshot semantics (R-EL21) survive crashes |
+| **ADR-009 — Diarization-review state persistence** | Persist review state in a new `recording_diarization_review` table with columns `(recording_id PK, status TEXT CHECK IN ('pending', 'in_review', 'completed', 'released'), reviewed_turns_json, created_at, updated_at)`. Auto-summary HOLD reads `status != 'released'`. Banner visibility reads `status IN ('pending', 'in_review')`. Lifecycle: created on transcription completion when low-confidence turns detected (`pending`) → user opens review (`in_review`) → user clicks "Run summary now" (`completed`) → auto-summary fires + status flips to `released`. | Survives DB restore; queryable for diagnostics; durability invariant matches Persist-Before-Deliver discipline. Rejected Zustand-persist (local-only, not crash-safe) and column-on-aliases (couples F4 MVP slice to Growth scope). Cross-references: R-EL19, R-EL20, FR25, FR27, FR28, NFR23. |
 
 ### API Design Convention
 
@@ -870,6 +897,76 @@ This is intentional. RPC-flavored URLs are self-documenting in code review and r
 - **Total v1.4.x window:** 8-11 calendar weeks at 4 dev-days/week solo cadence
 - **Strategy:** Ship MVP first behind `audio_notebook_qol_v1` flag; Growth gated behind `v1.4.1` tag
 
+### Diarization-Review Keyboard Contract
+
+> **Canonical keyboard spec for the diarization-review view.** Cited verbatim by FR26, FR51, R-EL15 implementations and by J4 / J7 narratives. Adopted to resolve the J4↔J7 contract conflict surfaced in implementation readiness. Modeled on the **WAI-ARIA Authoring Practices** composite-widget pattern.
+
+| Key | Action | Scope |
+|---|---|---|
+| **Tab** / **Shift+Tab** | Traverse between turns | Focusable elements (turn-list is one tab stop; entering it puts focus on the active turn) |
+| **↑** / **↓** | Move selection within the focused turn-list | Composite widget (does not change browser tab order) |
+| **←** / **→** | Switch attribution within a focused turn | Per-turn alternative-speaker cycling |
+| **Enter** | Accept current attribution | Active turn; advances selection to next turn |
+| **Esc** | Skip current turn | Active turn; advances selection to next turn without committing |
+| **Space** | Bulk-accept all currently visible turns | Whole filtered turn-list (respects active confidence filter) |
+
+**Implementation notes:**
+
+- Turn-list is a composite widget with `role="listbox"` (or `role="grid"` if attribution columns are exposed); individual turns use `role="option"` (or `role="row"`).
+- Tab order: review-banner → confidence-filter → turn-list (single tab stop) → bulk-action button → "Run summary now" button.
+- Screen-reader announcement on selection change: `"<turn content> · current speaker: <label> · confidence: <bucket>"` (consumed by FR54 announcement contract).
+- Browser-default link/button activation (Enter/Space) is **overridden** inside the turn-list because Space is reassigned to bulk-accept; off-list controls retain default behavior.
+
+**Cross-references:** FR26 (review-view keyboard navigation), FR51 (keyboard-only operability cross-cutting AC), FR54 (turn-by-turn screen-reader announcement), R-EL15 (scalable review UX), J4 (Sami's review session), J7 (Lia's screen-reader session). Any divergence in implementation requires an ADR; no silent drift.
+
+### Visual Affordance Specification (UI Contract)
+
+> **Canonical visual spec for the three new affordance classes the QoL pack introduces.** Implementers MUST reuse existing primitives in `dashboard/components/ui/` rather than build parallel components — this preserves the UI contract baseline and keeps `npm run ui:contract:check` clean. Cross-references FR/NFR/R-EL anchors below.
+
+**1. Status Badges** — *anchors:* R-EL1, FR35, NFR41
+
+| Aspect | Spec |
+|---|---|
+| **Reused primitive** | `StatusLight` (in `dashboard/components/ui/`) |
+| **Severity levels** | `ok` (green), `warn` (amber, e.g. *"summary truncated"*, *"summary empty"*), `error` (red, e.g. *"LLM unavailable"*, *"export deferred — drive not mounted"*) |
+| **Inline action** | Single-click **⟳ Retry** button rendered alongside the badge for `warn`/`error` states |
+| **Lifecycle** | Auto-dismiss on success (transitions to `ok` then fades after 3s); persists indefinitely while in `warn`/`error` until user action |
+| **Cardinality** | One per auto-action (auto-summary, auto-export, webhook delivery) per recording |
+
+**2. Persistent Banners** — *anchors:* R-EL20, FR28, NFR43
+
+| Aspect | Spec |
+|---|---|
+| **Reused primitive** | `QueuePausedBanner` pattern (in `dashboard/components/ui/`) |
+| **Visual** | Yellow/amber background, full-width, top of recording detail view |
+| **Persistence** | Persistent until user action — does NOT auto-dismiss on time, navigation, or app restart (R-EL19, R-EL20, NFR23) |
+| **Inline CTA** | *"Review uncertain turns"* button activates the diarization-review view (FR26) |
+| **Cardinality** | At most one banner per recording; coexists with status badges below |
+
+**3. Per-Turn Confidence Indicators** — *anchor:* R-EL4
+
+| Aspect | Spec |
+|---|---|
+| **Surface** | Transcript view (J4 / J7) — small chip rendered immediately beside the speaker label on each turn |
+| **Buckets** | `high` (≥80%): no chip rendered (zero visual noise); `medium` (60–80%): neutral chip; `low` (<60%): amber chip |
+| **Hover** | Tooltip reveals exact percentage (e.g. *"confidence: 67%"*) |
+| **Accessibility** | Chip has `aria-label="confidence: <bucket>"`; tooltip is `role="tooltip"`; FR54 turn-announcement contract includes confidence bucket |
+| **Cardinality** | One chip per low/medium-confidence turn; high-confidence turns render no chip |
+
+**Migration acceptance criterion (cross-cutting):**
+
+Any new visual element introduced by F1, F4, or F6 implementation MUST be covered by the UI contract. The dashboard CLAUDE.md rule is non-negotiable:
+
+```
+npm run ui:contract:extract → npm run ui:contract:build →
+node scripts/ui-contract/validate-contract.mjs --update-baseline →
+npm run ui:contract:check
+```
+
+CI gate `npm run ui:contract:check` must pass on every PR touching `dashboard/components/`. New CSS classes added by these affordance components surface as contract diffs — failing to update the baseline blocks merge.
+
+**Cross-references:** R-EL1, R-EL4, R-EL10, R-EL15, R-EL20, FR25, FR26, FR28, FR35, NFR23, NFR41, NFR43, NFR50; existing primitives `StatusLight`, `QueuePausedBanner` in `dashboard/components/ui/`.
+
 ---
 
 ## Project Scoping & Phased Development
@@ -908,7 +1005,7 @@ This is intentional. RPC-flavored URLs are self-documenting in code review and r
 - **R-EL33** — `webhook_deliveries` persistence table; **WebhookWorker** service at `server/backend/server/services/webhook_worker.py`
 - **R-EL21 + R-EL35** — Profile snapshot at job-start; crash recovery rehydrates snapshot
 - **R-EL12** — Deferred-retry on transient destination unavailability
-- **Configurator UI** — profile setup with field-first + optional wizard, live filename preview (R-EL14), folder picker
+- **Configurator UI** — profile setup with field-first + sane defaults + inline help banner (FR15), live filename preview (R-EL14), folder picker
 - **Diarization review UI (Growth slice)** — bulk-accept, confidence-filter, keyboard navigation (R-EL15), persistent banner + cross-restart state (R-EL19, R-EL20)
 
 **Engineer-day budget:** 14-20 dev-days
@@ -923,6 +1020,7 @@ This is intentional. RPC-flavored URLs are self-documenting in code review and r
 - **Multi-target export** — same recording exports to multiple destinations in one auto-action
 - **Profile sharing/import** — JSON export of public fields only (private fields per R-EL22 schema separation are never serialized)
 - **Auth-gated reveal endpoint** for re-editing private profile fields without re-entering them
+- **Multi-step setup wizard for first-time profile creation** — deferred from FR15 (v1.4.x ships sane-default field-first only; the wizard is separable polish, not a Lurker/Configurator blocker)
 
 ### Calendar Schedule
 
@@ -989,7 +1087,7 @@ This is intentional. RPC-flavored URLs are self-documenting in code review and r
 - **FR12 [MVP]:** Users can configure a profile's filename template using extensible placeholder grammar (`{date}`, `{title}`, `{recording_id}`, `{model}` minimum) with server-side validation rejecting malformed templates.
 - **FR13 [MVP]:** Users see a live filename preview that updates as they type the template, computed against a sample recording.
 - **FR14 [MVP]:** Users can choose a destination folder via the native OS folder picker (not a free-text input).
-- **FR15 [Growth]:** Users encountering an empty-profile screen can opt into a 30-second setup wizard or work the fields directly (hybrid field-first).
+- **FR15 [Growth]:** The empty-profile screen pre-populates fields with sane defaults (today's filename template, OS user-Documents folder as destination) and shows a single inline help banner explaining the field-first flow. No multi-step wizard — deferred to Vision.
 - **FR16 [Cross]:** Profile JSON schema is versioned (`schema_version: "MAJOR.MINOR"`); the system rejects unknown major versions on save with an explicit error.
 - **FR17 [Growth]:** Filename-template changes apply forward-only — existing recordings on disk keep their current names; users can opt into per-recording re-export via a recording-context-menu action.
 - **FR18 [Cross]:** Each transcription job snapshots its profile state at job-start; profile edits during job execution do not affect the running job.
@@ -1266,7 +1364,7 @@ This is intentional. RPC-flavored URLs are self-documenting in code review and r
 | Recording Import & Identity | mentioned | J1 | FR1–FR4 | NFR6 | R-EL23 | ADR-002 |
 | Manual Export & Download | mentioned | J1, J7 | FR5–FR9 | NFR48 | — | — |
 | Profile Management | mentioned | J2, J5, J6 | FR10–FR20 | NFR1, NFR8, NFR13, NFR14, NFR18, NFR46 | R-EL14, R-EL21, R-EL22, R-EL30, R-EL35 | ADR-001, ADR-003, ADR-007, ADR-008 |
-| Speaker Aliasing | differentiator #3 | J2, J4, J5, J7 | FR21–FR29 | NFR21, NFR23 | R-EL3, R-EL4, R-EL8, R-EL10, R-EL15, R-EL19, R-EL20 | ADR-005 |
+| Speaker Aliasing | differentiator #3 | J2, J4, J5, J7 | FR21–FR29 | NFR21, NFR23 | R-EL3, R-EL4, R-EL8, R-EL10, R-EL15, R-EL19, R-EL20 | ADR-005, ADR-009 |
 | Auto Post-Transcription Actions | differentiator #1 | J2, J3, J5 | FR30–FR39 | NFR3, NFR4, NFR16, NFR17, NFR19, NFR20, NFR24a, NFR24b | R-EL1, R-EL12, R-EL16, R-EL17, R-EL18 | ADR-004, ADR-006 |
 | Pre-Transcription Model Profiles | differentiator #5 | J2 (implicit) | FR40–FR42 | — | — | — |
 | Extensibility Webhook | differentiator #4 | J5 | FR43–FR47 | NFR5, NFR9–NFR12, NFR17, NFR40, NFR42, NFR47 | R-EL5, R-EL11, R-EL25, R-EL26, R-EL28, R-EL31, R-EL33 | ADR-006 |
