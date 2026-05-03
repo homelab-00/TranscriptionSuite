@@ -35,7 +35,11 @@ def fresh_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return db.get_db_path()
 
 
-def _seed(audio_hash: str, job_id: str = "seed-1") -> None:
+def _seed(
+    audio_hash: str,
+    job_id: str = "seed-1",
+    normalized_audio_hash: str | None = None,
+) -> None:
     create_job(
         job_id=job_id,
         source="file_import",
@@ -44,6 +48,7 @@ def _seed(audio_hash: str, job_id: str = "seed-1") -> None:
         task="transcribe",
         translation_target=None,
         audio_hash=audio_hash,
+        normalized_audio_hash=normalized_audio_hash,
     )
 
 
@@ -225,3 +230,104 @@ def test_dedup_check_excludes_legacy_null_recording(fresh_db: Path) -> None:
     body = txn_route.DedupCheckRequest(audio_hash="d4" * 32)
     result = asyncio.run(txn_route.dedup_check(body))
     assert result.matches == []
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Sprint 2 Item 3 — format-agnostic dedup via normalized_audio_hash
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_dedup_check_normalized_only_match_jobs(fresh_db: Path) -> None:
+    """Match exclusively on normalized_audio_hash side (raw differs)."""
+    raw = "11" * 32
+    norm = "22" * 32
+    _seed(audio_hash=raw, job_id="job-norm-only", normalized_audio_hash=norm)
+    body = txn_route.DedupCheckRequest(
+        audio_hash="ff" * 32,  # raw mismatch
+        normalized_audio_hash=norm,  # normalized hit
+    )
+    result = asyncio.run(txn_route.dedup_check(body))
+    assert len(result.matches) == 1
+    assert result.matches[0].recording_id == "job-norm-only"
+    assert result.matches[0].source == "transcription_job"
+
+
+def test_dedup_check_normalized_only_match_recording(fresh_db: Path) -> None:
+    """Match exclusively on normalized_audio_hash side for a recording row."""
+    norm = "33" * 32
+    with sqlite3.connect(fresh_db) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO recordings
+                (filename, filepath, duration_seconds, recorded_at,
+                 imported_at, audio_hash, normalized_audio_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "rec-norm.mp3",
+                "/tmp/rec-norm.mp3",
+                1.0,
+                "2026-05-04T00:00:00",
+                "2026-05-04T00:00:00",
+                "ee" * 32,
+                norm,
+            ),
+        )
+        rec_id = int(cur.lastrowid or 0)
+        conn.commit()
+    body = txn_route.DedupCheckRequest(
+        audio_hash="ff" * 32,
+        normalized_audio_hash=norm,
+    )
+    result = asyncio.run(txn_route.dedup_check(body))
+    assert len(result.matches) == 1
+    assert result.matches[0].source == "recording"
+    assert result.matches[0].recording_id == str(rec_id)
+
+
+def test_dedup_check_collapses_double_match_on_same_row(fresh_db: Path) -> None:
+    """A row that matches BOTH raw + normalized hash returns once, not twice.
+
+    SQLite's `WHERE a = ? OR b = ?` returns the row a single time even when
+    both predicates hit, so the per-table helpers naturally collapse.
+    """
+    raw = "44" * 32
+    norm = "55" * 32
+    _seed(audio_hash=raw, job_id="job-double-hit", normalized_audio_hash=norm)
+    body = txn_route.DedupCheckRequest(
+        audio_hash=raw,
+        normalized_audio_hash=norm,
+    )
+    result = asyncio.run(txn_route.dedup_check(body))
+    assert len(result.matches) == 1
+    assert result.matches[0].recording_id == "job-double-hit"
+
+
+def test_dedup_check_returns_distinct_rows_per_signal(fresh_db: Path) -> None:
+    """Two DIFFERENT prior rows, each matching on a DIFFERENT signal,
+    should both surface — that's the union of "exact bytes" + "same content"
+    detection working as designed.
+    """
+    raw_a = "66" * 32
+    norm_b = "77" * 32
+    # Row A matches raw only
+    _seed(audio_hash=raw_a, job_id="job-raw-only", normalized_audio_hash="aa" * 32)
+    # Row B matches normalized only
+    _seed(audio_hash="bb" * 32, job_id="job-norm-only-2", normalized_audio_hash=norm_b)
+    body = txn_route.DedupCheckRequest(
+        audio_hash=raw_a,
+        normalized_audio_hash=norm_b,
+    )
+    result = asyncio.run(txn_route.dedup_check(body))
+    ids = sorted(m.recording_id for m in result.matches)
+    assert ids == ["job-norm-only-2", "job-raw-only"]
+
+
+def test_dedup_check_normalized_only_request_works(fresh_db: Path) -> None:
+    """Empty raw hash with non-empty normalized hash still returns matches."""
+    norm = "88" * 32
+    _seed(audio_hash="cc" * 32, job_id="job-norm-only-3", normalized_audio_hash=norm)
+    body = txn_route.DedupCheckRequest(audio_hash="", normalized_audio_hash=norm)
+    result = asyncio.run(txn_route.dedup_check(body))
+    assert len(result.matches) == 1
+    assert result.matches[0].recording_id == "job-norm-only-3"

@@ -235,11 +235,21 @@ async def transcribe_audio(
         # the row has audio_hash IS NULL is bounded by this single UPDATE
         # — observers (the dedup-check endpoint) will see the hash before
         # any result_text exists, which is the only ordering that matters.
+        # Sprint 2 Item 3 — also compute the normalized PCM hash for
+        # format-agnostic dedup. Failure is swallowed to NULL — that side
+        # is opt-in.
         if db_job_id is not None:
             try:
+                from server.core.audio_utils import (
+                    compute_normalized_pcm_hash as _norm_sha,
+                )
                 from server.core.audio_utils import sha256_streaming as _sha
 
-                set_audio_hash(db_job_id, _sha(tmp_path))
+                set_audio_hash(
+                    db_job_id,
+                    _sha(tmp_path),
+                    normalized_audio_hash=_norm_sha(tmp_path),
+                )
             except Exception as _hash_err:
                 logger.warning(
                     "Failed to set audio_hash for job %s: %s",
@@ -1163,11 +1173,18 @@ async def import_and_transcribe(
     # audio. The /import worker still uses model_manager.job_tracker for
     # results (in-memory), so result_text/result_json on this row stay NULL.
     # See sprint-2-design.md §1 for the override rationale.
+    # Sprint 2 Item 3 — also compute the normalized PCM hash for
+    # format-agnostic dedup. Either value can be NULL on its own.
     audio_hash: str | None = None
+    normalized_audio_hash: str | None = None
     try:
+        from server.core.audio_utils import (
+            compute_normalized_pcm_hash as _norm_sha,
+        )
         from server.core.audio_utils import sha256_streaming as _sha
 
         audio_hash = _sha(tmp_path)
+        normalized_audio_hash = _norm_sha(tmp_path)
     except Exception as _hash_err:
         logger.warning(
             "Failed to compute audio_hash for import job %s: %s",
@@ -1184,12 +1201,12 @@ async def import_and_transcribe(
             task="translate" if translation_enabled else "transcribe",
             translation_target=(translation_target_language if translation_enabled else None),
             audio_hash=audio_hash,
+            normalized_audio_hash=normalized_audio_hash,
         )
-        # Story 2.4 + Sprint 2 Item 2 — surface prior matches across BOTH
-        # transcription_jobs AND recordings so the dashboard sees notebook
-        # uploads of the same content too. Exclude the just-created jobs
-        # row by id (recordings can never collide with the new job_id).
-        if audio_hash:
+        # Story 2.4 + Sprint 2 Item 2 + Item 3 — surface prior matches across
+        # BOTH transcription_jobs AND recordings on EITHER hash. Exclude the
+        # just-created jobs row by id.
+        if audio_hash or normalized_audio_hash:
             dedup_matches = [
                 DedupMatch(
                     recording_id=m["id"],
@@ -1197,7 +1214,11 @@ async def import_and_transcribe(
                     created_at=m["created_at"],
                     source=m["source"],
                 )
-                for m in find_duplicates_anywhere(audio_hash, limit=10)
+                for m in find_duplicates_anywhere(
+                    audio_hash or "",
+                    limit=10,
+                    normalized_audio_hash=normalized_audio_hash,
+                )
                 if not (m["source"] == "transcription_job" and m["id"] == job_id)
             ]
     except Exception as _e:
@@ -1243,9 +1264,15 @@ async def import_and_transcribe(
 
 
 class DedupCheckRequest(BaseModel):
-    """Body for ``POST /api/transcribe/import/dedup-check``."""
+    """Body for ``POST /api/transcribe/import/dedup-check``.
+
+    ``normalized_audio_hash`` (Sprint 2 Item 3) lets clients ask the server
+    "have you seen this content before, regardless of encoding?" alongside
+    the raw-byte question. Default empty so pre-Item-3 clients still work.
+    """
 
     audio_hash: str
+    normalized_audio_hash: str | None = None
 
 
 class DedupCheckResponse(BaseModel):
@@ -1269,10 +1296,10 @@ async def dedup_check(body: DedupCheckRequest) -> DedupCheckResponse:
     recording" UI flows. Carving it out as a separate route now keeps the
     contract stable.
     """
-    # Sprint 2 Item 2: query BOTH transcription_jobs and recordings via the
-    # neutral helper. Pre-Item-2 callers only saw transcription_job hits;
-    # post-Item-2 they additionally see notebook recordings of the same
-    # content. The DedupMatch.source field tells the client which is which.
+    # Sprint 2 Item 2 + Item 3: query BOTH transcription_jobs and recordings
+    # via the neutral helper, against EITHER the raw-byte hash or the
+    # normalized PCM hash. The DedupMatch.source field tells the client
+    # which table each match came from.
     matches = [
         DedupMatch(
             recording_id=m["id"],
@@ -1280,7 +1307,11 @@ async def dedup_check(body: DedupCheckRequest) -> DedupCheckResponse:
             created_at=m["created_at"],
             source=m["source"],
         )
-        for m in find_duplicates_anywhere(body.audio_hash, limit=10)
+        for m in find_duplicates_anywhere(
+            body.audio_hash,
+            limit=10,
+            normalized_audio_hash=body.normalized_audio_hash,
+        )
     ]
     return DedupCheckResponse(matches=matches)
 

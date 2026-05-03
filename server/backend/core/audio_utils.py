@@ -42,13 +42,59 @@ def sha256_streaming(path: str | Path) -> str:
     hash is taken over the raw file bytes the user uploaded (post-tempfile-
     save) — see sprint-2-design.md §1 for the rationale: this satisfies the
     J1 "same file imported twice" narrative cheaply, at the cost of being
-    sensitive to format re-encodes (a deferred limitation, not a blocker).
+    sensitive to format re-encodes (closed by Item 3 below).
     """
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(_SHA256_CHUNK_BYTES), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def compute_normalized_pcm_hash(input_path: str | Path) -> str | None:
+    """Return the SHA-256 hex digest of the input rendered as 16 kHz mono
+    int16 PCM (Issue #104, Sprint 2 carve-out — Item 3).
+
+    Two encodings of the same audio content (e.g. MP3 vs WAV vs M4A from
+    the same source) produce different raw-byte hashes; this helper paths
+    them through ffmpeg so a content-equal pair lands on the same digest.
+
+    Returns ``None`` when normalization fails for any reason (ffmpeg
+    missing, corrupt input, write error). Format-agnostic dedup is
+    opt-in — callers persist the result alongside the raw hash and the
+    dedup-check query OR's both columns; a NULL on this side simply
+    degrades the row to raw-byte-only matching, never blocks the upload.
+
+    The temp WAV is unlinked before return on both success and failure
+    paths.
+    """
+    if not shutil.which("ffmpeg"):
+        logger.warning(
+            "compute_normalized_pcm_hash: ffmpeg not in PATH — "
+            "format-agnostic dedup unavailable for %s",
+            input_path,
+        )
+        return None
+
+    tmp_wav: str | None = None
+    try:
+        tmp_wav = convert_to_wav(str(input_path))
+        if tmp_wav is None:
+            return None
+        return sha256_streaming(tmp_wav)
+    except (RuntimeError, OSError) as e:
+        logger.warning(
+            "compute_normalized_pcm_hash: ffmpeg failed for %s: %s",
+            input_path,
+            e,
+        )
+        return None
+    finally:
+        if tmp_wav is not None:
+            try:
+                Path(tmp_wav).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 # Try to import optional dependencies

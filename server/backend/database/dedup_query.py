@@ -25,8 +25,12 @@ from server.database.job_repository import find_by_audio_hash
 DedupSource = Literal["transcription_job", "recording"]
 
 
-def find_duplicates_anywhere(audio_hash: str, limit: int = 10) -> list[dict[str, Any]]:
-    """Return prior items (jobs OR recordings) sharing this audio_hash.
+def find_duplicates_anywhere(
+    audio_hash: str,
+    limit: int = 10,
+    normalized_audio_hash: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return prior items (jobs OR recordings) sharing the raw or normalized hash.
 
     Each result dict has the shape::
 
@@ -39,17 +43,26 @@ def find_duplicates_anywhere(audio_hash: str, limit: int = 10) -> list[dict[str,
         }
 
     Results from both tables are merged and sorted by ``created_at`` DESC,
-    then sliced to ``limit``. Empty hash returns an empty list (defensive,
-    mirrors the per-repo helpers).
+    then sliced to ``limit``. Empty raw hash AND empty normalized hash
+    returns an empty list (defensive, mirrors the per-repo helpers).
+
+    Sprint 2 Item 3 — when ``normalized_audio_hash`` is provided, each
+    per-repo helper OR's it against its column. A row that matches on
+    BOTH columns is naturally returned only once by SQLite (it's still
+    the same row), but rows that match on the raw side AND a different
+    row that matches on the normalized side BOTH appear — exactly the
+    intended behaviour ("found multiple duplicates across both signals").
 
     NULL hashes never match — both per-repo helpers exclude them via the
     equality predicate, so legacy rows do not participate in dedup.
     """
-    if not audio_hash:
+    if not audio_hash and not normalized_audio_hash:
         return []
 
-    jobs = find_by_audio_hash(audio_hash, limit=limit)
-    recs = find_recordings_by_audio_hash(audio_hash, limit=limit)
+    jobs = find_by_audio_hash(audio_hash, limit=limit, normalized_audio_hash=normalized_audio_hash)
+    recs = find_recordings_by_audio_hash(
+        audio_hash, limit=limit, normalized_audio_hash=normalized_audio_hash
+    )
 
     merged: list[dict[str, Any]] = []
     for j in jobs:

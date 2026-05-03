@@ -1611,6 +1611,7 @@ def save_longform_to_database(
     title: str | None = None,
     transcription_backend: str | None = None,
     audio_hash: str | None = None,
+    normalized_audio_hash: str | None = None,
 ) -> int | None:
     """
     Save a longform recording to the database atomically.
@@ -1633,6 +1634,11 @@ def save_longform_to_database(
             row insert so dedup-check queries see a consistent state. None for
             legacy callers / live-mode recordings (those simply do not participate
             in dedup).
+        normalized_audio_hash: Optional SHA-256 over the normalized PCM rendering
+            (16 kHz mono int16 — Sprint 2 carve-out, Item 3). Matches the same
+            content across format re-encodes. NULL when ffmpeg normalization
+            failed for this upload — the row still participates in raw-hash
+            dedup, just not in format-agnostic dedup.
 
     Returns:
         Recording ID on success, None on error
@@ -1674,9 +1680,10 @@ def save_longform_to_database(
                     recorded_at,
                     has_diarization,
                     transcription_backend,
-                    audio_hash
+                    audio_hash,
+                    normalized_audio_hash
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     audio_path.name,
@@ -1687,6 +1694,7 @@ def save_longform_to_database(
                     int(has_diarization),
                     transcription_backend,
                     audio_hash,
+                    normalized_audio_hash,
                 ),
             )
             recording_id: int = cursor.lastrowid or 0
@@ -1752,34 +1760,58 @@ def save_longform_to_database(
             conn.close()
 
 
-def find_recordings_by_audio_hash(audio_hash: str, limit: int = 10) -> list[dict[str, Any]]:
-    """Return prior recordings with matching audio_hash (Issue #104, Sprint 2 Item 2).
+def find_recordings_by_audio_hash(
+    audio_hash: str,
+    limit: int = 10,
+    normalized_audio_hash: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return prior recordings whose raw or normalized hash matches.
 
     Mirrors :func:`server.database.job_repository.find_by_audio_hash` so the
     unified dedup-check (`find_duplicates_anywhere`) can merge results from
     both tables. Most-recent-first by ``imported_at`` (the recordings-side
     analogue of ``transcription_jobs.created_at`` / ``completed_at``).
 
-    NULL hashes are excluded by the equality predicate, so legacy rows
-    (audio_hash IS NULL — see migration 012) never appear as matches.
+    Args:
+        audio_hash: SHA-256 over the raw upload bytes (Item 2). May be empty
+            to match only on ``normalized_audio_hash``.
+        limit: Maximum rows to return.
+        normalized_audio_hash: Optional SHA-256 over the normalized PCM
+            rendering (Item 3). When provided, the query OR's against the
+            second column too. NULL columns (legacy rows) never match.
     """
-    if not audio_hash:
+    has_raw = bool(audio_hash)
+    has_norm = bool(normalized_audio_hash)
+    if not has_raw and not has_norm:
         return []
     db_path = get_db_path()
     if not db_path.exists():
         return []
+
+    where_parts: list[str] = []
+    params: list[object] = []
+    if has_raw:
+        where_parts.append("audio_hash = ?")
+        params.append(audio_hash)
+    if has_norm:
+        where_parts.append("normalized_audio_hash = ?")
+        params.append(normalized_audio_hash)
+    where_clause = " OR ".join(where_parts)
+    params.append(limit)
+
     conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False)
     try:
         conn.row_factory = sqlite3.Row
         cursor = conn.execute(
-            """
-            SELECT id, filename, title, imported_at, recorded_at, audio_hash
+            f"""
+            SELECT id, filename, title, imported_at, recorded_at,
+                   audio_hash, normalized_audio_hash
             FROM recordings
-            WHERE audio_hash = ?
+            WHERE {where_clause}
             ORDER BY COALESCE(imported_at, recorded_at) DESC, id DESC
             LIMIT ?
             """,
-            (audio_hash, limit),
+            tuple(params),
         )
         return [dict(row) for row in cursor.fetchall()]
     finally:

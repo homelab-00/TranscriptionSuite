@@ -489,6 +489,7 @@ def _run_transcription(
     job_id: str,
     event_loop: Any = None,
     audio_hash: str | None = None,
+    normalized_audio_hash: str | None = None,
 ) -> None:
     """
     Run transcription in a background thread.
@@ -735,6 +736,7 @@ def _run_transcription(
             title=clean_title or None,
             transcription_backend=transcription_backend,
             audio_hash=audio_hash,
+            normalized_audio_hash=normalized_audio_hash,
         )
 
         if not recording_id:
@@ -869,6 +871,12 @@ async def upload_and_transcribe(
     # save_longform_to_database; the dashboard can later call dedup-check to
     # match notebook recordings against transcription_jobs and other notebook
     # recordings.
+    # Sprint 2 Item 3 — also compute the normalized PCM hash for
+    # format-agnostic dedup. ffmpeg failure → NULL second hash, upload still
+    # proceeds.
+    from server.core.audio_utils import (
+        compute_normalized_pcm_hash as _norm_sha,
+    )
     from server.core.audio_utils import sha256_streaming as _sha
 
     try:
@@ -886,6 +894,7 @@ async def upload_and_transcribe(
             status_code=500,
             detail="Failed to compute audio hash for upload",
         ) from hash_err
+    normalized_audio_hash: str | None = _norm_sha(tmp_path)
 
     # Resolve parallel diarization default from config before entering background thread
     config = request.app.state.config
@@ -914,6 +923,7 @@ async def upload_and_transcribe(
             job_id=job_id,
             event_loop=loop,
             audio_hash=audio_hash,
+            normalized_audio_hash=normalized_audio_hash,
         )
     )
 

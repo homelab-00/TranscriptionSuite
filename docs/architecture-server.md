@@ -143,20 +143,28 @@ PyAnnote 4.x speaker diarization pipeline:
 
 #### Audio dedup scope (FR4 / R-EL23)
 
-Issue #104: audio dedup operates **per-user-library**. SHA-256 hashes (raw
-upload bytes, streamed in 1 MiB chunks) live on **both**
-`transcription_jobs.audio_hash` (migration 011, written by
-`/api/transcribe/audio` + `/api/transcribe/import`) and `recordings.audio_hash`
-(migration 012, written by `/api/notebook/transcribe/upload`). The dedup-check
-endpoint runs `dedup_query.find_duplicates_anywhere`, which queries both
-tables and returns a merged list discriminated by a `source` field
-(`"transcription_job"` vs `"recording"`). All queries hit only the local
-SQLite database — no outbound network call, no shared registry. Cross-user
-dedup is an explicit non-goal.
+Issue #104: audio dedup operates **per-user-library**. Each upload row now
+carries TWO complementary SHA-256 columns:
 
-Format-agnostic dedup (e.g. matching the same recording uploaded as MP3 then
-WAV) remains deferred — the current hash is taken over the raw upload bytes,
-so re-encoded copies of the same content hash differently.
+- **`audio_hash`** (migrations 011 + 012) — SHA-256 of the raw upload bytes,
+  streamed in 1 MiB chunks. Cheapest signal; catches "same file imported
+  twice".
+- **`normalized_audio_hash`** (migration 013) — SHA-256 of the file rendered
+  through ffmpeg as 16 kHz mono int16 PCM. Catches "same content, different
+  encoding" (e.g. MP3 vs WAV vs M4A of the same source). NULL on rows where
+  ffmpeg failed at upload time — those rows fall back to raw-only dedup.
+
+Both columns exist on `transcription_jobs` (written by `/api/transcribe/audio`
++ `/api/transcribe/import`) and `recordings` (written by
+`/api/notebook/transcribe/upload`). The dedup-check endpoint
+(`POST /api/transcribe/import/dedup-check`) runs
+`dedup_query.find_duplicates_anywhere`, which queries both tables and OR's
+both columns, returning a merged list discriminated by a `source` field
+(`"transcription_job"` vs `"recording"`). A row that matches on both columns
+naturally appears once (SQLite predicate semantics).
+
+All queries hit only the local SQLite database — no outbound network call,
+no shared registry. Cross-user dedup is an explicit non-goal.
 
 ### Durability System (3 Waves)
 

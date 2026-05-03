@@ -100,38 +100,6 @@ implementer doesn't assume the guard is already in place.
 
 **Re-triage trigger:** Sprint 3 kickoff.
 
-### 3. Format-agnostic content dedup via normalized-PCM hash
-
-**What:** Sprint 2 ships the audio_hash as a streaming SHA-256 over
-the raw upload tempfile bytes (post-tempfile-save, pre-normalization).
-This satisfies the J1 "same file imported twice" narrative cheaply,
-but two different encodings of the same audio content (e.g. MP3 vs
-WAV vs M4A from the same source) produce different hashes and do
-NOT dedup against each other. The Story 2.2 AC literal text said
-"normalized PCM (16 kHz mono int16)" — Sprint 2 traded fidelity for
-implementation simplicity (raw-byte hashing happens before the
-audio decode, so dedup-check can fire without paying the decode
-cost up-front).
-
-**Why deferred:** Implementing format-agnostic dedup requires the
-hash to be computed AFTER `convert_to_wav` (or equivalent
-normalization). That moves the hash compute out of the request path
-and into the worker thread, which means the dedup-check endpoint
-needs a different trigger model (post-normalization async event vs
-pre-create_job synchronous call). Sprint 2 chose the simpler path
-to keep the LOC budget under 3500.
-
-**Defense shape:** Add a `normalized_audio_hash` column to
-`transcription_jobs` (and `recordings` once item #2 lands). The
-worker computes `sha256_streaming(normalized_wav_path)` after
-`convert_to_wav` and writes via `set_audio_hash` (existing helper).
-Dedup-check queries BOTH columns — raw hash for "exact same file"
-detection, normalized hash for "same content, different encoding"
-detection. Two hits on the same row are treated as a single match.
-
-**Re-triage trigger:** First user report of "I imported the MP3 and
-then the WAV of the same recording and the dashboard didn't notice."
-
 ### 4. DedupPromptModal full choice-flow integration (Sprint 2 wiring gap)
 
 **What:** Sprint 2 ships `DedupPromptModal` (tested standalone) and
