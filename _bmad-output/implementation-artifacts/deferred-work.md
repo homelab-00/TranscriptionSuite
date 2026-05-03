@@ -100,36 +100,6 @@ implementer doesn't assume the guard is already in place.
 
 **Re-triage trigger:** Sprint 3 kickoff.
 
-### 2. Notebook-upload path missing `audio_hash` (Sprint 2 dedup gap)
-
-**What:** Sprint 2's Story 2.4 dedup-check queries
-`transcription_jobs.audio_hash`. Both `/api/transcribe/audio` and
-`/api/transcribe/import` write the hash. The dashboard's primary
-file-picker, however, calls `/api/notebook/transcribe/upload`, which
-writes to the `recordings` table — a separate code path that does
-NOT touch `transcription_jobs` at all and therefore does not produce
-or query a hash. Cross-flow detection works (file imported via
-`/audio` yesterday, then via notebook today); same-path re-imports
-through notebook-upload do NOT dedup.
-
-**Why deferred:** Sprint 2 design §1 documented this explicitly. The
-literal AC scoped `audio_hash` to `transcription_jobs`; expanding to
-`recordings` would have required migration 012, plumbing into
-notebook.py, and a unified dedup-check query — outside the Sprint 2
-LOC budget.
-
-**Defense shape:** Migration 012 adds `audio_hash` to `recordings`
-with a covering index. Notebook upload computes the streaming hash
-(reuse `sha256_streaming`) at file-receive time. The dedup-check
-endpoint is extended with a `UNION ALL` over both tables (or a
-single function `find_duplicates_anywhere(hash)` in the repository
-layer that queries both).
-
-**Re-triage trigger:** First user report of "I uploaded the same
-recording twice and the dashboard didn't notice," OR Sprint 3 if
-auto-export workflows surface a need for cross-table dedup before
-that.
-
 ### 3. Format-agnostic content dedup via normalized-PCM hash
 
 **What:** Sprint 2 ships the audio_hash as a streaming SHA-256 over

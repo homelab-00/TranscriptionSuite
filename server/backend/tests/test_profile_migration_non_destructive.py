@@ -130,8 +130,8 @@ def test_migration_idempotent(fresh_db: Path) -> None:
         rows = conn.execute("SELECT version_num FROM alembic_version").fetchall()
     assert len(rows) == 1
     # Head advances with each sprint; accept any current-or-later revision.
-    # 009 = Stories 1.2/1.3, 010 = Story 1.9, 011 = Story 2.1.
-    assert rows[0][0] in {"009", "010", "011"}
+    # 009 = Stories 1.2/1.3, 010 = Story 1.9, 011 = Story 2.1, 012 = Sprint 2 Item 2.
+    assert rows[0][0] in {"009", "010", "011", "012"}
 
 
 def _read_all(db_path: Path, table: str) -> list[dict]:

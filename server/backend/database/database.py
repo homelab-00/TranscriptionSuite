@@ -1610,6 +1610,7 @@ def save_longform_to_database(
     recorded_at: datetime | None = None,
     title: str | None = None,
     transcription_backend: str | None = None,
+    audio_hash: str | None = None,
 ) -> int | None:
     """
     Save a longform recording to the database atomically.
@@ -1627,6 +1628,11 @@ def save_longform_to_database(
         recorded_at: Optional timestamp (defaults to now)
         title: Optional title (defaults to audio filename stem)
         transcription_backend: Optional normalized backend family used for transcription
+        audio_hash: Optional SHA-256 hex digest of the original upload bytes
+            (Issue #104 Sprint 2 carve-out, Item 2). Written atomically with the
+            row insert so dedup-check queries see a consistent state. None for
+            legacy callers / live-mode recordings (those simply do not participate
+            in dedup).
 
     Returns:
         Recording ID on success, None on error
@@ -1667,9 +1673,10 @@ def save_longform_to_database(
                     duration_seconds,
                     recorded_at,
                     has_diarization,
-                    transcription_backend
+                    transcription_backend,
+                    audio_hash
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     audio_path.name,
@@ -1679,6 +1686,7 @@ def save_longform_to_database(
                     recorded_at.isoformat(),
                     int(has_diarization),
                     transcription_backend,
+                    audio_hash,
                 ),
             )
             recording_id: int = cursor.lastrowid or 0
@@ -1742,6 +1750,40 @@ def save_longform_to_database(
     finally:
         if conn:
             conn.close()
+
+
+def find_recordings_by_audio_hash(audio_hash: str, limit: int = 10) -> list[dict[str, Any]]:
+    """Return prior recordings with matching audio_hash (Issue #104, Sprint 2 Item 2).
+
+    Mirrors :func:`server.database.job_repository.find_by_audio_hash` so the
+    unified dedup-check (`find_duplicates_anywhere`) can merge results from
+    both tables. Most-recent-first by ``imported_at`` (the recordings-side
+    analogue of ``transcription_jobs.created_at`` / ``completed_at``).
+
+    NULL hashes are excluded by the equality predicate, so legacy rows
+    (audio_hash IS NULL — see migration 012) never appear as matches.
+    """
+    if not audio_hash:
+        return []
+    db_path = get_db_path()
+    if not db_path.exists():
+        return []
+    conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False)
+    try:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            """
+            SELECT id, filename, title, imported_at, recorded_at, audio_hash
+            FROM recordings
+            WHERE audio_hash = ?
+            ORDER BY COALESCE(imported_at, recorded_at) DESC, id DESC
+            LIMIT ?
+            """,
+            (audio_hash, limit),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
 
 def save_longform_recording(

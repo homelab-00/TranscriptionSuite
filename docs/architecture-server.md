@@ -138,21 +138,25 @@ PyAnnote 4.x speaker diarization pipeline:
 | `words` | Word-level timestamps | id, segment_id, word, start_time, end_time, confidence |
 | `recordings_fts` | Full-text search index | FTS5 virtual table |
 | `transcription_jobs` | Durability layer | id, status, source, client_name, audio_path, result_text, result_json, delivered, audio_hash |
+| `recordings` | Notebook recordings | id, filename, filepath, title, duration_seconds, recorded_at, imported_at, audio_hash |
 | `chat_history` | LLM conversations | recording_id, messages, model |
 
 #### Audio dedup scope (FR4 / R-EL23)
 
-Issue #104 / Story 2.5: audio dedup operates **per-user-library**. SHA-256 hashes
-are stored in `transcription_jobs.audio_hash` (migration 011) and queried only
-against the local SQLite database via `find_by_audio_hash`. There is no
-federated cross-installation dedup, no outbound network call during dedup-check,
-and no shared registry. Cross-user dedup is an explicit non-goal.
+Issue #104: audio dedup operates **per-user-library**. SHA-256 hashes (raw
+upload bytes, streamed in 1 MiB chunks) live on **both**
+`transcription_jobs.audio_hash` (migration 011, written by
+`/api/transcribe/audio` + `/api/transcribe/import`) and `recordings.audio_hash`
+(migration 012, written by `/api/notebook/transcribe/upload`). The dedup-check
+endpoint runs `dedup_query.find_duplicates_anywhere`, which queries both
+tables and returns a merged list discriminated by a `source` field
+(`"transcription_job"` vs `"recording"`). All queries hit only the local
+SQLite database — no outbound network call, no shared registry. Cross-user
+dedup is an explicit non-goal.
 
-Coverage caveat: Sprint 2 wires the `audio_hash` write into the
-`/api/transcribe/audio` and `/api/transcribe/import` paths. The notebook upload
-path (`/api/notebook/transcribe/upload`) writes to `recordings` (not
-`transcription_jobs`) and does not currently produce a hash; cross-flow dedup
-detection from a notebook upload will be wired in a follow-up sprint.
+Format-agnostic dedup (e.g. matching the same recording uploaded as MP3 then
+WAV) remains deferred — the current hash is taken over the raw upload bytes,
+so re-encoded copies of the same content hash differently.
 
 ### Durability System (3 Waves)
 

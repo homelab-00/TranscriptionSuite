@@ -1,4 +1,4 @@
-"""Dedup-check endpoint tests (Issue #104, Stories 2.4 + 2.5).
+"""Dedup-check endpoint tests (Issue #104, Stories 2.4 + 2.5; Sprint 2 Item 2).
 
 Uses the direct-call pattern (CLAUDE.md) — handlers are invoked via
 asyncio.run() and the return value is asserted directly.
@@ -7,12 +7,14 @@ Covers:
   - Story 2.4 AC1: matching hash returns matches, missing hash returns []
   - Story 2.4 idempotence: two calls with same input produce same output
   - Story 2.5 AC1: no outbound network (httpx / socket) calls escape
+  - Sprint 2 Item 2: cross-flow matches across transcription_jobs + recordings
 """
 
 from __future__ import annotations
 
 import asyncio
 import socket
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -126,5 +128,100 @@ def test_dedup_check_no_outbound_network(fresh_db: Path, monkeypatch: pytest.Mon
 
 def test_dedup_check_empty_hash_returns_empty(fresh_db: Path) -> None:
     body = txn_route.DedupCheckRequest(audio_hash="")
+    result = asyncio.run(txn_route.dedup_check(body))
+    assert result.matches == []
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Sprint 2 Item 2 — cross-flow dedup (recordings + transcription_jobs)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _seed_recording(
+    fresh_db: Path,
+    audio_hash: str,
+    *,
+    filename: str = "rec.mp3",
+    title: str | None = None,
+    imported_at: str = "2026-05-04T12:00:00",
+) -> int:
+    """Insert a recordings row with the given audio_hash; return its id."""
+    with sqlite3.connect(fresh_db) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO recordings
+                (filename, filepath, title, duration_seconds, recorded_at,
+                 imported_at, audio_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                filename,
+                f"/tmp/{filename}",
+                title,
+                1.0,
+                imported_at,
+                imported_at,
+                audio_hash,
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid or 0)
+
+
+def test_dedup_check_returns_recording_only_match(fresh_db: Path) -> None:
+    """Hash present ONLY in recordings — match comes back tagged source=recording."""
+    h = "a1" * 32
+    rec_id = _seed_recording(fresh_db, h, title="Lecture A")
+    body = txn_route.DedupCheckRequest(audio_hash=h)
+    result = asyncio.run(txn_route.dedup_check(body))
+    assert len(result.matches) == 1
+    assert result.matches[0].source == "recording"
+    assert result.matches[0].recording_id == str(rec_id)
+    assert result.matches[0].name == "Lecture A"
+
+
+def test_dedup_check_jobs_only_match_keeps_source_default(fresh_db: Path) -> None:
+    """Pre-Item-2 callers see source='transcription_job' (default for jobs hits)."""
+    h = "b2" * 32
+    _seed(h, "job-only-1")
+    body = txn_route.DedupCheckRequest(audio_hash=h)
+    result = asyncio.run(txn_route.dedup_check(body))
+    assert len(result.matches) == 1
+    assert result.matches[0].source == "transcription_job"
+    assert result.matches[0].recording_id == "job-only-1"
+
+
+def test_dedup_check_returns_matches_from_both_tables(fresh_db: Path) -> None:
+    """Hash present in BOTH tables — both rows surface, ordered DESC by ts."""
+    h = "c3" * 32
+    # Older job, newer recording — recording must come first.
+    _seed(h, "older-job")
+    rec_id = _seed_recording(fresh_db, h, filename="newer.mp3", imported_at="2030-01-01T00:00:00")
+    body = txn_route.DedupCheckRequest(audio_hash=h)
+    result = asyncio.run(txn_route.dedup_check(body))
+    assert len(result.matches) == 2
+    sources = [m.source for m in result.matches]
+    assert "recording" in sources
+    assert "transcription_job" in sources
+    # Recording was imported in 2030 → must be first (DESC order).
+    assert result.matches[0].source == "recording"
+    assert result.matches[0].recording_id == str(rec_id)
+
+
+def test_dedup_check_excludes_legacy_null_recording(fresh_db: Path) -> None:
+    """A recording with NULL audio_hash never participates in dedup."""
+    # Insert a legacy row (no audio_hash column value)
+    with sqlite3.connect(fresh_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO recordings
+                (filename, filepath, duration_seconds, recorded_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("legacy.mp3", "/tmp/legacy.mp3", 1.0, "2026-05-04T00:00:00"),
+        )
+        conn.commit()
+    # Querying with any hash must not return the legacy row
+    body = txn_route.DedupCheckRequest(audio_hash="d4" * 32)
     result = asyncio.run(txn_route.dedup_check(body))
     assert result.matches == []

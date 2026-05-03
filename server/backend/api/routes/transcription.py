@@ -14,7 +14,7 @@ import json as _json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -24,9 +24,9 @@ from server.config import resolve_main_transcriber_model
 from server.core.json_utils import sanitize_for_json
 from server.core.model_manager import TranscriptionCancelledError
 from server.core.stt.backends.base import BackendDependencyError, STTBackend
+from server.database.dedup_query import find_duplicates_anywhere
 from server.database.job_repository import (
     create_job,
-    find_by_audio_hash,
     mark_delivered,
     mark_failed,
     save_result,
@@ -738,12 +738,26 @@ async def cancel_transcription(request: Request) -> dict[str, Any]:
 
 
 class DedupMatch(BaseModel):
-    """A prior transcription job that shares this upload's audio_hash
-    (Issue #104, Story 2.4)."""
+    """A prior item (transcription job OR notebook recording) that shares
+    this upload's audio_hash (Issue #104, Story 2.4 + Sprint 2 Item 2).
+
+    The ``source`` discriminator (added by the Sprint 2 carve-out) tells
+    the dashboard which table the match came from, which it needs to
+    navigate "Use existing" correctly:
+
+      - ``"transcription_job"`` — match is a row in ``transcription_jobs``
+        (returned by /api/transcribe/result/{id}).
+      - ``"recording"`` — match is a row in ``recordings`` (the notebook
+        view's GET /api/notebook/recordings/{id} resource).
+
+    Default value preserves wire compatibility for the pre-Item-2 fixture
+    data where every match was implicitly a transcription_job.
+    """
 
     recording_id: str
     name: str
     created_at: str
+    source: Literal["transcription_job", "recording"] = "transcription_job"
 
 
 class ImportAcceptedResponse(BaseModel):
@@ -757,24 +771,6 @@ class ImportAcceptedResponse(BaseModel):
 
     job_id: str
     dedup_matches: list[DedupMatch] = []
-
-
-def _dedup_name_for_match(row: dict[str, Any]) -> str:
-    """Best-effort display name for a dedup-match row.
-
-    Prefers a recoverable title from ``result_json``; falls back to the
-    short job id. Robust against malformed JSON (the row is still a valid
-    duplicate even if its result couldn't be parsed).
-    """
-    result_text = row.get("result_text")
-    if result_text:
-        # First non-empty line, capped at 80 chars — works for both
-        # plaintext result_text and a quick "what is this" hint.
-        for line in str(result_text).splitlines():
-            stripped = line.strip()
-            if stripped:
-                return stripped[:80]
-    return str(row.get("id", ""))[:8] or "Recording"
 
 
 def _run_file_import(
@@ -1189,17 +1185,20 @@ async def import_and_transcribe(
             translation_target=(translation_target_language if translation_enabled else None),
             audio_hash=audio_hash,
         )
-        # Story 2.4 — surface prior matches so the dashboard can show the
-        # dedup prompt. We exclude the just-created row by id.
+        # Story 2.4 + Sprint 2 Item 2 — surface prior matches across BOTH
+        # transcription_jobs AND recordings so the dashboard sees notebook
+        # uploads of the same content too. Exclude the just-created jobs
+        # row by id (recordings can never collide with the new job_id).
         if audio_hash:
             dedup_matches = [
                 DedupMatch(
                     recording_id=m["id"],
-                    name=_dedup_name_for_match(m),
-                    created_at=m.get("created_at") or "",
+                    name=m["name"],
+                    created_at=m["created_at"],
+                    source=m["source"],
                 )
-                for m in find_by_audio_hash(audio_hash, limit=10)
-                if m["id"] != job_id
+                for m in find_duplicates_anywhere(audio_hash, limit=10)
+                if not (m["source"] == "transcription_job" and m["id"] == job_id)
             ]
     except Exception as _e:
         logger.warning(
@@ -1252,7 +1251,8 @@ class DedupCheckRequest(BaseModel):
 class DedupCheckResponse(BaseModel):
     """Response shape for the dedup-check endpoint.
 
-    ``matches`` is ordered most-recent-first (see find_by_audio_hash).
+    ``matches`` is ordered most-recent-first across both source tables
+    (see ``server.database.dedup_query.find_duplicates_anywhere``).
     """
 
     matches: list[DedupMatch] = []
@@ -1269,13 +1269,18 @@ async def dedup_check(body: DedupCheckRequest) -> DedupCheckResponse:
     recording" UI flows. Carving it out as a separate route now keeps the
     contract stable.
     """
+    # Sprint 2 Item 2: query BOTH transcription_jobs and recordings via the
+    # neutral helper. Pre-Item-2 callers only saw transcription_job hits;
+    # post-Item-2 they additionally see notebook recordings of the same
+    # content. The DedupMatch.source field tells the client which is which.
     matches = [
         DedupMatch(
             recording_id=m["id"],
-            name=_dedup_name_for_match(m),
-            created_at=m.get("created_at") or "",
+            name=m["name"],
+            created_at=m["created_at"],
+            source=m["source"],
         )
-        for m in find_by_audio_hash(body.audio_hash, limit=10)
+        for m in find_duplicates_anywhere(body.audio_hash, limit=10)
     ]
     return DedupCheckResponse(matches=matches)
 

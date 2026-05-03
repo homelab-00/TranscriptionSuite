@@ -488,6 +488,7 @@ def _run_transcription(
     title: str | None,
     job_id: str,
     event_loop: Any = None,
+    audio_hash: str | None = None,
 ) -> None:
     """
     Run transcription in a background thread.
@@ -733,6 +734,7 @@ def _run_transcription(
             recorded_at=recorded_at,
             title=clean_title or None,
             transcription_backend=transcription_backend,
+            audio_hash=audio_hash,
         )
 
         if not recording_id:
@@ -861,6 +863,30 @@ async def upload_and_transcribe(
         tmp.write(content)
         tmp_path = Path(tmp.name)
 
+    # Compute audio_hash for dedup (Issue #104, Sprint 2 carve-out — Item 2).
+    # Hash the raw upload bytes — same approach as /api/transcribe/import. The
+    # hash is written atomically with the recordings row in
+    # save_longform_to_database; the dashboard can later call dedup-check to
+    # match notebook recordings against transcription_jobs and other notebook
+    # recordings.
+    from server.core.audio_utils import sha256_streaming as _sha
+
+    try:
+        audio_hash: str | None = _sha(tmp_path)
+    except OSError as hash_err:
+        # Tempfile vanished or unreadable — release the job slot and surface
+        # the failure before any DB row is created (mirrors the request-path
+        # invariant: failed pre-conditions never produce orphan records).
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        model_manager.job_tracker.cancel_job()
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to compute audio hash for upload",
+        ) from hash_err
+
     # Resolve parallel diarization default from config before entering background thread
     config = request.app.state.config
     use_parallel_default = config.get("diarization", "parallel", default=True)
@@ -887,6 +913,7 @@ async def upload_and_transcribe(
             title=title,
             job_id=job_id,
             event_loop=loop,
+            audio_hash=audio_hash,
         )
     )
 
