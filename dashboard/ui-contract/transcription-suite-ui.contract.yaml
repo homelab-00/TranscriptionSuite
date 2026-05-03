@@ -19,6 +19,9 @@ meta:
       - components/__tests__/SessionView.test.tsx
       - components/AudioVisualizer.tsx
       - components/PopOutWindow.tsx
+      - components/profiles/__tests__/EmptyProfileForm.test.tsx
+      - components/profiles/EmptyProfileForm.tsx
+      - components/profiles/ProfileSelector.tsx
       - components/Sidebar.tsx
       - components/ui/__tests__/UpdateBanner.test.tsx
       - components/ui/__tests__/UpdateModal.test.tsx
@@ -62,7 +65,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-02T14:24:53.386Z
+    generated_at: 2026-05-03T16:16:04.005Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -100,6 +103,7 @@ foundation:
         - "#000000"
         - "#0b1120"
         - "#0f172a"
+        - "#104"
         - "#1091"
         - "#1337"
         - "#14b8a6"
@@ -458,6 +462,7 @@ utility_allowlist:
     - bg-cyan-400/10
     - bg-cyan-400/20
     - bg-cyan-400/70
+    - bg-cyan-500/80
     - bg-emerald-400/10
     - bg-glass-100
     - bg-glass-200
@@ -512,6 +517,7 @@ utility_allowlist:
     - border-amber-400/40
     - border-amber-500/20
     - border-amber-500/30
+    - border-amber-500/40
     - border-b
     - border-b-2
     - border-blue-500/20
@@ -649,6 +655,7 @@ utility_allowlist:
     - hover:bg-amber-500/20
     - hover:bg-black/40
     - hover:bg-cyan-300
+    - hover:bg-cyan-400
     - hover:bg-cyan-400/30
     - hover:bg-glass-100
     - hover:bg-glass-300
@@ -657,6 +664,7 @@ utility_allowlist:
     - hover:bg-red-500/20
     - hover:bg-red-500/35
     - hover:bg-white/10
+    - hover:bg-white/15
     - hover:bg-white/5
     - hover:bg-white/8
     - hover:bg-yellow-400/30
@@ -1579,6 +1587,23 @@ component_contracts:
     state_rules:
       - id: active-option-dot
         rule: Selected option indicator dot color/shadow must follow accentColor variant mapping.
+  EmptyProfileForm:
+    file: components/profiles/EmptyProfileForm.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   ErrorFallback:
     file: components/ui/ErrorFallback.tsx
     required_tokens:
@@ -1968,6 +1993,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   PopOutWindow:
     file: components/PopOutWindow.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  ProfileSelector:
+    file: components/profiles/ProfileSelector.tsx
     required_tokens:
       - colors
       - motion
