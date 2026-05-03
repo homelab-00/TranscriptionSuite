@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.43
+  spec_version: 1.0.44
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -19,7 +19,9 @@ meta:
       - components/__tests__/SessionView.test.tsx
       - components/AriaLiveRegion.tsx
       - components/AudioVisualizer.tsx
+      - components/import/__tests__/DedupChoiceContainer.test.tsx
       - components/import/__tests__/DedupPromptModal.test.tsx
+      - components/import/DedupChoiceContainer.tsx
       - components/import/DedupPromptModal.tsx
       - components/PopOutWindow.tsx
       - components/profiles/__tests__/EmptyProfileForm.test.tsx
@@ -77,7 +79,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-03T21:30:36.109Z
+    generated_at: 2026-05-03T22:59:12.758Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -1635,6 +1637,23 @@ component_contracts:
     state_rules:
       - id: active-option-dot
         rule: Selected option indicator dot color/shadow must follow accentColor variant mapping.
+  DedupChoiceContainer:
+    file: components/import/DedupChoiceContainer.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   DedupPromptModal:
     file: components/import/DedupPromptModal.tsx
     required_tokens:

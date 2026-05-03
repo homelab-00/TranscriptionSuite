@@ -189,11 +189,18 @@ export interface TranscriptionAccepted {
   dedup_matches?: DedupMatch[];
 }
 
-/** A prior job that shares this upload's audio_hash. */
+/** A prior item that shares this upload's audio_hash or normalized_audio_hash.
+ *
+ * `source` (Sprint 2 carve-out — Item 2) tells the dashboard which table the
+ * match came from. Optional for backwards compatibility with older server
+ * responses that pre-date Item 2. Default behavior on undefined is to assume
+ * `'transcription_job'` (the original Sprint 2 contract).
+ */
 export interface DedupMatch {
   recording_id: string;
   name: string;
   created_at: string;
+  source?: 'transcription_job' | 'recording';
 }
 
 /** Returned by POST /api/transcribe/import/dedup-check (Issue #104, Story 2.4). */
