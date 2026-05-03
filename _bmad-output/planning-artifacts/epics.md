@@ -719,6 +719,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 2.1: `audio_hash` column on `transcription_jobs` (migration)
 
+**Status: DONE (sprint 2 — migration 011; see _bmad-output/implementation-artifacts/sprint-2-design.md)**
+
 **As a** backend engineer
 **I want** the `audio_hash` column added to `transcription_jobs` with a covering index for dedup lookups
 **So that** Story 2.2 can write the hash and Story 2.4 can query for matches efficiently.
@@ -747,6 +749,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 2.2: SHA-256 audio content hash on import
+
+**Status: DONE (sprint 2 — raw-byte streaming hash on /audio + /import; design §1 documents the AC override from "normalized PCM" to "raw upload bytes")**
 
 **As a** backend engineer
 **I want** the import flow to compute SHA-256 of normalized PCM and write it to `audio_hash`
@@ -780,6 +784,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 2.3: Audio file import via existing file-picker (FR1 verification + idempotence)
 
+**Status: DONE (sprint 2 — regression test test_import_works_without_profile)**
+
 **As a** Lurker user (Anna)
 **I want** to import audio files via the existing file-picker without being asked to set up a profile first
 **So that** the J1 happy-path zero-config flow holds (R-EL7).
@@ -805,6 +811,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 2.4: Dedup-check endpoint + dedup-prompt UI
+
+**Status: DONE (sprint 2 — POST /api/transcribe/import/dedup-check + DedupPromptModal; AC URL adjusted from /api/recordings/import/* to /api/transcribe/import/* per design §1)**
 
 **As a** Lurker user (Anna re-importing the same file)
 **I want** a clear prompt asking whether to use the existing transcript or create a new entry when I import a file that matches an existing recording's content hash
@@ -844,6 +852,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 2.5: Per-user-library dedup scope
+
+**Status: DONE (sprint 2 — test_dedup_check_no_outbound_network + architecture-server.md scope note)**
 
 **As a** privacy-conscious user
 **I want** dedup to operate only within my local library, never across installations
@@ -888,6 +898,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 3.1: Filename template engine + extensible placeholder grammar
 
+**Status: DONE (sprint 2 — server/backend/core/filename_template.py + dashboard/src/utils/filenameTemplate.ts mirror; Python↔TS sync test enforces drift-free registry)**
+
 **As a** Configurator (Maria)
 **I want** an extensible placeholder grammar (`{date}`, `{title}`, `{recording_id}`, `{model}`) for filename templates
 **So that** I can customize names without writing wrapper scripts (FR12, R-EL2).
@@ -919,6 +931,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 3.2: Server-side template validation + sanitization
+
+**Status: DONE (sprint 2 — sanitize_filename + PUT/POST /api/profiles validation; hand-crafted parametrized tests substitute for Hypothesis dep — design §5 risk note)**
 
 **As a** backend engineer
 **I want** the template-engine to reject malformed templates and sanitize rendered output for filesystem safety
@@ -958,6 +972,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 3.3: Live filename preview in profile UI
 
+**Status: DONE (sprint 2 — TemplatePreviewField with synchronous render + invalid-template inline error)**
+
 **As a** Configurator (Maria)
 **I want** the filename preview to update as I type the template
 **So that** I can see the result before saving (R-EL14).
@@ -990,6 +1006,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 3.4: Plain-text export formatter (streaming)
 
+**Status: DONE (sprint 2 — server/backend/core/plaintext_export.py + format=plaintext branch on /api/notebook/recordings/{id}/export wraps StreamingResponse + iter_segments)**
+
 **As a** user
 **I want** downloaded files to be plain text — one speaker turn per blank-line block, no subtitle timestamps
 **So that** I can drop them straight into Obsidian/notes (FR9, NFR48).
@@ -1017,6 +1035,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 3.5: Download transcript + summary buttons + native file-save dialog
+
+**Status: DONE (sprint 2 — DownloadButtons + dialog:saveFile IPC + useFileSaveDialog hook; renderer-side fetch is buffered for MVP, streaming-to-disk via Electron protocol deferred for >100MB transcripts)**
 
 **As a** Lurker (Anna)
 **I want** explicit "Download transcript" and "Download summary" buttons in the completed-recording UI, opening the native OS file-save dialog
@@ -1064,6 +1084,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 3.6: Forward-only template change + Re-export action
 
+**Status: DONE (sprint 2 — sticky-OK notice in TemplatePreviewField + POST /api/notebook/recordings/{id}/reexport; AC URL adjusted from /api/recordings/* per design §1)**
+
 **As a** Configurator (Maria, J6)
 **I want** template changes to apply forward-only and have an opt-in per-recording Re-export action
 **So that** old files on disk keep their names and I never get surprised by silent renames (FR17).
@@ -1097,6 +1119,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 3.7: Recording deletion dialog with explicit on-disk artifact options (R-EL13, R-EL32)
+
+**Status: DONE (sprint 2 — DELETE /api/notebook/recordings/{id}?delete_artifacts=true&artifact_path=... + DeleteRecordingDialog; renderer derives artifact paths because notebook recordings don't carry a profile snapshot — design §1)**
 
 **As a** privacy-conscious user
 **I want** the recording-deletion dialog to explicitly state that on-disk artifacts are NOT removed by default, and offer a per-deletion option to remove them

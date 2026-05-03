@@ -291,7 +291,23 @@ async function processSessionJob(
     fileObj = file;
   }
 
-  const { job_id: serverJobId } = await apiClient.importAndTranscribe(fileObj, job.options);
+  const importResponse = await apiClient.importAndTranscribe(fileObj, job.options);
+  const { job_id: serverJobId } = importResponse;
+
+  // Issue #104, Story 2.4 — surface dedup-detection to the user via a
+  // toast. The full DedupPromptModal flow (Use existing / Create new
+  // choices with server-side cancellation) is documented as Sprint 3
+  // polish — see _bmad-output/implementation-artifacts/deferred-work.md.
+  // For now, the user is informed that a duplicate was detected and the
+  // current job will proceed as a new entry; they can manually delete
+  // the dup later if desired.
+  if (importResponse.dedup_matches?.length) {
+    const first = importResponse.dedup_matches[0];
+    toast.warning(
+      `Duplicate detected: '${first.name}' was previously imported. Creating a new entry.`,
+    );
+  }
+
   const result = await pollForSessionResult(serverJobId);
 
   if (result.error) throw new Error(result.error);

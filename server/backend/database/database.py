@@ -15,7 +15,7 @@ import sqlite3
 import subprocess
 import tempfile
 import wave
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -495,6 +495,24 @@ def get_segments(recording_id: int) -> list[dict[str, Any]]:
         return [dict(row) for row in cursor.fetchall()]
 
 
+def iter_segments(recording_id: int) -> Iterator[dict[str, Any]]:
+    """Yield segments one at a time (Issue #104, Story 3.4).
+
+    Used by the plaintext streaming export so an 8-hour recording
+    (~100k segments / ~1 GB of text) can be formatted with bounded RAM.
+    The connection stays open for the lifetime of the iterator —
+    callers must consume to completion (or drop the iterator).
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM segments WHERE recording_id = ? ORDER BY segment_index",
+            (recording_id,),
+        )
+        for row in cursor:
+            yield dict(row)
+
+
 def get_words(recording_id: int) -> list[dict[str, Any]]:
     """Get all words for a recording."""
     with get_connection() as conn:
@@ -813,7 +831,6 @@ def delete_messages_from(conversation_id: int, message_id: int) -> int:
 # =============================================================================
 # Extended Recording operations
 # =============================================================================
-
 
 
 def get_recordings_for_month(year: int, month: int) -> list[dict[str, Any]]:

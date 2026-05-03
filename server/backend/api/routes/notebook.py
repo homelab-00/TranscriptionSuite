@@ -168,13 +168,30 @@ async def get_recording_detail(recording_id: int) -> dict[str, Any]:
 
 
 @router.delete("/recordings/{recording_id}")
-async def remove_recording(recording_id: int) -> dict[str, str]:
+async def remove_recording(
+    recording_id: int,
+    delete_artifacts: bool = False,
+    artifact_profile_id: int | None = None,
+) -> dict[str, Any]:
     """
     Delete a recording and all associated data.
 
     Deletion order is important for data integrity:
     1. Delete from database first (can be rolled back, critical data)
     2. Then delete audio file (orphan file is safer than orphan record)
+    3. (Story 3.7) When ``delete_artifacts=true`` AND
+       ``artifact_profile_id`` references an existing profile, derive the
+       expected on-disk transcript filename from that profile's template +
+       destination_folder, render it against the recording's metadata,
+       sanitize, and unlink (best-effort). Default is to LEAVE on-disk
+       files (FR48 — least surprise).
+
+    Notebook recordings don't carry a profile snapshot, so the active
+    profile id supplied by the renderer (``artifact_profile_id``) is the
+    only signal the server has for which template was used at export
+    time. If a previous export used a DIFFERENT profile, the derived
+    path won't match and the file remains on disk — harmless, the user
+    can clean it up manually.
     """
     recording = get_recording(recording_id)
     if not recording:
@@ -186,6 +203,8 @@ async def remove_recording(recording_id: int) -> dict[str, str]:
     if not delete_recording(recording_id):
         raise HTTPException(status_code=500, detail="Failed to delete recording")
 
+    artifact_failures: list[str] = []
+
     # 2. Delete audio file AFTER database success
     # If this fails, we have an orphan file (harmless) rather than an orphan record
     try:
@@ -193,8 +212,35 @@ async def remove_recording(recording_id: int) -> dict[str, str]:
             audio_path.unlink()
     except Exception as e:
         logger.warning(f"Orphan file cleanup needed for {audio_path}: {e}")
+        artifact_failures.append(str(audio_path))
 
-    return {"status": "deleted", "id": str(recording_id)}
+    # 3. (Story 3.7 AC3) Opt-in delete of on-disk transcript/summary
+    # export artifacts. Best-effort — surface failures via artifact_failures
+    # but never block the DB delete (right-to-erasure best-effort, R-EL32).
+    if delete_artifacts and artifact_profile_id is not None:
+        from server.core.filename_template import render_and_sanitize
+        from server.database import profile_repository
+
+        profile = profile_repository.get_profile(artifact_profile_id)
+        if profile is not None:
+            public = profile.get("public_fields", {}) or {}
+            template = public.get("filename_template") or "{date} - {title}.txt"
+            destination = public.get("destination_folder")
+            if destination:
+                rendered = render_and_sanitize(template, recording)
+                target = Path(destination) / rendered
+                try:
+                    if target.exists():
+                        target.unlink()
+                except Exception as e:
+                    logger.warning(f"Artifact cleanup failed for {target}: {e}")
+                    artifact_failures.append(str(target))
+
+    return {
+        "status": "deleted",
+        "id": str(recording_id),
+        "artifact_failures": artifact_failures,
+    }
 
 
 @router.put("/recordings/{recording_id}/summary")
@@ -915,7 +961,10 @@ async def get_timeslot_info(
 @router.get("/recordings/{recording_id}/export")
 async def export_recording(
     recording_id: int,
-    format: str = Query("txt", description="Export format: 'txt', 'srt', or 'ass'"),
+    format: str = Query(
+        "txt",
+        description="Export format: 'txt', 'srt', 'ass', or 'plaintext'",
+    ),
 ) -> Response:
     """
     Export a recording's transcription.
@@ -927,15 +976,40 @@ async def export_recording(
     - Speaker labels (if diarization is present)
 
     Formats:
-    - txt: Human-readable text format for pure transcription notes
+    - txt: Verbose human-readable text — full metadata header + transcript
+    - plaintext: FR9 streaming format — paragraph-per-speaker-turn, no
+      subtitle timestamps, no metadata header. Used by the Sprint 2
+      "Download transcript" button (Issue #104, Story 3.4).
     - srt: SubRip subtitle format
     - ass: Advanced SubStation Alpha subtitle format
     """
     requested_format = format.strip().lower()
-    if requested_format not in {"txt", "srt", "ass"}:
+    if requested_format not in {"txt", "srt", "ass", "plaintext"}:
         raise HTTPException(
             status_code=400,
-            detail="Unsupported export format. Supported formats: txt, srt, ass.",
+            detail="Unsupported export format. Supported formats: txt, plaintext, srt, ass.",
+        )
+
+    # Story 3.4 — plaintext is a streaming response that bypasses the
+    # full materialization path used by txt/srt/ass. We branch early so
+    # we don't pay the cost of get_words() / cue building for plaintext.
+    if requested_format == "plaintext":
+        recording = get_recording(recording_id)
+        if not recording:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        from server.core.plaintext_export import stream_plaintext
+        from server.database.database import iter_segments
+
+        title = recording.get("title") or recording.get("filename") or "Recording"
+        rendered_filename = (
+            f"{title.replace(' ', '_')}.txt" if title else f"recording_{recording_id}.txt"
+        )
+        return StreamingResponse(
+            stream_plaintext(recording, iter_segments(recording_id)),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Content-Disposition": _content_disposition("attachment", rendered_filename),
+            },
         )
 
     try:
@@ -1119,6 +1193,94 @@ async def export_recording(
             status_code=500,
             detail=f"Export failed: {type(e).__name__}: {e}",
         ) from e
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Re-export with current profile (Issue #104, Story 3.6)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class ReexportRequest(BaseModel):
+    """Body for ``POST /api/notebook/recordings/{id}/reexport`` (Story 3.6)."""
+
+    profile_id: int
+
+
+class ReexportResponse(BaseModel):
+    """Response shape for the re-export endpoint."""
+
+    status: str
+    path: str
+    filename: str
+
+
+@router.post("/recordings/{recording_id}/reexport", response_model=ReexportResponse)
+async def reexport_recording(recording_id: int, body: ReexportRequest) -> ReexportResponse:
+    """Render the recording's plaintext export using the CURRENT active
+    profile's template and write a NEW file to that profile's
+    destination_folder (FR17 forward-only).
+
+    AC3.6.AC3: the original file from a prior export is NOT deleted —
+    re-export is purely additive. Caller chooses to clean up the old file
+    via the deletion dialog (Story 3.7).
+    """
+    from server.core.filename_template import render_and_sanitize
+    from server.core.plaintext_export import stream_plaintext
+    from server.database import profile_repository
+    from server.database.database import iter_segments
+
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    profile = profile_repository.get_profile(body.profile_id)
+    if profile is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "profile_not_found", "id": body.profile_id},
+        )
+
+    public = profile.get("public_fields", {}) or {}
+    template = public.get("filename_template") or "{date} - {title}.txt"
+    destination = public.get("destination_folder") or ""
+    if not destination:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "destination_folder_unset",
+                "message": (
+                    "The active profile has no destination_folder. "
+                    "Set one in the profile editor before re-exporting."
+                ),
+            },
+        )
+
+    rendered = render_and_sanitize(template, recording)
+    target_path = Path(destination) / rendered
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Stream to disk so an 8-hour transcript doesn't OOM the server.
+    try:
+        with open(target_path, "w", encoding="utf-8") as f:
+            for chunk in stream_plaintext(recording, iter_segments(recording_id)):
+                f.write(chunk)
+    except OSError as exc:
+        logger.error(
+            "Re-export write failed for recording %s to %s: %s",
+            recording_id,
+            target_path,
+            exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "reexport_write_failed", "message": str(exc)},
+        ) from exc
+
+    return ReexportResponse(
+        status="reexported",
+        path=str(target_path),
+        filename=rendered,
+    )
 
 
 def _get_backup_manager() -> DatabaseBackupManager:

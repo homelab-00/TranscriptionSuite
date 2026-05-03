@@ -27,6 +27,7 @@ def create_job(
     task: str,
     translation_target: str | None,
     profile_id: int | None = None,
+    audio_hash: str | None = None,
 ) -> None:
     """Insert a new job row with status='processing'. Called at transcription start.
 
@@ -39,6 +40,11 @@ def create_job(
     affect a running transcription. If the profile is deleted between
     selection and job-start, the snapshot helper returns ``None`` and we
     insert without snapshot fields rather than failing the job.
+
+    When ``audio_hash`` is provided (Issue #104, Story 2.2), it is written
+    atomically with the row insert. The dedup-check endpoint (Story 2.4)
+    queries against this column. Hash is computed by the caller — see
+    ``server.core.audio_utils.sha256_streaming``.
     """
     snapshot_json: str | None = None
     snapshot_schema_version: str | None = None
@@ -58,8 +64,9 @@ def create_job(
             """
             INSERT OR IGNORE INTO transcription_jobs
                 (id, status, source, client_name, language, task,
-                 translation_target, job_profile_snapshot, snapshot_schema_version)
-            VALUES (?, 'processing', ?, ?, ?, ?, ?, ?, ?)
+                 translation_target, job_profile_snapshot, snapshot_schema_version,
+                 audio_hash)
+            VALUES (?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job_id,
@@ -70,9 +77,37 @@ def create_job(
                 translation_target,
                 snapshot_json,
                 snapshot_schema_version,
+                audio_hash,
             ),
         )
         conn.commit()
+
+
+def find_by_audio_hash(audio_hash: str, limit: int = 10) -> list[dict]:
+    """Return prior jobs with matching audio_hash (Issue #104, Story 2.4).
+
+    Used by the dedup-check endpoint to find re-imports of the same audio
+    content. Returns most-recent-first. Per FR4 / R-EL23, the query operates
+    only on the local SQLite DB — no outbound calls.
+
+    NULL hashes are excluded by the equality predicate, so legacy rows
+    (audio_hash IS NULL — see migration 011) never appear as matches.
+    """
+    if not audio_hash:
+        return []
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            SELECT id, source, client_name, created_at, completed_at,
+                   result_text, audio_hash
+            FROM transcription_jobs
+            WHERE audio_hash = ?
+            ORDER BY COALESCE(completed_at, created_at) DESC
+            LIMIT ?
+            """,
+            (audio_hash, limit),
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
 
 def save_result(
@@ -198,6 +233,22 @@ def set_audio_path(job_id: str, audio_path: str) -> None:
         conn.execute(
             "UPDATE transcription_jobs SET audio_path = ? WHERE id = ?",
             (audio_path, job_id),
+        )
+        conn.commit()
+
+
+def set_audio_hash(job_id: str, audio_hash: str) -> None:
+    """Set audio_hash field on an existing job row (Issue #104, Story 2.2).
+
+    Used for the ``/audio`` HTTP endpoint where ``create_job`` runs before
+    the upload tempfile exists; the hash is computed post-save and patched
+    in. The /import endpoint passes the hash directly to ``create_job`` and
+    does not call this function.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE transcription_jobs SET audio_hash = ? WHERE id = ?",
+            (audio_hash, job_id),
         )
         conn.commit()
 

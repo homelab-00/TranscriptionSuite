@@ -137,8 +137,22 @@ PyAnnote 4.x speaker diarization pipeline:
 | `segments` | Transcription segments | id, recording_id, text, start_time, end_time, speaker |
 | `words` | Word-level timestamps | id, segment_id, word, start_time, end_time, confidence |
 | `recordings_fts` | Full-text search index | FTS5 virtual table |
-| `transcription_jobs` | Durability layer | id, status, source, client_name, audio_path, result_text, result_json, delivered |
+| `transcription_jobs` | Durability layer | id, status, source, client_name, audio_path, result_text, result_json, delivered, audio_hash |
 | `chat_history` | LLM conversations | recording_id, messages, model |
+
+#### Audio dedup scope (FR4 / R-EL23)
+
+Issue #104 / Story 2.5: audio dedup operates **per-user-library**. SHA-256 hashes
+are stored in `transcription_jobs.audio_hash` (migration 011) and queried only
+against the local SQLite database via `find_by_audio_hash`. There is no
+federated cross-installation dedup, no outbound network call during dedup-check,
+and no shared registry. Cross-user dedup is an explicit non-goal.
+
+Coverage caveat: Sprint 2 wires the `audio_hash` write into the
+`/api/transcribe/audio` and `/api/transcribe/import` paths. The notebook upload
+path (`/api/notebook/transcribe/upload`) writes to `recordings` (not
+`transcription_jobs`) and does not currently produce a hash; cross-flow dedup
+detection from a notebook upload will be wired in a follow-up sprint.
 
 ### Durability System (3 Waves)
 

@@ -10,6 +10,7 @@ Provides common audio operations:
 
 import gc
 import glob as glob_module
+import hashlib
 import logging
 import os
 import shutil
@@ -23,6 +24,32 @@ from typing import Any
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# 1 MiB read window — large enough to amortize syscall overhead, small enough
+# to keep peak RSS bounded (NFR48). hashlib.sha256 update() is O(chunk_size)
+# and the kernel page cache absorbs sequential reads efficiently.
+_SHA256_CHUNK_BYTES = 1024 * 1024
+
+
+def sha256_streaming(path: str | Path) -> str:
+    """Return the hex SHA-256 digest of a file, reading in 1 MiB chunks.
+
+    Memory bound: 1 MiB regardless of file size. A 1-hour 16 kHz mono
+    int16 WAV is ~115 MiB; an 8-hour file is ~920 MiB. Loading either
+    fully into memory would blow the NFR48 200 MB peak-RSS budget.
+
+    Used by Issue #104 / Story 2.2 to compute audio_hash for dedup. The
+    hash is taken over the raw file bytes the user uploaded (post-tempfile-
+    save) — see sprint-2-design.md §1 for the rationale: this satisfies the
+    J1 "same file imported twice" narrative cheaply, at the cost of being
+    sensitive to format re-encodes (a deferred limitation, not a blocker).
+    """
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(_SHA256_CHUNK_BYTES), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
 
 # Try to import optional dependencies
 try:

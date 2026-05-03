@@ -99,3 +99,108 @@ guard. That belongs to Story 6.11 (Sprint 3 / epic-auto-actions).
 implementer doesn't assume the guard is already in place.
 
 **Re-triage trigger:** Sprint 3 kickoff.
+
+### 2. Notebook-upload path missing `audio_hash` (Sprint 2 dedup gap)
+
+**What:** Sprint 2's Story 2.4 dedup-check queries
+`transcription_jobs.audio_hash`. Both `/api/transcribe/audio` and
+`/api/transcribe/import` write the hash. The dashboard's primary
+file-picker, however, calls `/api/notebook/transcribe/upload`, which
+writes to the `recordings` table — a separate code path that does
+NOT touch `transcription_jobs` at all and therefore does not produce
+or query a hash. Cross-flow detection works (file imported via
+`/audio` yesterday, then via notebook today); same-path re-imports
+through notebook-upload do NOT dedup.
+
+**Why deferred:** Sprint 2 design §1 documented this explicitly. The
+literal AC scoped `audio_hash` to `transcription_jobs`; expanding to
+`recordings` would have required migration 012, plumbing into
+notebook.py, and a unified dedup-check query — outside the Sprint 2
+LOC budget.
+
+**Defense shape:** Migration 012 adds `audio_hash` to `recordings`
+with a covering index. Notebook upload computes the streaming hash
+(reuse `sha256_streaming`) at file-receive time. The dedup-check
+endpoint is extended with a `UNION ALL` over both tables (or a
+single function `find_duplicates_anywhere(hash)` in the repository
+layer that queries both).
+
+**Re-triage trigger:** First user report of "I uploaded the same
+recording twice and the dashboard didn't notice," OR Sprint 3 if
+auto-export workflows surface a need for cross-table dedup before
+that.
+
+### 3. Format-agnostic content dedup via normalized-PCM hash
+
+**What:** Sprint 2 ships the audio_hash as a streaming SHA-256 over
+the raw upload tempfile bytes (post-tempfile-save, pre-normalization).
+This satisfies the J1 "same file imported twice" narrative cheaply,
+but two different encodings of the same audio content (e.g. MP3 vs
+WAV vs M4A from the same source) produce different hashes and do
+NOT dedup against each other. The Story 2.2 AC literal text said
+"normalized PCM (16 kHz mono int16)" — Sprint 2 traded fidelity for
+implementation simplicity (raw-byte hashing happens before the
+audio decode, so dedup-check can fire without paying the decode
+cost up-front).
+
+**Why deferred:** Implementing format-agnostic dedup requires the
+hash to be computed AFTER `convert_to_wav` (or equivalent
+normalization). That moves the hash compute out of the request path
+and into the worker thread, which means the dedup-check endpoint
+needs a different trigger model (post-normalization async event vs
+pre-create_job synchronous call). Sprint 2 chose the simpler path
+to keep the LOC budget under 3500.
+
+**Defense shape:** Add a `normalized_audio_hash` column to
+`transcription_jobs` (and `recordings` once item #2 lands). The
+worker computes `sha256_streaming(normalized_wav_path)` after
+`convert_to_wav` and writes via `set_audio_hash` (existing helper).
+Dedup-check queries BOTH columns — raw hash for "exact same file"
+detection, normalized hash for "same content, different encoding"
+detection. Two hits on the same row are treated as a single match.
+
+**Re-triage trigger:** First user report of "I imported the MP3 and
+then the WAV of the same recording and the dashboard didn't notice."
+
+### 4. DedupPromptModal full choice-flow integration (Sprint 2 wiring gap)
+
+**What:** Sprint 2 ships `DedupPromptModal` (tested standalone) and
+plumbs `dedup_matches` from `/api/transcribe/import` through the
+apiClient into `importQueueStore`. The current integration surfaces
+duplicates as a one-line **toast** ("Duplicate detected: '{name}'…")
+rather than the full AC2.4.AC2 modal flow with **Use existing** /
+**Create new** buttons. The modal component is mounted-ready but no
+caller invokes it.
+
+**Why deferred:** The modal-with-choices flow needs queue-pause
+semantics that don't exist in `importQueueStore`'s current shape
+(jobs run sequentially via internal recursion; no built-in
+"awaiting user decision" state). Implementing it requires either
+a queue redesign OR a separate "dedup decisions" Zustand store
+that mediates between the upload response and the user choice.
+Either approach is ~80–120 LOC and product-design work
+(specifically: what does "Use existing" do? navigate to the prior
+recording? cancel the in-flight job server-side? both?). Sprint 2's
+LOC budget had no room for that decision tree; the toast signal
+was shipped to ensure users at least learn about the duplicate.
+
+**Defense shape:**
+- Add a top-level `DedupChoiceContainer` mounted in App.tsx
+  subscribing to a new `useDedupChoiceStore` (Zustand)
+- `importQueueStore` pushes the matches + a `resolve(choice)` callback
+  into the store and **awaits** the resolution before continuing the
+  queue iteration
+- `DedupPromptModal` is rendered from the container with state from
+  the store
+- "Use existing" → calls `apiClient.cancelTranscription()` to abort
+  the just-started server job, removes the queue entry, and emits a
+  `useAriaAnnouncer` message; the resolve callback unblocks the queue
+  with `'use_existing'`
+- "Create new" → resolve with `'create_new'`; queue continues
+- Cancel/Esc → same as "Use existing" for safety (user clearly
+  doesn't want a duplicate)
+
+**Re-triage trigger:** Sprint 3 kickoff if the toast-only
+detection proves insufficient, OR a user report of "I want to
+navigate to the existing recording when I import a duplicate, not
+have a new entry created."

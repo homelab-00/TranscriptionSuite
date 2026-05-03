@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.41
+  spec_version: 1.0.43
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -19,13 +19,21 @@ meta:
       - components/__tests__/SessionView.test.tsx
       - components/AriaLiveRegion.tsx
       - components/AudioVisualizer.tsx
+      - components/import/__tests__/DedupPromptModal.test.tsx
+      - components/import/DedupPromptModal.tsx
       - components/PopOutWindow.tsx
       - components/profiles/__tests__/EmptyProfileForm.test.tsx
       - components/profiles/__tests__/ModelProfileSelector.test.tsx
+      - components/profiles/__tests__/TemplatePreviewField.test.tsx
       - components/profiles/EmptyProfileForm.tsx
       - components/profiles/ModelProfileSelector.tsx
       - components/profiles/ModelProfilesPanel.tsx
       - components/profiles/ProfileSelector.tsx
+      - components/profiles/TemplatePreviewField.tsx
+      - components/recording/__tests__/DeleteRecordingDialog.test.tsx
+      - components/recording/__tests__/DownloadButtons.test.tsx
+      - components/recording/DeleteRecordingDialog.tsx
+      - components/recording/DownloadButtons.tsx
       - components/Sidebar.tsx
       - components/ui/__tests__/UpdateBanner.test.tsx
       - components/ui/__tests__/UpdateModal.test.tsx
@@ -69,7 +77,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-03T17:04:48.213Z
+    generated_at: 2026-05-03T21:30:36.109Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -242,6 +250,7 @@ foundation:
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
+        - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
         - shadow-2xl
@@ -295,6 +304,7 @@ foundation:
         - rounded-lg
         - rounded-md
         - rounded-r-full
+        - rounded-sm
         - rounded-t-2xl
         - rounded-tl-none
         - rounded-tr-none
@@ -327,6 +337,7 @@ foundation:
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
+        - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
         - text-[10px]
@@ -429,6 +440,9 @@ utility_allowlist:
     - animate-in
     - animate-ping
     - animate-pulse
+    - aria-invalid
+    - aria-label
+    - aria-labels
     - backdrop-blur-2xl
     - backdrop-blur-3xl
     - backdrop-blur-md
@@ -468,6 +482,8 @@ utility_allowlist:
     - bg-cyan-500/80
     - bg-emerald-400/10
     - bg-glass-100
+    - bg-glass-100/30
+    - bg-glass-100/50
     - bg-glass-200
     - bg-glass-surface
     - bg-green-500
@@ -672,6 +688,7 @@ utility_allowlist:
     - hover:bg-white/5
     - hover:bg-white/8
     - hover:bg-yellow-400/30
+    - hover:border-accent-cyan/50
     - hover:border-white/10
     - hover:border-white/20
     - hover:opacity-85
@@ -713,9 +730,12 @@ utility_allowlist:
     - left-3
     - left-4
     - left-8
+    - lg:col-span-2
     - lg:flex
     - lg:grid-cols-2
+    - lg:grid-cols-3
     - lg:p-10
+    - line-clamp-2
     - m-0
     - mask-gradient-right
     - max-h-32
@@ -754,6 +774,7 @@ utility_allowlist:
     - min-w-100
     - min-w-25
     - min-w-32.5
+    - min-w-36
     - min-w-42.5
     - min-w-6
     - ml-0.5
@@ -775,7 +796,7 @@ utility_allowlist:
     - mt-4
     - mt-6
     - mt-8
-    - mx-2
+    - mt-auto
     - mx-auto
     - my-1
     - my-2
@@ -812,8 +833,10 @@ utility_allowlist:
     - pb-2
     - pb-4
     - pb-8
+    - pl-0
     - pl-1
     - pl-12
+    - pl-2
     - pl-4
     - pl-5
     - pl-6
@@ -877,6 +900,7 @@ utility_allowlist:
     - rounded-lg
     - rounded-md
     - rounded-r-full
+    - rounded-sm
     - rounded-t-2xl
     - rounded-tl-none
     - rounded-tr-none
@@ -946,6 +970,7 @@ utility_allowlist:
     - text-emerald-200
     - text-emerald-400
     - text-green-400
+    - text-indigo-400
     - text-left
     - text-lg
     - text-neutral-100
@@ -1032,7 +1057,6 @@ utility_allowlist:
     - w-7
     - w-72
     - w-8
-    - w-80
     - w-9
     - w-full
     - w-px
@@ -1074,6 +1098,7 @@ utility_allowlist:
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
     - shadow-[0_0_5px_rgba(239,22,238,0.5)]
+    - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
     - text-[10px]
@@ -1610,6 +1635,57 @@ component_contracts:
     state_rules:
       - id: active-option-dot
         rule: Selected option indicator dot color/shadow must follow accentColor variant mapping.
+  DedupPromptModal:
+    file: components/import/DedupPromptModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  DeleteRecordingDialog:
+    file: components/recording/DeleteRecordingDialog.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  DownloadButtons:
+    file: components/recording/DownloadButtons.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   EmptyProfileForm:
     file: components/profiles/EmptyProfileForm.tsx
     required_tokens:
@@ -2403,6 +2479,23 @@ component_contracts:
     state_rules:
       - id: status-color-map
         rule: Each status maps to registered bg/shadow token pair and cannot drift from status palette.
+  TemplatePreviewField:
+    file: components/profiles/TemplatePreviewField.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   TimeSection:
     file: components/views/NotebookView.tsx
     required_tokens:

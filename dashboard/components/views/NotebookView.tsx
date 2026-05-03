@@ -58,6 +58,8 @@ import {
 } from '../../src/services/modelCapabilities';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
+import { DeleteRecordingDialog } from '../recording/DeleteRecordingDialog';
+import { useActiveProfileStore } from '../../src/stores/activeProfileStore';
 import { getConfig, setConfig } from '../../src/config/store';
 
 // GH #92: same allow-list as AddNoteModal's <input accept="…"> below — keep
@@ -262,9 +264,12 @@ const NoteActionMenu: React.FC<MenuProps> = ({
   onPlay,
 }) => {
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const activeProfileId = useActiveProfileStore((s) => s.activeProfileId);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(noteTitle);
   const [renameLoading, setRenameLoading] = useState(false);
+  // Issue #104, Story 3.7 — DeleteRecordingDialog state.
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const getValidRecordingId = (): number | null =>
     typeof recordingId === 'number' && Number.isFinite(recordingId) ? recordingId : null;
@@ -319,24 +324,40 @@ const NoteActionMenu: React.FC<MenuProps> = ({
     onClose();
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     const targetId = getValidRecordingId();
     if (targetId === null) {
       toast.error('Invalid recording ID.');
       onClose();
       return;
     }
-    if (
-      !(await confirm('Delete this recording? This cannot be undone.', {
-        danger: true,
-        confirmLabel: 'Delete',
-      }))
-    )
+    // Story 3.7 — open the deletion dialog with the on-disk-artifact
+    // checkbox; actual deletion fires from handleConfirmDelete.
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = async (deleteArtifacts: boolean) => {
+    setDeleteDialogOpen(false);
+    const targetId = getValidRecordingId();
+    if (targetId === null) {
+      onClose();
       return;
+    }
     try {
-      await apiClient.deleteRecording(targetId);
+      const result = await apiClient.deleteRecording(targetId, {
+        deleteArtifacts,
+        artifactProfileId: deleteArtifacts ? activeProfileId : null,
+      });
       await Promise.resolve(onRefresh());
-      toast.success('Recording deleted.');
+      // Surface any artifact-deletion failures so the user knows the DB
+      // delete succeeded but a file unlink didn't (R-EL32 best-effort).
+      if (result.artifact_failures?.length) {
+        toast.error(
+          `Recording deleted, but ${result.artifact_failures.length} on-disk file(s) could not be removed.`,
+        );
+      } else {
+        toast.success('Recording deleted.');
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete recording.';
       toast.error(message);
@@ -393,6 +414,15 @@ const NoteActionMenu: React.FC<MenuProps> = ({
   return (
     <>
       {confirmDialog && createPortal(confirmDialog, document.body)}
+      <DeleteRecordingDialog
+        open={deleteDialogOpen}
+        recordingName={noteTitle}
+        onCancel={() => {
+          setDeleteDialogOpen(false);
+          onClose();
+        }}
+        onConfirm={handleConfirmDelete}
+      />
       {createPortal(
         <div
           className="fixed inset-0 z-50"

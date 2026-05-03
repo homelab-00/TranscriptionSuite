@@ -25,6 +25,7 @@ import type {
   RecordingDetail,
   RecordingTranscription,
   TranscriptionAccepted,
+  DedupCheckResponse,
   CalendarResponse,
   TimeslotResponse,
   ExportFormat,
@@ -560,9 +561,35 @@ export class APIClient {
     return this.get(`/api/notebook/recordings/${id}`);
   }
 
-  /** DELETE /api/notebook/recordings/:id */
-  async deleteRecording(id: number): Promise<{ status: string; id: string }> {
-    return this.del(`/api/notebook/recordings/${id}`);
+  /**
+   * DELETE /api/notebook/recordings/:id
+   *
+   * Issue #104, Story 3.7 — when `deleteArtifacts` is true AND
+   * `artifactProfileId` is provided, the server renders the artifact
+   * filename from that profile's template + destination, sanitizes,
+   * and unlinks. Failures (permission denied, file gone) surface in
+   * `artifact_failures` but do NOT block the DB delete (R-EL32
+   * right-to-erasure best-effort).
+   *
+   * Notebook recordings don't carry a profile snapshot, so the
+   * currently-active profile id is the renderer's best guess. If the
+   * recording was originally exported with a different profile, the
+   * derived path won't match and the file remains on disk — harmless.
+   */
+  async deleteRecording(
+    id: number,
+    opts: { deleteArtifacts?: boolean; artifactProfileId?: number | null } = {},
+  ): Promise<{ status: string; id: string; artifact_failures: string[] }> {
+    const params = new URLSearchParams();
+    if (opts.deleteArtifacts) params.set('delete_artifacts', 'true');
+    if (opts.artifactProfileId != null) {
+      params.set('artifact_profile_id', String(opts.artifactProfileId));
+    }
+    const query = params.toString();
+    const url = query
+      ? `/api/notebook/recordings/${id}?${query}`
+      : `/api/notebook/recordings/${id}`;
+    return this.del(url);
   }
 
   /** PATCH /api/notebook/recordings/:id/title */
@@ -666,6 +693,29 @@ export class APIClient {
   }
 
   // ─── File Import (Session) ────────────────────────────────────────────────
+
+  /**
+   * POST /api/transcribe/import/dedup-check — Issue #104, Story 2.4.
+   * Returns prior transcription_jobs rows with a matching audio_hash.
+   * Idempotent and read-only (FR4 / R-EL23 — no outbound network).
+   */
+  async dedupCheck(audioHash: string): Promise<DedupCheckResponse> {
+    return this.post('/api/transcribe/import/dedup-check', { audio_hash: audioHash });
+  }
+
+  /**
+   * POST /api/notebook/recordings/{id}/reexport — Issue #104, Story 3.6.
+   * Renders the recording's plaintext export using the given profile's
+   * template; writes a NEW file. Does NOT delete the prior export file.
+   */
+  async reexportRecording(
+    recordingId: number,
+    profileId: number,
+  ): Promise<{ status: string; path: string; filename: string }> {
+    return this.post(`/api/notebook/recordings/${recordingId}/reexport`, {
+      profile_id: profileId,
+    });
+  }
 
   /**
    * POST /api/transcribe/import — start a background file-import transcription.

@@ -404,6 +404,14 @@ export interface ElectronAPI {
     getDownloadsPath: () => Promise<string>;
     writeText: (filePath: string, content: string) => Promise<void>;
     selectFolder: () => Promise<string | null>;
+    /**
+     * Issue #104, Story 3.5 — native file-save dialog. Returns the user-
+     * chosen absolute path, or null if cancelled.
+     */
+    saveFile: (opts: {
+      defaultPath?: string;
+      filters?: { name: string; extensions: string[] }[];
+    }) => Promise<string | null>;
   };
   watcher: {
     startSession: (folderPath: string) => Promise<void>;
@@ -729,6 +737,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     writeText: (filePath: string, content: string) =>
       ipcRenderer.invoke('file:writeText', filePath, content) as Promise<void>,
     selectFolder: () => ipcRenderer.invoke('dialog:selectFolder') as Promise<string | null>,
+    saveFile: (opts) => ipcRenderer.invoke('dialog:saveFile', opts) as Promise<string | null>,
   },
   watcher: {
     startSession: (folderPath: string) =>

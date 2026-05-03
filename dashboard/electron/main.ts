@@ -1137,6 +1137,29 @@ ipcMain.handle('dialog:selectFolder', async () => {
   return result.filePaths[0];
 });
 
+// Issue #104, Story 3.5 — native file-save dialog for Download buttons.
+ipcMain.handle(
+  'dialog:saveFile',
+  async (
+    _event,
+    opts: {
+      defaultPath?: string;
+      filters?: { name: string; extensions: string[] }[];
+    },
+  ) => {
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: opts?.defaultPath,
+      filters: opts?.filters ?? [
+        { name: 'Text', extensions: ['txt'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePath) return null;
+    return result.filePath;
+  },
+);
+
 // ─── Docker Management IPC ──────────────────────────────────────────────────
 
 ipcMain.handle('docker:available', async () => {
