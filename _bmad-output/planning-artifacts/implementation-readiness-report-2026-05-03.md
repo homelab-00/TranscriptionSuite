@@ -1,10 +1,10 @@
 ---
 date: 2026-05-03
 project: TranscriptionSuite
-prd_under_review: _bmad-output/planning-artifacts/prd.md
+prd_under_review: _bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
 stepsCompleted: ['step-01-document-discovery', 'step-02-prd-analysis', 'step-03-epic-coverage-validation', 'step-04-ux-alignment', 'step-05-epic-quality-review', 'step-06-final-assessment']
 filesIncluded:
-  prd: _bmad-output/planning-artifacts/prd.md
+  prd: _bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
   architecture: 'embedded-in-prd (ADRs 001-008 + API Design Convention + Implementation Considerations)'
   epics: 'declared-in-prd-frontmatter-only (epic-a/b/c groupings — no separate epics-and-stories file)'
   ux: 'embedded-in-prd (7 user journeys + cross-cutting accessibility AC)'
@@ -20,7 +20,7 @@ minorIssues: 4
 
 **Date:** 2026-05-03
 **Project:** TranscriptionSuite
-**PRD Under Review:** `_bmad-output/planning-artifacts/prd.md` — *Audio Notebook QoL pack* (Issue #104)
+**PRD Under Review:** `_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md` — *Audio Notebook QoL pack* (Issue #104)
 
 ---
 
@@ -32,7 +32,7 @@ minorIssues: 4
 ### Files Found in `planning_artifacts/`
 
 **PRD Documents:**
-- `prd.md` (90,995 bytes, modified 2026-05-03) — Audio Notebook QoL pack PRD (single whole document)
+- `prd-issue-104-audio-notebook-qol.md` (90,995 bytes, modified 2026-05-03) — Audio Notebook QoL pack PRD (single whole document)
 
 **Architecture Documents:**
 - *(none found at the planning-artifacts root)*
@@ -50,27 +50,27 @@ minorIssues: 4
 
 | Type | Whole | Sharded | Decision |
 |---|---|---|---|
-| PRD | ✅ `prd.md` | ❌ | Use whole `prd.md` |
+| PRD | ✅ `prd-issue-104-audio-notebook-qol.md` | ❌ | Use whole `prd-issue-104-audio-notebook-qol.md` |
 | Architecture | ❌ | ❌ | **Missing — must verify whether embedded in PRD** |
 | Epics | ❌ stand-alone | ❌ | **Missing — must verify whether embedded in PRD** |
 | UX | ❌ | ❌ | **Missing — must verify whether embedded in PRD** |
 
 ### Duplicates
-None detected. No `*prd*` folder or `*prd-*.md` siblings exist alongside `prd.md`.
+None detected. No `*prd*` folder or `*prd-*.md` siblings exist alongside `prd-issue-104-audio-notebook-qol.md`.
 
 ### Critical Issues / Warnings
-- ⚠️ **No stand-alone Architecture, Epics, or UX documents found.** Many BMad PRDs embed an Epic Breakdown, UX/UI considerations, and a Solution Architecture / Technical Design section inline. The PRD will be inspected in Step 2 to determine whether those sections exist inside `prd.md` itself, or whether the planning artifacts are genuinely incomplete.
+- ⚠️ **No stand-alone Architecture, Epics, or UX documents found.** Many BMad PRDs embed an Epic Breakdown, UX/UI considerations, and a Solution Architecture / Technical Design section inline. The PRD will be inspected in Step 2 to determine whether those sections exist inside `prd-issue-104-audio-notebook-qol.md` itself, or whether the planning artifacts are genuinely incomplete.
 - ⚠️ Implementation specs in `_bmad-output/implementation-artifacts/` are **out of scope** for this readiness check (they are post-planning artifacts). They will not be used as substitutes for missing planning docs.
 
 ### Resolution Plan
-Proceed to Step 2 — PRD Analysis. During Step 2 we will inspect `prd.md` for embedded epics / UX / architecture and reclassify the inventory above accordingly before judging epic coverage in Step 3.
+Proceed to Step 2 — PRD Analysis. During Step 2 we will inspect `prd-issue-104-audio-notebook-qol.md` for embedded epics / UX / architecture and reclassify the inventory above accordingly before judging epic coverage in Step 3.
 
 
 ---
 
 ## Step 2 — PRD Analysis
 
-### Document Structure Found Inside `prd.md`
+### Document Structure Found Inside `prd-issue-104-audio-notebook-qol.md`
 
 The "missing" Architecture, UX, and Epics docs from Step 1 are partially **embedded inline** in the PRD:
 
@@ -465,7 +465,7 @@ The profile system is foundational across F1, F2, F5 (and dependent for the Webh
 
 ### UX Document Status
 
-**No stand-alone UX document.** UX content is **embedded inline in `prd.md`** as:
+**No stand-alone UX document.** UX content is **embedded inline in `prd-issue-104-audio-notebook-qol.md`** as:
 - `## User Journeys` — 7 journeys (J1–J7), 350+ lines, narrative format with persona/opening/rising-action/climax/resolution/reveals
 - `## Journey Requirements Summary` — capability-to-journey-to-feature traceability table
 - `### Desktop App — Platform & Integration Deltas` — accessibility cross-cutting AC + system integration deltas (file dialogs, folder picker, keychain)
@@ -859,5 +859,5 @@ This assessment identified **17 issues** across **3 severity tiers** spanning **
 
 **Assessment Date:** 2026-05-03
 **Assessor:** Implementation Readiness skill (PM agent persona) for Bill
-**PRD Reviewed:** `_bmad-output/planning-artifacts/prd.md` (1,320 lines, version dated 2026-05-02)
+**PRD Reviewed:** `_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md` (1,320 lines, version dated 2026-05-02)
 **Project:** TranscriptionSuite — Audio Notebook QoL pack (Issue #104)

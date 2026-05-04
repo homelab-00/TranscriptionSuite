@@ -1,12 +1,12 @@
 ---
 project_name: 'TranscriptionSuite'
 date: '2026-05-03'
-source_prd: '_bmad-output/planning-artifacts/prd.md'
+source_prd: '_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md'
 source_readiness_report: '_bmad-output/planning-artifacts/implementation-readiness-report-2026-05-03.md'
 restructure_origin: 'Readiness report Step 5 §G (Recommended Restructuring) — overrides PRD frontmatter `plannedEpicGroupings`'
 stepsCompleted: ['step-01-validate', 'step-02-design-epics', 'step-03-create-stories', 'step-04-final-validation']
 inputDocuments:
-  - '_bmad-output/planning-artifacts/prd.md'
+  - '_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md'
   - '_bmad-output/planning-artifacts/implementation-readiness-report-2026-05-03.md'
   - '_bmad-output/planning-artifacts/handoff-prompts-readiness-fixes.md'
   - 'docs/project-context.md'

@@ -5,7 +5,7 @@ project: TranscriptionSuite
 scope: Full epic — 56 stories across 5 sprints, 8 sub-epics
 status: epic complete; gh-104-prd ready to merge to main
 artifacts:
-  - _bmad-output/planning-artifacts/prd.md
+  - _bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
   - _bmad-output/planning-artifacts/epics.md
   - _bmad-output/implementation-artifacts/sprint-1-design.md
   - _bmad-output/implementation-artifacts/sprint-2-design.md

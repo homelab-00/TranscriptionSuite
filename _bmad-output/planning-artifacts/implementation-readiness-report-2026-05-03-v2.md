@@ -2,12 +2,12 @@
 date: 2026-05-03
 project: TranscriptionSuite
 report_version: v2
-prd_under_review: _bmad-output/planning-artifacts/prd.md
+prd_under_review: _bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
 epics_under_review: _bmad-output/planning-artifacts/epics.md
 v1_report: _bmad-output/planning-artifacts/implementation-readiness-report-2026-05-03.md
 stepsCompleted: ['step-01-document-discovery', 'step-02-prd-analysis', 'step-03-epic-coverage-validation', 'step-04-ux-alignment', 'step-05-epic-quality-review', 'step-06-final-assessment']
 filesIncluded:
-  prd: _bmad-output/planning-artifacts/prd.md (1418 lines, revisionsApplied=[ADR-009, kbd-contract, FR15-downscope, visual-spec, FR15-narrative-cleanup])
+  prd: _bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md (1418 lines, revisionsApplied=[ADR-009, kbd-contract, FR15-downscope, visual-spec, FR15-narrative-cleanup])
   architecture: 'embedded-in-prd (ADRs 001-009 + API Design + Diarization-Review Keyboard Contract + Visual Affordance Specification + Implementation Considerations)'
   epics: '_bmad-output/planning-artifacts/epics.md (2515 lines; 8 epics / 57 stories / 196 BDD ACs) — supersedes PRD frontmatter plannedEpicGroupings'
   ux: 'embedded-in-prd (7 user journeys + cross-cutting accessibility AC + canonical Keyboard Contract + Visual Affordance UI Contract spec)'
@@ -30,7 +30,7 @@ v1Comparison:
 
 **Date:** 2026-05-03
 **Project:** TranscriptionSuite
-**PRD Under Review:** `_bmad-output/planning-artifacts/prd.md` — *Audio Notebook QoL pack* (Issue #104)
+**PRD Under Review:** `_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md` — *Audio Notebook QoL pack* (Issue #104)
 **Epics Under Review:** `_bmad-output/planning-artifacts/epics.md`
 **v1 Report:** `_bmad-output/planning-artifacts/implementation-readiness-report-2026-05-03.md`
 
@@ -46,7 +46,7 @@ v1Comparison:
 ### Files Found
 
 **PRD Documents:**
-- `prd.md` (99,936 bytes, 1,418 lines, modified 2026-05-03) — Audio Notebook QoL pack PRD with revisions applied.
+- `prd-issue-104-audio-notebook-qol.md` (99,936 bytes, 1,418 lines, modified 2026-05-03) — Audio Notebook QoL pack PRD with revisions applied.
 
 **Epics & Stories Documents:**
 - `epics.md` (128,790 bytes, 2,515 lines, modified 2026-05-03) — **NEW since v1**. 8 epics, 57 stories, 196 BDD ACs.
@@ -66,7 +66,7 @@ v1Comparison:
 
 | Type | v1 Status | v2 Status | Decision |
 |---|---|---|---|
-| PRD | ✅ `prd.md` (whole) | ✅ `prd.md` (whole, revised) | Use whole `prd.md` |
+| PRD | ✅ `prd-issue-104-audio-notebook-qol.md` (whole) | ✅ `prd-issue-104-audio-notebook-qol.md` (whole, revised) | Use whole `prd-issue-104-audio-notebook-qol.md` |
 | Architecture | ❌ embedded-only | ✅ embedded-only **+ ADR-009 added** | Use embedded ADRs 001-009 |
 | Epics | ❌ frontmatter-declaration-only | ✅ **`epics.md` exists** (8 epics / 57 stories) | Use `epics.md` — supersedes `plannedEpicGroupings` in PRD frontmatter |
 | UX | ❌ embedded-only | ✅ embedded **+ Keyboard Contract + Visual Spec subsections** | Use embedded UX content |
@@ -84,7 +84,7 @@ Proceed with full coverage analysis using the new `epics.md` as the canonical de
 
 ## Step 2 — PRD Analysis (v2 — diff from v1)
 
-### Document Structure (Inside `prd.md`)
+### Document Structure (Inside `prd-issue-104-audio-notebook-qol.md`)
 
 | Inline Section | v1 | v2 | Δ |
 |---|---|---|---|
@@ -252,7 +252,7 @@ Performed audit on all 196 BDD ACs across the 57 stories. **No story introduces 
 
 ### UX Document Status
 
-UX content remains embedded inline in `prd.md` as in v1, but with **two new canonical subsections added**:
+UX content remains embedded inline in `prd-issue-104-audio-notebook-qol.md` as in v1, but with **two new canonical subsections added**:
 - **Diarization-Review Keyboard Contract** (PRD line 900) — resolves J4↔J7 conflict
 - **Visual Affordance Specification (UI Contract)** (PRD line 922) — resolves visual-spec gap
 
@@ -671,7 +671,7 @@ The restructure adopted the v1 architecture guidance **without modification or h
 **Assessment Date:** 2026-05-03
 **Assessor:** Implementation Readiness skill (PM agent persona) for Bill
 **Documents Reviewed:**
-- `_bmad-output/planning-artifacts/prd.md` (1,418 lines, revisionsApplied=[ADR-009, kbd-contract, FR15-downscope, visual-spec, FR15-narrative-cleanup])
+- `_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md` (1,418 lines, revisionsApplied=[ADR-009, kbd-contract, FR15-downscope, visual-spec, FR15-narrative-cleanup])
 - `_bmad-output/planning-artifacts/epics.md` (2,515 lines; 8 epics / 57 stories / 196 BDD ACs)
 - `_bmad-output/planning-artifacts/implementation-readiness-report-2026-05-03.md` (v1 report, preserved unmodified for diff)
 

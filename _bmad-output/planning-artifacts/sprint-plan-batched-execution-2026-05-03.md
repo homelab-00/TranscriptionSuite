@@ -3,7 +3,7 @@ date: 2026-05-03
 purpose: Five sequential sprint prompts for batched execution of the Audio Notebook QoL pack (Issue #104), replacing per-story BMad cycle with sprint-scoped sessions
 sequence: sprint-1 (foundations) → sprint-2 (files) → sprint-3 (speakers) → sprint-4 (auto-actions) → sprint-5 (webhook)
 session_origin: post-readiness conversational planning, 2026-05-03
-prd_under_execution: _bmad-output/planning-artifacts/prd.md
+prd_under_execution: _bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
 epics_under_execution: _bmad-output/planning-artifacts/epics.md
 readiness_verdict: READY (per implementation-readiness-report-2026-05-03-v2.md)
 target_runtime: Claude Code, Opus 4.7, xHigh thinking, 1M token context
@@ -101,7 +101,7 @@ Reproduced from `epics.md` § "Epic Dependency Graph":
 
 ```
 @_bmad-output/planning-artifacts/epics.md
-@_bmad-output/planning-artifacts/prd.md
+@_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
 @_bmad-output/planning-artifacts/implementation-readiness-report-2026-05-03-v2.md
 @CLAUDE.md
 @docs/index.md
@@ -173,7 +173,7 @@ Use Opus 4.7 reasoning fully. 1M context — load files freely.
 
 ```
 @_bmad-output/planning-artifacts/epics.md
-@_bmad-output/planning-artifacts/prd.md
+@_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
 @_bmad-output/implementation-artifacts/sprint-1-design.md
 @CLAUDE.md
 
@@ -240,7 +240,7 @@ Use Opus 4.7 reasoning fully. 1M context — load files freely.
 
 ```
 @_bmad-output/planning-artifacts/epics.md
-@_bmad-output/planning-artifacts/prd.md
+@_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
 @_bmad-output/implementation-artifacts/sprint-1-design.md
 @_bmad-output/implementation-artifacts/sprint-2-design.md
 @CLAUDE.md
@@ -255,8 +255,8 @@ Depends on Sprint 1. Sprint 2 not strictly required but assumed merged.
 ## Workflow
 
 1. DESIGN PASS — Read all 14 stories' ACs PLUS the PRD's "Diarization-Review
-   Keyboard Contract" subsection (~prd.md line 900–920) and "Visual Affordance
-   Specification" UX-DR3 (per-turn confidence chip — prd.md ~line 922–968)
+   Keyboard Contract" subsection (~prd-issue-104-audio-notebook-qol.md line 900–920) and "Visual Affordance
+   Specification" UX-DR3 (per-turn confidence chip — prd-issue-104-audio-notebook-qol.md ~line 922–968)
    and ADR-009 lifecycle (v2 readiness report ~line 112–115). Write
    `_bmad-output/implementation-artifacts/sprint-3-design.md` covering:
    alias storage (with FK cascade), REST shape, alias substitution algorithm
@@ -311,7 +311,7 @@ Use Opus 4.7 reasoning fully. 1M context — load files freely.
 
 ```
 @_bmad-output/planning-artifacts/epics.md
-@_bmad-output/planning-artifacts/prd.md
+@_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
 @_bmad-output/implementation-artifacts/sprint-3-design.md
 @CLAUDE.md
 
@@ -324,7 +324,7 @@ Implement Stories 6.1–6.11 (epic-auto-actions; lines 1652–2032 of epics.md).
 ## Workflow
 
 1. DESIGN PASS — Read all 11 stories' ACs PLUS the durability invariant in
-   CLAUDE.md ("AVOID DATA LOSS AT ALL COSTS") and FR30–39 in prd.md. Write
+   CLAUDE.md ("AVOID DATA LOSS AT ALL COSTS") and FR30–39 in prd-issue-104-audio-notebook-qol.md. Write
    `_bmad-output/implementation-artifacts/sprint-4-design.md` covering:
    auto-action toggle schema on profiles, auto-summary lifecycle hook
    (where it fires in transcription pipeline), auto-export lifecycle hook,
@@ -384,7 +384,7 @@ Use Opus 4.7 reasoning fully. 1M context — load files freely.
 
 ```
 @_bmad-output/planning-artifacts/epics.md
-@_bmad-output/planning-artifacts/prd.md
+@_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
 @_bmad-output/implementation-artifacts/sprint-4-design.md
 @CLAUDE.md
 

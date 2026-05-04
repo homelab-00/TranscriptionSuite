@@ -14,12 +14,12 @@ session_origin: implementation-readiness-check-v1
 ## Prompt 1 of 3 — Edit the PRD (apply 4 fixes inline)
 
 ```
-@_bmad-output/planning-artifacts/prd.md
+@_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
 @_bmad-output/planning-artifacts/implementation-readiness-report-2026-05-03.md
 /bmad-edit-prd
 
 Apply the four PRD fixes called out as Critical/Major in the readiness
-report. All four edits land INSIDE prd.md (do not create separate
+report. All four edits land INSIDE prd-issue-104-audio-notebook-qol.md (do not create separate
 architecture or UX files). Keep edits surgical — preserve the existing
 structure, FR/NFR/R-EL/ADR numbering, and Appendix A/B/C cross-references.
 
@@ -102,7 +102,7 @@ and whether anything blocked the edits.
 ## Prompt 2 of 3 — Create epics and stories (8-epic restructure)
 
 ```
-@_bmad-output/planning-artifacts/prd.md
+@_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
 @_bmad-output/planning-artifacts/implementation-readiness-report-2026-05-03.md
 /bmad-create-epics-and-stories
 
@@ -197,7 +197,7 @@ forward-dependency rules, STOP and flag it — do not invent a workaround.
 ## Prompt 3 of 3 — Re-run readiness check
 
 ```
-@_bmad-output/planning-artifacts/prd.md
+@_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md
 @_bmad-output/planning-artifacts/epics.md
 @_bmad-output/planning-artifacts/implementation-readiness-report-2026-05-03.md
 /bmad-check-implementation-readiness

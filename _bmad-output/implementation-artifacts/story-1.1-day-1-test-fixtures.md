@@ -282,9 +282,9 @@ If any of those fixtures are wrong or under-spec, every downstream story has to 
 
 - [Source: `_bmad-output/planning-artifacts/epics.md` lines 311-345 — Story 1.1 ACs verbatim]
 - [Source: `_bmad-output/planning-artifacts/epics.md` lines 162-169 — Day-1 Dependencies and Day-1 Test Fixtures lists]
-- [Source: `_bmad-output/planning-artifacts/prd.md` lines 1232-1242 — NFR51–NFR55 (Test Coverage & Enforcement)]
-- [Source: `_bmad-output/planning-artifacts/prd.md` line 891 — Day-1 Test Infrastructure Commitments]
-- [Source: `_bmad-output/planning-artifacts/prd.md` lines 1244-1252 — PRD Assumptions #3 and #4 (pytest-benchmark, flake8-tidy-imports)]
+- [Source: `_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md` lines 1232-1242 — NFR51–NFR55 (Test Coverage & Enforcement)]
+- [Source: `_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md` line 891 — Day-1 Test Infrastructure Commitments]
+- [Source: `_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md` lines 1244-1252 — PRD Assumptions #3 and #4 (pytest-benchmark, flake8-tidy-imports)]
 - [Source: `_bmad-output/planning-artifacts/implementation-readiness-report-2026-05-03-v2.md` lines 626-644 — Recommended Sprint 0 ordering and per-feature test minimums]
 - [Source: `server/backend/tests/conftest.py` — existing fixtures that must be preserved]
 - [Source: `server/backend/pyproject.toml` lines 84-104 — current dev deps and pytest config]

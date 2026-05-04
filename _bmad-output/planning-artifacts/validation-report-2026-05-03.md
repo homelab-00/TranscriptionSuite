@@ -1,5 +1,5 @@
 ---
-validationTarget: '_bmad-output/planning-artifacts/prd.md'
+validationTarget: '_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md'
 validationDate: '2026-05-03'
 validationSkill: 'bmad-validate-prd'
 inputDocuments:
@@ -48,14 +48,14 @@ postValidationFollowUp:
 
 # PRD Validation Report
 
-**PRD Being Validated:** `_bmad-output/planning-artifacts/prd.md`
+**PRD Being Validated:** `_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md`
 **Validation Date:** 2026-05-03
 **Validator:** bmad-validate-prd skill
 **Context:** Post-edit validation following Prompt 1 of `handoff-prompts-readiness-fixes.md`. Four surgical fixes applied (ADR-009, kbd-contract, FR15-downscope, visual-spec). This report provides structural-integrity confirmation distinct from `bmad-check-implementation-readiness` (the heavier readiness check that depends on epics).
 
 ## Input Documents
 
-- PRD: `_bmad-output/planning-artifacts/prd.md` (1408 lines, BMAD Standard) ✓
+- PRD: `_bmad-output/planning-artifacts/prd-issue-104-audio-notebook-qol.md` (1408 lines, BMAD Standard) ✓
 - Project Context: `docs/project-context.md` ✓
 - Project Index: `docs/index.md` ✓
 - Dev README: `docs/README_DEV.md` ✓
