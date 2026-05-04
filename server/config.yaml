@@ -715,3 +715,14 @@ durability:
     # Startup already runs orphan recovery once. Set to 0 to disable periodic sweeps.
     # Default: 30
     orphan_sweep_interval_minutes: 30
+
+# Issue #104, Sprint 4 — auto-summary and auto-export coordinator settings.
+auto_actions:
+    # How often (in seconds) the deferred-export sweeper re-checks rows whose
+    # destination was missing at completion time. When the destination comes
+    # back online, the row's auto_export_status flips from 'deferred' back to
+    # 'success' on the next sweep. Also re-fires auto_summary 'retry_pending'
+    # rows (Story 6.11). Set to 0 to disable the sweeper entirely.
+    # Default: 30
+    deferred_export_sweep_interval_s: 30.0
+

@@ -386,6 +386,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     _cleanup_task = None
     _orphan_sweep_task = None
+    _deferred_export_sweep_task = None
 
     config = get_config()
     _log_time("config loaded")
@@ -469,6 +470,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
     else:
         logger.info("Audio cleanup disabled (cleanup_enabled=false)")
+
+    # Schedule periodic deferred-export sweeper (Issue #104, Story 6.8 / R-EL12).
+    # The sweeper re-fires auto_export rows whose destination came back online
+    # since they were marked 'deferred', and re-fires auto_summary rows in
+    # 'retry_pending' (Story 6.11). Mirrors audio_cleanup's cancel-safe shape.
+    auto_actions_config = config.config.get("auto_actions", {})
+    _sweep_interval_s = auto_actions_config.get("deferred_export_sweep_interval_s", 30.0)
+
+    if _sweep_interval_s > 0:
+        from server.core.auto_action_sweeper import periodic_deferred_export_sweep
+
+        _deferred_export_sweep_task = asyncio.create_task(
+            periodic_deferred_export_sweep(interval_s=_sweep_interval_s)
+        )
+        _log_time("deferred-export sweep scheduled (async, periodic)")
+        logger.info("Deferred-export sweep scheduled (interval=%.1fs)", _sweep_interval_s)
+    else:
+        logger.info(
+            "Deferred-export sweep disabled (deferred_export_sweep_interval_s=%.1f)",
+            _sweep_interval_s,
+        )
 
     # Orphan sweep scheduling deferred until after model manager creation (needs job tracker)
     _orphan_sweep_interval = durability_config.get("orphan_sweep_interval_minutes", 30)
@@ -612,6 +634,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             await _orphan_sweep_task
         except asyncio.CancelledError:
             logger.debug("Orphan sweep task cancelled")
+
+    # Cancel periodic deferred-export sweep task (Issue #104, Story 6.8)
+    if _deferred_export_sweep_task and not _deferred_export_sweep_task.done():
+        _deferred_export_sweep_task.cancel()
+        try:
+            await _deferred_export_sweep_task
+        except asyncio.CancelledError:
+            logger.debug("Deferred-export sweep task cancelled")
 
     # Graceful drain: stop any active recording sessions before killing the model.
     # Wave 1 already persisted results to DB, so a timeout just means the result
