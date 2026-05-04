@@ -15,6 +15,13 @@ export interface ReviewTurn {
   speaker_id: string | null;
   confidence: number;
   text?: string;
+  /**
+   * Other speaker_ids in the recording (excluding this turn's current speaker),
+   * in first-appearance order. Drives ←/→ attribution-cycling in
+   * DiarizationReviewView (Issue #104, Sprint 4 deferred-work no. 4). Optional
+   * because older serialized clients omit it; treat undefined as [].
+   */
+  alternative_speakers?: string[];
 }
 
 export function filterLowConfidence<T extends ReviewTurn>(

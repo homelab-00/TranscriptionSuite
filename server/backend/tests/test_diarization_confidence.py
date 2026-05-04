@@ -61,9 +61,20 @@ def test_aggregates_word_confidence_as_mean() -> None:
     segs = [_seg(1, 0), _seg(2, 1)]
     words = [_word(1, 0.9), _word(1, 0.7), _word(2, 0.5)]
     out = per_turn_confidence(segs, words)
+    # Single speaker recording → alternative_speakers is empty for every turn.
     assert out == [
-        {"turn_index": 0, "speaker_id": "SPEAKER_00", "confidence": 0.8},
-        {"turn_index": 1, "speaker_id": "SPEAKER_00", "confidence": 0.5},
+        {
+            "turn_index": 0,
+            "speaker_id": "SPEAKER_00",
+            "confidence": 0.8,
+            "alternative_speakers": [],
+        },
+        {
+            "turn_index": 1,
+            "speaker_id": "SPEAKER_00",
+            "confidence": 0.5,
+            "alternative_speakers": [],
+        },
     ]
 
 
@@ -71,7 +82,14 @@ def test_skips_words_with_null_confidence() -> None:
     segs = [_seg(1, 0)]
     words = [_word(1, 0.9), _word(1, None), _word(1, 0.7)]
     out = per_turn_confidence(segs, words)
-    assert out == [{"turn_index": 0, "speaker_id": "SPEAKER_00", "confidence": 0.8}]
+    assert out == [
+        {
+            "turn_index": 0,
+            "speaker_id": "SPEAKER_00",
+            "confidence": 0.8,
+            "alternative_speakers": [],
+        }
+    ]
 
 
 def test_omits_segments_with_no_usable_words() -> None:
@@ -80,7 +98,14 @@ def test_omits_segments_with_no_usable_words() -> None:
     # Only seg 1 has a usable word
     words = [_word(1, 0.9), _word(2, None)]
     out = per_turn_confidence(segs, words)
-    assert out == [{"turn_index": 0, "speaker_id": "SPEAKER_00", "confidence": 0.9}]
+    assert out == [
+        {
+            "turn_index": 0,
+            "speaker_id": "SPEAKER_00",
+            "confidence": 0.9,
+            "alternative_speakers": [],
+        }
+    ]
 
 
 def test_returns_empty_when_no_words_at_all() -> None:
@@ -95,7 +120,14 @@ def test_handles_invalid_confidence_strings() -> None:
     segs = [_seg(1, 0)]
     words = [_word(1, "not-a-number"), _word(1, 0.5)]  # type: ignore[arg-type]
     out = per_turn_confidence(segs, words)
-    assert out == [{"turn_index": 0, "speaker_id": "SPEAKER_00", "confidence": 0.5}]
+    assert out == [
+        {
+            "turn_index": 0,
+            "speaker_id": "SPEAKER_00",
+            "confidence": 0.5,
+            "alternative_speakers": [],
+        }
+    ]
 
 
 def test_rounding_to_4_decimal_places() -> None:
@@ -103,6 +135,60 @@ def test_rounding_to_4_decimal_places() -> None:
     words = [_word(1, 0.123456789)]
     out = per_turn_confidence(segs, words)
     assert out[0]["confidence"] == 0.1235
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# alternative_speakers — Sprint 4 deferred-work no. 4
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_alternative_speakers_excludes_current_and_preserves_appearance_order() -> None:
+    """Three distinct speakers in appearance order SPK_A, SPK_B, SPK_C —
+    each turn lists the OTHER two in the order they first appeared."""
+    segs = [
+        _seg(1, 0, "SPK_A"),
+        _seg(2, 1, "SPK_B"),
+        _seg(3, 2, "SPK_A"),  # Re-appearance does not re-order
+        _seg(4, 3, "SPK_C"),
+    ]
+    words = [_word(1, 0.5), _word(2, 0.5), _word(3, 0.5), _word(4, 0.5)]
+    out = per_turn_confidence(segs, words)
+    by_index = {t["turn_index"]: t for t in out}
+    # Appearance order is [SPK_A, SPK_B, SPK_C].
+    assert by_index[0]["alternative_speakers"] == ["SPK_B", "SPK_C"]
+    assert by_index[1]["alternative_speakers"] == ["SPK_A", "SPK_C"]
+    assert by_index[2]["alternative_speakers"] == ["SPK_B", "SPK_C"]
+    assert by_index[3]["alternative_speakers"] == ["SPK_A", "SPK_B"]
+
+
+def test_alternative_speakers_ignores_segments_without_words_for_listing() -> None:
+    """A speaker that ONLY appears in word-less segments still counts as a
+    distinct speaker in the recording — the appearance scan walks every
+    segment, not only the ones that survive the word-confidence filter."""
+    segs = [_seg(1, 0, "SPK_A"), _seg(2, 1, "SPK_B"), _seg(3, 2, "SPK_C")]
+    # SPK_B has no usable words → its turn is omitted from `out`, but
+    # SPK_B is still a candidate alternative on the surviving turns.
+    words = [_word(1, 0.5), _word(3, 0.5)]
+    out = per_turn_confidence(segs, words)
+    by_speaker = {t["speaker_id"]: t for t in out}
+    assert by_speaker["SPK_A"]["alternative_speakers"] == ["SPK_B", "SPK_C"]
+    assert by_speaker["SPK_C"]["alternative_speakers"] == ["SPK_A", "SPK_B"]
+
+
+def test_alternative_speakers_handles_null_speaker() -> None:
+    """A null speaker_id on a segment doesn't poison the appearance list."""
+    segs = [
+        {"id": 1, "segment_index": 0, "speaker": None, "text": "x"},
+        _seg(2, 1, "SPK_A"),
+        _seg(3, 2, "SPK_B"),
+    ]
+    words = [_word(1, 0.5), _word(2, 0.5), _word(3, 0.5)]
+    out = per_turn_confidence(segs, words)
+    # Turn 0 has speaker_id=None — the OTHER speakers are SPK_A, SPK_B.
+    assert out[0]["speaker_id"] is None
+    assert out[0]["alternative_speakers"] == ["SPK_A", "SPK_B"]
+    assert out[1]["alternative_speakers"] == ["SPK_B"]
+    assert out[2]["alternative_speakers"] == ["SPK_A"]
 
 
 # ──────────────────────────────────────────────────────────────────────────

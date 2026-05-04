@@ -135,11 +135,20 @@ class DateUpdate(BaseModel):
 
 
 class TurnConfidence(BaseModel):
-    """One per-turn diarization confidence entry. Story 5.4 (Issue #104)."""
+    """One per-turn diarization confidence entry. Story 5.4 (Issue #104).
+
+    ``alternative_speakers`` (Sprint 4 deferred-work no. 4) is the set of
+    other speaker_ids in the recording (excluding this turn's current
+    speaker), in first-appearance order. The dashboard's diarization-
+    review view uses it to drive the ←/→ attribution-cycling keys. Default
+    [] keeps the response shape backward-compatible for older serialized
+    clients.
+    """
 
     turn_index: int
     speaker_id: str | None = None
     confidence: float
+    alternative_speakers: list[str] = []
 
 
 class DiarizationConfidenceResponse(BaseModel):

@@ -42,10 +42,32 @@ def per_turn_confidence(
 ) -> list[dict[str, Any]]:
     """Aggregate word-level confidence into per-turn confidence.
 
-    Returns a list of ``{turn_index, speaker_id, confidence}`` dicts
-    in segment_index order. Segments without usable word-confidence
-    values are silently omitted (Story 5.4 AC2 fallback).
+    Returns a list of ``{turn_index, speaker_id, confidence,
+    alternative_speakers}`` dicts in segment_index order. Segments
+    without usable word-confidence values are silently omitted (Story
+    5.4 AC2 fallback).
+
+    ``alternative_speakers`` (Issue #104, Sprint 4 deferred-work no. 4)
+    is the set of distinct speaker_ids that appear ANYWHERE in the
+    recording, excluding the turn's current speaker, in first-appearance
+    order. The dashboard's diarization-review view uses this list to
+    drive the ←/→ attribution-cycling key handler. Single-speaker
+    recordings get an empty list.
     """
+    # Materialize segments once so we can use them twice (appearance order
+    # scan + the main per-turn loop).
+    segments_list = list(segments)
+
+    # Build the appearance-order list of distinct non-null speaker_ids.
+    appearance_order: list[str] = []
+    seen_speakers: set[str] = set()
+    for seg in segments_list:
+        speaker = seg.get("speaker")
+        if speaker is None or speaker in seen_speakers:
+            continue
+        seen_speakers.add(speaker)
+        appearance_order.append(speaker)
+
     by_segment: dict[int, list[float]] = {}
     for w in words:
         seg_id = w.get("segment_id")
@@ -63,7 +85,7 @@ def per_turn_confidence(
         by_segment.setdefault(seg_id_int, []).append(cf)
 
     out: list[dict[str, Any]] = []
-    for seg in segments:
+    for seg in segments_list:
         seg_id = seg.get("id")
         if seg_id is None:
             continue
@@ -74,11 +96,13 @@ def per_turn_confidence(
         scores = by_segment.get(seg_id_int)
         if not scores:
             continue
+        speaker = seg.get("speaker")
         out.append(
             {
                 "turn_index": int(seg.get("segment_index", 0) or 0),
-                "speaker_id": seg.get("speaker"),
+                "speaker_id": speaker,
                 "confidence": round(sum(scores) / len(scores), 4),
+                "alternative_speakers": [s for s in appearance_order if s != speaker],
             }
         )
     return out
