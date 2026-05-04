@@ -1736,6 +1736,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 6.1: Profile auto-action toggles persisted
 
+**Status: DONE (sprint 4 — commit A; AC1+AC2 contract proof tests added; toggle persistence + UI delivered by Sprint 1 Story 1.5)**
+
 **As a** Configurator
 **I want** auto-summary and auto-export toggles in my profile
 **So that** I can opt-in once and walk away (FR30, FR31).
@@ -1761,6 +1763,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 ---
 
 ### Story 6.2: Auto-summary lifecycle hook (FR30, FR32, NFR3)
+
+**Status: DONE (sprint 4 — commit B; auto_action_coordinator + auto_summary_engine; HOLD-aware via diarization_review_lifecycle.auto_summary_is_held; on_auto_summary_fired called on success; notebook upload completion path wires asyncio.run_coroutine_threadsafe(trigger_auto_actions); on_transcription_complete also wired closing Sprint 3 deferred)**
 
 **As a** backend engineer
 **I want** the auto-summary lifecycle hook to fire within 2s of transcription completion (when enabled, when no HOLD), generate a summary, and save it back to the recording
@@ -1799,6 +1803,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 6.3: Auto-export lifecycle hook (FR31, NFR4)
 
+**Status: DONE (sprint 4 — commit B; auto_action_coordinator._run_auto_export; render_and_sanitize for filename; atomic _write_atomic via tempfile.mkstemp + os.replace; transcript via plaintext_export.stream_plaintext + apply_aliases; summary written when recordings.summary present)**
+
 **As a** backend engineer
 **I want** the auto-export lifecycle hook to write transcript and summary files to the destination folder within 2s of the trigger
 **So that** Maria returns to ready files (FR31, NFR4).
@@ -1831,6 +1837,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 6.4: Persist-Before-Deliver invariant for all auto-action artifacts (FR33)
 
+**Status: DONE (sprint 4 — commit C; tests/test_persist_before_deliver_matrix.py — 4 matrix entries (auto_summary_save_back, auto_summary_lost_and_found, auto_export_write, manual_download_save) + Sprint 5 webhook placeholder; AC2 simulated commit-failure regression writes LLM text to data/lost-and-found/<rec_id>-<ts>.summary.txt before re-raising; coordinator catches and marks failed)**
+
 **As a** project maintainer
 **I want** an automated regression test asserting NO new Persist-Before-Deliver violations
 **So that** the project's most critical invariant survives the QoL pack (FR33, NFR16).
@@ -1858,6 +1866,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 6.5: Auto-action independence + partial success (FR34)
 
+**Status: DONE (sprint 4 — commit D; coordinator dispatches summary + export as independent asyncio.Tasks gathered with return_exceptions=True; tests/test_auto_action_independence.py — 5 tests covering AC1, AC2, both-fail-distinct, both-succeed-distinct, concurrent-execution timing proof)**
+
 **As a** Configurator (Maria, J3)
 **I want** auto-summary and auto-export to be independent — if summary fails, export still runs (and vice versa)
 **So that** I get partial value even on partial failures (FR34).
@@ -1884,6 +1894,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 ---
 
 ### Story 6.6: Status badge with single-click retry — `StatusLight` primitive (UX-DR1)
+
+**Status: DONE (sprint 4 — commit E; AutoActionStatusBadge wraps StatusLight with severity mapping ok/warn/error/processing/manual_intervention_required; inline ⟳ Retry button with aria-label including recording name (FR53); useAriaAnnouncer for status changes (FR52); autoDismissOk option for 3s ok auto-dismiss; statusToBadgeProps maps backend enum to UI severity; useAutoActionRetry mutation hook; apiClient.retryAutoAction; ui-contract baseline updated to spec_version 1.0.46; 22 Vitest tests covering AC1-AC5 + auto-dismiss + status mapping)**
 
 **As a** Configurator
 **I want** failures to surface as a recoverable status badge with a single-click retry button — visually consistent with existing primitives
@@ -1938,6 +1950,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 6.7: Empty / truncated summary distinct states (R-EL16, R-EL17)
 
+**Status: DONE (sprint 4 — commit F; auto_summary_engine._looks_truncated heuristic — tokens_used >= 95% of max_tokens AND text does not end in terminal punctuation; coordinator marks summary_empty (<10 chars) or summary_truncated; both states still persist content to recordings.summary so user can review/retry; 10 unit tests + 4 integration tests)**
+
 **As a** Configurator (Maria)
 **I want** the LLM returning an empty summary or hitting token-limit truncation to surface as DISTINCT amber states — never as green/success
 **So that** I notice and can act (FR36, FR37, R-EL16, R-EL17).
@@ -1970,6 +1984,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 ---
 
 ### Story 6.8: Deferred-retry on destination unavailability (R-EL12)
+
+**Status: DONE (sprint 4 — commit F; auto_action_sweeper.periodic_deferred_export_sweep modeled on audio_cleanup.periodic_cleanup; scans rows with auto_export_status in {deferred, retry_pending} or auto_summary_status='retry_pending'; checks os.path.isdir(destination) before re-fire; bootstrap-safe NFR24a — picks up rows that survived restart; cancel-safe — asyncio.CancelledError exits cleanly; 8 tests covering destination-back-online, retry_pending re-fire, sweeper-skips-failed, cancel-safety, bootstrap-safety)**
 
 **As a** Configurator (Maria, J3)
 **I want** auto-export to defer and auto-retry when the destination becomes available (e.g., USB drive plugged in) — without losing the transcript
@@ -2008,6 +2024,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 6.9: Idempotent retry endpoint + manual retry button (FR39, R-EL27)
 
+**Status: DONE (sprint 4 — commit G + commit H code-review fix; POST /api/notebook/recordings/{id}/auto-actions/retry; URL prefix override per Sprint 3/4 design §1; 202 retry_initiated when status in {failed, deferred, summary_empty, summary_truncated, manual_intervention_required}; 200 already_complete on success NO re-execution; 200 already_in_progress when status in {in_progress, pending, retry_pending} NO double-fire; manual retry resets attempts so escalation budget is fresh; 10 endpoint tests including retry_pending-guard regression test)**
+
 **As a** Configurator
 **I want** the retry endpoint to be idempotent — replaying a successful action returns "already_complete" without re-firing side effects
 **So that** double-clicks or aggressive polling don't cause duplicate exports (FR39, R-EL27).
@@ -2040,6 +2058,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 6.10: Idempotent re-export semantics on retry
 
+**Status: DONE (sprint 4 — commit G; coordinator._write_atomic uses tempfile.mkstemp(dir=target.parent) for unique temp paths + os.replace for atomic rename; orphan temp cleanup on exception; concurrent retry collision test asserts file content matches ONE input exactly (no half-written / interleaved bytes); no .1/.2 suffix accumulation)**
+
 **As a** backend engineer
 **I want** re-exports to overwrite-in-place (same path) rather than create new files with suffixes
 **So that** retry doesn't accumulate stale files (J3 narrative: "auto-export re-fires; summary file appears in folder (idempotent re-export)").
@@ -2065,6 +2085,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 ---
 
 ### Story 6.11: Retry escalation policy (R-EL18) + F1+F4 race-condition guard (cross-feature constraint #1)
+
+**Status: DONE (sprint 4 — commit H; _handle_auto_action_failure: first failure → status=retry_pending + asyncio.create_task(_delayed_retry, 30s); second consecutive failure → manual_intervention_required; sweeper skips manual rows so no retry loop; F1+F4 race guard: alias PUT route brackets body with notify_alias_mutation_started/finished in try/finally; auto-summary calls _wait_for_alias_quiescence with 2s window + 10s timeout fallback before LLM call; 8 escalation/race-guard tests)**
 
 **As a** project maintainer
 **I want** failed actions to escalate to "manual intervention required" after one auto-retry, AND auto-summary to wait for alias propagation

@@ -204,6 +204,35 @@ def test_retry_on_in_progress_returns_already_in_progress(
     assert repo.get_auto_action_status(1, "auto_summary") == "in_progress"
 
 
+def test_retry_on_retry_pending_returns_already_in_progress(
+    fresh_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Story 6.11 race-fix — clicking Retry while a 30s auto-retry is
+    pending must NOT dispatch a second retry against the same row.
+
+    Regression test for HIGH issue from code review (commit J).
+    """
+    _seed(fresh_db)
+    repo.set_auto_summary_status(1, "retry_pending")
+
+    fired = [False]
+
+    async def _should_not_fire(_rec_id: int, _action_type: str) -> None:
+        fired[0] = True
+
+    monkeypatch.setattr(
+        "server.core.auto_action_coordinator.retry_auto_action_internal",
+        _should_not_fire,
+    )
+
+    result, http_response = _call_retry(1, "auto_summary")
+    assert result.status == "already_in_progress"
+    assert http_response.status_code == 200
+    assert fired[0] is False
+    # Status untouched — the scheduled retry will fire on its own
+    assert repo.get_auto_action_status(1, "auto_summary") == "retry_pending"
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Manual retry resets attempts (Story 6.11 → R-EL18)
 # ──────────────────────────────────────────────────────────────────────────

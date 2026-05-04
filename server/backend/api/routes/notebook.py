@@ -1703,8 +1703,11 @@ async def retry_auto_action(
             action_type=payload.action_type,
             status="already_complete",
         )
-    # Don't double-fire while already in flight.
-    if current in {"in_progress", "pending"}:
+    # Don't double-fire while already in flight. `retry_pending` means a
+    # 30s-delayed auto-retry is scheduled (Story 6.11) — clicking the
+    # button while that's pending would dispatch a second retry against
+    # the same row. Treat as "already in progress".
+    if current in {"in_progress", "pending", "retry_pending"}:
         response.status_code = 200
         return AutoActionRetryResponse(
             recording_id=recording_id,
