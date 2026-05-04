@@ -113,6 +113,10 @@ class RecordingDetailResponse(RecordingResponse):
 
     segments: list[dict[str, Any]] = []
     words: list[dict[str, Any]] = []
+    # Sprint 5 — Story 7.7: latest webhook delivery state for this recording.
+    # Both fields are None when no webhook has ever been attempted.
+    webhook_status: str | None = None
+    webhook_error: str | None = None
 
 
 class SummaryUpdate(BaseModel):
@@ -218,6 +222,12 @@ async def list_recordings(
 async def get_recording_detail(recording_id: int) -> dict[str, Any]:
     """
     Get a single recording with full details including segments and words.
+
+    Sprint 5 — Story 7.7 AC1: also surfaces ``webhook_status`` /
+    ``webhook_error`` derived from the most-recent ``webhook_deliveries``
+    row for this recording. Both fields are ``None`` when no webhook
+    has ever been attempted for this recording. The dashboard's status
+    badge consumes these fields directly.
     """
     recording = get_recording(recording_id)
     if not recording:
@@ -227,10 +237,35 @@ async def get_recording_detail(recording_id: int) -> dict[str, Any]:
     segments = get_segments(recording_id)
     words = get_words(recording_id)
 
+    # Sprint 5 — surface latest webhook delivery status. The query is
+    # cheap (idx_webhook_deliveries_recording covers it) so we do it
+    # inline rather than adding a JOIN to get_recording (which is used
+    # everywhere — would risk regressions in other endpoints).
+    #
+    # Defensive: some legacy test fixtures seed the recordings table
+    # WITHOUT running alembic migrations, so webhook_deliveries (added
+    # in migration 016) is absent. Treat missing-table the same as
+    # "no delivery has been attempted" — the field returns null.
+    from sqlite3 import OperationalError
+
+    from server.database import webhook_deliveries_repository as _wdr
+
+    try:
+        latest_webhook = _wdr.get_latest_for_recording(recording_id)
+    except OperationalError as exc:
+        if "no such table" in str(exc):
+            latest_webhook = None
+        else:
+            raise
+    webhook_status = latest_webhook["status"] if latest_webhook else None
+    webhook_error = latest_webhook["last_error"] if latest_webhook else None
+
     return {
         **recording,
         "segments": segments,
         "words": words,
+        "webhook_status": webhook_status,
+        "webhook_error": webhook_error,
     }
 
 
@@ -1678,8 +1713,13 @@ class AutoActionRetryRequest(BaseModel):
     @field_validator("action_type")
     @classmethod
     def _validate_action_type(cls, v: str) -> str:
-        if v not in ("auto_summary", "auto_export"):
-            raise ValueError(f"action_type must be 'auto_summary' or 'auto_export'; received {v!r}")
+        # Sprint 5 — Story 7.7 AC1 extends the action types with "webhook";
+        # the retry endpoint funnels webhook retries to a separate code
+        # path (the WebhookWorker queue, not the auto-action coordinator).
+        if v not in ("auto_summary", "auto_export", "webhook"):
+            raise ValueError(
+                f"action_type must be 'auto_summary', 'auto_export', or 'webhook'; received {v!r}"
+            )
         return v
 
 
@@ -1709,6 +1749,59 @@ async def retry_auto_action(
 
     if not get_recording(recording_id):
         raise HTTPException(status_code=404, detail="Recording not found")
+
+    # Sprint 5 — Story 7.7 AC1: webhook retries funnel to the WebhookWorker
+    # queue (a fresh row inserted at status='pending'), NOT the auto-action
+    # coordinator. The idempotency contract is the same as auto-summary /
+    # auto-export but evaluated against the LATEST webhook_deliveries row
+    # for the recording.
+    if payload.action_type == "webhook":
+        from server.core.auto_action_coordinator import _run_webhook_dispatch
+        from server.database import (
+            auto_action_repository as _aar,
+        )
+        from server.database import (
+            webhook_deliveries_repository as wdr,
+        )
+
+        latest = wdr.get_latest_for_recording(recording_id)
+        if latest is not None and latest["status"] == "success":
+            response.status_code = 200
+            return AutoActionRetryResponse(
+                recording_id=recording_id,
+                action_type="webhook",
+                status="already_complete",
+            )
+        if latest is not None and latest["status"] in ("pending", "in_flight"):
+            response.status_code = 200
+            return AutoActionRetryResponse(
+                recording_id=recording_id,
+                action_type="webhook",
+                status="already_in_progress",
+            )
+        # Manual retry — re-fire from the snapshot saved at the original
+        # auto-action time (no profile drift). Same source-of-truth as
+        # auto-summary / auto-export retries.
+        snapshot = _aar.get_profile_snapshot(recording_id) or {}
+        public = snapshot.get("public_fields") or {}
+        if not public.get("webhook_url"):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "no_webhook_configured"},
+            )
+        # AWAIT (not fire-and-forget) so the durable 'pending' row is
+        # committed BEFORE the 202 response goes out. A hard process
+        # death between create_task() and create_pending() would
+        # otherwise drop the user's retry silently. _run_webhook_dispatch
+        # is fast (one INSERT + a notify) so awaiting it does not block
+        # the request meaningfully.
+        await _run_webhook_dispatch(recording_id, public)
+        response.status_code = 202
+        return AutoActionRetryResponse(
+            recording_id=recording_id,
+            action_type="webhook",
+            status="retry_initiated",
+        )
 
     current = aar.get_auto_action_status(recording_id, payload.action_type)
 

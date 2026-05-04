@@ -802,7 +802,9 @@ export class APIClient {
    */
   async retryAutoAction(
     recordingId: number,
-    actionType: 'auto_summary' | 'auto_export',
+    // Sprint 5 — Story 7.7 extends with 'webhook' so the dashboard's
+    // single retry hook covers all three lifecycles.
+    actionType: 'auto_summary' | 'auto_export' | 'webhook',
   ): Promise<{
     recording_id: number;
     action_type: string;

@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.46
+  spec_version: 1.0.47
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -12,6 +12,7 @@ meta:
       - components/__tests__/AudioVisualizer.test.tsx
       - components/__tests__/LogsView.test.tsx
       - components/__tests__/NotebookView.canary-language.test.tsx
+      - components/__tests__/NotebookView.profile-id.test.tsx
       - components/__tests__/NotebookView.test.tsx
       - components/__tests__/ServerView.test.tsx
       - components/__tests__/SessionImportTab.canary-language.test.tsx
@@ -33,6 +34,7 @@ meta:
       - components/profiles/ProfileSelector.tsx
       - components/profiles/TemplatePreviewField.tsx
       - components/recording/__tests__/AutoActionStatusBadge.test.tsx
+      - components/recording/__tests__/AutoActionStatusBadge.webhook.test.tsx
       - components/recording/__tests__/ConfidenceChip.test.tsx
       - components/recording/__tests__/DeleteRecordingDialog.test.tsx
       - components/recording/__tests__/DiarizationReviewView.keyboard.test.tsx
@@ -67,6 +69,7 @@ meta:
       - components/ui/StatusLight.tsx
       - components/ui/UpdateBanner.tsx
       - components/ui/UpdateModal.tsx
+      - components/views/__tests__/AudioNoteModal.auto-actions.test.tsx
       - components/views/__tests__/GpuDiagnosticModal.test.tsx
       - components/views/__tests__/GpuHealthCard.test.tsx
       - components/views/AboutModal.tsx
@@ -90,7 +93,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-04T09:01:14.032Z
+    generated_at: 2026-05-04T15:52:40.913Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -262,7 +265,6 @@ foundation:
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
-        - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
@@ -349,7 +351,6 @@ foundation:
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
-        - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
@@ -523,6 +524,7 @@ utility_allowlist:
     - bg-slate-500
     - bg-slate-500/10
     - bg-slate-500/20
+    - bg-slate-600
     - bg-slate-700
     - bg-slate-800
     - bg-slate-900
@@ -601,7 +603,6 @@ utility_allowlist:
     - bottom-right
     - cursor-not-allowed
     - cursor-pointer
-    - cursor-text
     - custom-scrollbar
     - delay-100
     - delay-150
@@ -687,7 +688,6 @@ utility_allowlist:
     - hover:-translate-y-1
     - hover:bg-accent-cyan
     - hover:bg-accent-cyan/10
-    - hover:bg-accent-cyan/20
     - hover:bg-accent-cyan/30
     - hover:bg-accent-cyan/5
     - hover:bg-amber-400/20
@@ -718,7 +718,6 @@ utility_allowlist:
     - hover:shadow-accent-cyan/40
     - hover:shadow-lg
     - hover:text-accent-cyan
-    - hover:text-accent-cyan/80
     - hover:text-amber-300
     - hover:text-black
     - hover:text-cyan-200
@@ -758,6 +757,7 @@ utility_allowlist:
     - lg:grid-cols-2
     - lg:grid-cols-3
     - lg:p-10
+    - lg:p-8
     - line-clamp-2
     - m-0
     - mask-gradient-right
@@ -821,10 +821,10 @@ utility_allowlist:
     - mt-6
     - mt-8
     - mt-auto
+    - mx-1
     - mx-auto
     - my-1
     - my-2
-    - my-4
     - opacity-0
     - opacity-10
     - opacity-30
@@ -865,7 +865,6 @@ utility_allowlist:
     - pl-5
     - pl-6
     - pl-8
-    - pointer-events-auto
     - pointer-events-none
     - pr-10
     - pr-12
@@ -971,7 +970,6 @@ utility_allowlist:
     - text-2xl
     - text-3xl
     - text-accent-cyan
-    - text-accent-cyan/70
     - text-accent-magenta
     - text-accent-orange
     - text-accent-violet
@@ -1123,7 +1121,6 @@ utility_allowlist:
     - shadow-[0_0_18px_rgba(239,68,68,0.35)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
-    - shadow-[0_0_5px_rgba(239,22,238,0.5)]
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]

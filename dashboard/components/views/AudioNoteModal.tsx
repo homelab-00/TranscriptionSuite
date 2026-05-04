@@ -606,6 +606,12 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       path: recording?.auto_export_path ?? null,
     },
   );
+  // Sprint 5 — Story 7.7: third badge for the per-recording webhook
+  // delivery status. The backend exposes the latest webhook_deliveries
+  // row's status + last_error directly on the GET response.
+  const webhookBadgeProps = statusToBadgeProps(recording?.webhook_status ?? null, 'webhook', {
+    error: recording?.webhook_error ?? null,
+  });
   const lowConfTurnCount = useMemo(() => {
     let n = 0;
     for (const t of confidenceState.turns) {
@@ -2016,32 +2022,44 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                     (Story 6.6). Each badge renders only when its corresponding
                     backend column is non-null, so toggle-off recordings show
                     nothing here. */}
-                {(summaryBadgeProps || exportBadgeProps) && note?.recordingId && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {summaryBadgeProps && (
-                      <AutoActionStatusBadge
-                        recordingId={note.recordingId}
-                        recordingName={note.title}
-                        actionType="auto_summary"
-                        severity={summaryBadgeProps.severity}
-                        message={summaryBadgeProps.message}
-                        retryable={summaryBadgeProps.retryable}
-                        onRetry={(t) => autoActionRetry.mutate(t)}
-                      />
-                    )}
-                    {exportBadgeProps && (
-                      <AutoActionStatusBadge
-                        recordingId={note.recordingId}
-                        recordingName={note.title}
-                        actionType="auto_export"
-                        severity={exportBadgeProps.severity}
-                        message={exportBadgeProps.message}
-                        retryable={exportBadgeProps.retryable}
-                        onRetry={(t) => autoActionRetry.mutate(t)}
-                      />
-                    )}
-                  </div>
-                )}
+                {(summaryBadgeProps || exportBadgeProps || webhookBadgeProps) &&
+                  note?.recordingId && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {summaryBadgeProps && (
+                        <AutoActionStatusBadge
+                          recordingId={note.recordingId}
+                          recordingName={note.title}
+                          actionType="auto_summary"
+                          severity={summaryBadgeProps.severity}
+                          message={summaryBadgeProps.message}
+                          retryable={summaryBadgeProps.retryable}
+                          onRetry={(t) => autoActionRetry.mutate(t)}
+                        />
+                      )}
+                      {exportBadgeProps && (
+                        <AutoActionStatusBadge
+                          recordingId={note.recordingId}
+                          recordingName={note.title}
+                          actionType="auto_export"
+                          severity={exportBadgeProps.severity}
+                          message={exportBadgeProps.message}
+                          retryable={exportBadgeProps.retryable}
+                          onRetry={(t) => autoActionRetry.mutate(t)}
+                        />
+                      )}
+                      {webhookBadgeProps && (
+                        <AutoActionStatusBadge
+                          recordingId={note.recordingId}
+                          recordingName={note.title}
+                          actionType="webhook"
+                          severity={webhookBadgeProps.severity}
+                          message={webhookBadgeProps.message}
+                          retryable={webhookBadgeProps.retryable}
+                          onRetry={(t) => autoActionRetry.mutate(t)}
+                        />
+                      )}
+                    </div>
+                  )}
 
                 {/* 2. AI Summary Section - Editable */}
                 <div

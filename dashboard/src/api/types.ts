@@ -167,6 +167,11 @@ export interface Recording {
 export interface RecordingDetail extends Recording {
   segments: TranscriptionSegment[];
   words: TranscriptionWord[];
+  // Issue #104 Sprint 5 — Story 7.7: latest webhook delivery state for
+  // this recording. Both fields are null when no webhook has ever been
+  // attempted (toggle off, no profile, fresh recording).
+  webhook_status?: string | null;
+  webhook_error?: string | null;
 }
 
 export interface RecordingTranscription {
