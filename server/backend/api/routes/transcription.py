@@ -14,7 +14,7 @@ import json as _json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -24,11 +24,13 @@ from server.config import resolve_main_transcriber_model
 from server.core.json_utils import sanitize_for_json
 from server.core.model_manager import TranscriptionCancelledError
 from server.core.stt.backends.base import BackendDependencyError, STTBackend
+from server.database.dedup_query import find_duplicates_anywhere
 from server.database.job_repository import (
     create_job,
     mark_delivered,
     mark_failed,
     save_result,
+    set_audio_hash,
 )
 from server.logging import sanitize_log_value
 
@@ -83,6 +85,7 @@ async def transcribe_audio(
     expected_speakers: int | None = Form(None),
     parallel_diarization: bool | None = Form(None),
     multitrack: bool = Form(False),
+    profile_id: int | None = Form(None),
 ) -> dict[str, Any]:
     """
     Transcribe an uploaded audio file.
@@ -152,6 +155,7 @@ async def transcribe_audio(
             language=language,
             task="translate" if translation_enabled else "transcribe",
             translation_target=(translation_target_language if translation_enabled else None),
+            profile_id=profile_id,
         )
     except Exception as _e:
         logger.warning(
@@ -223,6 +227,35 @@ async def transcribe_audio(
             content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
+
+        # Issue #104, Story 2.2 — compute SHA-256 of the saved upload for
+        # dedup-check. The streaming helper holds at most 1 MiB in RAM. We
+        # patch the hash in via set_audio_hash because create_job ran
+        # earlier (line ~149) before the tempfile existed. The window where
+        # the row has audio_hash IS NULL is bounded by this single UPDATE
+        # — observers (the dedup-check endpoint) will see the hash before
+        # any result_text exists, which is the only ordering that matters.
+        # Sprint 2 Item 3 — also compute the normalized PCM hash for
+        # format-agnostic dedup. Failure is swallowed to NULL — that side
+        # is opt-in.
+        if db_job_id is not None:
+            try:
+                from server.core.audio_utils import (
+                    compute_normalized_pcm_hash as _norm_sha,
+                )
+                from server.core.audio_utils import sha256_streaming as _sha
+
+                set_audio_hash(
+                    db_job_id,
+                    _sha(tmp_path),
+                    normalized_audio_hash=_norm_sha(tmp_path),
+                )
+            except Exception as _hash_err:
+                logger.warning(
+                    "Failed to set audio_hash for job %s: %s",
+                    sanitize_log_value(db_job_id),
+                    _hash_err,
+                )
 
         # ensure_transcription_loaded() ran at route entry (before
         # try_start_job) — the engine is guaranteed attached here (Issue #76).
@@ -714,10 +747,40 @@ async def cancel_transcription(request: Request) -> dict[str, Any]:
 # ─── File Import (background transcription, no notebook/DB storage) ─────────
 
 
+class DedupMatch(BaseModel):
+    """A prior item (transcription job OR notebook recording) that shares
+    this upload's audio_hash (Issue #104, Story 2.4 + Sprint 2 Item 2).
+
+    The ``source`` discriminator (added by the Sprint 2 carve-out) tells
+    the dashboard which table the match came from, which it needs to
+    navigate "Use existing" correctly:
+
+      - ``"transcription_job"`` — match is a row in ``transcription_jobs``
+        (returned by /api/transcribe/result/{id}).
+      - ``"recording"`` — match is a row in ``recordings`` (the notebook
+        view's GET /api/notebook/recordings/{id} resource).
+
+    Default value preserves wire compatibility for the pre-Item-2 fixture
+    data where every match was implicitly a transcription_job.
+    """
+
+    recording_id: str
+    name: str
+    created_at: str
+    source: Literal["transcription_job", "recording"] = "transcription_job"
+
+
 class ImportAcceptedResponse(BaseModel):
-    """Response model for accepted file import job (202)."""
+    """Response model for accepted file import job (202).
+
+    ``dedup_matches`` (Issue #104, Story 2.4) carries any prior jobs whose
+    ``audio_hash`` matches this upload. Empty list when no prior match
+    (J1 happy-path silently proceeds — AC2.4.AC3). Default-empty keeps the
+    response shape backwards compatible for clients that ignore the field.
+    """
 
     job_id: str
+    dedup_matches: list[DedupMatch] = []
 
 
 def _run_file_import(
@@ -1105,6 +1168,66 @@ async def import_and_transcribe(
         tmp.write(content)
         tmp_path = Path(tmp.name)
 
+    # Issue #104, Story 2.2 — durability row for the /import flow exists
+    # purely so the dedup-check endpoint can find re-imports of the same
+    # audio. The /import worker still uses model_manager.job_tracker for
+    # results (in-memory), so result_text/result_json on this row stay NULL.
+    # See sprint-2-design.md §1 for the override rationale.
+    # Sprint 2 Item 3 — also compute the normalized PCM hash for
+    # format-agnostic dedup. Either value can be NULL on its own.
+    audio_hash: str | None = None
+    normalized_audio_hash: str | None = None
+    try:
+        from server.core.audio_utils import (
+            compute_normalized_pcm_hash as _norm_sha,
+        )
+        from server.core.audio_utils import sha256_streaming as _sha
+
+        audio_hash = _sha(tmp_path)
+        normalized_audio_hash = _norm_sha(tmp_path)
+    except Exception as _hash_err:
+        logger.warning(
+            "Failed to compute audio_hash for import job %s: %s",
+            job_id[:8],
+            _hash_err,
+        )
+    dedup_matches: list[DedupMatch] = []
+    try:
+        create_job(
+            job_id=job_id,
+            source="file_import",
+            client_name=client_name,
+            language=language,
+            task="translate" if translation_enabled else "transcribe",
+            translation_target=(translation_target_language if translation_enabled else None),
+            audio_hash=audio_hash,
+            normalized_audio_hash=normalized_audio_hash,
+        )
+        # Story 2.4 + Sprint 2 Item 2 + Item 3 — surface prior matches across
+        # BOTH transcription_jobs AND recordings on EITHER hash. Exclude the
+        # just-created jobs row by id.
+        if audio_hash or normalized_audio_hash:
+            dedup_matches = [
+                DedupMatch(
+                    recording_id=m["id"],
+                    name=m["name"],
+                    created_at=m["created_at"],
+                    source=m["source"],
+                )
+                for m in find_duplicates_anywhere(
+                    audio_hash or "",
+                    limit=10,
+                    normalized_audio_hash=normalized_audio_hash,
+                )
+                if not (m["source"] == "transcription_job" and m["id"] == job_id)
+            ]
+    except Exception as _e:
+        logger.warning(
+            "Failed to create durability row for import job %s: %s",
+            job_id[:8],
+            _e,
+        )
+
     # Resolve parallel diarization default from config before entering background thread
     config = request.app.state.config
     use_parallel_default = config.get("diarization", "parallel", default=True)
@@ -1133,8 +1256,64 @@ async def import_and_transcribe(
         )
     )
 
-    # Return immediately — client polls /api/admin/status for result
-    return {"job_id": job_id[:8]}
+    # Return immediately — client polls /api/admin/status for result.
+    # dedup_matches carries any prior jobs with the same audio_hash so the
+    # dashboard can show the dedup prompt (Story 2.4) without a follow-up
+    # round-trip. Empty list = J1 happy path (no duplicate found).
+    return {"job_id": job_id[:8], "dedup_matches": dedup_matches}
+
+
+class DedupCheckRequest(BaseModel):
+    """Body for ``POST /api/transcribe/import/dedup-check``.
+
+    ``normalized_audio_hash`` (Sprint 2 Item 3) lets clients ask the server
+    "have you seen this content before, regardless of encoding?" alongside
+    the raw-byte question. Default empty so pre-Item-3 clients still work.
+    """
+
+    audio_hash: str
+    normalized_audio_hash: str | None = None
+
+
+class DedupCheckResponse(BaseModel):
+    """Response shape for the dedup-check endpoint.
+
+    ``matches`` is ordered most-recent-first across both source tables
+    (see ``server.database.dedup_query.find_duplicates_anywhere``).
+    """
+
+    matches: list[DedupMatch] = []
+
+
+@router.post("/import/dedup-check", response_model=DedupCheckResponse)
+async def dedup_check(body: DedupCheckRequest) -> DedupCheckResponse:
+    """Idempotent: returns any prior transcription_jobs with the same
+    audio_hash. No side effects. Read-only against the local SQLite DB —
+    per FR4 / R-EL23, the query never escapes the local library.
+
+    The /import endpoint already returns ``dedup_matches`` inline, so this
+    endpoint exists primarily for future "find duplicates of an existing
+    recording" UI flows. Carving it out as a separate route now keeps the
+    contract stable.
+    """
+    # Sprint 2 Item 2 + Item 3: query BOTH transcription_jobs and recordings
+    # via the neutral helper, against EITHER the raw-byte hash or the
+    # normalized PCM hash. The DedupMatch.source field tells the client
+    # which table each match came from.
+    matches = [
+        DedupMatch(
+            recording_id=m["id"],
+            name=m["name"],
+            created_at=m["created_at"],
+            source=m["source"],
+        )
+        for m in find_duplicates_anywhere(
+            body.audio_hash,
+            limit=10,
+            normalized_audio_hash=body.normalized_audio_hash,
+        )
+    ]
+    return DedupCheckResponse(matches=matches)
 
 
 @router.get("/result/{job_id}", response_model=None)

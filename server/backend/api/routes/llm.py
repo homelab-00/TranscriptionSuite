@@ -734,6 +734,47 @@ async def process_with_llm_stream(request: LLMRequest):
     return _build_llm_stream_response(request)
 
 
+def _build_alias_aware_transcript_text(recording_id: int, segments: list[dict]) -> tuple[str, str]:
+    """Build (full_text, speaker_key_preface) for an LLM prompt.
+
+    Issue #104, Stories 5.2 / 5.3 — alias propagation to AI summary
+    and AI chat. Both flows must:
+      1. Substitute speaker labels using the recording's aliases.
+      2. Prepend a "Speakers in this transcript: ..." preamble so the
+         model knows the authoritative names + raw IDs.
+    The PROMPT-CONSTRUCTION SITE (caller) appends an R-EL3 directive
+    to the system prompt: "Use the speaker names provided verbatim."
+
+    The full_text format mirrors the existing pre-Sprint-3 shape
+    (``[{speaker}]: {text}``) so prompts that already work continue
+    to work — only the speaker name changes.
+    """
+    from server.core.alias_substitution import apply_aliases, speaker_key_preface
+    from server.database import alias_repository
+
+    aliases = alias_repository.alias_map(recording_id)
+    raw_order: list[str] = []
+    for seg in segments:
+        raw = seg.get("speaker")
+        if raw and raw not in raw_order:
+            raw_order.append(raw)
+
+    full_text = "\n".join(
+        f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}" if seg.get("speaker") else seg["text"]
+        for seg in apply_aliases(segments, aliases)
+    )
+    preface = speaker_key_preface(aliases, raw_order)
+    return full_text, preface
+
+
+# R-EL3 directive appended to the system prompt whenever speaker_key_preface
+# is non-empty. Tells the model the names are authoritative.
+_VERBATIM_DIRECTIVE = (
+    "Use the speaker names provided verbatim. "
+    "Do not infer relationships, abbreviate, or merge names."
+)
+
+
 @router.post("/summarize/{recording_id}", response_model=LLMResponse)
 async def summarize_recording(
     recording_id: int,
@@ -760,13 +801,15 @@ async def summarize_recording(
     # checks above run unguarded so a bad id always returns 404 (not 409).
     await _acquire_summary_slot(recording_id)
     try:
-        # Build full text from segments
-        full_text = "\n".join(
-            f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}"
-            if seg.get("speaker")
-            else seg["text"]
-            for seg in transcription["segments"]
+        # Issue #104, Story 5.2 — alias propagation. The transcript
+        # text passed to the LLM uses display labels; the preamble tells
+        # the model the authoritative names. Verbatim guarantee R-EL3.
+        full_text, preface = _build_alias_aware_transcript_text(
+            recording_id, transcription["segments"]
         )
+        if preface:
+            preamble = f"{preface}\n\n{_VERBATIM_DIRECTIVE}\n\n"
+            full_text = preamble + full_text
 
         # Process with LLM
         llm_response = await process_with_llm(
@@ -829,13 +872,14 @@ async def summarize_recording_stream(
     # so cancellation and mid-stream errors never leak the lock.
     await _acquire_summary_slot(recording_id)
     try:
-        # Build full text from segments
-        full_text = "\n".join(
-            f"[{seg.get('speaker', 'Speaker')}]: {seg['text']}"
-            if seg.get("speaker")
-            else seg["text"]
-            for seg in transcription["segments"]
+        # Issue #104, Story 5.2 — alias propagation (mirror of the
+        # non-streaming summarize_recording path).
+        full_text, preface = _build_alias_aware_transcript_text(
+            recording_id, transcription["segments"]
         )
+        if preface:
+            preamble = f"{preface}\n\n{_VERBATIM_DIRECTIVE}\n\n"
+            full_text = preamble + full_text
 
         async def _persist(text: str, model: str | None) -> None:
             if not update_recording_summary(recording_id, text, model):
@@ -1614,10 +1658,17 @@ async def chat_with_llm(request: ChatRequest):
             if transcription and transcription.get("segments"):
                 diarization_enabled = bool(recording.get("has_diarization"))
                 if diarization_enabled:
-                    transcription_context = "\n".join(
-                        f"[{seg.get('speaker') or 'Speaker'}]: {seg.get('text', '')}"
-                        for seg in transcription["segments"]
+                    # Issue #104, Story 5.3 — alias propagation to chat.
+                    # Speaker labels are pre-substituted with aliases;
+                    # speaker key preamble is prepended so the LLM sees
+                    # the authoritative name + raw id mapping.
+                    full_text, preface = _build_alias_aware_transcript_text(
+                        conversation["recording_id"], transcription["segments"]
                     )
+                    if preface:
+                        transcription_context = f"{preface}\n\n{_VERBATIM_DIRECTIVE}\n\n{full_text}"
+                    else:
+                        transcription_context = full_text
                 else:
                     transcription_context = "\n".join(
                         seg.get("text", "") for seg in transcription["segments"]

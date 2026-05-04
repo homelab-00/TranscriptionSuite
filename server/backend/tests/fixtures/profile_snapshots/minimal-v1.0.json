@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "name": "minimal",
+  "description": null,
+  "public_fields": {
+    "filename_template": "{date}_{client}_{title}",
+    "destination_folder": "~/Downloads"
+  }
+}

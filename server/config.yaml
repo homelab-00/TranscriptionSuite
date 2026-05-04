@@ -715,3 +715,51 @@ durability:
     # Startup already runs orphan recovery once. Set to 0 to disable periodic sweeps.
     # Default: 30
     orphan_sweep_interval_minutes: 30
+
+# Issue #104, Sprint 4 — auto-summary and auto-export coordinator settings.
+auto_actions:
+    # How often (in seconds) the deferred-export sweeper re-checks rows whose
+    # destination was missing at completion time. When the destination comes
+    # back online, the row's auto_export_status flips from 'deferred' back to
+    # 'success' on the next sweep. Also re-fires auto_summary 'retry_pending'
+    # rows (Story 6.11). Set to 0 to disable the sweeper entirely.
+    # Default: 30
+    deferred_export_sweep_interval_s: 30.0
+
+# Issue #104, Sprint 5 — per-profile webhook delivery (epic-webhook).
+# This is the NEW per-profile webhook system (separate from the legacy
+# `webhook:` block above which is global / fire-and-forget). Per-profile
+# webhooks are durable: every attempt is persisted to webhook_deliveries
+# (R-EL33 / NFR17) so retries survive crashes.
+webhook_deliveries:
+    # Enable/disable the WebhookWorker entirely. When false, profile saves
+    # still validate the URL (so users can configure ahead of time), but no
+    # delivery attempts are made.
+    # Default: true
+    enabled: true
+
+    # How often (in seconds) the worker polls for new pending deliveries
+    # when there is no producer wake-up signal. Producers (auto-action
+    # coordinator + retry endpoint) call notify_new_delivery() to shortcut
+    # this for fresh events; the poll is a recovery floor for orphaned
+    # rows after a crash.
+    # Default: 5.0
+    poll_interval_s: 5.0
+
+    # Enable/disable the periodic retention sweeper (NFR40). When false,
+    # success / manual_intervention_required rows accumulate forever;
+    # useful for forensic reviews of long-running deployments.
+    # Default: true
+    retention_enabled: true
+
+    # Number of days to retain success / manual_intervention_required rows
+    # before periodic cleanup deletes them. Pending / in_flight / failed
+    # rows are NEVER cleaned (still actionable / queryable for debug).
+    # Default: 30
+    retention_days: 30
+
+    # How often (in hours) the retention sweep runs. The first sweep runs
+    # immediately at startup; subsequent sweeps follow the interval.
+    # Default: 24
+    retention_interval_hours: 24
+

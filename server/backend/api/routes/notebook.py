@@ -29,7 +29,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from server.api.routes.utils import get_client_name, sanitize_for_log
 from server.config import get_config
 from server.core.stt.backends.factory import detect_backend_type
@@ -98,6 +98,14 @@ class RecordingResponse(BaseModel):
     summary: str | None = None
     summary_model: str | None = None
     transcription_backend: str | None = None
+    # Issue #104 Sprint 4 — auto-action lifecycle (migration 015). Surfaced
+    # on the response so the dashboard's AutoActionStatusBadge can render
+    # without a second round-trip. Status enum is documented in the migration.
+    auto_summary_status: str | None = None
+    auto_summary_error: str | None = None
+    auto_export_status: str | None = None
+    auto_export_error: str | None = None
+    auto_export_path: str | None = None
 
 
 class RecordingDetailResponse(RecordingResponse):
@@ -105,6 +113,10 @@ class RecordingDetailResponse(RecordingResponse):
 
     segments: list[dict[str, Any]] = []
     words: list[dict[str, Any]] = []
+    # Sprint 5 — Story 7.7: latest webhook delivery state for this recording.
+    # Both fields are None when no webhook has ever been attempted.
+    webhook_status: str | None = None
+    webhook_error: str | None = None
 
 
 class SummaryUpdate(BaseModel):
@@ -124,6 +136,65 @@ class DateUpdate(BaseModel):
     """Request body for updating a recording's recorded_at date."""
 
     recorded_at: str
+
+
+class TurnConfidence(BaseModel):
+    """One per-turn diarization confidence entry. Story 5.4 (Issue #104).
+
+    ``alternative_speakers`` (Sprint 4 deferred-work no. 4) is the set of
+    other speaker_ids in the recording (excluding this turn's current
+    speaker), in first-appearance order. The dashboard's diarization-
+    review view uses it to drive the ←/→ attribution-cycling keys. Default
+    [] keeps the response shape backward-compatible for older serialized
+    clients.
+    """
+
+    turn_index: int
+    speaker_id: str | None = None
+    confidence: float
+    alternative_speakers: list[str] = []
+
+
+class DiarizationConfidenceResponse(BaseModel):
+    """Response shape for ``GET /recordings/{id}/diarization-confidence``."""
+
+    recording_id: int
+    turns: list[TurnConfidence]
+
+
+class DiarizationReviewState(BaseModel):
+    """ADR-009 lifecycle state for a recording (Story 5.6 / 5.7)."""
+
+    recording_id: int
+    status: str | None = None  # None when no row exists
+    reviewed_turns_json: str | None = None
+
+
+class DiarizationReviewSubmit(BaseModel):
+    """POST body for the lifecycle endpoint (Stories 5.7 / 5.9)."""
+
+    action: str  # 'open' (Story 5.7 banner CTA) | 'complete' (Story 5.9 Run summary now)
+    reviewed_turns: list[dict] | None = None  # populated when action='complete'
+
+
+class AliasItem(BaseModel):
+    """One speaker alias entry. Story 4.2 (Issue #104)."""
+
+    speaker_id: str
+    alias_name: str
+
+
+class AliasesPayload(BaseModel):
+    """PUT body — full-replace list of aliases for a recording."""
+
+    aliases: list[AliasItem]
+
+
+class AliasesResponse(BaseModel):
+    """GET / PUT response shape for the alias endpoints."""
+
+    recording_id: int
+    aliases: list[AliasItem]
 
 
 @router.get("/recordings", response_model=list[RecordingResponse])
@@ -151,6 +222,12 @@ async def list_recordings(
 async def get_recording_detail(recording_id: int) -> dict[str, Any]:
     """
     Get a single recording with full details including segments and words.
+
+    Sprint 5 — Story 7.7 AC1: also surfaces ``webhook_status`` /
+    ``webhook_error`` derived from the most-recent ``webhook_deliveries``
+    row for this recording. Both fields are ``None`` when no webhook
+    has ever been attempted for this recording. The dashboard's status
+    badge consumes these fields directly.
     """
     recording = get_recording(recording_id)
     if not recording:
@@ -160,21 +237,63 @@ async def get_recording_detail(recording_id: int) -> dict[str, Any]:
     segments = get_segments(recording_id)
     words = get_words(recording_id)
 
+    # Sprint 5 — surface latest webhook delivery status. The query is
+    # cheap (idx_webhook_deliveries_recording covers it) so we do it
+    # inline rather than adding a JOIN to get_recording (which is used
+    # everywhere — would risk regressions in other endpoints).
+    #
+    # Defensive: some legacy test fixtures seed the recordings table
+    # WITHOUT running alembic migrations, so webhook_deliveries (added
+    # in migration 016) is absent. Treat missing-table the same as
+    # "no delivery has been attempted" — the field returns null.
+    from sqlite3 import OperationalError
+
+    from server.database import webhook_deliveries_repository as _wdr
+
+    try:
+        latest_webhook = _wdr.get_latest_for_recording(recording_id)
+    except OperationalError as exc:
+        if "no such table" in str(exc):
+            latest_webhook = None
+        else:
+            raise
+    webhook_status = latest_webhook["status"] if latest_webhook else None
+    webhook_error = latest_webhook["last_error"] if latest_webhook else None
+
     return {
         **recording,
         "segments": segments,
         "words": words,
+        "webhook_status": webhook_status,
+        "webhook_error": webhook_error,
     }
 
 
 @router.delete("/recordings/{recording_id}")
-async def remove_recording(recording_id: int) -> dict[str, str]:
+async def remove_recording(
+    recording_id: int,
+    delete_artifacts: bool = False,
+    artifact_profile_id: int | None = None,
+) -> dict[str, Any]:
     """
     Delete a recording and all associated data.
 
     Deletion order is important for data integrity:
     1. Delete from database first (can be rolled back, critical data)
     2. Then delete audio file (orphan file is safer than orphan record)
+    3. (Story 3.7) When ``delete_artifacts=true`` AND
+       ``artifact_profile_id`` references an existing profile, derive the
+       expected on-disk transcript filename from that profile's template +
+       destination_folder, render it against the recording's metadata,
+       sanitize, and unlink (best-effort). Default is to LEAVE on-disk
+       files (FR48 — least surprise).
+
+    Notebook recordings don't carry a profile snapshot, so the active
+    profile id supplied by the renderer (``artifact_profile_id``) is the
+    only signal the server has for which template was used at export
+    time. If a previous export used a DIFFERENT profile, the derived
+    path won't match and the file remains on disk — harmless, the user
+    can clean it up manually.
     """
     recording = get_recording(recording_id)
     if not recording:
@@ -186,6 +305,8 @@ async def remove_recording(recording_id: int) -> dict[str, str]:
     if not delete_recording(recording_id):
         raise HTTPException(status_code=500, detail="Failed to delete recording")
 
+    artifact_failures: list[str] = []
+
     # 2. Delete audio file AFTER database success
     # If this fails, we have an orphan file (harmless) rather than an orphan record
     try:
@@ -193,8 +314,35 @@ async def remove_recording(recording_id: int) -> dict[str, str]:
             audio_path.unlink()
     except Exception as e:
         logger.warning(f"Orphan file cleanup needed for {audio_path}: {e}")
+        artifact_failures.append(str(audio_path))
 
-    return {"status": "deleted", "id": str(recording_id)}
+    # 3. (Story 3.7 AC3) Opt-in delete of on-disk transcript/summary
+    # export artifacts. Best-effort — surface failures via artifact_failures
+    # but never block the DB delete (right-to-erasure best-effort, R-EL32).
+    if delete_artifacts and artifact_profile_id is not None:
+        from server.core.filename_template import render_and_sanitize
+        from server.database import profile_repository
+
+        profile = profile_repository.get_profile(artifact_profile_id)
+        if profile is not None:
+            public = profile.get("public_fields", {}) or {}
+            template = public.get("filename_template") or "{date} - {title}.txt"
+            destination = public.get("destination_folder")
+            if destination:
+                rendered = render_and_sanitize(template, recording)
+                target = Path(destination) / rendered
+                try:
+                    if target.exists():
+                        target.unlink()
+                except Exception as e:
+                    logger.warning(f"Artifact cleanup failed for {target}: {e}")
+                    artifact_failures.append(str(target))
+
+    return {
+        "status": "deleted",
+        "id": str(recording_id),
+        "artifact_failures": artifact_failures,
+    }
 
 
 @router.put("/recordings/{recording_id}/summary")
@@ -278,6 +426,214 @@ async def update_date_patch(
         return {"status": "updated", "id": recording_id, "recorded_at": recorded_at}
     else:
         raise HTTPException(status_code=500, detail="Failed to update date")
+
+
+# ---------------------------------------------------------------------------
+# Speaker aliases (Issue #104, Story 4.2)
+# ---------------------------------------------------------------------------
+# Mounted on the notebook router rather than a top-level /api/recordings
+# router because notebook recordings are the only entity that owns
+# speaker labels in this codebase. URL-prefix override is documented in
+# `_bmad-output/implementation-artifacts/sprint-3-design.md` §1.
+
+
+@router.get(
+    "/recordings/{recording_id}/diarization-review",
+    response_model=DiarizationReviewState,
+)
+async def get_diarization_review_state(
+    recording_id: int,
+) -> DiarizationReviewState:
+    """Return the current ADR-009 lifecycle state (Issue #104, Story 5.7).
+
+    Returns ``status: null`` (no row) when no review has been triggered
+    for this recording — the dashboard treats null as "no banner".
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+    from server.database import diarization_review_repository as repo
+
+    row = repo.get_review(recording_id)
+    return DiarizationReviewState(
+        recording_id=recording_id,
+        status=row["status"] if row else None,
+        reviewed_turns_json=row["reviewed_turns_json"] if row else None,
+    )
+
+
+@router.post(
+    "/recordings/{recording_id}/diarization-review",
+    response_model=DiarizationReviewState,
+)
+async def submit_diarization_review(
+    recording_id: int,
+    payload: DiarizationReviewSubmit,
+) -> DiarizationReviewState:
+    """Lifecycle trigger endpoint (Stories 5.7 / 5.9).
+
+    Actions:
+      - ``open``     — pending → in_review (banner CTA invokes this)
+      - ``complete`` — in_review → completed; persists ``reviewed_turns_json``;
+                       Sprint 4 Story 6.2 calls ``on_auto_summary_fired()``
+                       to flip to ``released``
+
+    Persist-Before-Deliver (NFR16): each lifecycle trigger commits before
+    returning, so the response reflects committed state.
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    import json
+
+    from server.core.diarization_review_lifecycle import (
+        IllegalReviewTransitionError,
+        on_review_view_opened,
+        on_run_summary_now_clicked,
+    )
+    from server.database import diarization_review_repository as repo
+
+    try:
+        if payload.action == "open":
+            on_review_view_opened(recording_id)
+        elif payload.action == "complete":
+            # Lifecycle transition FIRST — illegal-transition failure
+            # must leave reviewed_turns_json untouched. Writing the JSON
+            # before the transition would produce orphan data when the
+            # transition raises (e.g. someone raced and the row is no
+            # longer in_review). After the transition succeeds, the
+            # JSON write commits separately but is functionally a follow-up
+            # decoration of an already-completed row.
+            on_run_summary_now_clicked(recording_id)
+            if payload.reviewed_turns is not None:
+                repo.update_reviewed_turns(
+                    recording_id,
+                    json.dumps(payload.reviewed_turns, ensure_ascii=False, sort_keys=True),
+                )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid action: {payload.action!r}. Expected 'open' or 'complete'.",
+            )
+    except IllegalReviewTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    row = repo.get_review(recording_id)
+    return DiarizationReviewState(
+        recording_id=recording_id,
+        status=row["status"] if row else None,
+        reviewed_turns_json=row["reviewed_turns_json"] if row else None,
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/diarization-confidence",
+    response_model=DiarizationConfidenceResponse,
+)
+async def get_diarization_confidence(
+    recording_id: int,
+) -> DiarizationConfidenceResponse:
+    """Per-turn diarization confidence (Issue #104, Story 5.4).
+
+    Returns ``{recording_id, turns: [{turn_index, speaker_id, confidence}, ...]}``.
+    Older recordings without word-level confidence return ``turns: []`` —
+    the dashboard treats absent turns as "no chip rendering" (Story 5.5).
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+    from server.core.diarization_confidence import per_turn_confidence
+
+    segments = get_segments(recording_id)
+    words = get_words(recording_id)
+    return DiarizationConfidenceResponse(
+        recording_id=recording_id,
+        turns=[TurnConfidence(**t) for t in per_turn_confidence(segments, words)],
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/aliases",
+    response_model=AliasesResponse,
+)
+async def list_recording_aliases(recording_id: int) -> AliasesResponse:
+    """List speaker aliases for a recording.
+
+    Returns an empty array when no aliases are stored — never 404 for
+    a missing alias set (Story 4.2 AC1). Returns 404 only when the
+    recording itself does not exist.
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+    from server.database import alias_repository
+
+    return AliasesResponse(
+        recording_id=recording_id,
+        aliases=[AliasItem(**row) for row in alias_repository.list_aliases(recording_id)],
+    )
+
+
+@router.put(
+    "/recordings/{recording_id}/aliases",
+    response_model=AliasesResponse,
+)
+async def update_recording_aliases(
+    recording_id: int,
+    payload: AliasesPayload,
+) -> AliasesResponse:
+    """Full-replace upsert of recording aliases (Story 4.2 AC2).
+
+    Each item in ``payload.aliases`` is upserted on
+    ``(recording_id, speaker_id)``. Pre-existing rows whose
+    ``speaker_id`` is NOT in the request body are deleted.
+
+    The ``alias_name`` is preserved verbatim (R-EL3) — only surrounding
+    whitespace is stripped. Empty alias names (after strip) are
+    skipped, which has the effect of CLEARING the alias for that
+    speaker_id.
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    from server.core.auto_action_coordinator import (
+        notify_alias_mutation_finished,
+        notify_alias_mutation_started,
+    )
+    from server.database import alias_repository
+
+    # Story 6.11 (cross-feature constraint #1) — F1 auto-summary must
+    # not race with F4 alias propagation. We bracket this PUT with the
+    # coordinator's race-guard so any in-flight auto-summary trigger
+    # waits for this mutation to complete.
+    notify_alias_mutation_started(recording_id)
+    try:
+        cleaned: list[dict[str, str]] = []
+        for entry in payload.aliases:
+            # Validate speaker_id — must be a non-empty token. Whitespace
+            # and NUL bytes are rejected because `speaker_id` is used as a
+            # join key against `segments.speaker` and a malformed value
+            # would silently produce a label miss.
+            speaker_id = entry.speaker_id.strip() if entry.speaker_id else ""
+            if not speaker_id or "\x00" in speaker_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Invalid speaker_id: {entry.speaker_id!r} — must be a "
+                        "non-empty string without NUL bytes."
+                    ),
+                )
+            trimmed = entry.alias_name.strip()
+            if not trimmed:
+                # Empty alias → drop the row (full-replace semantics handle it)
+                continue
+            cleaned.append({"speaker_id": speaker_id, "alias_name": trimmed})
+
+        alias_repository.replace_aliases(recording_id, cleaned)
+
+        return AliasesResponse(
+            recording_id=recording_id,
+            aliases=[AliasItem(**row) for row in alias_repository.list_aliases(recording_id)],
+        )
+    finally:
+        notify_alias_mutation_finished(recording_id)
 
 
 @router.get("/recordings/{recording_id}/audio")
@@ -442,6 +798,9 @@ def _run_transcription(
     title: str | None,
     job_id: str,
     event_loop: Any = None,
+    audio_hash: str | None = None,
+    normalized_audio_hash: str | None = None,
+    profile_snapshot: dict[str, Any] | None = None,
 ) -> None:
     """
     Run transcription in a background thread.
@@ -687,6 +1046,8 @@ def _run_transcription(
             recorded_at=recorded_at,
             title=clean_title or None,
             transcription_backend=transcription_backend,
+            audio_hash=audio_hash,
+            normalized_audio_hash=normalized_audio_hash,
         )
 
         if not recording_id:
@@ -705,6 +1066,44 @@ def _run_transcription(
         logger.info(
             f"Background transcription job {job_id[:8]} completed: recording_id={recording_id}"
         )
+
+        # Issue #104, Story 5.6 — diarization-review lifecycle hook +
+        # Story 6.2 / 6.3 — auto-action coordinator dispatch.
+        # Both fire AFTER the transcript has been committed (Persist-Before-Deliver).
+        if event_loop is not None:
+            from server.core.auto_action_coordinator import trigger_auto_actions
+            from server.core.diarization_confidence import (
+                LOW_CONFIDENCE_THRESHOLD,
+                per_turn_confidence,
+            )
+            from server.core.diarization_review_lifecycle import on_transcription_complete
+            from server.database.database import get_segments, get_words
+
+            try:
+                segments_for_conf = get_segments(recording_id)
+                words_for_conf = get_words(recording_id)
+                turns = per_turn_confidence(segments_for_conf, words_for_conf)
+                has_low_conf = any(t["confidence"] < LOW_CONFIDENCE_THRESHOLD for t in turns)
+                on_transcription_complete(recording_id, has_low_conf)
+            except Exception:
+                # Lifecycle bookkeeping must never crash the transcription pipeline.
+                logger.exception(
+                    "diarization-review lifecycle hook failed for recording %d",
+                    recording_id,
+                )
+
+            # Fire-and-forget the auto-action coordinator on the main loop.
+            # Disabled toggles are a no-op inside the coordinator.
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    trigger_auto_actions(recording_id, profile_snapshot),
+                    event_loop,
+                )
+            except Exception:
+                logger.exception(
+                    "trigger_auto_actions dispatch failed for recording %d",
+                    recording_id,
+                )
 
         # Fire outgoing webhook (background thread — use fire-and-forget)
         if event_loop is not None:
@@ -768,6 +1167,7 @@ async def upload_and_transcribe(
     expected_speakers: int | None = Form(None),
     parallel_diarization: bool | None = Form(None),
     title: str | None = Form(None),
+    profile_id: int | None = Form(None),
 ) -> dict[str, Any]:
     """
     Upload an audio file and start transcription in the background.
@@ -815,9 +1215,55 @@ async def upload_and_transcribe(
         tmp.write(content)
         tmp_path = Path(tmp.name)
 
+    # Compute audio_hash for dedup (Issue #104, Sprint 2 carve-out — Item 2).
+    # Hash the raw upload bytes — same approach as /api/transcribe/import. The
+    # hash is written atomically with the recordings row in
+    # save_longform_to_database; the dashboard can later call dedup-check to
+    # match notebook recordings against transcription_jobs and other notebook
+    # recordings.
+    # Sprint 2 Item 3 — also compute the normalized PCM hash for
+    # format-agnostic dedup. ffmpeg failure → NULL second hash, upload still
+    # proceeds.
+    from server.core.audio_utils import (
+        compute_normalized_pcm_hash as _norm_sha,
+    )
+    from server.core.audio_utils import sha256_streaming as _sha
+
+    try:
+        audio_hash: str | None = _sha(tmp_path)
+    except OSError as hash_err:
+        # Tempfile vanished or unreadable — release the job slot and surface
+        # the failure before any DB row is created (mirrors the request-path
+        # invariant: failed pre-conditions never produce orphan records).
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        model_manager.job_tracker.cancel_job()
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to compute audio hash for upload",
+        ) from hash_err
+    normalized_audio_hash: str | None = _norm_sha(tmp_path)
+
     # Resolve parallel diarization default from config before entering background thread
     config = request.app.state.config
     use_parallel_default = config.get("diarization", "parallel", default=True)
+
+    # Issue #104, Story 6.2 — snapshot the profile at upload time so the
+    # background thread (which may finish minutes later) sees the SAME
+    # toggles even if the user edits the profile during transcription.
+    profile_snapshot: dict[str, Any] | None = None
+    if profile_id is not None:
+        from server.database import profile_repository
+
+        profile_row = profile_repository.get_profile(profile_id)
+        if profile_row is not None:
+            profile_snapshot = {
+                "profile_id": profile_id,
+                "schema_version": profile_row.get("schema_version"),
+                "public_fields": profile_row.get("public_fields") or {},
+            }
 
     # Capture event loop for webhook dispatch from background thread
     loop = asyncio.get_running_loop()
@@ -841,6 +1287,9 @@ async def upload_and_transcribe(
             title=title,
             job_id=job_id,
             event_loop=loop,
+            audio_hash=audio_hash,
+            normalized_audio_hash=normalized_audio_hash,
+            profile_snapshot=profile_snapshot,
         )
     )
 
@@ -915,7 +1364,10 @@ async def get_timeslot_info(
 @router.get("/recordings/{recording_id}/export")
 async def export_recording(
     recording_id: int,
-    format: str = Query("txt", description="Export format: 'txt', 'srt', or 'ass'"),
+    format: str = Query(
+        "txt",
+        description="Export format: 'txt', 'srt', 'ass', or 'plaintext'",
+    ),
 ) -> Response:
     """
     Export a recording's transcription.
@@ -927,15 +1379,49 @@ async def export_recording(
     - Speaker labels (if diarization is present)
 
     Formats:
-    - txt: Human-readable text format for pure transcription notes
+    - txt: Verbose human-readable text — full metadata header + transcript
+    - plaintext: FR9 streaming format — paragraph-per-speaker-turn, no
+      subtitle timestamps, no metadata header. Used by the Sprint 2
+      "Download transcript" button (Issue #104, Story 3.4).
     - srt: SubRip subtitle format
     - ass: Advanced SubStation Alpha subtitle format
     """
     requested_format = format.strip().lower()
-    if requested_format not in {"txt", "srt", "ass"}:
+    if requested_format not in {"txt", "srt", "ass", "plaintext"}:
         raise HTTPException(
             status_code=400,
-            detail="Unsupported export format. Supported formats: txt, srt, ass.",
+            detail="Unsupported export format. Supported formats: txt, plaintext, srt, ass.",
+        )
+
+    # Story 3.4 — plaintext is a streaming response that bypasses the
+    # full materialization path used by txt/srt/ass. We branch early so
+    # we don't pay the cost of get_words() / cue building for plaintext.
+    if requested_format == "plaintext":
+        recording = get_recording(recording_id)
+        if not recording:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        from server.core.alias_substitution import apply_aliases
+        from server.core.plaintext_export import stream_plaintext
+        from server.database import alias_repository
+        from server.database.database import iter_segments
+
+        title = recording.get("title") or recording.get("filename") or "Recording"
+        rendered_filename = (
+            f"{title.replace(' ', '_')}.txt" if title else f"recording_{recording_id}.txt"
+        )
+        # Story 5.1 — alias propagation. ``apply_aliases`` is a lazy
+        # generator over ``iter_segments``, so the bounded-RAM property
+        # of the streaming exporter is preserved.
+        aliases = alias_repository.alias_map(recording_id)
+        return StreamingResponse(
+            stream_plaintext(
+                recording,
+                apply_aliases(iter_segments(recording_id), aliases),
+            ),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Content-Disposition": _content_disposition("attachment", rendered_filename),
+            },
         )
 
     try:
@@ -1079,10 +1565,14 @@ async def export_recording(
             filename = f"{title.replace(' ', '_')}_export.txt"
             media_type = "text/plain; charset=utf-8"
         else:
+            # Story 5.1 — alias propagation to subtitle exports.
+            from server.database import alias_repository
+
             cues = build_subtitle_cues(
                 segments=segments,
                 words=words,
                 has_diarization=has_diarization,
+                alias_overrides=alias_repository.alias_map(recording_id),
             )
 
             if requested_format == "srt":
@@ -1119,6 +1609,233 @@ async def export_recording(
             status_code=500,
             detail=f"Export failed: {type(e).__name__}: {e}",
         ) from e
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Re-export with current profile (Issue #104, Story 3.6)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class ReexportRequest(BaseModel):
+    """Body for ``POST /api/notebook/recordings/{id}/reexport`` (Story 3.6)."""
+
+    profile_id: int
+
+
+class ReexportResponse(BaseModel):
+    """Response shape for the re-export endpoint."""
+
+    status: str
+    path: str
+    filename: str
+
+
+@router.post("/recordings/{recording_id}/reexport", response_model=ReexportResponse)
+async def reexport_recording(recording_id: int, body: ReexportRequest) -> ReexportResponse:
+    """Render the recording's plaintext export using the CURRENT active
+    profile's template and write a NEW file to that profile's
+    destination_folder (FR17 forward-only).
+
+    AC3.6.AC3: the original file from a prior export is NOT deleted —
+    re-export is purely additive. Caller chooses to clean up the old file
+    via the deletion dialog (Story 3.7).
+    """
+    from server.core.filename_template import render_and_sanitize
+    from server.core.plaintext_export import stream_plaintext
+    from server.database import profile_repository
+    from server.database.database import iter_segments
+
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    profile = profile_repository.get_profile(body.profile_id)
+    if profile is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "profile_not_found", "id": body.profile_id},
+        )
+
+    public = profile.get("public_fields", {}) or {}
+    template = public.get("filename_template") or "{date} - {title}.txt"
+    destination = public.get("destination_folder") or ""
+    if not destination:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "destination_folder_unset",
+                "message": (
+                    "The active profile has no destination_folder. "
+                    "Set one in the profile editor before re-exporting."
+                ),
+            },
+        )
+
+    rendered = render_and_sanitize(template, recording)
+    target_path = Path(destination) / rendered
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Stream to disk so an 8-hour transcript doesn't OOM the server.
+    try:
+        with open(target_path, "w", encoding="utf-8") as f:
+            for chunk in stream_plaintext(recording, iter_segments(recording_id)):
+                f.write(chunk)
+    except OSError as exc:
+        logger.error(
+            "Re-export write failed for recording %s to %s: %s",
+            recording_id,
+            target_path,
+            exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "reexport_write_failed", "message": str(exc)},
+        ) from exc
+
+    return ReexportResponse(
+        status="reexported",
+        path=str(target_path),
+        filename=rendered,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Auto-action retry endpoint (Issue #104, Stories 6.9 / 6.10)
+# ---------------------------------------------------------------------------
+# Mounted on the notebook router rather than a top-level
+# /api/recordings/* router (per Sprint 3/4 design — see
+# `_bmad-output/implementation-artifacts/sprint-4-design.md` §1).
+
+
+class AutoActionRetryRequest(BaseModel):
+    action_type: str  # validated below — keep as plain str so 400 instead of 422
+
+    @field_validator("action_type")
+    @classmethod
+    def _validate_action_type(cls, v: str) -> str:
+        # Sprint 5 — Story 7.7 AC1 extends the action types with "webhook";
+        # the retry endpoint funnels webhook retries to a separate code
+        # path (the WebhookWorker queue, not the auto-action coordinator).
+        if v not in ("auto_summary", "auto_export", "webhook"):
+            raise ValueError(
+                f"action_type must be 'auto_summary', 'auto_export', or 'webhook'; received {v!r}"
+            )
+        return v
+
+
+class AutoActionRetryResponse(BaseModel):
+    recording_id: int
+    action_type: str
+    status: str  # "retry_initiated" | "already_complete" | "already_in_progress"
+
+
+@router.post("/recordings/{recording_id}/auto-actions/retry")
+async def retry_auto_action(
+    recording_id: int, payload: AutoActionRetryRequest, response: Response
+) -> AutoActionRetryResponse:
+    """Idempotent retry for auto-summary or auto-export (Story 6.9 / R-EL27).
+
+    Response shape:
+      - 202 + retry_initiated      — happy path; coordinator dispatched
+      - 200 + already_complete     — status was already 'success'; no-op
+      - 200 + already_in_progress  — concurrent click while a retry is in flight
+
+    Manual retry RESETS the auto-retry counter (Story 6.11 — escalation
+    only counts AUTO retries, not user-initiated retries). The retry
+    runs the same coordinator path as the original auto-action.
+    """
+    from server.core.auto_action_coordinator import retry_auto_action_internal
+    from server.database import auto_action_repository as aar
+
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    # Sprint 5 — Story 7.7 AC1: webhook retries funnel to the WebhookWorker
+    # queue (a fresh row inserted at status='pending'), NOT the auto-action
+    # coordinator. The idempotency contract is the same as auto-summary /
+    # auto-export but evaluated against the LATEST webhook_deliveries row
+    # for the recording.
+    if payload.action_type == "webhook":
+        from server.core.auto_action_coordinator import _run_webhook_dispatch
+        from server.database import (
+            auto_action_repository as _aar,
+        )
+        from server.database import (
+            webhook_deliveries_repository as wdr,
+        )
+
+        latest = wdr.get_latest_for_recording(recording_id)
+        if latest is not None and latest["status"] == "success":
+            response.status_code = 200
+            return AutoActionRetryResponse(
+                recording_id=recording_id,
+                action_type="webhook",
+                status="already_complete",
+            )
+        if latest is not None and latest["status"] in ("pending", "in_flight"):
+            response.status_code = 200
+            return AutoActionRetryResponse(
+                recording_id=recording_id,
+                action_type="webhook",
+                status="already_in_progress",
+            )
+        # Manual retry — re-fire from the snapshot saved at the original
+        # auto-action time (no profile drift). Same source-of-truth as
+        # auto-summary / auto-export retries.
+        snapshot = _aar.get_profile_snapshot(recording_id) or {}
+        public = snapshot.get("public_fields") or {}
+        if not public.get("webhook_url"):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "no_webhook_configured"},
+            )
+        # AWAIT (not fire-and-forget) so the durable 'pending' row is
+        # committed BEFORE the 202 response goes out. A hard process
+        # death between create_task() and create_pending() would
+        # otherwise drop the user's retry silently. _run_webhook_dispatch
+        # is fast (one INSERT + a notify) so awaiting it does not block
+        # the request meaningfully.
+        await _run_webhook_dispatch(recording_id, public)
+        response.status_code = 202
+        return AutoActionRetryResponse(
+            recording_id=recording_id,
+            action_type="webhook",
+            status="retry_initiated",
+        )
+
+    current = aar.get_auto_action_status(recording_id, payload.action_type)
+
+    # Idempotent on success — Story 6.9 AC2 / R-EL27 — no re-execution.
+    if current == "success":
+        response.status_code = 200
+        return AutoActionRetryResponse(
+            recording_id=recording_id,
+            action_type=payload.action_type,
+            status="already_complete",
+        )
+    # Don't double-fire while already in flight. `retry_pending` means a
+    # 30s-delayed auto-retry is scheduled (Story 6.11) — clicking the
+    # button while that's pending would dispatch a second retry against
+    # the same row. Treat as "already in progress".
+    if current in {"in_progress", "pending", "retry_pending"}:
+        response.status_code = 200
+        return AutoActionRetryResponse(
+            recording_id=recording_id,
+            action_type=payload.action_type,
+            status="already_in_progress",
+        )
+
+    # Reset attempts so manual retry is treated as a fresh attempt
+    # (R-EL18 specifies "automatic retry exhausted", not "user gave up").
+    aar.reset_auto_action_attempts(recording_id, payload.action_type)
+    aar.set_auto_action_status(recording_id, payload.action_type, "pending")
+    asyncio.create_task(retry_auto_action_internal(recording_id, payload.action_type))
+    response.status_code = 202
+    return AutoActionRetryResponse(
+        recording_id=recording_id,
+        action_type=payload.action_type,
+        status="retry_initiated",
+    )
 
 
 def _get_backup_manager() -> DatabaseBackupManager:

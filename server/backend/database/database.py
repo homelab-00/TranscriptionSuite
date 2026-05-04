@@ -15,7 +15,7 @@ import sqlite3
 import subprocess
 import tempfile
 import wave
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -495,6 +495,24 @@ def get_segments(recording_id: int) -> list[dict[str, Any]]:
         return [dict(row) for row in cursor.fetchall()]
 
 
+def iter_segments(recording_id: int) -> Iterator[dict[str, Any]]:
+    """Yield segments one at a time (Issue #104, Story 3.4).
+
+    Used by the plaintext streaming export so an 8-hour recording
+    (~100k segments / ~1 GB of text) can be formatted with bounded RAM.
+    The connection stays open for the lifetime of the iterator —
+    callers must consume to completion (or drop the iterator).
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM segments WHERE recording_id = ? ORDER BY segment_index",
+            (recording_id,),
+        )
+        for row in cursor:
+            yield dict(row)
+
+
 def get_words(recording_id: int) -> list[dict[str, Any]]:
     """Get all words for a recording."""
     with get_connection() as conn:
@@ -813,7 +831,6 @@ def delete_messages_from(conversation_id: int, message_id: int) -> int:
 # =============================================================================
 # Extended Recording operations
 # =============================================================================
-
 
 
 def get_recordings_for_month(year: int, month: int) -> list[dict[str, Any]]:
@@ -1593,6 +1610,8 @@ def save_longform_to_database(
     recorded_at: datetime | None = None,
     title: str | None = None,
     transcription_backend: str | None = None,
+    audio_hash: str | None = None,
+    normalized_audio_hash: str | None = None,
 ) -> int | None:
     """
     Save a longform recording to the database atomically.
@@ -1610,6 +1629,16 @@ def save_longform_to_database(
         recorded_at: Optional timestamp (defaults to now)
         title: Optional title (defaults to audio filename stem)
         transcription_backend: Optional normalized backend family used for transcription
+        audio_hash: Optional SHA-256 hex digest of the original upload bytes
+            (Issue #104 Sprint 2 carve-out, Item 2). Written atomically with the
+            row insert so dedup-check queries see a consistent state. None for
+            legacy callers / live-mode recordings (those simply do not participate
+            in dedup).
+        normalized_audio_hash: Optional SHA-256 over the normalized PCM rendering
+            (16 kHz mono int16 — Sprint 2 carve-out, Item 3). Matches the same
+            content across format re-encodes. NULL when ffmpeg normalization
+            failed for this upload — the row still participates in raw-hash
+            dedup, just not in format-agnostic dedup.
 
     Returns:
         Recording ID on success, None on error
@@ -1650,9 +1679,11 @@ def save_longform_to_database(
                     duration_seconds,
                     recorded_at,
                     has_diarization,
-                    transcription_backend
+                    transcription_backend,
+                    audio_hash,
+                    normalized_audio_hash
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     audio_path.name,
@@ -1662,6 +1693,8 @@ def save_longform_to_database(
                     recorded_at.isoformat(),
                     int(has_diarization),
                     transcription_backend,
+                    audio_hash,
+                    normalized_audio_hash,
                 ),
             )
             recording_id: int = cursor.lastrowid or 0
@@ -1725,6 +1758,64 @@ def save_longform_to_database(
     finally:
         if conn:
             conn.close()
+
+
+def find_recordings_by_audio_hash(
+    audio_hash: str,
+    limit: int = 10,
+    normalized_audio_hash: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return prior recordings whose raw or normalized hash matches.
+
+    Mirrors :func:`server.database.job_repository.find_by_audio_hash` so the
+    unified dedup-check (`find_duplicates_anywhere`) can merge results from
+    both tables. Most-recent-first by ``imported_at`` (the recordings-side
+    analogue of ``transcription_jobs.created_at`` / ``completed_at``).
+
+    Args:
+        audio_hash: SHA-256 over the raw upload bytes (Item 2). May be empty
+            to match only on ``normalized_audio_hash``.
+        limit: Maximum rows to return.
+        normalized_audio_hash: Optional SHA-256 over the normalized PCM
+            rendering (Item 3). When provided, the query OR's against the
+            second column too. NULL columns (legacy rows) never match.
+    """
+    has_raw = bool(audio_hash)
+    has_norm = bool(normalized_audio_hash)
+    if not has_raw and not has_norm:
+        return []
+    db_path = get_db_path()
+    if not db_path.exists():
+        return []
+
+    where_parts: list[str] = []
+    params: list[object] = []
+    if has_raw:
+        where_parts.append("audio_hash = ?")
+        params.append(audio_hash)
+    if has_norm:
+        where_parts.append("normalized_audio_hash = ?")
+        params.append(normalized_audio_hash)
+    where_clause = " OR ".join(where_parts)
+    params.append(limit)
+
+    conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False)
+    try:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            f"""
+            SELECT id, filename, title, imported_at, recorded_at,
+                   audio_hash, normalized_audio_hash
+            FROM recordings
+            WHERE {where_clause}
+            ORDER BY COALESCE(imported_at, recorded_at) DESC, id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
 
 def save_longform_recording(

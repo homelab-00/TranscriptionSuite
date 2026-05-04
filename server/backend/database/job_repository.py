@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from server.logging import sanitize_log_value
 
 from .database import get_connection
+from .profile_repository import snapshot_profile_at_job_start
 
 # Adapted from Scriberr (https://github.com/rishikanthc/Scriberr) — job model structure:
 # id, status, audio_path, result, error_message, timestamps pattern.
@@ -25,21 +26,120 @@ def create_job(
     language: str | None,
     task: str,
     translation_target: str | None,
+    profile_id: int | None = None,
+    audio_hash: str | None = None,
+    normalized_audio_hash: str | None = None,
 ) -> None:
     """Insert a new job row with status='processing'. Called at transcription start.
 
     Uses INSERT OR IGNORE so duplicate calls are safe.
+
+    When ``profile_id`` is provided, snapshots the profile via
+    :func:`profile_repository.snapshot_profile_at_job_start` and writes the
+    frozen JSON dump + schema version into the row (FR18). The snapshot is
+    immutable for the lifetime of the job — concurrent profile edits cannot
+    affect a running transcription. If the profile is deleted between
+    selection and job-start, the snapshot helper returns ``None`` and we
+    insert without snapshot fields rather than failing the job.
+
+    When ``audio_hash`` is provided (Issue #104, Story 2.2), it is written
+    atomically with the row insert. The dedup-check endpoint (Story 2.4)
+    queries against this column. Hash is computed by the caller — see
+    ``server.core.audio_utils.sha256_streaming``.
+
+    When ``normalized_audio_hash`` is provided (Sprint 2 carve-out — Item 3),
+    it is also written atomically. This second hash matches the same audio
+    content across format re-encodes (MP3 vs WAV vs M4A). NULL when
+    normalization (ffmpeg) fails — the row still participates in raw
+    audio_hash dedup. See ``audio_utils.compute_normalized_pcm_hash``.
     """
+    snapshot_json: str | None = None
+    snapshot_schema_version: str | None = None
+    if profile_id is not None:
+        snapshot = snapshot_profile_at_job_start(profile_id)
+        if snapshot is not None:
+            snapshot_json, snapshot_schema_version = snapshot
+        else:
+            logger.warning(
+                "create_job: profile_id=%d not found at snapshot time — "
+                "inserting job without profile snapshot",
+                profile_id,
+            )
+
     with get_connection() as conn:
         conn.execute(
             """
             INSERT OR IGNORE INTO transcription_jobs
-                (id, status, source, client_name, language, task, translation_target)
-            VALUES (?, 'processing', ?, ?, ?, ?, ?)
+                (id, status, source, client_name, language, task,
+                 translation_target, job_profile_snapshot, snapshot_schema_version,
+                 audio_hash, normalized_audio_hash)
+            VALUES (?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (job_id, source, client_name, language, task, translation_target),
+            (
+                job_id,
+                source,
+                client_name,
+                language,
+                task,
+                translation_target,
+                snapshot_json,
+                snapshot_schema_version,
+                audio_hash,
+                normalized_audio_hash,
+            ),
         )
         conn.commit()
+
+
+def find_by_audio_hash(
+    audio_hash: str,
+    limit: int = 10,
+    normalized_audio_hash: str | None = None,
+) -> list[dict]:
+    """Return prior jobs whose raw or normalized hash matches.
+
+    Used by the dedup-check endpoint to find re-imports of the same audio
+    content. Returns most-recent-first. Per FR4 / R-EL23, the query operates
+    only on the local SQLite DB — no outbound calls.
+
+    Args:
+        audio_hash: SHA-256 over the raw upload bytes (Story 2.2). May be
+            empty to match only on ``normalized_audio_hash``.
+        limit: Maximum rows to return.
+        normalized_audio_hash: Optional SHA-256 over the normalized PCM
+            rendering (Sprint 2 Item 3). When provided, the query OR's
+            against the second column too — a row that matches on EITHER
+            hash is returned. NULL columns (legacy rows) never match.
+    """
+    has_raw = bool(audio_hash)
+    has_norm = bool(normalized_audio_hash)
+    if not has_raw and not has_norm:
+        return []
+
+    where_parts: list[str] = []
+    params: list[object] = []
+    if has_raw:
+        where_parts.append("audio_hash = ?")
+        params.append(audio_hash)
+    if has_norm:
+        where_parts.append("normalized_audio_hash = ?")
+        params.append(normalized_audio_hash)
+    where_clause = " OR ".join(where_parts)
+    params.append(limit)
+
+    with get_connection() as conn:
+        cursor = conn.execute(
+            f"""
+            SELECT id, source, client_name, created_at, completed_at,
+                   result_text, audio_hash, normalized_audio_hash
+            FROM transcription_jobs
+            WHERE {where_clause}
+            ORDER BY COALESCE(completed_at, created_at) DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
 
 def save_result(
@@ -166,6 +266,42 @@ def set_audio_path(job_id: str, audio_path: str) -> None:
             "UPDATE transcription_jobs SET audio_path = ? WHERE id = ?",
             (audio_path, job_id),
         )
+        conn.commit()
+
+
+def set_audio_hash(
+    job_id: str,
+    audio_hash: str,
+    normalized_audio_hash: str | None = None,
+) -> None:
+    """Set audio_hash (and optionally normalized_audio_hash) on an existing row
+    (Issue #104, Story 2.2 + Sprint 2 Item 3).
+
+    Used for the ``/audio`` HTTP endpoint where ``create_job`` runs before
+    the upload tempfile exists; the hash is computed post-save and patched
+    in. The /import endpoint passes the hash directly to ``create_job`` and
+    does not call this function.
+
+    When ``normalized_audio_hash`` is provided, it is written in the same
+    UPDATE so the row reaches a fully-hashed state atomically. Pass None
+    to skip the second column (the existing audio-only callers pre-Item 3
+    keep working unchanged).
+    """
+    with get_connection() as conn:
+        if normalized_audio_hash is None:
+            conn.execute(
+                "UPDATE transcription_jobs SET audio_hash = ? WHERE id = ?",
+                (audio_hash, job_id),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE transcription_jobs
+                SET audio_hash = ?, normalized_audio_hash = ?
+                WHERE id = ?
+                """,
+                (audio_hash, normalized_audio_hash, job_id),
+            )
         conn.commit()
 
 

@@ -32,8 +32,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: ESLint (banned-API enforcement)
+        run: npm run lint
+
       - name: TypeScript + JavaScript checks
         run: npm run typecheck
 
       - name: UI contract checks
         run: npm run ui:contract:check
+
+      # Story 1.8 AC4 / NFR25 — accessibility gate. Lighthouse runs against
+      # the static Vite build (no Electron preload bridge available) and
+      # asserts categories:accessibility >= 0.9. Components that depend on
+      # window.electronAPI use optional chaining, so the renderer mounts
+      # gracefully in static mode and a11y can be scored. If a renderer
+      # change ever makes the page fail to mount in static mode, this gate
+      # will catch it before it ships.
+      - name: Build dashboard (Lighthouse target)
+        run: npm run build
+
+      - name: Lighthouse CI (accessibility >= 90)
+        run: npx --yes @lhci/cli@0.13.x autorun --config=./lighthouserc.json
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}

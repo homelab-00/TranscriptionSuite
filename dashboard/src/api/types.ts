@@ -112,6 +112,8 @@ export interface TranscriptionUploadOptions {
   multitrack?: boolean;
   file_created_at?: string;
   title?: string;
+  /** Active recording-profile id (FR18). Snapshotted server-side at job start. */
+  profile_id?: number | null;
 }
 
 export interface LanguagesResponse {
@@ -151,11 +153,25 @@ export interface Recording {
   summary: string | null;
   summary_model: string | null;
   transcription_backend?: 'whisper' | 'parakeet' | 'canary' | 'vibevoice_asr' | null;
+  // Issue #104 Sprint 4 — auto-action lifecycle (migration 015). Optional on
+  // older serialized clients; null when the toggle is off or the action has
+  // not run yet. Status enum lives in the migration; the dashboard's
+  // statusToBadgeProps handles all known values.
+  auto_summary_status?: string | null;
+  auto_summary_error?: string | null;
+  auto_export_status?: string | null;
+  auto_export_error?: string | null;
+  auto_export_path?: string | null;
 }
 
 export interface RecordingDetail extends Recording {
   segments: TranscriptionSegment[];
   words: TranscriptionWord[];
+  // Issue #104 Sprint 5 — Story 7.7: latest webhook delivery state for
+  // this recording. Both fields are null when no webhook has ever been
+  // attempted (toggle off, no profile, fresh recording).
+  webhook_status?: string | null;
+  webhook_error?: string | null;
 }
 
 export interface RecordingTranscription {
@@ -176,6 +192,34 @@ export interface UploadResponse {
 /** Returned by POST /api/notebook/transcribe/upload (202 Accepted) */
 export interface TranscriptionAccepted {
   job_id: string;
+  /**
+   * Issue #104 / Story 2.4 — populated by /api/transcribe/import when a
+   * prior job's audio_hash matches this upload. Empty list = J1 happy path
+   * (no duplicate). Notebook upload (`/api/notebook/transcribe/upload`)
+   * doesn't currently populate this field; it's reserved for future cross-
+   * flow dedup. Default-empty keeps the response shape backwards-compatible
+   * for callers that ignore it.
+   */
+  dedup_matches?: DedupMatch[];
+}
+
+/** A prior item that shares this upload's audio_hash or normalized_audio_hash.
+ *
+ * `source` (Sprint 2 carve-out — Item 2) tells the dashboard which table the
+ * match came from. Optional for backwards compatibility with older server
+ * responses that pre-date Item 2. Default behavior on undefined is to assume
+ * `'transcription_job'` (the original Sprint 2 contract).
+ */
+export interface DedupMatch {
+  recording_id: string;
+  name: string;
+  created_at: string;
+  source?: 'transcription_job' | 'recording';
+}
+
+/** Returned by POST /api/transcribe/import/dedup-check (Issue #104, Story 2.4). */
+export interface DedupCheckResponse {
+  matches: DedupMatch[];
 }
 
 /** Result stored in job_tracker after background transcription completes */

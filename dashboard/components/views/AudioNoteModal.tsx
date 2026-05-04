@@ -37,7 +37,19 @@ import { useRecording } from '../../src/hooks/useRecording';
 import { apiClient } from '../../src/api/client';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
+import { ConfidenceChip } from '../recording/ConfidenceChip';
+import { DeleteRecordingDialog } from '../recording/DeleteRecordingDialog';
+import { SpeakerRenameInput } from '../recording/SpeakerRenameInput';
+import { AutoActionStatusBadge, statusToBadgeProps } from '../recording/AutoActionStatusBadge';
+import { useAutoActionRetry } from '../../src/hooks/useAutoActionRetry';
+import { PersistentInfoBanner } from '../ui/PersistentInfoBanner';
+import { useActiveProfileStore } from '../../src/stores/activeProfileStore';
+import { useDiarizationConfidence } from '../../src/hooks/useDiarizationConfidence';
+import { useDiarizationReview } from '../../src/hooks/useDiarizationReview';
 import { useWordHighlighter } from '../../src/hooks/useWordHighlighter';
+import { useRecordingAliases } from '../../src/hooks/useRecordingAliases';
+import { buildSpeakerLabelMap, labelFor } from '../../src/utils/aliasSubstitution';
+import { LOW_CONFIDENCE_THRESHOLD } from '../../src/utils/confidenceBuckets';
 import { getConfig } from '../../src/config/store';
 import type { ChatMessage, Conversation, LLMModel } from '../../src/api/types';
 
@@ -417,6 +429,10 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   note,
 }) => {
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const activeProfileId = useActiveProfileStore((s) => s.activeProfileId);
+  // Issue #104, Story 3.7 — DeleteRecordingDialog state for the
+  // recording-delete affordance in the options menu.
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   // Portal Container State
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
@@ -541,6 +557,76 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const segments = transcription?.segments ?? [];
   const hasDiarizationTranscript =
     Boolean(recording?.has_diarization) || segments.some((seg) => Boolean(seg.speaker));
+
+  // Issue #104, Stories 4.3 / 4.4 — Speaker aliases for the active recording.
+  // The hook is the single source of truth: rename commits via setAliases
+  // and every turn re-renders with the new label in the same React pass
+  // (FR22 / "applies to all turns of the same speaker_id").
+  const recordingId = note?.recordingId ?? null;
+  const aliasState = useRecordingAliases(recordingId);
+  const speakerLabelMap = useMemo(
+    () => buildSpeakerLabelMap(segments, aliasState.aliasMap),
+    [segments, aliasState.aliasMap],
+  );
+  const handleSpeakerRename = useCallback(
+    (speakerId: string, newName: string) => {
+      const trimmed = newName.trim();
+      const next = aliasState.aliases.filter((a) => a.speaker_id !== speakerId);
+      if (trimmed) next.push({ speaker_id: speakerId, alias_name: trimmed });
+      aliasState.setAliases(next).catch(() => {
+        toast.error('Failed to update speaker label');
+      });
+    },
+    [aliasState],
+  );
+
+  // Issue #104 Story 5.5 — per-turn diarization confidence for chip rendering.
+  // Older recordings without word-level confidence return turns:[] which
+  // renders no chips at all (graceful fallback).
+  const confidenceState = useDiarizationConfidence(recordingId);
+
+  // Issue #104 Story 5.7 — review state drives the persistent banner.
+  const reviewState = useDiarizationReview(recordingId);
+
+  // Issue #104 Sprint 4 deferred-work no. 3 — surface the auto-summary /
+  // auto-export lifecycle status. statusToBadgeProps returns null when the
+  // backend column is null (toggle off / not run yet) so the badge simply
+  // does not render in those cases.
+  const autoActionRetry = useAutoActionRetry(recordingId ?? 0);
+  const summaryBadgeProps = statusToBadgeProps(
+    recording?.auto_summary_status ?? null,
+    'auto_summary',
+    { error: recording?.auto_summary_error ?? null },
+  );
+  const exportBadgeProps = statusToBadgeProps(
+    recording?.auto_export_status ?? null,
+    'auto_export',
+    {
+      error: recording?.auto_export_error ?? null,
+      path: recording?.auto_export_path ?? null,
+    },
+  );
+  // Sprint 5 — Story 7.7: third badge for the per-recording webhook
+  // delivery status. The backend exposes the latest webhook_deliveries
+  // row's status + last_error directly on the GET response.
+  const webhookBadgeProps = statusToBadgeProps(recording?.webhook_status ?? null, 'webhook', {
+    error: recording?.webhook_error ?? null,
+  });
+  const lowConfTurnCount = useMemo(() => {
+    let n = 0;
+    for (const t of confidenceState.turns) {
+      if (t.confidence < LOW_CONFIDENCE_THRESHOLD) n += 1;
+    }
+    return n;
+  }, [confidenceState.turns]);
+  const totalTurnCount = confidenceState.turns.length;
+  const handleOpenReview = useCallback(() => {
+    reviewState.openReview().catch(() => {
+      toast.error('Failed to open review');
+    });
+    // Story 5.9 review view (commit I) opens here. For commit H we
+    // expose only the lifecycle transition; the dedicated view ships next.
+  }, [reviewState]);
   const hasWordTimestamps = segments.some((seg) => seg.words && seg.words.length > 0);
   const hasSegmentDetail = hasDiarizationTranscript || hasWordTimestamps;
   const plainTranscriptText = hasSegmentDetail
@@ -1471,25 +1557,102 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     [note?.recordingId],
   );
 
-  /** Confirm + delete the recording. Closes the modal on success. */
-  const handleRecordingDelete = useCallback(async () => {
+  /**
+   * Issue #104, Story 3.5 — download the FR9-format plain-text transcript
+   * via the native OS file-save dialog. Uses the new `format=plaintext`
+   * branch on the export route (StreamingResponse, paragraph per speaker
+   * turn, no subtitle timestamps).
+   */
+  const handleDownloadPlaintextTranscript = useCallback(async () => {
     setOptionsMenuOpen(false);
     if (!note?.recordingId) return;
-    const ok = await confirm('Delete this recording? This cannot be undone.', {
-      danger: true,
-      confirmLabel: 'Delete',
-    });
-    if (!ok) return;
-    try {
-      await apiClient.deleteRecording(note.recordingId);
-      onRecordingMutated?.();
-      toast.success('Recording deleted.');
-      onClose();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to delete recording.';
-      toast.error(message);
+    const url = apiClient.getExportUrl(note.recordingId, 'plaintext' as never);
+    if (url === null) {
+      toast.error('Remote host not configured. Open Settings → Connection.');
+      return;
     }
-  }, [note?.recordingId, confirm, onRecordingMutated, onClose]);
+    const fileIO = window.electronAPI?.fileIO;
+    if (!fileIO?.saveFile || !fileIO.writeText) {
+      // Fallback: just open the URL — browser will save via its own dialog.
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    try {
+      const defaultName = `${(note.title || 'recording').replace(/\s+/g, '_')}.txt`;
+      const target = await fileIO.saveFile({
+        defaultPath: defaultName,
+        filters: [{ name: 'Text', extensions: ['txt'] }],
+      });
+      if (!target) return;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Server returned ${response.status}`);
+      const content = await response.text();
+      await fileIO.writeText(target, content);
+      toast.success(`Transcript saved to ${target}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      toast.error(`Could not save transcript: ${message}`);
+    }
+  }, [note?.recordingId, note?.title]);
+
+  /** Story 3.5 — download the AI summary as plain text. */
+  const handleDownloadPlaintextSummary = useCallback(async () => {
+    setOptionsMenuOpen(false);
+    if (!note?.recordingId || !summaryText) return;
+    const fileIO = window.electronAPI?.fileIO;
+    if (!fileIO?.saveFile || !fileIO.writeText) {
+      toast.error('Save dialog unavailable in this environment.');
+      return;
+    }
+    try {
+      const defaultName = `${(note.title || 'recording').replace(/\s+/g, '_')}_summary.txt`;
+      const target = await fileIO.saveFile({
+        defaultPath: defaultName,
+        filters: [{ name: 'Text', extensions: ['txt'] }],
+      });
+      if (!target) return;
+      await fileIO.writeText(target, summaryText);
+      toast.success(`Summary saved to ${target}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      toast.error(`Could not save summary: ${message}`);
+    }
+  }, [note?.recordingId, note?.title, summaryText]);
+
+  /** Open the deletion dialog. Actual deletion fires from
+   * handleConfirmRecordingDelete after the user picks options.
+   */
+  const handleRecordingDelete = useCallback(() => {
+    setOptionsMenuOpen(false);
+    if (!note?.recordingId) return;
+    setDeleteDialogOpen(true);
+  }, [note?.recordingId]);
+
+  const handleConfirmRecordingDelete = useCallback(
+    async (deleteArtifacts: boolean) => {
+      setDeleteDialogOpen(false);
+      if (!note?.recordingId) return;
+      try {
+        const result = await apiClient.deleteRecording(note.recordingId, {
+          deleteArtifacts,
+          artifactProfileId: deleteArtifacts ? activeProfileId : null,
+        });
+        onRecordingMutated?.();
+        if (result.artifact_failures?.length) {
+          toast.error(
+            `Recording deleted, but ${result.artifact_failures.length} on-disk file(s) could not be removed.`,
+          );
+        } else {
+          toast.success('Recording deleted.');
+        }
+        onClose();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to delete recording.';
+        toast.error(message);
+      }
+    },
+    [note?.recordingId, activeProfileId, onRecordingMutated, onClose],
+  );
 
   if (!isRendered || !note || !portalContainer) return createPortal(confirmDialog, document.body);
 
@@ -1498,6 +1661,12 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       {/* Render confirmDialog and renameDialog via portals to document.body so they
           always appear above the modal (z-9999), regardless of stacking context. */}
       {createPortal(confirmDialog, document.body)}
+      <DeleteRecordingDialog
+        open={deleteDialogOpen}
+        recordingName={note.title || 'this recording'}
+        onCancel={() => setDeleteDialogOpen(false)}
+        onConfirm={handleConfirmRecordingDelete}
+      />
       {renameDialog &&
         createPortal(
           <div className="fixed inset-0 z-10000 flex items-center justify-center p-4">
@@ -1701,6 +1870,31 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                           >
                             <Edit2 size={14} /> Rename
                           </button>
+                          {/* Issue #104, Story 3.5 — Download transcript /
+                              Download summary use the new plain-text streaming
+                              format + native save dialog. The verbose Export
+                              TXT/SRT/ASS items below stay for power users. */}
+                          <button
+                            onClick={handleDownloadPlaintextTranscript}
+                            aria-label="Download transcript as plain text"
+                            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
+                          >
+                            <Download size={14} /> Download transcript
+                          </button>
+                          <button
+                            onClick={handleDownloadPlaintextSummary}
+                            aria-label="Download summary as plain text"
+                            disabled={!summaryText}
+                            title={
+                              summaryText
+                                ? undefined
+                                : 'No summary yet — generate from the AI panel'
+                            }
+                            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-slate-300"
+                          >
+                            <Download size={14} /> Download summary
+                          </button>
+                          <div className="my-1 h-px bg-white/10"></div>
                           <button
                             onClick={() => handleRecordingExport('txt')}
                             className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
@@ -1824,6 +2018,49 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                 ref={transcriptContainerRef}
                 className="custom-scrollbar flex-1 space-y-8 overflow-y-auto p-8"
               >
+                {/* Issue #104 Sprint 4 — auto-summary / auto-export status badges
+                    (Story 6.6). Each badge renders only when its corresponding
+                    backend column is non-null, so toggle-off recordings show
+                    nothing here. */}
+                {(summaryBadgeProps || exportBadgeProps || webhookBadgeProps) &&
+                  note?.recordingId && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {summaryBadgeProps && (
+                        <AutoActionStatusBadge
+                          recordingId={note.recordingId}
+                          recordingName={note.title}
+                          actionType="auto_summary"
+                          severity={summaryBadgeProps.severity}
+                          message={summaryBadgeProps.message}
+                          retryable={summaryBadgeProps.retryable}
+                          onRetry={(t) => autoActionRetry.mutate(t)}
+                        />
+                      )}
+                      {exportBadgeProps && (
+                        <AutoActionStatusBadge
+                          recordingId={note.recordingId}
+                          recordingName={note.title}
+                          actionType="auto_export"
+                          severity={exportBadgeProps.severity}
+                          message={exportBadgeProps.message}
+                          retryable={exportBadgeProps.retryable}
+                          onRetry={(t) => autoActionRetry.mutate(t)}
+                        />
+                      )}
+                      {webhookBadgeProps && (
+                        <AutoActionStatusBadge
+                          recordingId={note.recordingId}
+                          recordingName={note.title}
+                          actionType="webhook"
+                          severity={webhookBadgeProps.severity}
+                          message={webhookBadgeProps.message}
+                          retryable={webhookBadgeProps.retryable}
+                          onRetry={(t) => autoActionRetry.mutate(t)}
+                        />
+                      )}
+                    </div>
+                  )}
+
                 {/* 2. AI Summary Section - Editable */}
                 <div
                   className={`overflow-hidden rounded-2xl border border-white/10 transition-all duration-500 ease-in-out ${summaryExpanded ? 'from-accent-magenta/5 bg-linear-to-br to-purple-900/10' : 'bg-glass-100 hover:bg-white/5'}`}
@@ -1919,6 +2156,20 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                   )}
                 </div>
 
+                {/* Issue #104 Story 5.7 — persistent low-confidence review banner.
+                    Visible while ADR-009 status is 'pending' or 'in_review'.
+                    Dismissed only by the lifecycle (R-EL20 — no time/navigation
+                    auto-dismiss). */}
+                {reviewState.bannerVisible && (
+                  <PersistentInfoBanner
+                    severity="warning"
+                    message={`⚠ Speaker labels uncertain on ${lowConfTurnCount} of ${totalTurnCount} turn boundaries — review before auto-summary runs.`}
+                    ctaLabel="Review uncertain turns"
+                    onCta={handleOpenReview}
+                    ariaAnnouncement={`Transcription complete. ${lowConfTurnCount} of ${totalTurnCount} turn boundaries flagged low-confidence.`}
+                  />
+                )}
+
                 {/* 3. Transcript - Added selectable-text to paragraphs */}
                 <div className="space-y-6">
                   <div className="pointer-events-none sticky top-0 z-10 py-4 select-none">
@@ -1939,7 +2190,27 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                                 <div
                                   className={`mb-1 text-xs font-bold ${speakerColor(seg.speaker)}`}
                                 >
-                                  {seg.speaker}
+                                  {/* Issue #104 Stories 4.3 / 4.4 — alias-aware
+                                      speaker rendering. The display label is
+                                      `aliasMap[raw] ?? "Speaker N"`; rename
+                                      writes through useRecordingAliases. */}
+                                  <SpeakerRenameInput
+                                    speakerId={seg.speaker}
+                                    currentLabel={labelFor(seg.speaker, speakerLabelMap)}
+                                    className="cursor-text rounded px-1 hover:bg-white/10 focus:bg-white/10 focus:outline-none data-[editing]:bg-black/30"
+                                    onCommit={(newName) =>
+                                      handleSpeakerRename(seg.speaker as string, newName)
+                                    }
+                                  />
+                                  {/* Issue #104 Story 5.5 — per-turn confidence
+                                      chip. high → null; medium → neutral;
+                                      low → amber. Tooltip shows %.  */}
+                                  {(() => {
+                                    const conf = confidenceState.byTurn.get(i);
+                                    return conf !== undefined ? (
+                                      <ConfidenceChip confidence={conf} />
+                                    ) : null;
+                                  })()}
                                 </div>
                               )}
                               {!hideTimestamps && (

@@ -17,6 +17,10 @@ import {
 import logoUrl from '../../docs/assets/logo.png';
 import { StatusLight } from './ui/StatusLight';
 import type { RuntimeProfile } from '../src/types/runtime';
+import { ProfileSelector } from './profiles/ProfileSelector';
+import { ModelProfileSelector } from './profiles/ModelProfileSelector';
+import type { ModelProfile } from '../src/services/modelProfileStore';
+import { toast } from 'sonner';
 
 interface SidebarProps {
   currentView: View;
@@ -36,6 +40,15 @@ interface SidebarProps {
   runtimeProfile?: RuntimeProfile;
   serverReachable?: boolean;
   mlxProcessAlive?: boolean;
+  /** True while live mode is engaged — model swaps are blocked in this state. */
+  liveModeActive?: boolean;
+  /**
+   * Caller-supplied model swap. Receives the selected model profile and is
+   * expected to drive model_manager.load_transcription_model via the
+   * existing `server.mainModelSelection` config path. Resolve when the
+   * server has been notified; the selector keeps the spinner up until then.
+   */
+  onSwitchModelProfile?: (profile: ModelProfile) => Promise<void>;
 }
 
 const SIDEBAR_COLLAPSED_WIDTH_PX = 80;
@@ -61,6 +74,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   runtimeProfile,
   serverReachable,
   mlxProcessAlive,
+  liveModeActive = false,
+  onSwitchModelProfile,
 }) => {
   const isMetal = runtimeProfile === 'metal';
   const [collapsed, setCollapsed] = useState(false);
@@ -389,6 +404,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
       </nav>
+
+      {/* Profile selectors — global state controls (Stories 1.6 + 8.3 wiring,
+          Issue #104). Hidden in collapsed state because dropdowns can't fit
+          in the 80px column. Both write to electron-store so the choice
+          survives restart. */}
+      {!collapsed && (
+        <div className="border-glass-border flex flex-col gap-2 border-t px-3 py-3">
+          <ProfileSelector />
+          <ModelProfileSelector
+            liveModeActive={liveModeActive}
+            onSwitch={async (profile) => {
+              if (onSwitchModelProfile === undefined) return;
+              await onSwitchModelProfile(profile);
+            }}
+            onRejected={(reason) => toast.error(reason)}
+          />
+        </div>
+      )}
 
       {/* Bug Report - above the separator */}
       <div className="px-3 pb-2">

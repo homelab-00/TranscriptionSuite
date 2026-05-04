@@ -137,8 +137,34 @@ PyAnnote 4.x speaker diarization pipeline:
 | `segments` | Transcription segments | id, recording_id, text, start_time, end_time, speaker |
 | `words` | Word-level timestamps | id, segment_id, word, start_time, end_time, confidence |
 | `recordings_fts` | Full-text search index | FTS5 virtual table |
-| `transcription_jobs` | Durability layer | id, status, source, client_name, audio_path, result_text, result_json, delivered |
+| `transcription_jobs` | Durability layer | id, status, source, client_name, audio_path, result_text, result_json, delivered, audio_hash |
+| `recordings` | Notebook recordings | id, filename, filepath, title, duration_seconds, recorded_at, imported_at, audio_hash |
 | `chat_history` | LLM conversations | recording_id, messages, model |
+
+#### Audio dedup scope (FR4 / R-EL23)
+
+Issue #104: audio dedup operates **per-user-library**. Each upload row now
+carries TWO complementary SHA-256 columns:
+
+- **`audio_hash`** (migrations 011 + 012) — SHA-256 of the raw upload bytes,
+  streamed in 1 MiB chunks. Cheapest signal; catches "same file imported
+  twice".
+- **`normalized_audio_hash`** (migration 013) — SHA-256 of the file rendered
+  through ffmpeg as 16 kHz mono int16 PCM. Catches "same content, different
+  encoding" (e.g. MP3 vs WAV vs M4A of the same source). NULL on rows where
+  ffmpeg failed at upload time — those rows fall back to raw-only dedup.
+
+Both columns exist on `transcription_jobs` (written by `/api/transcribe/audio`
++ `/api/transcribe/import`) and `recordings` (written by
+`/api/notebook/transcribe/upload`). The dedup-check endpoint
+(`POST /api/transcribe/import/dedup-check`) runs
+`dedup_query.find_duplicates_anywhere`, which queries both tables and OR's
+both columns, returning a merged list discriminated by a `source` field
+(`"transcription_job"` vs `"recording"`). A row that matches on both columns
+naturally appears once (SQLite predicate semantics).
+
+All queries hit only the local SQLite database — no outbound network call,
+no shared registry. Cross-user dedup is an explicit non-goal.
 
 ### Durability System (3 Waves)
 

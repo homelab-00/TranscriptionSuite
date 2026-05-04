@@ -261,6 +261,13 @@ class ModelManager:
         except Exception:
             return  # Not an MLX platform — nothing to do.
 
+        # mlx.core may exist without a `metal` namespace on partial / non-Apple
+        # Silicon installs (and in test environments where a sibling test has
+        # registered a sys.modules['mlx.core'] stub). Treat that the same as
+        # "not an MLX platform" rather than crashing the constructor.
+        if not hasattr(mx, "metal"):
+            return
+
         from server.config import get_config
 
         cfg = get_config()

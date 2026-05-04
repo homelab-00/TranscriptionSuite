@@ -18,6 +18,8 @@ import type {
 import { resolveTranscriptionOutput } from '../services/transcriptionFormatters';
 import { supportsAutoDetect } from '../services/modelCapabilities';
 import { getConfig } from '../config/store';
+import { useDedupChoiceStore } from './dedupChoiceStore';
+import { useAriaAnnouncerStore } from './ariaAnnouncerStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -291,7 +293,41 @@ async function processSessionJob(
     fileObj = file;
   }
 
-  const { job_id: serverJobId } = await apiClient.importAndTranscribe(fileObj, job.options);
+  const importResponse = await apiClient.importAndTranscribe(fileObj, job.options);
+  const { job_id: serverJobId } = importResponse;
+
+  // Issue #104, Story 2.4 + Sprint 2 Item 4 — full DedupPromptModal flow.
+  // When the server reports prior matches, await the user's choice via
+  // useDedupChoiceStore. The container component (mounted at App level)
+  // renders the modal and resolves the promise.
+  if (importResponse.dedup_matches?.length) {
+    const first = importResponse.dedup_matches[0];
+    const choice = await useDedupChoiceStore.getState().requestChoice(importResponse.dedup_matches);
+
+    if (choice === 'use_existing' || choice === 'cancel') {
+      // User picked "Use existing" (or pressed Esc / closed): cancel the
+      // server-side job and skip this queue entry. The cancel API is
+      // best-effort — if the job already completed it's a harmless no-op.
+      try {
+        await apiClient.cancelTranscription();
+      } catch {
+        // Swallow: skip-the-local-entry is the user-visible contract.
+      }
+      useAriaAnnouncerStore.getState().announce(`Duplicate skipped: ${first.name}`, 'polite');
+      // Mark this queue entry as success-with-no-output so the user sees
+      // the queue advance rather than freeze on a "processing" state.
+      // We deliberately do NOT mark as 'error' — the user chose this.
+      store.setState((s) => ({
+        jobs: s.jobs.map((j) =>
+          j.id === job.id ? { ...j, status: 'success' as const, outputFilename: undefined } : j,
+        ),
+      }));
+      return;
+    }
+    // 'create_new': continue with the existing happy path.
+    toast.warning(`Duplicate of '${first.name}' detected. Creating a new entry as requested.`);
+  }
+
   const result = await pollForSessionResult(serverJobId);
 
   if (result.error) throw new Error(result.error);

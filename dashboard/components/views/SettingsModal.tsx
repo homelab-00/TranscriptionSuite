@@ -22,6 +22,7 @@ import {
   Send,
   Cpu,
   Bot,
+  Layers,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
@@ -45,13 +46,19 @@ import { AmdIcon } from '../ui/icons/AmdIcon';
 import { IntelIcon } from '../ui/icons/IntelIcon';
 import { AppleIcon } from '../ui/icons/AppleIcon';
 import type { RuntimeProfile } from '../../src/types/runtime';
+import type { Profile } from '../../src/api/client';
+import { EmptyProfileForm } from '../profiles/EmptyProfileForm';
+import { ModelProfilesPanel } from '../profiles/ModelProfilesPanel';
+import { useLanguages } from '../../src/hooks/useLanguages';
+import { MAIN_MODEL_PRESETS } from '../../src/services/modelSelection';
+import { CANARY_TRANSLATION_TARGETS } from '../../src/services/modelCapabilities';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-const tabs = ['App', 'Client', 'Server', 'AI', 'Notebook'];
+const tabs = ['App', 'Client', 'Server', 'AI', 'Notebook', 'Profiles'];
 const DEFAULT_SHORTCUTS = {
   startRecording: 'Alt+Ctrl+Z',
   stopTranscribe: 'Alt+Ctrl+X',
@@ -127,6 +134,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       }
     | undefined
   >(undefined);
+
+  // Profiles tab state — recording (post-transcription) profiles list, fetch
+  // status, and the "creating new" toggle that mounts EmptyProfileForm.
+  // Story 1.5/1.6 wiring (Issue #104). Model profiles are managed by
+  // ModelProfilesPanel itself (electron-store backed, no shared state here).
+  const [recordingProfiles, setRecordingProfiles] = useState<Profile[]>([]);
+  const [profilesLoading, setProfilesLoading] = useState<boolean>(false);
+  const [creatingRecordingProfile, setCreatingRecordingProfile] = useState<boolean>(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const { languages: sttLanguages } = useLanguages(null);
 
   // Token management state
   const [tokens, setTokens] = useState<AuthToken[]>([]);
@@ -1990,6 +2007,179 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     </div>
   );
 
+  // Recording-profiles fetch — runs whenever the Profiles tab becomes active
+  // and when a profile is created/deleted (refreshKey bump). Failures surface
+  // inline (profileError) rather than throwing — the user can retry by
+  // re-opening the tab.
+  useEffect(() => {
+    if (activeTab !== 'Profiles') return;
+    let cancelled = false;
+    setProfilesLoading(true);
+    setProfileError(null);
+    void apiClient
+      .listProfiles()
+      .then((list) => {
+        if (!cancelled) setRecordingProfiles(list);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setProfileError(err instanceof Error ? err.message : 'Failed to load profiles');
+      })
+      .finally(() => {
+        if (!cancelled) setProfilesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
+  const refreshRecordingProfiles = useCallback(async () => {
+    setProfilesLoading(true);
+    setProfileError(null);
+    try {
+      const list = await apiClient.listProfiles();
+      setRecordingProfiles(list);
+    } catch (err: unknown) {
+      setProfileError(err instanceof Error ? err.message : 'Failed to load profiles');
+    } finally {
+      setProfilesLoading(false);
+    }
+  }, []);
+
+  const handleDeleteRecordingProfile = useCallback(
+    async (profile: Profile) => {
+      const ok = await confirm(
+        `Delete profile "${profile.name}"? Existing transcriptions are unaffected — only future jobs lose this preset.`,
+        { danger: true, confirmLabel: 'Delete' },
+      );
+      if (!ok) return;
+      try {
+        await apiClient.deleteProfile(profile.id);
+        toast.success(`Deleted "${profile.name}"`);
+        await refreshRecordingProfiles();
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : 'Delete failed');
+      }
+    },
+    [confirm, refreshRecordingProfiles],
+  );
+
+  // Translation targets list — Canary supports translation to a fixed set of
+  // EU target languages; we surface those by intersecting with the languages
+  // list returned by the server (which has display names) so the dropdown
+  // reads "German" rather than "de".
+  const translationTargetOptions = React.useMemo(() => {
+    const codes = new Set<string>(CANARY_TRANSLATION_TARGETS);
+    return sttLanguages
+      .filter((l) => codes.has(l.code))
+      .map((l) => ({ code: l.code, label: l.name }));
+  }, [sttLanguages]);
+
+  const availableLanguageOptions = React.useMemo(
+    () =>
+      sttLanguages.filter((l) => l.code !== 'auto').map((l) => ({ code: l.code, label: l.name })),
+    [sttLanguages],
+  );
+
+  const availableModelOptions = React.useMemo(
+    () => MAIN_MODEL_PRESETS.map((id) => ({ id, label: id })),
+    [],
+  );
+
+  const renderProfilesTab = () => (
+    <div className="space-y-6">
+      <Section title="Recording Profiles">
+        <p className="mb-2 text-xs text-slate-400">
+          Group filename template, destination folder, and auto-actions into a named profile. The
+          active profile is snapshotted at job start — edits do not affect running jobs.
+        </p>
+
+        {profileError !== null && (
+          <div role="alert" className="rounded bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            {profileError}
+          </div>
+        )}
+
+        {profilesLoading ? (
+          <div className="flex items-center gap-2 text-sm text-slate-400" aria-live="polite">
+            <Loader2 size={14} className="animate-spin" />
+            Loading profiles…
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-2" aria-label="Existing recording profiles">
+            {recordingProfiles.length === 0 && !creatingRecordingProfile && (
+              <li className="text-xs text-slate-500">
+                No profiles yet. Click "New profile" below to create one with sane defaults.
+              </li>
+            )}
+            {recordingProfiles.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-center justify-between rounded bg-white/5 px-3 py-2 text-sm"
+              >
+                <div className="flex flex-col">
+                  <span className="font-medium text-slate-100">{p.name}</span>
+                  {p.description !== null && p.description !== '' && (
+                    <span className="text-xs text-slate-400">{p.description}</span>
+                  )}
+                  <span className="font-mono text-xs text-slate-500">
+                    {p.public_fields.filename_template}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteRecordingProfile(p)}
+                  aria-label={`Delete profile "${p.name}"`}
+                  className="rounded bg-red-500/20 px-2 py-1 text-xs text-red-200 hover:bg-red-500/30"
+                >
+                  <Trash2 size={12} className="inline" /> Delete
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {!creatingRecordingProfile && (
+          <div className="pt-2">
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<Plus size={14} />}
+              onClick={() => setCreatingRecordingProfile(true)}
+            >
+              New profile
+            </Button>
+          </div>
+        )}
+
+        {creatingRecordingProfile && (
+          <div className="mt-3 rounded-lg border border-white/10 bg-white/5">
+            <EmptyProfileForm
+              onCreated={async () => {
+                setCreatingRecordingProfile(false);
+                await refreshRecordingProfiles();
+                toast.success('Profile created');
+              }}
+              onCancel={() => setCreatingRecordingProfile(false)}
+            />
+          </div>
+        )}
+      </Section>
+
+      <Section title="Model Profiles">
+        <p className="mb-2 text-xs text-slate-400">
+          Save STT-model + language combinations and switch between them in one click from the
+          sidebar selector. Independent of recording profiles (FR42).
+        </p>
+        <ModelProfilesPanel
+          availableModels={availableModelOptions}
+          availableLanguages={availableLanguageOptions}
+          translationTargets={translationTargetOptions}
+        />
+      </Section>
+    </div>
+  );
+
   const getIconForTab = (tab: string) => {
     switch (tab) {
       case 'App':
@@ -2002,6 +2192,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         return <Database size={16} />;
       case 'AI':
         return <Bot size={16} />;
+      case 'Profiles':
+        return <Layers size={16} />;
       default:
         return null;
     }
@@ -2058,6 +2250,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               {activeTab === 'Server' && renderServerTab()}
               {activeTab === 'AI' && renderAITab()}
               {activeTab === 'Notebook' && renderNotebookTab()}
+              {activeTab === 'Profiles' && renderProfilesTab()}
             </div>
           </div>
 

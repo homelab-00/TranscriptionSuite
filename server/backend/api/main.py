@@ -50,6 +50,7 @@ from server.api.routes import (  # noqa: E402
     llm,
     notebook,
     openai_audio,
+    profiles,
     search,
     transcription,
     websocket,
@@ -385,6 +386,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     _cleanup_task = None
     _orphan_sweep_task = None
+    _deferred_export_sweep_task = None
+    _webhook_worker = None
+    _webhook_cleanup_task = None
 
     config = get_config()
     _log_time("config loaded")
@@ -397,6 +401,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     init_db()
     _log_time("database init_db() complete")
     logger.info("Database initialized")
+
+    # Bootstrap secrets/master.key for the keychain fallback (Story 1.7).
+    # Idempotent — no-op when the file already exists.
+    try:
+        from pathlib import Path as _Path
+
+        from server.utils.config_migration import ensure_master_key
+
+        _project_root = _Path(__file__).resolve().parents[3]
+        ensure_master_key(_project_root / "secrets")
+        _log_time("secrets/master.key ensured")
+    except Exception as exc:  # noqa: BLE001 — bootstrap must not crash startup
+        logger.warning("master.key bootstrap failed (non-fatal): %s", exc)
 
     # Read durability config early so orphan recovery can use it
     _durability_config_early = config.config.get("durability", {})
@@ -455,6 +472,74 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
     else:
         logger.info("Audio cleanup disabled (cleanup_enabled=false)")
+
+    # Schedule periodic deferred-export sweeper (Issue #104, Story 6.8 / R-EL12).
+    # The sweeper re-fires auto_export rows whose destination came back online
+    # since they were marked 'deferred', and re-fires auto_summary rows in
+    # 'retry_pending' (Story 6.11). Mirrors audio_cleanup's cancel-safe shape.
+    auto_actions_config = config.config.get("auto_actions", {})
+    _sweep_interval_s = auto_actions_config.get("deferred_export_sweep_interval_s", 30.0)
+
+    if _sweep_interval_s > 0:
+        from server.core.auto_action_sweeper import periodic_deferred_export_sweep
+
+        _deferred_export_sweep_task = asyncio.create_task(
+            periodic_deferred_export_sweep(interval_s=_sweep_interval_s)
+        )
+        _log_time("deferred-export sweep scheduled (async, periodic)")
+        logger.info("Deferred-export sweep scheduled (interval=%.1fs)", _sweep_interval_s)
+    else:
+        logger.info(
+            "Deferred-export sweep disabled (deferred_export_sweep_interval_s=%.1f)",
+            _sweep_interval_s,
+        )
+
+    # Issue #104, Sprint 5 — start the WebhookWorker (Story 7.3) +
+    # schedule periodic webhook_deliveries retention cleanup (Story 7.7
+    # AC3 / NFR40). Both are gated by config flags so deployments that
+    # don't use webhooks pay nothing for them. The worker is bootstrap-
+    # safe (NFR24a/b) — it picks up any 'pending'/'in_flight' rows left
+    # over from the prior session via list_pending().
+    webhook_config = config.config.get("webhook_deliveries", {})
+    _webhook_worker_enabled = webhook_config.get("enabled", True)
+    _webhook_retention_enabled = webhook_config.get("retention_enabled", True)
+    _webhook_retention_days = webhook_config.get("retention_days", 30)
+    _webhook_retention_interval_hours = webhook_config.get("retention_interval_hours", 24)
+    _webhook_poll_interval_s = webhook_config.get("poll_interval_s", 5.0)
+
+    if _webhook_worker_enabled:
+        from server.services.webhook_worker import WebhookWorker, get_worker
+
+        _webhook_worker = get_worker()
+        # Replace any cached singleton from a hot-reload with one tuned to
+        # the current config's poll interval. Most production runs only
+        # see one start() per process so this is a no-op on the second
+        # branch; tests that mutate config rely on it.
+        if _webhook_worker._poll_interval != _webhook_poll_interval_s:  # noqa: SLF001
+            _webhook_worker = WebhookWorker(poll_interval_s=_webhook_poll_interval_s)
+            from server.services import webhook_worker as _ww_mod
+
+            _ww_mod._instance = _webhook_worker  # noqa: SLF001
+        await _webhook_worker.start()
+        _log_time("webhook worker started")
+        logger.info("WebhookWorker started (poll=%.1fs)", _webhook_poll_interval_s)
+    else:
+        logger.info("WebhookWorker disabled (webhook_deliveries.enabled=false)")
+
+    if _webhook_retention_enabled:
+        from server.database.webhook_cleanup import periodic_webhook_cleanup
+
+        _webhook_cleanup_task = asyncio.create_task(
+            periodic_webhook_cleanup(_webhook_retention_days, _webhook_retention_interval_hours)
+        )
+        _log_time("webhook cleanup scheduled (async, periodic)")
+        logger.info(
+            "Webhook cleanup scheduled (retention=%dd, interval=%dh)",
+            _webhook_retention_days,
+            _webhook_retention_interval_hours,
+        )
+    else:
+        logger.info("Webhook cleanup disabled (webhook_deliveries.retention_enabled=false)")
 
     # Orphan sweep scheduling deferred until after model manager creation (needs job tracker)
     _orphan_sweep_interval = durability_config.get("orphan_sweep_interval_minutes", 30)
@@ -599,6 +684,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         except asyncio.CancelledError:
             logger.debug("Orphan sweep task cancelled")
 
+    # Cancel periodic deferred-export sweep task (Issue #104, Story 6.8)
+    if _deferred_export_sweep_task and not _deferred_export_sweep_task.done():
+        _deferred_export_sweep_task.cancel()
+        try:
+            await _deferred_export_sweep_task
+        except asyncio.CancelledError:
+            logger.debug("Deferred-export sweep task cancelled")
+
+    # Cancel periodic webhook retention cleanup task (Issue #104, Story 7.7)
+    if _webhook_cleanup_task and not _webhook_cleanup_task.done():
+        _webhook_cleanup_task.cancel()
+        try:
+            await _webhook_cleanup_task
+        except asyncio.CancelledError:
+            logger.debug("Webhook cleanup task cancelled")
+
+    # Drain WebhookWorker (Issue #104, Story 7.3 AC2/AC5) — stop with a
+    # 30s grace deadline so in-flight HTTP calls have a chance to finish.
+    # Any leftover 'in_flight' rows are reverted to 'pending' so the
+    # next process start picks them up cleanly.
+    if _webhook_worker is not None:
+        try:
+            await _webhook_worker.stop(grace_s=30.0)
+            logger.info("WebhookWorker stopped cleanly")
+        except Exception:
+            logger.exception("WebhookWorker stop raised; continuing shutdown")
+
     # Graceful drain: stop any active recording sessions before killing the model.
     # Wave 1 already persisted results to DB, so a timeout just means the result
     # is in DB and can be fetched later — no data loss.
@@ -668,6 +780,7 @@ def create_app(config_path: Path | None = None) -> FastAPI:
     app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
     app.include_router(transcription.router, prefix="/api/transcribe", tags=["Transcription"])
     app.include_router(notebook.router, prefix="/api/notebook", tags=["Audio Notebook"])
+    app.include_router(profiles.router, prefix="/api/profiles", tags=["Profiles"])
     app.include_router(search.router, prefix="/api/search", tags=["Search"])
     app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
     app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])

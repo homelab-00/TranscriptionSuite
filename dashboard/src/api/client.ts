@@ -25,6 +25,7 @@ import type {
   RecordingDetail,
   RecordingTranscription,
   TranscriptionAccepted,
+  DedupCheckResponse,
   CalendarResponse,
   TimeslotResponse,
   ExportFormat,
@@ -47,6 +48,45 @@ import type {
 
 // Re-export types that consumers need
 export type { HealthResponse, ReadyResponse, ServerStatus } from './types';
+
+// ─── Profiles types (Issue #104, Story 1.2) ──────────────────────────────────
+
+export interface ProfilePublicFields {
+  filename_template: string;
+  destination_folder: string;
+  auto_summary_enabled: boolean;
+  auto_export_enabled: boolean;
+  summary_model_id: string | null;
+  summary_prompt_template: string | null;
+  export_format: string;
+}
+
+export interface Profile {
+  id: number;
+  name: string;
+  description: string | null;
+  schema_version: string;
+  public_fields: ProfilePublicFields;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProfileCreatePayload {
+  name: string;
+  description?: string | null;
+  schema_version?: string;
+  public_fields: ProfilePublicFields;
+  /** Plaintext private fields — sent over the wire ONCE; persisted via keychain server-side. */
+  private_fields?: Record<string, string>;
+}
+
+export interface ProfileUpdatePayload {
+  name?: string;
+  description?: string | null;
+  schema_version?: string;
+  public_fields?: ProfilePublicFields;
+  private_fields?: Record<string, string>;
+}
 
 export class APIClient {
   private baseUrl: string;
@@ -483,6 +523,7 @@ export class APIClient {
     if (options?.expected_speakers)
       fd.append('expected_speakers', String(options.expected_speakers));
     if (options?.multitrack) fd.append('multitrack', 'true');
+    if (options?.profile_id != null) fd.append('profile_id', String(options.profile_id));
     return this.postFormData('/api/transcribe/audio', fd);
   }
 
@@ -520,9 +561,35 @@ export class APIClient {
     return this.get(`/api/notebook/recordings/${id}`);
   }
 
-  /** DELETE /api/notebook/recordings/:id */
-  async deleteRecording(id: number): Promise<{ status: string; id: string }> {
-    return this.del(`/api/notebook/recordings/${id}`);
+  /**
+   * DELETE /api/notebook/recordings/:id
+   *
+   * Issue #104, Story 3.7 — when `deleteArtifacts` is true AND
+   * `artifactProfileId` is provided, the server renders the artifact
+   * filename from that profile's template + destination, sanitizes,
+   * and unlinks. Failures (permission denied, file gone) surface in
+   * `artifact_failures` but do NOT block the DB delete (R-EL32
+   * right-to-erasure best-effort).
+   *
+   * Notebook recordings don't carry a profile snapshot, so the
+   * currently-active profile id is the renderer's best guess. If the
+   * recording was originally exported with a different profile, the
+   * derived path won't match and the file remains on disk — harmless.
+   */
+  async deleteRecording(
+    id: number,
+    opts: { deleteArtifacts?: boolean; artifactProfileId?: number | null } = {},
+  ): Promise<{ status: string; id: string; artifact_failures: string[] }> {
+    const params = new URLSearchParams();
+    if (opts.deleteArtifacts) params.set('delete_artifacts', 'true');
+    if (opts.artifactProfileId != null) {
+      params.set('artifact_profile_id', String(opts.artifactProfileId));
+    }
+    const query = params.toString();
+    const url = query
+      ? `/api/notebook/recordings/${id}?${query}`
+      : `/api/notebook/recordings/${id}`;
+    return this.del(url);
   }
 
   /** PATCH /api/notebook/recordings/:id/title */
@@ -567,6 +634,81 @@ export class APIClient {
   /** GET /api/notebook/recordings/:id/transcription */
   async getRecordingTranscription(id: number): Promise<RecordingTranscription> {
     return this.get(`/api/notebook/recordings/${id}/transcription`);
+  }
+
+  // ─── Notebook: Speaker Aliases (Issue #104, Story 4.2) ───────────────────
+
+  /** GET /api/notebook/recordings/:id/aliases */
+  async getRecordingAliases(id: number): Promise<{
+    recording_id: number;
+    aliases: { speaker_id: string; alias_name: string }[];
+  }> {
+    return this.get(`/api/notebook/recordings/${id}/aliases`);
+  }
+
+  /**
+   * PUT /api/notebook/recordings/:id/aliases
+   *
+   * Full-replace upsert. Aliases NOT included in the payload are deleted
+   * from the recording (Story 4.2 AC2). Empty alias_name strings (after
+   * trim) are dropped server-side, which has the effect of clearing
+   * the alias for that speaker_id.
+   */
+  async setRecordingAliases(
+    id: number,
+    aliases: { speaker_id: string; alias_name: string }[],
+  ): Promise<{
+    recording_id: number;
+    aliases: { speaker_id: string; alias_name: string }[];
+  }> {
+    return this.put(`/api/notebook/recordings/${id}/aliases`, { aliases });
+  }
+
+  /**
+   * GET /api/notebook/recordings/:id/diarization-confidence
+   *
+   * Issue #104, Story 5.4 — per-turn confidence derived from word-level
+   * scores. Older recordings without word-confidence return turns: [].
+   */
+  async getRecordingDiarizationConfidence(id: number): Promise<{
+    recording_id: number;
+    turns: { turn_index: number; speaker_id: string | null; confidence: number }[];
+  }> {
+    return this.get(`/api/notebook/recordings/${id}/diarization-confidence`);
+  }
+
+  // ─── Notebook: Diarization Review (Issue #104, Stories 5.6 / 5.7 / 5.9) ──
+
+  /** GET /api/notebook/recordings/:id/diarization-review */
+  async getDiarizationReview(id: number): Promise<{
+    recording_id: number;
+    status: 'pending' | 'in_review' | 'completed' | 'released' | null;
+    reviewed_turns_json: string | null;
+  }> {
+    return this.get(`/api/notebook/recordings/${id}/diarization-review`);
+  }
+
+  /**
+   * POST /api/notebook/recordings/:id/diarization-review
+   *
+   * Lifecycle trigger:
+   *   - action='open' — pending → in_review (banner CTA)
+   *   - action='complete' — in_review → completed; persists reviewed_turns
+   *
+   * 409 on illegal transitions (e.g. open when already completed).
+   */
+  async submitDiarizationReview(
+    id: number,
+    payload: {
+      action: 'open' | 'complete';
+      reviewed_turns?: { turn_index: number; decision: string; speaker_id?: string | null }[];
+    },
+  ): Promise<{
+    recording_id: number;
+    status: 'pending' | 'in_review' | 'completed' | 'released' | null;
+    reviewed_turns_json: string | null;
+  }> {
+    return this.post(`/api/notebook/recordings/${id}/diarization-review`, payload);
   }
 
   /**
@@ -621,10 +763,57 @@ export class APIClient {
     if (options?.multitrack) fd.append('multitrack', 'true');
     if (options?.file_created_at) fd.append('file_created_at', options.file_created_at);
     if (options?.title) fd.append('title', options.title);
+    if (options?.profile_id != null) fd.append('profile_id', String(options.profile_id));
     return this.postFormData('/api/notebook/transcribe/upload', fd);
   }
 
   // ─── File Import (Session) ────────────────────────────────────────────────
+
+  /**
+   * POST /api/transcribe/import/dedup-check — Issue #104, Story 2.4.
+   * Returns prior transcription_jobs rows with a matching audio_hash.
+   * Idempotent and read-only (FR4 / R-EL23 — no outbound network).
+   */
+  async dedupCheck(audioHash: string): Promise<DedupCheckResponse> {
+    return this.post('/api/transcribe/import/dedup-check', { audio_hash: audioHash });
+  }
+
+  /**
+   * POST /api/notebook/recordings/{id}/reexport — Issue #104, Story 3.6.
+   * Renders the recording's plaintext export using the given profile's
+   * template; writes a NEW file. Does NOT delete the prior export file.
+   */
+  async reexportRecording(
+    recordingId: number,
+    profileId: number,
+  ): Promise<{ status: string; path: string; filename: string }> {
+    return this.post(`/api/notebook/recordings/${recordingId}/reexport`, {
+      profile_id: profileId,
+    });
+  }
+
+  /**
+   * POST /api/notebook/recordings/{id}/auto-actions/retry — Issue #104, Stories 6.6 + 6.9.
+   * Idempotent retry of a failed/deferred/empty/truncated auto-action.
+   * Returns:
+   *   - 202 + status='retry_initiated' on happy path
+   *   - 200 + status='already_complete' if status was already 'success'
+   *   - 200 + status='already_in_progress' if a retry is in-flight
+   */
+  async retryAutoAction(
+    recordingId: number,
+    // Sprint 5 — Story 7.7 extends with 'webhook' so the dashboard's
+    // single retry hook covers all three lifecycles.
+    actionType: 'auto_summary' | 'auto_export' | 'webhook',
+  ): Promise<{
+    recording_id: number;
+    action_type: string;
+    status: 'retry_initiated' | 'already_complete' | 'already_in_progress';
+  }> {
+    return this.post(`/api/notebook/recordings/${recordingId}/auto-actions/retry`, {
+      action_type: actionType,
+    });
+  }
 
   /**
    * POST /api/transcribe/import — start a background file-import transcription.
@@ -648,6 +837,7 @@ export class APIClient {
     if (options?.parallel_diarization !== undefined)
       fd.append('parallel_diarization', String(options.parallel_diarization));
     if (options?.multitrack) fd.append('multitrack', 'true');
+    if (options?.profile_id != null) fd.append('profile_id', String(options.profile_id));
     return this.postFormData('/api/transcribe/import', fd);
   }
 
@@ -1045,6 +1235,30 @@ export class APIClient {
     } finally {
       reader.releaseLock();
     }
+  }
+
+  // ── Profiles (Issue #104, Story 1.2) ────────────────────────────────────
+  async listProfiles(): Promise<Profile[]> {
+    return this.get<Profile[]>('/api/profiles');
+  }
+  async getProfile(id: number): Promise<Profile> {
+    return this.get<Profile>(`/api/profiles/${id}`);
+  }
+  async createProfile(payload: ProfileCreatePayload): Promise<Profile> {
+    return this.post<Profile>('/api/profiles', payload);
+  }
+  async updateProfile(id: number, payload: ProfileUpdatePayload): Promise<Profile> {
+    return this.put<Profile>(`/api/profiles/${id}`, payload);
+  }
+  async deleteProfile(id: number): Promise<void> {
+    // Server returns 204 No Content; the private del<T> would try to .json()
+    // an empty body. Inline the fetch for the no-content case.
+    this.ensureConfigured(`/api/profiles/${id}`);
+    const res = await fetch(`${this.baseUrl}/api/profiles/${id}`, {
+      method: 'DELETE',
+      headers: this.authHeaders(),
+    });
+    if (!res.ok) throw new APIError(res.status, await res.text(), `/api/profiles/${id}`);
   }
 }
 

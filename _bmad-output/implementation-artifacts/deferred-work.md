@@ -59,19 +59,6 @@ When an item ships, **delete the entry** — git history + the spec file are the
 
 **Re-triage:** when W3 ships, re-evaluate this entry. If issue #87 closes, drop. If still open, promote individual candidates to active sprint work.
 
-### gh-102-followup carve-out no. 2 — Folder-watch auto-imports drop `session.mainLanguage` (MEDIUM)
-
-**Surfaced 2026-04-30 during gh-102-followup planning.** `dashboard/src/stores/importQueueStore.ts::handleFilesDetected` (~L580-602) snapshots `sessionConfig` / `notebookConfig` for auto-watch jobs but the snapshot does not include the user's persisted Source Language. Auto-imported files inherit the same gh-81 `ValueError` on Canary that the manual flow does.
-
-**Why deferred (split off from the gh-102-followup spec at user request):** Different trigger surface (filesystem watcher, not user-initiated drop). Adds an additional async-loading race to design around (see "Defense shape" below). Not in the reporter's reproduction.
-
-**Defense shape (concrete, decided 2026-04-30):** When `useLanguages.loading === true` (no real server data yet), **pause folder-watch detection entirely** — do not enqueue any file. The pause clears automatically when the languages query resolves and the resolve guard becomes accurate. Implementation outline:
-1. Extend `SessionConfig` / `NotebookConfig` types in `importQueueStore.ts` with `language: string | undefined` (raw display name) so the picker selection can be snapshotted by the syncing `useEffect` in `SessionImportTab` / notebook tab.
-2. In `handleFilesDetected`: read the languages list (via a dedicated store-level cache populated by `apiClient.getLanguages()` once the languages-query resolves elsewhere); resolve the snapshotted display name to a code; if no real languages data is available yet, drop the detected batch with a warn-level `appendWatchLog` entry and a toast ("Folder Watch paused — languages still loading"). Reuse the existing `watcherServerConnected` pause-style flow.
-3. When Canary is active and the resolve fails (picker unset / `Auto Detect`), drop the batch with a clear `appendWatchLog` warn ("Folder Watch paused — Source Language required for the active model").
-
-**Re-triage trigger:** ship when the next folder-watch sprint touches `importQueueStore.ts`, or when a Canary user reports auto-watch failures.
-
 ### gh-101 — `hasVulkanWsl2SidecarImage` does not detect partial-pull / corrupted-layer images (LOW-MEDIUM)
 
 **Surfaced 2026-05-02 during code review of `spec-gh-101-followup-vulkan-wsl2-comprehensive`.** `docker image inspect` returns success for an image with corrupted layers from a partial pull. Compose `up` then fails much later with an opaque whisper-server error pointing at missing files inside the container, far from the dashboard's preflight check.

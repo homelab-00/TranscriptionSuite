@@ -45,8 +45,17 @@ def build_subtitle_cues(
     segments: list[dict[str, Any]],
     words: list[dict[str, Any]],
     has_diarization: bool,
+    *,
+    alias_overrides: dict[str, str] | None = None,
 ) -> list[SubtitleCue]:
-    """Build readable subtitle cues from words (preferred) or segments."""
+    """Build readable subtitle cues from words (preferred) or segments.
+
+    ``alias_overrides`` (Issue #104, Story 5.1) maps raw diarization
+    labels (e.g. ``SPEAKER_00``) to user-supplied display names (e.g.
+    ``Elena Vasquez``). When provided, the alias REPLACES the
+    ``Speaker N`` default for that raw label across the whole cue
+    list — no other normalization is applied (R-EL3 verbatim guarantee).
+    """
     sorted_segments = sorted(
         segments,
         key=lambda seg: (
@@ -88,6 +97,14 @@ def build_subtitle_cues(
                 if raw:
                     raw_speaker_order.append(raw)
     normalized_speakers = normalize_speaker_labels(raw_speaker_order)
+
+    # Story 5.1 — alias overrides replace the "Speaker N" default for
+    # any raw label the user has aliased. Names are passed through
+    # verbatim (R-EL3).
+    if alias_overrides:
+        for raw, alias_name in alias_overrides.items():
+            if raw in normalized_speakers:
+                normalized_speakers[raw] = alias_name
 
     if sorted_words:
         return _build_word_cues(

@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "name": "full",
+  "description": "Exercises every public profile field the QoL pack ships with.",
+  "public_fields": {
+    "filename_template": "{date}_{client}_{title}",
+    "destination_folder": "~/Recordings/Polaris-Marine",
+    "auto_summary_enabled": true,
+    "auto_export_enabled": true,
+    "ai_summary_prompt": "Summarise the call as a structured action-items list."
+  },
+  "private_field_refs": {
+    "webhook_token": "ref:keyring:profile.full.webhook_token",
+    "ai_summary_api_key": "ref:keyring:profile.full.ai_summary_api_key"
+  }
+}

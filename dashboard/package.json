@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run typecheck && npm run format:check && npm run ui:contract:check",
+    "lint": "eslint . --max-warnings=0",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run ui:contract:check",
+    "lighthouse": "npm run build && npx --yes @lhci/cli@0.13.x autorun --config=./lighthouserc.json",
     "test": "vitest run --passWithNoTests",
     "build:electron": "npm run build && tsc -p electron/tsconfig.json",
     "preview": "vite preview",
@@ -50,6 +52,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@tailwindcss/vite": "4.2.1",
     "@tanstack/react-query-devtools": "5.91.3",
     "@testing-library/dom": "10.4.1",
@@ -64,6 +67,8 @@
     "autoprefixer": "10.4.27",
     "electron": "^40.8.5",
     "electron-builder": "26.8.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-security": "3.0.1",
     "jsdom": "28.1.0",
     "license-checker-rseidelsohn": "4.4.2",
@@ -72,6 +77,7 @@
     "prettier-plugin-tailwindcss": "0.7.2",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
+    "typescript-eslint": "^8.59.1",
     "vite": "^7.3.2",
     "vitest": "4.0.18",
     "yaml": "^2.8.3"
