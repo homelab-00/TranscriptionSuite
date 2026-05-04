@@ -155,3 +155,103 @@ if auto_summary_is_held(recording_id):
 
 **Re-triage trigger:** Sprint 4 Story 6.2 kickoff.
 
+---
+
+### Sprint 4 no. 1 — Auto-action sweeper not wired into FastAPI lifespan (MEDIUM)
+
+**Symptom:** `server/backend/core/auto_action_sweeper.py::periodic_deferred_export_sweep` is implemented and unit-tested (cancel-safe, bootstrap-safe per NFR24a), but `server/backend/main.py`'s `lifespan` async-generator does NOT start it. Production servers will never sweep `auto_export_status='deferred'` rows back to `success` when the destination comes online, defeating Story 6.8 / R-EL12 entirely. The user-visible failure mode is identical to "auto-export is silently broken" once the destination remounts.
+
+**Why deferred:** Sprint 4 commits A–H landed before lifespan wiring; the omission was caught during sprint-completion review. Caused by Sprint 4, no upstream owner.
+
+**Defense shape:**
+
+```python
+# server/backend/main.py — inside lifespan async-generator, alongside audio_cleanup
+from server.core.auto_action_sweeper import periodic_deferred_export_sweep
+sweep_interval = config.get("auto_actions", "deferred_export_sweep_interval_s", default=30.0)
+sweep_task = asyncio.create_task(periodic_deferred_export_sweep(interval_s=sweep_interval))
+yield
+sweep_task.cancel()
+```
+
+Tests: a lifespan integration test that starts the server, drops a `deferred` row + creates the destination dir, sleeps slightly past the interval, asserts status flipped to `success`.
+
+**Re-triage trigger:** First Sprint 4 PR review or Sprint 5 kickoff — should land before users exercise auto-export at scale.
+
+---
+
+### Sprint 4 no. 2 — Dashboard upload does not send `profile_id` (MEDIUM)
+
+**Symptom:** `POST /api/notebook/transcribe/upload` accepts a `profile_id` form-param (Sprint 4 commit B); without it, `_run_transcription` receives `profile_snapshot=None` and `trigger_auto_actions` short-circuits as a no-op. Result: even when the user toggles auto-summary / auto-export ON in their profile, NOTHING fires. The end-to-end Story 6.2 / 6.3 flow does not work from the dashboard until the upload component selects an active profile and forwards its id.
+
+**Why deferred:** Backend contract is in place + tested; the dashboard upload path's profile-selection UX was scoped out of Sprint 4 to keep the LOC budget under 4000.
+
+**Defense shape:**
+1. Add an "active profile" pointer in dashboard state (e.g. `useActiveProfile` hook or first-row default from `apiClient.listProfiles()`).
+2. In the upload form (likely `dashboard/components/views/SessionView.tsx` or wherever `POST /transcribe/upload` is called), append `fd.append('profile_id', String(profileId))`.
+3. Vitest: add a test that the upload mutation includes `profile_id` in its FormData.
+
+**Re-triage trigger:** First user reports "auto-summary doesn't fire" or Sprint 5 dashboard polish.
+
+---
+
+### Sprint 4 no. 3 — `AutoActionStatusBadge` not rendered in recording detail view (MEDIUM)
+
+**Symptom:** The component, hook, and apiClient method are delivered + UI-contract-ratified (Sprint 4 commit E), but `AudioNoteModal.tsx` (the recording detail surface) does NOT yet read `recording.auto_summary_status` / `recording.auto_export_status` and render the badges. End result: even when auto-actions ran successfully, the user has no visible signal that they happened, no retry button on failure, no held-state surface. Story 6.6 AC1 ("badge appears on recording detail view") is not satisfied end-to-end.
+
+**Why deferred:** Same as no. 2 — frontend integration scoped out to keep Sprint 4 commits in budget; the component was prioritized to land with the UI-contract update.
+
+**Defense shape:** Inside `AudioNoteModal.tsx`, near the existing summary panel:
+
+```tsx
+import { AutoActionStatusBadge, statusToBadgeProps } from '../recording/AutoActionStatusBadge';
+import { useAutoActionRetry } from '../../src/hooks/useAutoActionRetry';
+
+const retry = useAutoActionRetry(recording.id);
+const summaryProps = statusToBadgeProps(recording.auto_summary_status, 'auto_summary',
+  { error: recording.auto_summary_error });
+const exportProps = statusToBadgeProps(recording.auto_export_status, 'auto_export',
+  { error: recording.auto_export_error, path: recording.auto_export_path });
+
+{summaryProps && <AutoActionStatusBadge recordingId={recording.id} recordingName={recording.title}
+  actionType="auto_summary" {...summaryProps} onRetry={() => retry.mutate('auto_summary')} />}
+{exportProps && <AutoActionStatusBadge ... actionType="auto_export" ... />}
+```
+
+Plus: extend the recording-detail Pydantic + TypeScript types to surface the new columns (already in DB, not yet on the response model).
+
+**Re-triage trigger:** Same as no. 2.
+
+---
+
+### Sprint 4 no. 4 — Diarization-review attribution-cycle ←/→ keys are no-op placeholder (MEDIUM)
+
+**Surfaced 2026-05-04 during Sprint 3 (Story 5.9).** `DiarizationReviewView.onListKeyDown` consumes `ArrowLeft` / `ArrowRight` with `preventDefault()` so the canonical Diarization-Review Keyboard Contract (PRD §900–920) doesn't bubble them to surrounding controls — but the key handler body is empty. The Keyboard Contract row "←/→ Switch attribution within a focused turn" is therefore not implemented end-to-end.
+
+**Why deferred:** Sprint 3's primary goal was the canonical Keyboard Contract shape (composite-widget listbox, aria-activedescendant, single tab stop) plus the lifecycle-driving keys (Enter/Esc/Space). Attribution cycling requires a per-turn alternative-speaker list (which speakers are plausible candidates for THIS turn) — that data plumbing is its own design decision and was scoped out to keep Sprint 3 within LOC budget.
+
+**Defense shape:** Two pieces:
+
+1. **Backend** — extend `GET /api/notebook/recordings/{id}/diarization-confidence` (or add a sibling endpoint) to return `alternative_speakers: string[]` per turn. The list is the set of OTHER speaker_ids that appear in the recording, ordered by descending similarity score (or simply by appearance order if pyannote doesn't expose similarity).
+
+2. **Frontend** — `DiarizationReviewView` tracks `activeAttributionIndex` per turn:
+
+```tsx
+case 'ArrowRight':
+  e.preventDefault();
+  setActiveAttributionIndex((prev) => {
+    const turn = visibleTurns[activeIndex];
+    const alts = turn?.alternative_speakers ?? [];
+    return Math.min(prev + 1, alts.length - 1);
+  });
+  break;
+case 'ArrowLeft':
+  e.preventDefault();
+  setActiveAttributionIndex((prev) => Math.max(prev - 1, 0));
+  break;
+```
+
+The current attribution is `turn.alternative_speakers[activeAttributionIndex] ?? turn.speaker_id`. On Enter (accept), the chosen attribution is recorded in the decision payload as `speaker_id` so the JSON the server stores reflects the user's choice.
+
+**Re-triage trigger:** First user feedback that "the ←/→ keys do nothing" OR Sprint 5 (next sprint that touches the review view).
+
