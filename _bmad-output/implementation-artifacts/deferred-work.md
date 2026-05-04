@@ -100,3 +100,58 @@ implementer doesn't assume the guard is already in place.
 
 **Re-triage trigger:** Sprint 3 kickoff.
 
+---
+
+## Sprint 3 (Issue #104, Audio Notebook QoL pack — epic-aliases-mvp + epic-aliases-growth)
+
+Sprint 3 landed Stories 4.1–4.5 + 5.1–5.9 (14 stories) on `gh-104-prd`.
+Two items are explicitly carried forward.
+
+### 1. Longform/import diarization-completion hook for Story 5.6 trigger
+
+**Surfaced 2026-05-04 during sprint-3-design pass.** Sprint 3 wired
+`on_transcription_complete()` into the **notebook upload** completion
+path only (the path that exercises diarization in the J4 reviewer
+journey — researcher uploads a recording, opens the detail view, sees
+the banner). The two other transcription-completion sites — longform
+(`transcription.py` durability worker) and direct-import (`/import`
+in-memory job_tracker) — do not yet fire the trigger.
+
+**Why deferred:** The longform/import completion lifecycle is owned by
+the Sprint 4 auto-summary worker (Story 6.2). Wiring the trigger into
+that worker AND the upload path in Sprint 3 would have duplicated the
+call site; the Sprint 4 design will pick the right single owner.
+
+**Reconfirmed-deferred note (2026-05-04):** Investigated under the
+`/bmad-quick-dev` Sprint 3 carry-forward pass. Re-confirmed deferral on
+a structural ground: `recording_diarization_review` is FK'd to
+`recordings(id)` (migration 010), and **neither `transcription.py` nor
+`/import` produces a `recordings` row** — the `/import` docstring
+(transcription.py:1130) explicitly notes *"this does NOT save to the
+database"* (i.e. the `recordings` table); the durability row written by
+`/import` lives in `transcription_jobs` and exists *"purely so the
+dedup-check endpoint can find re-imports"*. Without a `recording_id`,
+`on_transcription_complete(recording_id, …)` cannot run from those
+paths. The only ways to wire this now are: (a) auto-promote
+`transcription_jobs` rows to `recordings` rows on completion (large new
+feature, Sprint-4-sized scope); (b) re-key the lifecycle table by
+`job_id` (data migration + repository rewrite); (c) add a no-op stub
+that future work would have to refactor. None are cheap. Sprint 4
+Story 6.2 is expected to introduce the unified completion lifecycle
+that resolves this — keep the trigger here until then.
+
+**Defense shape (concrete):** When Story 6.2 lands the auto-summary
+lifecycle, add a single hook just before the auto-summary fires:
+
+```python
+# Sprint 4 — pseudocode for the call site
+from server.core.diarization_review_lifecycle import (
+    on_transcription_complete, auto_summary_is_held,
+)
+on_transcription_complete(recording_id, has_low_confidence_turn=...)
+if auto_summary_is_held(recording_id):
+    return  # banner asks user to review first
+```
+
+**Re-triage trigger:** Sprint 4 Story 6.2 kickoff.
+

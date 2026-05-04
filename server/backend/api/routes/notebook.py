@@ -126,6 +126,56 @@ class DateUpdate(BaseModel):
     recorded_at: str
 
 
+class TurnConfidence(BaseModel):
+    """One per-turn diarization confidence entry. Story 5.4 (Issue #104)."""
+
+    turn_index: int
+    speaker_id: str | None = None
+    confidence: float
+
+
+class DiarizationConfidenceResponse(BaseModel):
+    """Response shape for ``GET /recordings/{id}/diarization-confidence``."""
+
+    recording_id: int
+    turns: list[TurnConfidence]
+
+
+class DiarizationReviewState(BaseModel):
+    """ADR-009 lifecycle state for a recording (Story 5.6 / 5.7)."""
+
+    recording_id: int
+    status: str | None = None  # None when no row exists
+    reviewed_turns_json: str | None = None
+
+
+class DiarizationReviewSubmit(BaseModel):
+    """POST body for the lifecycle endpoint (Stories 5.7 / 5.9)."""
+
+    action: str  # 'open' (Story 5.7 banner CTA) | 'complete' (Story 5.9 Run summary now)
+    reviewed_turns: list[dict] | None = None  # populated when action='complete'
+
+
+class AliasItem(BaseModel):
+    """One speaker alias entry. Story 4.2 (Issue #104)."""
+
+    speaker_id: str
+    alias_name: str
+
+
+class AliasesPayload(BaseModel):
+    """PUT body — full-replace list of aliases for a recording."""
+
+    aliases: list[AliasItem]
+
+
+class AliasesResponse(BaseModel):
+    """GET / PUT response shape for the alias endpoints."""
+
+    recording_id: int
+    aliases: list[AliasItem]
+
+
 @router.get("/recordings", response_model=list[RecordingResponse])
 async def list_recordings(
     start_date: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
@@ -324,6 +374,202 @@ async def update_date_patch(
         return {"status": "updated", "id": recording_id, "recorded_at": recorded_at}
     else:
         raise HTTPException(status_code=500, detail="Failed to update date")
+
+
+# ---------------------------------------------------------------------------
+# Speaker aliases (Issue #104, Story 4.2)
+# ---------------------------------------------------------------------------
+# Mounted on the notebook router rather than a top-level /api/recordings
+# router because notebook recordings are the only entity that owns
+# speaker labels in this codebase. URL-prefix override is documented in
+# `_bmad-output/implementation-artifacts/sprint-3-design.md` §1.
+
+
+@router.get(
+    "/recordings/{recording_id}/diarization-review",
+    response_model=DiarizationReviewState,
+)
+async def get_diarization_review_state(
+    recording_id: int,
+) -> DiarizationReviewState:
+    """Return the current ADR-009 lifecycle state (Issue #104, Story 5.7).
+
+    Returns ``status: null`` (no row) when no review has been triggered
+    for this recording — the dashboard treats null as "no banner".
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+    from server.database import diarization_review_repository as repo
+
+    row = repo.get_review(recording_id)
+    return DiarizationReviewState(
+        recording_id=recording_id,
+        status=row["status"] if row else None,
+        reviewed_turns_json=row["reviewed_turns_json"] if row else None,
+    )
+
+
+@router.post(
+    "/recordings/{recording_id}/diarization-review",
+    response_model=DiarizationReviewState,
+)
+async def submit_diarization_review(
+    recording_id: int,
+    payload: DiarizationReviewSubmit,
+) -> DiarizationReviewState:
+    """Lifecycle trigger endpoint (Stories 5.7 / 5.9).
+
+    Actions:
+      - ``open``     — pending → in_review (banner CTA invokes this)
+      - ``complete`` — in_review → completed; persists ``reviewed_turns_json``;
+                       Sprint 4 Story 6.2 calls ``on_auto_summary_fired()``
+                       to flip to ``released``
+
+    Persist-Before-Deliver (NFR16): each lifecycle trigger commits before
+    returning, so the response reflects committed state.
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    import json
+
+    from server.core.diarization_review_lifecycle import (
+        IllegalReviewTransitionError,
+        on_review_view_opened,
+        on_run_summary_now_clicked,
+    )
+    from server.database import diarization_review_repository as repo
+
+    try:
+        if payload.action == "open":
+            on_review_view_opened(recording_id)
+        elif payload.action == "complete":
+            # Lifecycle transition FIRST — illegal-transition failure
+            # must leave reviewed_turns_json untouched. Writing the JSON
+            # before the transition would produce orphan data when the
+            # transition raises (e.g. someone raced and the row is no
+            # longer in_review). After the transition succeeds, the
+            # JSON write commits separately but is functionally a follow-up
+            # decoration of an already-completed row.
+            on_run_summary_now_clicked(recording_id)
+            if payload.reviewed_turns is not None:
+                repo.update_reviewed_turns(
+                    recording_id,
+                    json.dumps(payload.reviewed_turns, ensure_ascii=False, sort_keys=True),
+                )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid action: {payload.action!r}. Expected 'open' or 'complete'.",
+            )
+    except IllegalReviewTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    row = repo.get_review(recording_id)
+    return DiarizationReviewState(
+        recording_id=recording_id,
+        status=row["status"] if row else None,
+        reviewed_turns_json=row["reviewed_turns_json"] if row else None,
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/diarization-confidence",
+    response_model=DiarizationConfidenceResponse,
+)
+async def get_diarization_confidence(
+    recording_id: int,
+) -> DiarizationConfidenceResponse:
+    """Per-turn diarization confidence (Issue #104, Story 5.4).
+
+    Returns ``{recording_id, turns: [{turn_index, speaker_id, confidence}, ...]}``.
+    Older recordings without word-level confidence return ``turns: []`` —
+    the dashboard treats absent turns as "no chip rendering" (Story 5.5).
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+    from server.core.diarization_confidence import per_turn_confidence
+
+    segments = get_segments(recording_id)
+    words = get_words(recording_id)
+    return DiarizationConfidenceResponse(
+        recording_id=recording_id,
+        turns=[TurnConfidence(**t) for t in per_turn_confidence(segments, words)],
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/aliases",
+    response_model=AliasesResponse,
+)
+async def list_recording_aliases(recording_id: int) -> AliasesResponse:
+    """List speaker aliases for a recording.
+
+    Returns an empty array when no aliases are stored — never 404 for
+    a missing alias set (Story 4.2 AC1). Returns 404 only when the
+    recording itself does not exist.
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+    from server.database import alias_repository
+
+    return AliasesResponse(
+        recording_id=recording_id,
+        aliases=[AliasItem(**row) for row in alias_repository.list_aliases(recording_id)],
+    )
+
+
+@router.put(
+    "/recordings/{recording_id}/aliases",
+    response_model=AliasesResponse,
+)
+async def update_recording_aliases(
+    recording_id: int,
+    payload: AliasesPayload,
+) -> AliasesResponse:
+    """Full-replace upsert of recording aliases (Story 4.2 AC2).
+
+    Each item in ``payload.aliases`` is upserted on
+    ``(recording_id, speaker_id)``. Pre-existing rows whose
+    ``speaker_id`` is NOT in the request body are deleted.
+
+    The ``alias_name`` is preserved verbatim (R-EL3) — only surrounding
+    whitespace is stripped. Empty alias names (after strip) are
+    skipped, which has the effect of CLEARING the alias for that
+    speaker_id.
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    from server.database import alias_repository
+
+    cleaned: list[dict[str, str]] = []
+    for entry in payload.aliases:
+        # Validate speaker_id — must be a non-empty token. Whitespace and
+        # NUL bytes are rejected because `speaker_id` is used as a join
+        # key against `segments.speaker` and a malformed value would
+        # silently produce a label miss (the alias never matches a turn).
+        speaker_id = entry.speaker_id.strip() if entry.speaker_id else ""
+        if not speaker_id or "\x00" in speaker_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid speaker_id: {entry.speaker_id!r} — must be a "
+                    "non-empty string without NUL bytes."
+                ),
+            )
+        trimmed = entry.alias_name.strip()
+        if not trimmed:
+            # Empty alias → drop the row (full-replace semantics handle it)
+            continue
+        cleaned.append({"speaker_id": speaker_id, "alias_name": trimmed})
+
+    alias_repository.replace_aliases(recording_id, cleaned)
+
+    return AliasesResponse(
+        recording_id=recording_id,
+        aliases=[AliasItem(**row) for row in alias_repository.list_aliases(recording_id)],
+    )
 
 
 @router.get("/recordings/{recording_id}/audio")
@@ -1034,15 +1280,24 @@ async def export_recording(
         recording = get_recording(recording_id)
         if not recording:
             raise HTTPException(status_code=404, detail="Recording not found")
+        from server.core.alias_substitution import apply_aliases
         from server.core.plaintext_export import stream_plaintext
+        from server.database import alias_repository
         from server.database.database import iter_segments
 
         title = recording.get("title") or recording.get("filename") or "Recording"
         rendered_filename = (
             f"{title.replace(' ', '_')}.txt" if title else f"recording_{recording_id}.txt"
         )
+        # Story 5.1 — alias propagation. ``apply_aliases`` is a lazy
+        # generator over ``iter_segments``, so the bounded-RAM property
+        # of the streaming exporter is preserved.
+        aliases = alias_repository.alias_map(recording_id)
         return StreamingResponse(
-            stream_plaintext(recording, iter_segments(recording_id)),
+            stream_plaintext(
+                recording,
+                apply_aliases(iter_segments(recording_id), aliases),
+            ),
             media_type="text/plain; charset=utf-8",
             headers={
                 "Content-Disposition": _content_disposition("attachment", rendered_filename),
@@ -1190,10 +1445,14 @@ async def export_recording(
             filename = f"{title.replace(' ', '_')}_export.txt"
             media_type = "text/plain; charset=utf-8"
         else:
+            # Story 5.1 — alias propagation to subtitle exports.
+            from server.database import alias_repository
+
             cues = build_subtitle_cues(
                 segments=segments,
                 words=words,
                 has_diarization=has_diarization,
+                alias_overrides=alias_repository.alias_map(recording_id),
             )
 
             if requested_format == "srt":

@@ -1179,6 +1179,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 4.1: `recording_speaker_aliases` table migration
 
+**Status: DONE (sprint 3 — commit A; migration 014; FK ON DELETE CASCADE; UNIQUE(recording_id, speaker_id))**
+
 **As a** backend engineer
 **I want** the `recording_speaker_aliases` table created
 **So that** Stories 4.2-4.5 can read/write aliases (FR21).
@@ -1214,6 +1216,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 4.2: REST endpoints `GET/PUT /api/recordings/{id}/aliases`
 
+**Status: DONE (sprint 3 — commit A; mounted on notebook router as `/api/notebook/recordings/{id}/aliases` per design §1; full-replace upsert; verbatim alias preservation)**
+
 **As a** dashboard developer
 **I want** REST endpoints to read and update speaker aliases per recording
 **So that** Story 4.3's UI can use them (FR29).
@@ -1246,6 +1250,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 4.3: Speaker rename UI on transcript view
+
+**Status: DONE (sprint 3 — commit B; SpeakerRenameInput component; AudioNoteModal wiring; Enter commits, Esc cancels, blur commits; ARIA announcement on focus)**
 
 **As a** Configurator
 **I want** to rename "Speaker 1" → "Elena" inline on the transcript view
@@ -1280,6 +1286,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 4.4: Alias substitution in transcript view rendering
 
+**Status: DONE (sprint 3 — commit B; aliasSubstitution.ts + buildSpeakerLabelMap; read-time only — stored transcript never mutated (R-EL3); first snapshot of 5 propagation snapshots)**
+
 **As a** Configurator
 **I want** the transcript view to substitute aliases everywhere it renders speaker labels
 **So that** the view is consistent (FR22).
@@ -1307,6 +1315,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 4.5: Alias cleanup on recording delete (FK cascade verification)
+
+**Status: DONE (sprint 3 — commit C; cascade tested 3→0; survives DB schema/data restore round-trip)**
 
 **As a** backend engineer
 **I want** alias rows automatically deleted when their parent recording is deleted
@@ -1351,6 +1361,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 5.1: Alias propagation to plain-text and subtitle exports
 
+**Status: DONE (sprint 3 — commit D; apply_aliases generator over iter_segments preserves bounded RAM; subtitle build_subtitle_cues alias_overrides param; 2 propagation snapshots)**
+
 **As a** Configurator (Maria, J2)
 **I want** "Elena Vasquez" to appear in my plain-text and subtitle exports — never "Speaker 1"
 **So that** the exports match the transcript view (FR23).
@@ -1380,6 +1392,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 5.2: Alias propagation to AI summary prompt context (verbatim, R-EL3)
+
+**Status: DONE (sprint 3 — commit D; _build_alias_aware_transcript_text helper + speaker_key_preface preamble + R-EL3 verbatim directive in system prompt; covers blocking and streaming summarize routes)**
 
 **As a** Configurator
 **I want** the AI summary to reference aliases verbatim ("Vasquez argued that...", not "Speaker 1 argued that...") and never infer/merge/rewrite alias names
@@ -1413,6 +1427,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 5.3: Alias propagation to AI chat context
 
+**Status: DONE (sprint 3 — commit D; chat_with_llm uses _build_alias_aware_transcript_text + same R-EL3 directive when first message includes transcription context)**
+
 **As a** user chatting with the AI about a recording
 **I want** the AI chat to also use aliases verbatim
 **So that** my conversation is consistent with the summary and view (FR23, FR24).
@@ -1437,6 +1453,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 5.4: Diarization-confidence per-turn API (R-EL4)
+
+**Status: DONE (sprint 3 — commit E; per_turn_confidence helper aggregates word-level confidence as mean; mounted as `/api/notebook/recordings/{id}/diarization-confidence`; empty turns:[] fallback for older runs without word data)**
 
 **As a** dashboard developer
 **I want** an endpoint returning per-turn diarization confidence for a recording
@@ -1463,6 +1481,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 5.5: Per-turn confidence indicators in transcript view (visual spec UX-DR3)
+
+**Status: DONE (sprint 3 — commit F; ConfidenceChip component; high → null, medium → neutral, low → amber; tooltip shows %; aria-label="confidence: <bucket>"; UI contract baseline updated to spec_version 1.0.45)**
 
 **As a** researcher
 **I want** confidence chips beside speaker labels: no chip for high-confidence, neutral chip for medium, amber chip for low — with hover tooltip showing exact %
@@ -1503,6 +1523,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 5.6: ADR-009 lifecycle state machine in `recording_diarization_review`
+
+**Status: DONE (sprint 3 — commit G; diarization_review_lifecycle.py module; on_transcription_complete / on_review_view_opened / on_run_summary_now_clicked / on_auto_summary_fired triggers; banner_visible + auto_summary_is_held predicates; illegal transitions raise IllegalReviewTransitionError; longform/import completion-path wiring deferred to Sprint 4 per design §1)**
 
 **As a** backend engineer
 **I want** the review-state lifecycle (pending → in_review → completed → released) implemented per ADR-009
@@ -1554,6 +1576,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 5.7: Persistent "Review uncertain turns" banner (UX-DR2)
 
+**Status: DONE (sprint 3 — commit H; PersistentInfoBanner component; AudioNoteModal integration; ARIA-live announcement on mount via useAriaAnnouncer; banner persists across navigation/restart per ADR-009 lifecycle)**
+
 **As a** researcher
 **I want** a yellow/amber banner at the top of the recording detail view that persists until I act on it
 **So that** I cannot miss the prompt to review (FR28, R-EL20, NFR43).
@@ -1591,6 +1615,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 
 ### Story 5.8: Auto-summary HOLD on low-confidence (R-EL10)
 
+**Status: DONE (sprint 3 — commit H; auto_summary_is_held predicate exposed; fake-consumer test asserts contract; manual-summary-bypasses-hold static-analysis test guards Story 5.8 AC3; full auto-summary lifecycle wiring lands Sprint 4 Story 6.2)**
+
 **As a** researcher
 **I want** the auto-summary lifecycle hook to skip recordings with `recording_diarization_review.status != 'released'`
 **So that** the LLM never summarizes a transcript whose attributions I haven't validated (FR25, R-EL10).
@@ -1622,6 +1648,8 @@ The PRD does not have a separate UX Design document; UX requirements are embedde
 ---
 
 ### Story 5.9: Diarization-review focused view + Diarization-Review Keyboard Contract (FR26, FR54, R-EL15)
+
+**Status: DONE (sprint 3 — commit I; DiarizationReviewView composite-widget listbox; canonical Keyboard Contract Tab/↑↓/←→/Enter/Esc/Space; aria-activedescendant; FR54 turn announcements via useAriaAnnouncer; confidence-threshold filter (bottom_5 / <60 / <80 / all); filter linearity p95 <200ms at N=100, r²>0.95 across [10,100,500,1000])**
 
 **As a** researcher (Sami, J4) AND a screen-reader user (Lia, J7)
 **I want** a focused review view with confidence-threshold filter, bulk-accept, and full keyboard navigation per the Diarization-Review Keyboard Contract

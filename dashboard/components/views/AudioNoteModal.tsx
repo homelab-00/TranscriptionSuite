@@ -37,9 +37,17 @@ import { useRecording } from '../../src/hooks/useRecording';
 import { apiClient } from '../../src/api/client';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
+import { ConfidenceChip } from '../recording/ConfidenceChip';
 import { DeleteRecordingDialog } from '../recording/DeleteRecordingDialog';
+import { SpeakerRenameInput } from '../recording/SpeakerRenameInput';
+import { PersistentInfoBanner } from '../ui/PersistentInfoBanner';
 import { useActiveProfileStore } from '../../src/stores/activeProfileStore';
+import { useDiarizationConfidence } from '../../src/hooks/useDiarizationConfidence';
+import { useDiarizationReview } from '../../src/hooks/useDiarizationReview';
 import { useWordHighlighter } from '../../src/hooks/useWordHighlighter';
+import { useRecordingAliases } from '../../src/hooks/useRecordingAliases';
+import { buildSpeakerLabelMap, labelFor } from '../../src/utils/aliasSubstitution';
+import { LOW_CONFIDENCE_THRESHOLD } from '../../src/utils/confidenceBuckets';
 import { getConfig } from '../../src/config/store';
 import type { ChatMessage, Conversation, LLMModel } from '../../src/api/types';
 
@@ -547,6 +555,51 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const segments = transcription?.segments ?? [];
   const hasDiarizationTranscript =
     Boolean(recording?.has_diarization) || segments.some((seg) => Boolean(seg.speaker));
+
+  // Issue #104, Stories 4.3 / 4.4 — Speaker aliases for the active recording.
+  // The hook is the single source of truth: rename commits via setAliases
+  // and every turn re-renders with the new label in the same React pass
+  // (FR22 / "applies to all turns of the same speaker_id").
+  const recordingId = note?.recordingId ?? null;
+  const aliasState = useRecordingAliases(recordingId);
+  const speakerLabelMap = useMemo(
+    () => buildSpeakerLabelMap(segments, aliasState.aliasMap),
+    [segments, aliasState.aliasMap],
+  );
+  const handleSpeakerRename = useCallback(
+    (speakerId: string, newName: string) => {
+      const trimmed = newName.trim();
+      const next = aliasState.aliases.filter((a) => a.speaker_id !== speakerId);
+      if (trimmed) next.push({ speaker_id: speakerId, alias_name: trimmed });
+      aliasState.setAliases(next).catch(() => {
+        toast.error('Failed to update speaker label');
+      });
+    },
+    [aliasState],
+  );
+
+  // Issue #104 Story 5.5 — per-turn diarization confidence for chip rendering.
+  // Older recordings without word-level confidence return turns:[] which
+  // renders no chips at all (graceful fallback).
+  const confidenceState = useDiarizationConfidence(recordingId);
+
+  // Issue #104 Story 5.7 — review state drives the persistent banner.
+  const reviewState = useDiarizationReview(recordingId);
+  const lowConfTurnCount = useMemo(() => {
+    let n = 0;
+    for (const t of confidenceState.turns) {
+      if (t.confidence < LOW_CONFIDENCE_THRESHOLD) n += 1;
+    }
+    return n;
+  }, [confidenceState.turns]);
+  const totalTurnCount = confidenceState.turns.length;
+  const handleOpenReview = useCallback(() => {
+    reviewState.openReview().catch(() => {
+      toast.error('Failed to open review');
+    });
+    // Story 5.9 review view (commit I) opens here. For commit H we
+    // expose only the lifecycle transition; the dedicated view ships next.
+  }, [reviewState]);
   const hasWordTimestamps = segments.some((seg) => seg.words && seg.words.length > 0);
   const hasSegmentDetail = hasDiarizationTranscript || hasWordTimestamps;
   const plainTranscriptText = hasSegmentDetail
@@ -2033,6 +2086,20 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                   )}
                 </div>
 
+                {/* Issue #104 Story 5.7 — persistent low-confidence review banner.
+                    Visible while ADR-009 status is 'pending' or 'in_review'.
+                    Dismissed only by the lifecycle (R-EL20 — no time/navigation
+                    auto-dismiss). */}
+                {reviewState.bannerVisible && (
+                  <PersistentInfoBanner
+                    severity="warning"
+                    message={`⚠ Speaker labels uncertain on ${lowConfTurnCount} of ${totalTurnCount} turn boundaries — review before auto-summary runs.`}
+                    ctaLabel="Review uncertain turns"
+                    onCta={handleOpenReview}
+                    ariaAnnouncement={`Transcription complete. ${lowConfTurnCount} of ${totalTurnCount} turn boundaries flagged low-confidence.`}
+                  />
+                )}
+
                 {/* 3. Transcript - Added selectable-text to paragraphs */}
                 <div className="space-y-6">
                   <div className="pointer-events-none sticky top-0 z-10 py-4 select-none">
@@ -2053,7 +2120,27 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                                 <div
                                   className={`mb-1 text-xs font-bold ${speakerColor(seg.speaker)}`}
                                 >
-                                  {seg.speaker}
+                                  {/* Issue #104 Stories 4.3 / 4.4 — alias-aware
+                                      speaker rendering. The display label is
+                                      `aliasMap[raw] ?? "Speaker N"`; rename
+                                      writes through useRecordingAliases. */}
+                                  <SpeakerRenameInput
+                                    speakerId={seg.speaker}
+                                    currentLabel={labelFor(seg.speaker, speakerLabelMap)}
+                                    className="cursor-text rounded px-1 hover:bg-white/10 focus:bg-white/10 focus:outline-none data-[editing]:bg-black/30"
+                                    onCommit={(newName) =>
+                                      handleSpeakerRename(seg.speaker as string, newName)
+                                    }
+                                  />
+                                  {/* Issue #104 Story 5.5 — per-turn confidence
+                                      chip. high → null; medium → neutral;
+                                      low → amber. Tooltip shows %.  */}
+                                  {(() => {
+                                    const conf = confidenceState.byTurn.get(i);
+                                    return conf !== undefined ? (
+                                      <ConfidenceChip confidence={conf} />
+                                    ) : null;
+                                  })()}
                                 </div>
                               )}
                               {!hideTimestamps && (
