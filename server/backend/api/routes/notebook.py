@@ -98,6 +98,14 @@ class RecordingResponse(BaseModel):
     summary: str | None = None
     summary_model: str | None = None
     transcription_backend: str | None = None
+    # Issue #104 Sprint 4 — auto-action lifecycle (migration 015). Surfaced
+    # on the response so the dashboard's AutoActionStatusBadge can render
+    # without a second round-trip. Status enum is documented in the migration.
+    auto_summary_status: str | None = None
+    auto_summary_error: str | None = None
+    auto_export_status: str | None = None
+    auto_export_error: str | None = None
+    auto_export_path: str | None = None
 
 
 class RecordingDetailResponse(RecordingResponse):
