@@ -99,3 +99,4 @@ guard. That belongs to Story 6.11 (Sprint 3 / epic-auto-actions).
 implementer doesn't assume the guard is already in place.
 
 **Re-triage trigger:** Sprint 3 kickoff.
+

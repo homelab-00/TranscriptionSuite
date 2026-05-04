@@ -71,3 +71,10 @@ __pycache__/
 codeql-agent-results/
 benchmark_*.json
 benchmark_*.csv
+
+## Runtime data: SQLite + audio caches under server/data
+server/data/
+*.db
+*.sqlite
+*.sqlite3
+!.gitnexus/registry/*.db

@@ -19,11 +19,36 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from server.core.filename_template import find_unknown_placeholders
 from server.database import profile_repository
 from server.database.profile_repository import (
     SUPPORTED_SCHEMA_VERSIONS,
     UnsupportedSchemaVersionError,
 )
+
+
+def _validate_template(public_fields: Any) -> None:
+    """Reject templates with unknown placeholders (Issue #104, Story 3.2 AC1).
+
+    Raises HTTPException 400 with the R-EL24 error shape.
+    """
+    if public_fields is None:
+        return
+    template = (
+        public_fields.filename_template if hasattr(public_fields, "filename_template") else None
+    )
+    if not template:
+        return
+    unknown = find_unknown_placeholders(template)
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_template",
+                "unknown_placeholders": unknown,
+            },
+        )
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -127,6 +152,9 @@ async def create_profile_endpoint(body: ProfileCreate) -> ProfileResponse:
             status_code=400,
             detail=_schema_version_error_detail(body.schema_version),
         )
+    # Story 3.2 AC1: reject templates with unknown placeholders. Applied at
+    # CREATE as well as UPDATE so a malformed template can never be saved.
+    _validate_template(body.public_fields)
     try:
         profile_id = profile_repository.create_profile(
             name=body.name,
@@ -159,6 +187,8 @@ async def update_profile_endpoint(profile_id: int, body: ProfileUpdate) -> Profi
             status_code=400,
             detail=_schema_version_error_detail(body.schema_version),
         )
+    # Story 3.2 AC1: reject templates with unknown placeholders.
+    _validate_template(body.public_fields)
 
     # Only forward fields the caller actually set in the JSON payload —
     # the repository distinguishes "omitted" (sentinel) from "None"

@@ -17,6 +17,7 @@ import { X } from 'lucide-react';
 import { apiClient, type Profile } from '../../src/api/client';
 import { useFolderPicker } from '../../src/hooks/useFolderPicker';
 import { defaultPublicFields, resolveDocumentsPath } from '../../src/services/profileDefaults';
+import { TemplatePreviewField } from './TemplatePreviewField';
 
 const BANNER_DISMISS_KEY = 'notebook.dismissedBanners.emptyProfile';
 
@@ -38,7 +39,6 @@ export const EmptyProfileForm: React.FC<EmptyProfileFormProps> = ({
 }) => {
   const nameId = useId();
   const descId = useId();
-  const templateId = useId();
   const destId = useId();
   const summaryId = useId();
   const exportId = useId();
@@ -55,6 +55,10 @@ export const EmptyProfileForm: React.FC<EmptyProfileFormProps> = ({
   const [bannerVisible, setBannerVisible] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  // Issue #104, Story 3.3 AC3 — Save is gated on template validity.
+  // The TemplatePreviewField below pushes the validity flag up via
+  // onValidityChange; defaults to true (the initial template is valid).
+  const [templateValid, setTemplateValid] = useState<boolean>(true);
 
   // Resolve the OS Documents path on first paint (AC1).
   useEffect(() => {
@@ -162,17 +166,14 @@ export const EmptyProfileForm: React.FC<EmptyProfileFormProps> = ({
         />
       </label>
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span>Filename template</span>
-        <input
-          id={templateId}
-          type="text"
-          value={filenameTemplate}
-          onChange={(e) => setFilenameTemplate(e.target.value)}
-          aria-label="Filename template"
-          className="rounded bg-white/5 px-2 py-1 font-mono"
-        />
-      </label>
+      {/* Story 3.3 — live preview + inline invalid-template error replaces
+          the plain template input. Save is disabled when the template
+          contains an unknown placeholder (AC3.3.AC3). */}
+      <TemplatePreviewField
+        template={filenameTemplate}
+        onTemplateChange={setFilenameTemplate}
+        onValidityChange={setTemplateValid}
+      />
 
       <div className="flex flex-col gap-1 text-sm">
         <label htmlFor={destId}>Destination folder</label>
@@ -234,7 +235,7 @@ export const EmptyProfileForm: React.FC<EmptyProfileFormProps> = ({
         </button>
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || !templateValid}
           className="rounded bg-cyan-500/80 px-3 py-1 text-black hover:bg-cyan-400 disabled:opacity-50"
         >
           {submitting ? 'Saving…' : 'Save'}

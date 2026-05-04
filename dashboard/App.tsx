@@ -11,6 +11,7 @@ import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
 import { BugReportModal } from './components/views/BugReportModal';
 import { StarPopupModal } from './components/views/StarPopupModal';
+import { DedupChoiceContainer } from './components/import/DedupChoiceContainer';
 import { Button } from './components/ui/Button';
 import { CustomSelect } from './components/ui/CustomSelect';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -810,6 +811,11 @@ const AppInner: React.FC = () => {
       <AboutModal isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} />
       <BugReportModal isOpen={isBugReportOpen} onClose={() => setIsBugReportOpen(false)} />
       <StarPopupModal isOpen={showStarPopup} onDismiss={() => void dismissStarPopup()} />
+
+      {/* Issue #104, Sprint 2 Item 4 — full dedup choice flow.
+          The container subscribes to useDedupChoiceStore; the import queue
+          calls requestChoice() and awaits the user's pick before continuing. */}
+      <DedupChoiceContainer />
 
       {modelOnboardingOpen && (
         <div className="fixed inset-0 z-60 flex items-center justify-center p-4">

@@ -245,6 +245,11 @@ interface ElectronAPI {
     getDownloadsPath: () => Promise<string>;
     writeText: (filePath: string, content: string) => Promise<void>;
     selectFolder: () => Promise<string | null>;
+    /** Issue #104, Story 3.5 — native file-save dialog. */
+    saveFile: (opts: {
+      defaultPath?: string;
+      filters?: { name: string; extensions: string[] }[];
+    }) => Promise<string | null>;
   };
   notifications: {
     show: (options: {

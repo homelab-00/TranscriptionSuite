@@ -178,6 +178,34 @@ export interface UploadResponse {
 /** Returned by POST /api/notebook/transcribe/upload (202 Accepted) */
 export interface TranscriptionAccepted {
   job_id: string;
+  /**
+   * Issue #104 / Story 2.4 — populated by /api/transcribe/import when a
+   * prior job's audio_hash matches this upload. Empty list = J1 happy path
+   * (no duplicate). Notebook upload (`/api/notebook/transcribe/upload`)
+   * doesn't currently populate this field; it's reserved for future cross-
+   * flow dedup. Default-empty keeps the response shape backwards-compatible
+   * for callers that ignore it.
+   */
+  dedup_matches?: DedupMatch[];
+}
+
+/** A prior item that shares this upload's audio_hash or normalized_audio_hash.
+ *
+ * `source` (Sprint 2 carve-out — Item 2) tells the dashboard which table the
+ * match came from. Optional for backwards compatibility with older server
+ * responses that pre-date Item 2. Default behavior on undefined is to assume
+ * `'transcription_job'` (the original Sprint 2 contract).
+ */
+export interface DedupMatch {
+  recording_id: string;
+  name: string;
+  created_at: string;
+  source?: 'transcription_job' | 'recording';
+}
+
+/** Returned by POST /api/transcribe/import/dedup-check (Issue #104, Story 2.4). */
+export interface DedupCheckResponse {
+  matches: DedupMatch[];
 }
 
 /** Result stored in job_tracker after background transcription completes */
