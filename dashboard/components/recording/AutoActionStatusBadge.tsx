@@ -38,7 +38,10 @@ export type AutoActionSeverity =
   | 'error'
   | 'processing'
   | 'manual_intervention_required';
-export type AutoActionType = 'auto_summary' | 'auto_export';
+// Sprint 5 — Story 7.7: 'webhook' joins the existing two action types
+// so the badge can surface webhook delivery failures with the same
+// retry-button affordance.
+export type AutoActionType = 'auto_summary' | 'auto_export' | 'webhook';
 
 interface AutoActionStatusBadgeProps {
   recordingId: number;
@@ -70,6 +73,7 @@ const SEVERITY_TO_STATUSLIGHT: Record<
 const ACTION_LABEL: Record<AutoActionType, string> = {
   auto_summary: 'auto-summary',
   auto_export: 'auto-export',
+  webhook: 'webhook',
 };
 
 export function AutoActionStatusBadge({
@@ -144,6 +148,15 @@ const RETRYABLE_STATUSES = new Set<string>([
   'retry_pending',
 ]);
 
+// Sprint 5 — webhook adds two in-progress states ('pending', 'in_flight')
+// that the existing 'in_progress'/'pending' branch already handles. The
+// 'failed' branch already covers webhook delivery errors.
+const ACTION_LABELS_PROPER: Record<AutoActionType, string> = {
+  auto_summary: 'Summary',
+  auto_export: 'Export',
+  webhook: 'Webhook',
+};
+
 export function statusToBadgeProps(
   status: string | null,
   actionType: AutoActionType,
@@ -151,15 +164,25 @@ export function statusToBadgeProps(
 ): AutoActionStatusMap | null {
   if (status === null || status === undefined) return null;
 
-  const action = actionType === 'auto_summary' ? 'Summary' : 'Export';
+  const action = ACTION_LABELS_PROPER[actionType];
   const retryable = RETRYABLE_STATUSES.has(status);
 
   switch (status) {
     case 'success':
-      return { severity: 'ok', message: `${action} ready`, retryable: false };
+      return {
+        severity: 'ok',
+        message: actionType === 'webhook' ? 'Webhook delivered' : `${action} ready`,
+        retryable: false,
+      };
     case 'in_progress':
     case 'pending':
-      return { severity: 'processing', message: `${action} in progress…`, retryable: false };
+    case 'in_flight':
+      return {
+        severity: 'processing',
+        message:
+          actionType === 'webhook' ? 'Webhook delivery in flight…' : `${action} in progress…`,
+        retryable: false,
+      };
     case 'held':
       return {
         severity: 'warn',
@@ -184,12 +207,16 @@ export function statusToBadgeProps(
         message: `${action} — auto-retry pending…`,
         retryable: true,
       };
-    case 'failed':
+    case 'failed': {
+      const failedVerb = actionType === 'webhook' ? 'delivery failed' : 'failed';
       return {
         severity: 'error',
-        message: options.error ? `${action} failed: ${options.error}` : `${action} failed`,
+        message: options.error
+          ? `${action} ${failedVerb}: ${options.error}`
+          : `${action} ${failedVerb}`,
         retryable: true,
       };
+    }
     case 'manual_intervention_required':
       return {
         severity: 'manual_intervention_required',

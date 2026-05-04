@@ -387,6 +387,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     _cleanup_task = None
     _orphan_sweep_task = None
     _deferred_export_sweep_task = None
+    _webhook_worker = None
+    _webhook_cleanup_task = None
 
     config = get_config()
     _log_time("config loaded")
@@ -491,6 +493,53 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             "Deferred-export sweep disabled (deferred_export_sweep_interval_s=%.1f)",
             _sweep_interval_s,
         )
+
+    # Issue #104, Sprint 5 — start the WebhookWorker (Story 7.3) +
+    # schedule periodic webhook_deliveries retention cleanup (Story 7.7
+    # AC3 / NFR40). Both are gated by config flags so deployments that
+    # don't use webhooks pay nothing for them. The worker is bootstrap-
+    # safe (NFR24a/b) — it picks up any 'pending'/'in_flight' rows left
+    # over from the prior session via list_pending().
+    webhook_config = config.config.get("webhook_deliveries", {})
+    _webhook_worker_enabled = webhook_config.get("enabled", True)
+    _webhook_retention_enabled = webhook_config.get("retention_enabled", True)
+    _webhook_retention_days = webhook_config.get("retention_days", 30)
+    _webhook_retention_interval_hours = webhook_config.get("retention_interval_hours", 24)
+    _webhook_poll_interval_s = webhook_config.get("poll_interval_s", 5.0)
+
+    if _webhook_worker_enabled:
+        from server.services.webhook_worker import WebhookWorker, get_worker
+
+        _webhook_worker = get_worker()
+        # Replace any cached singleton from a hot-reload with one tuned to
+        # the current config's poll interval. Most production runs only
+        # see one start() per process so this is a no-op on the second
+        # branch; tests that mutate config rely on it.
+        if _webhook_worker._poll_interval != _webhook_poll_interval_s:  # noqa: SLF001
+            _webhook_worker = WebhookWorker(poll_interval_s=_webhook_poll_interval_s)
+            from server.services import webhook_worker as _ww_mod
+
+            _ww_mod._instance = _webhook_worker  # noqa: SLF001
+        await _webhook_worker.start()
+        _log_time("webhook worker started")
+        logger.info("WebhookWorker started (poll=%.1fs)", _webhook_poll_interval_s)
+    else:
+        logger.info("WebhookWorker disabled (webhook_deliveries.enabled=false)")
+
+    if _webhook_retention_enabled:
+        from server.database.webhook_cleanup import periodic_webhook_cleanup
+
+        _webhook_cleanup_task = asyncio.create_task(
+            periodic_webhook_cleanup(_webhook_retention_days, _webhook_retention_interval_hours)
+        )
+        _log_time("webhook cleanup scheduled (async, periodic)")
+        logger.info(
+            "Webhook cleanup scheduled (retention=%dd, interval=%dh)",
+            _webhook_retention_days,
+            _webhook_retention_interval_hours,
+        )
+    else:
+        logger.info("Webhook cleanup disabled (webhook_deliveries.retention_enabled=false)")
 
     # Orphan sweep scheduling deferred until after model manager creation (needs job tracker)
     _orphan_sweep_interval = durability_config.get("orphan_sweep_interval_minutes", 30)
@@ -642,6 +691,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             await _deferred_export_sweep_task
         except asyncio.CancelledError:
             logger.debug("Deferred-export sweep task cancelled")
+
+    # Cancel periodic webhook retention cleanup task (Issue #104, Story 7.7)
+    if _webhook_cleanup_task and not _webhook_cleanup_task.done():
+        _webhook_cleanup_task.cancel()
+        try:
+            await _webhook_cleanup_task
+        except asyncio.CancelledError:
+            logger.debug("Webhook cleanup task cancelled")
+
+    # Drain WebhookWorker (Issue #104, Story 7.3 AC2/AC5) — stop with a
+    # 30s grace deadline so in-flight HTTP calls have a chance to finish.
+    # Any leftover 'in_flight' rows are reverted to 'pending' so the
+    # next process start picks them up cleanly.
+    if _webhook_worker is not None:
+        try:
+            await _webhook_worker.stop(grace_s=30.0)
+            logger.info("WebhookWorker stopped cleanly")
+        except Exception:
+            logger.exception("WebhookWorker stop raised; continuing shutdown")
 
     # Graceful drain: stop any active recording sessions before killing the model.
     # Wave 1 already persisted results to DB, so a timeout just means the result
