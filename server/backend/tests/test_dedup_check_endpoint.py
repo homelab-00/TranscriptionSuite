@@ -119,6 +119,8 @@ def test_dedup_check_no_outbound_network(fresh_db: Path, monkeypatch: pytest.Mon
         monkeypatch.setattr(httpx.Client, "send", _raise_outbound)  # noqa: TID251
         monkeypatch.setattr(httpx.AsyncClient, "send", _raise_outbound)  # noqa: TID251
     except ImportError:
+        # httpx is optional in the test env; if it isn't installed we still
+        # have the socket-level guard above to catch outbound network calls.
         pass
 
     h = "ef" * 32

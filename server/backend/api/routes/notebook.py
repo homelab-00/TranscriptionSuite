@@ -65,6 +65,18 @@ _ASCII_FALLBACK_REPLACE = str.maketrans(
 )
 
 
+def _sanitize_for_log(value: object) -> str:
+    """Strip CR/LF (and equivalents) from any value flowing into a logger.
+
+    Defeats CodeQL ``py/log-injection`` (CWE-117) by acting as an explicit
+    barrier the analyzer recognizes — the runtime gates (Pydantic int coercion
+    on path params, the ``requested_format`` whitelist) are not visible to the
+    taint tracker, so even values that are already safe must pass through
+    here before being logged.
+    """
+    return str(value).replace("\r", " ").replace("\n", " ")
+
+
 def _content_disposition(disposition: str, filename: str) -> str:
     """Build an RFC 6266 Content-Disposition value with both an ASCII
     fallback and a UTF-8 form so non-ASCII filenames (Greek, Cyrillic,
@@ -1238,6 +1250,9 @@ async def upload_and_transcribe(
         try:
             tmp_path.unlink(missing_ok=True)
         except OSError:
+            # Best-effort cleanup; the OS reaps tempfiles on reboot and the
+            # caller is already raising 500 — leaking a temp byte stream
+            # here must not mask the real error returned to the client.
             pass
         model_manager.job_tracker.cancel_job()
         raise HTTPException(
@@ -1599,10 +1614,10 @@ async def export_recording(
         # generic "Internal server error" envelope so users can report something
         # actionable. Full traceback still lands in the server log.
         logger.error(
-            "Export failed for recording %s (format=%s): %s",
-            recording_id,
-            requested_format,
-            e,
+            "Export failed for recording %d (format=%s): %s",
+            int(recording_id),
+            _sanitize_for_log(requested_format),
+            _sanitize_for_log(e),
             exc_info=True,
         )
         raise HTTPException(
@@ -1682,10 +1697,10 @@ async def reexport_recording(recording_id: int, body: ReexportRequest) -> Reexpo
                 f.write(chunk)
     except OSError as exc:
         logger.error(
-            "Re-export write failed for recording %s to %s: %s",
-            recording_id,
-            target_path,
-            exc,
+            "Re-export write failed for recording %d to %s: %s",
+            int(recording_id),
+            _sanitize_for_log(target_path),
+            _sanitize_for_log(exc),
         )
         raise HTTPException(
             status_code=500,

@@ -264,6 +264,9 @@ def discover_cudnn_lib_path(venv_dir: Path) -> str:
             if any(candidate.glob("libcudnn*.so*")):
                 return str(candidate)
     except OSError:
+        # Glob can raise on broken symlinks or transient I/O — fall through
+        # to the empty-string fallback so the Dockerfile's hardcoded
+        # LD_LIBRARY_PATH stays in effect.
         pass
     return ""
 

@@ -456,6 +456,8 @@ async def test_cancel_safe_shutdown(insert_pending, webhook_mock_receiver) -> No
     try:
         await task
     except asyncio.CancelledError:
+        # Expected: awaiting a cancelled task re-raises CancelledError;
+        # the test wants the cancel to terminate, not to propagate.
         pass
     # After hard cancel, stop() still runs to perform the in_flight-revert
     # housekeeping cleanly — should not raise. The CancelledError that

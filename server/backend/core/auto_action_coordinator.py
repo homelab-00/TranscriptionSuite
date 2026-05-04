@@ -359,6 +359,9 @@ def _write_atomic(target: Path, content: str) -> None:
         try:
             os.unlink(tmp_path)
         except FileNotFoundError:
+            # tmp_path was never created (mkstemp succeeded but fdopen
+            # failed before any write) or another process already removed
+            # it — nothing to clean up.
             pass
         raise
 

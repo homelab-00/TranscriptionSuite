@@ -139,6 +139,8 @@ def test_scheduled_sweeper_task_flips_deferred_row_to_success(
             try:
                 await task
             except asyncio.CancelledError:
+                # Awaiting a cancelled task may re-raise CancelledError;
+                # we asked for cancellation, so swallow it.
                 pass
 
     asyncio.run(runner())

@@ -73,6 +73,7 @@ async def test_periodic_loop_cancel_safe(recording_id: int) -> None:
     try:
         await task
     except asyncio.CancelledError:
+        # Acceptable per the comment above — both shutdown paths are valid.
         pass
 
 
@@ -102,4 +103,6 @@ async def test_subsequent_runs_after_first_run(recording_id: int) -> None:
     try:
         await task
     except asyncio.CancelledError:
+        # Awaiting a cancelled task may re-raise CancelledError; we asked
+        # for cancellation, so swallow it and let the test exit cleanly.
         pass

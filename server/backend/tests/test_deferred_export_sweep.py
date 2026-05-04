@@ -199,6 +199,8 @@ def test_periodic_sweep_cancel_clean(fresh_db: Path) -> None:
         try:
             await task
         except asyncio.CancelledError:
+            # Sweeper catches the inner CancelledError, but the outer await
+            # may still surface it on a tight schedule. Either is acceptable.
             pass
 
     asyncio.run(runner())

@@ -105,7 +105,7 @@ export const FullscreenVisualizer: React.FC<FullscreenVisualizerProps> = ({
           <AudioVisualizer
             className="h-full w-full"
             analyserNode={analyserNode}
-            isActive={isRendered && !!analyserNode}
+            isActive={!!analyserNode}
           />
 
           {/* Overlay Gradient for depth */}

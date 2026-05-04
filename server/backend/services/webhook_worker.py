@@ -206,6 +206,8 @@ class WebhookWorker:
                 await asyncio.wait_for(self._wake_event.wait(), timeout=self._poll_interval)
                 self._wake_event.clear()
             except TimeoutError:
+                # Expected: no wake_event during the poll interval — fall through
+                # to the next iteration so the queue is drained on schedule.
                 pass
             except asyncio.CancelledError:
                 logger.debug("WebhookWorker run cancelled (shutdown)")

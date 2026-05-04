@@ -1826,10 +1826,10 @@ async function pullImage(tag: string): Promise<string> {
     });
 
   for (let attempt = 1; attempt <= MAX_PULL_ATTEMPTS; attempt++) {
-    if (pullCancelled) {
-      throw new Error('Pull cancelled.');
-    }
-
+    // No top-of-loop cancel check here: pullCancelled is reset to false above
+    // and the loop has no yield points outside of the awaited backoff (which
+    // is followed by its own post-await check). cancelPull() can only flip
+    // the flag during an await, and every await already has a paired check.
     const result = await runOne();
 
     if (pullCancelled) {

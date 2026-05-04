@@ -263,7 +263,7 @@ const NoteActionMenu: React.FC<MenuProps> = ({
   onRefresh,
   onPlay,
 }) => {
-  const { confirm, dialog: confirmDialog } = useConfirm();
+  const { dialog: confirmDialog } = useConfirm();
   const activeProfileId = useActiveProfileStore((s) => s.activeProfileId);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(noteTitle);
