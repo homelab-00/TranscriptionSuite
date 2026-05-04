@@ -328,14 +328,34 @@ async def _run_auto_export(
 
 
 def _write_atomic(target: Path, content: str) -> None:
-    """Story 6.10: write to .tmp sibling, then os.replace.
+    """Story 6.10: write to a UNIQUE temp sibling, then os.replace.
 
-    `os.replace` is atomic on POSIX and Windows; concurrent retries
-    either win or lose the race, but never produce a half-written file.
+    Two concurrent writers must NOT collide on the same temp filename —
+    that would leave one with a missing-source FileNotFoundError on
+    replace. We use ``tempfile.NamedTemporaryFile(delete=False)`` in
+    the target directory so each writer gets a unique temp path.
+    ``os.replace`` is atomic on POSIX and Windows; the last writer wins
+    cleanly. No half-written file is ever observable.
     """
-    tmp = target.with_name(target.name + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    os.replace(tmp, target)
+    import tempfile
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=target.name + ".",
+        suffix=".tmp",
+        dir=str(target.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, target)
+    except Exception:
+        # Best-effort cleanup of the orphan temp file on failure.
+        try:
+            os.unlink(tmp_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _write_transcript_atomic(base: Path, recording_id: int) -> None:

@@ -29,7 +29,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from server.api.routes.utils import get_client_name, sanitize_for_log
 from server.config import get_config
 from server.core.stt.backends.factory import detect_backend_type
@@ -1632,6 +1632,84 @@ async def reexport_recording(recording_id: int, body: ReexportRequest) -> Reexpo
         status="reexported",
         path=str(target_path),
         filename=rendered,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Auto-action retry endpoint (Issue #104, Stories 6.9 / 6.10)
+# ---------------------------------------------------------------------------
+# Mounted on the notebook router rather than a top-level
+# /api/recordings/* router (per Sprint 3/4 design — see
+# `_bmad-output/implementation-artifacts/sprint-4-design.md` §1).
+
+
+class AutoActionRetryRequest(BaseModel):
+    action_type: str  # validated below — keep as plain str so 400 instead of 422
+
+    @field_validator("action_type")
+    @classmethod
+    def _validate_action_type(cls, v: str) -> str:
+        if v not in ("auto_summary", "auto_export"):
+            raise ValueError(f"action_type must be 'auto_summary' or 'auto_export'; received {v!r}")
+        return v
+
+
+class AutoActionRetryResponse(BaseModel):
+    recording_id: int
+    action_type: str
+    status: str  # "retry_initiated" | "already_complete" | "already_in_progress"
+
+
+@router.post("/recordings/{recording_id}/auto-actions/retry")
+async def retry_auto_action(
+    recording_id: int, payload: AutoActionRetryRequest, response: Response
+) -> AutoActionRetryResponse:
+    """Idempotent retry for auto-summary or auto-export (Story 6.9 / R-EL27).
+
+    Response shape:
+      - 202 + retry_initiated      — happy path; coordinator dispatched
+      - 200 + already_complete     — status was already 'success'; no-op
+      - 200 + already_in_progress  — concurrent click while a retry is in flight
+
+    Manual retry RESETS the auto-retry counter (Story 6.11 — escalation
+    only counts AUTO retries, not user-initiated retries). The retry
+    runs the same coordinator path as the original auto-action.
+    """
+    from server.core.auto_action_coordinator import retry_auto_action_internal
+    from server.database import auto_action_repository as aar
+
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    current = aar.get_auto_action_status(recording_id, payload.action_type)
+
+    # Idempotent on success — Story 6.9 AC2 / R-EL27 — no re-execution.
+    if current == "success":
+        response.status_code = 200
+        return AutoActionRetryResponse(
+            recording_id=recording_id,
+            action_type=payload.action_type,
+            status="already_complete",
+        )
+    # Don't double-fire while already in flight.
+    if current in {"in_progress", "pending"}:
+        response.status_code = 200
+        return AutoActionRetryResponse(
+            recording_id=recording_id,
+            action_type=payload.action_type,
+            status="already_in_progress",
+        )
+
+    # Reset attempts so manual retry is treated as a fresh attempt
+    # (R-EL18 specifies "automatic retry exhausted", not "user gave up").
+    aar.reset_auto_action_attempts(recording_id, payload.action_type)
+    aar.set_auto_action_status(recording_id, payload.action_type, "pending")
+    asyncio.create_task(retry_auto_action_internal(recording_id, payload.action_type))
+    response.status_code = 202
+    return AutoActionRetryResponse(
+        recording_id=recording_id,
+        action_type=payload.action_type,
+        status="retry_initiated",
     )
 
 
