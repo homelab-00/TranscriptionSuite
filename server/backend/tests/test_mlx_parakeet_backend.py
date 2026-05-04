@@ -1,8 +1,11 @@
 """Unit tests for the MLX Parakeet STT backend and factory detection.
 
-These tests run in the standard CI environment (no Apple Silicon required).
-Heavy dependencies (parakeet_mlx, soundfile, scipy) are stubbed out so that
-the logic can be verified on any platform.
+The factory-detection tests run anywhere, but the lifecycle/transcribe
+tests in this module exercise code paths in ``mlx_parakeet_backend`` that
+``import mlx`` at runtime — those paths require a real mlx install
+(Apple Silicon). The whole module is therefore gated behind
+``pytest.importorskip("mlx")`` so non-MLX environments (CI Linux,
+non-arm64 dev machines) skip cleanly instead of erroring.
 """
 
 from __future__ import annotations
@@ -15,6 +18,10 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+
+# Skip the entire module when mlx is not importable. This is order-safe
+# even if a sibling test installs a sys.modules['mlx'] stub later.
+pytest.importorskip("mlx", reason="MLX backend tests require a real mlx install")
 
 # ---------------------------------------------------------------------------
 # Mock objects that stand in for parakeet-mlx's typed result objects

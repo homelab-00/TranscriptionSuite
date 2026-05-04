@@ -22,6 +22,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install system dependencies (FFmpeg)
+        # Required by tests/test_ffmpeg_utils.py, which exercises the
+        # production audio-processing pipeline against the real ffmpeg
+        # binary (resampling, normalization, format conversion).
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
