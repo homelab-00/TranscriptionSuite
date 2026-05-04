@@ -122,6 +122,24 @@ the Sprint 4 auto-summary worker (Story 6.2). Wiring the trigger into
 that worker AND the upload path in Sprint 3 would have duplicated the
 call site; the Sprint 4 design will pick the right single owner.
 
+**Reconfirmed-deferred note (2026-05-04):** Investigated under the
+`/bmad-quick-dev` Sprint 3 carry-forward pass. Re-confirmed deferral on
+a structural ground: `recording_diarization_review` is FK'd to
+`recordings(id)` (migration 010), and **neither `transcription.py` nor
+`/import` produces a `recordings` row** — the `/import` docstring
+(transcription.py:1130) explicitly notes *"this does NOT save to the
+database"* (i.e. the `recordings` table); the durability row written by
+`/import` lives in `transcription_jobs` and exists *"purely so the
+dedup-check endpoint can find re-imports"*. Without a `recording_id`,
+`on_transcription_complete(recording_id, …)` cannot run from those
+paths. The only ways to wire this now are: (a) auto-promote
+`transcription_jobs` rows to `recordings` rows on completion (large new
+feature, Sprint-4-sized scope); (b) re-key the lifecycle table by
+`job_id` (data migration + repository rewrite); (c) add a no-op stub
+that future work would have to refactor. None are cheap. Sprint 4
+Story 6.2 is expected to introduce the unified completion lifecycle
+that resolves this — keep the trigger here until then.
+
 **Defense shape (concrete):** When Story 6.2 lands the auto-summary
 lifecycle, add a single hook just before the auto-summary fires:
 
@@ -136,24 +154,4 @@ if auto_summary_is_held(recording_id):
 ```
 
 **Re-triage trigger:** Sprint 4 Story 6.2 kickoff.
-
-### 2. Bulk-accept undo (v2 readiness Minor 3, partially-resolved)
-
-**Surfaced in implementation-readiness-report-v2.** The diarization
-review view's bulk-accept (Story 5.9 AC2) commits decisions immediately;
-there is no undo affordance. v2 readiness flagged this as partially
-resolved (the AC describes the action but not undo).
-
-**Why deferred:** Sprint 3's primary goal was the canonical Keyboard
-Contract; undo would have added a separate keyboard binding and a
-parallel state structure. Accepted as deferred polish.
-
-**Defense shape:** Add Ctrl+Z to revert the last bulk-accept within
-the session (in-memory only — once submitted, decisions are final).
-A toast confirms the undo. Could share an undo stack with the
-attribution-cycle UI when ←/→ keys actually do something (currently
-no-op placeholder per Story 5.9).
-
-**Re-triage trigger:** First user complaint about accidental
-bulk-accept, OR the next epic that touches the review view.
 

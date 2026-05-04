@@ -13,6 +13,12 @@
  *   - Esc skips the current turn, advances to next.
  *   - Space bulk-accepts every visible turn (respects active filter).
  *
+ * Additive convenience layer (NOT part of the canonical keyboard contract):
+ *   - Ctrl+Z (Cmd+Z on macOS) — undoes the most recent bulk-accept. The
+ *     undo stack is in-memory only (cleared on submit) and is bounded to
+ *     UNDO_STACK_CAP entries. Per-turn Enter/Esc decisions are NOT undoable
+ *     by design — see deferred-work.md "Bulk-accept undo" entry.
+ *
  * Tab order in the surrounding view (Story 5.9 AC3):
  *   review-banner → confidence-filter → turn-list → bulk-action → "Run summary now"
  *
@@ -21,6 +27,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { useAriaAnnouncer } from '../../src/hooks/useAriaAnnouncer';
 import {
   filterLowConfidence,
@@ -28,6 +35,8 @@ import {
   type ReviewTurn,
 } from '../../src/utils/diarizationReviewFilter';
 import { bucketFor } from '../../src/utils/confidenceBuckets';
+
+const UNDO_STACK_CAP = 10;
 
 interface ReviewDecision {
   turn_index: number;
@@ -60,6 +69,7 @@ export function DiarizationReviewView({ turns, speakerLabel, onComplete, onCance
   const [filterMode, setFilterMode] = useState<FilterMode>('below_80');
   const [activeIndex, setActiveIndex] = useState(0);
   const [decisions, setDecisions] = useState<Map<number, ReviewDecision>>(new Map());
+  const [undoStack, setUndoStack] = useState<Map<number, ReviewDecision>[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const announce = useAriaAnnouncer();
   const listRef = useRef<HTMLDivElement>(null);
@@ -114,6 +124,13 @@ export function DiarizationReviewView({ turns, speakerLabel, onComplete, onCance
   );
 
   const bulkAccept = useCallback(() => {
+    // Snapshot the current decisions BEFORE overwriting, so Ctrl+Z can pop it.
+    // The snapshot is an independent Map copy so a later bulk-accept does not
+    // mutate older snapshots.
+    setUndoStack((stack) => {
+      const next = [...stack, new Map(decisions)];
+      return next.length > UNDO_STACK_CAP ? next.slice(-UNDO_STACK_CAP) : next;
+    });
     setDecisions((prev) => {
       const next = new Map(prev);
       for (const t of visibleTurns) {
@@ -126,9 +143,30 @@ export function DiarizationReviewView({ turns, speakerLabel, onComplete, onCance
       return next;
     });
     announce(`Bulk-accepted ${visibleTurns.length} turns.`);
-  }, [visibleTurns, announce]);
+  }, [decisions, visibleTurns, announce]);
+
+  const undoBulkAccept = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const previous = undoStack[undoStack.length - 1];
+    setDecisions(previous);
+    setUndoStack((stack) => stack.slice(0, -1));
+    const reverted = visibleTurns.length;
+    toast.success(`Bulk-accept undone — ${reverted} turn${reverted === 1 ? '' : 's'} reverted.`);
+    announce('Bulk-accept undone.');
+  }, [undoStack, visibleTurns.length, announce]);
+
+  const isUndoShortcut = (e: React.KeyboardEvent): boolean =>
+    (e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z');
 
   const onListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isUndoShortcut(e)) {
+      e.preventDefault();
+      // Stop propagation so the wrapper handler does not also undo — the
+      // wrapper handler is a fallback for when focus is OUTSIDE the listbox.
+      e.stopPropagation();
+      undoBulkAccept();
+      return;
+    }
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
@@ -164,6 +202,17 @@ export function DiarizationReviewView({ turns, speakerLabel, onComplete, onCance
     }
   };
 
+  const onWrapperKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Catch Ctrl/Cmd+Z when focus is on the filter dropdown or submit button
+    // rather than the listbox. The listbox handler runs first when the
+    // listbox owns focus and stops the event with preventDefault, so this
+    // wrapper handler only fires for elements outside the listbox.
+    if (isUndoShortcut(e)) {
+      e.preventDefault();
+      undoBulkAccept();
+    }
+  };
+
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
@@ -181,12 +230,18 @@ export function DiarizationReviewView({ turns, speakerLabel, onComplete, onCance
       });
       await onComplete(allDecisions);
     } finally {
+      // Decisions are final once submitted; the undo affordance is local-only
+      // and would no longer reflect server state.
+      setUndoStack([]);
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="space-y-4 rounded-lg border border-white/10 bg-black/30 p-4">
+    <div
+      onKeyDown={onWrapperKeyDown}
+      className="space-y-4 rounded-lg border border-white/10 bg-black/30 p-4"
+    >
       <header className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-100">Review uncertain turns</h2>
         {onCancel && (

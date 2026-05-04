@@ -15,14 +15,26 @@
  */
 
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DiarizationReviewView } from '../DiarizationReviewView';
 import type { ReviewTurn } from '../../../src/utils/diarizationReviewFilter';
 
+const { mockToastSuccess } = vi.hoisted(() => ({ mockToastSuccess: vi.fn() }));
+
 vi.mock('../../../src/hooks/useAriaAnnouncer', () => ({
   useAriaAnnouncer: () => vi.fn(),
 }));
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: (...args: unknown[]) => mockToastSuccess(...args),
+  },
+}));
+
+beforeEach(() => {
+  mockToastSuccess.mockReset();
+});
 
 function makeTurns(): ReviewTurn[] {
   // 3 turns, all in low bucket so they all show under default filter
@@ -185,6 +197,137 @@ describe('Diarization Keyboard Contract — ←/→ are consumed', () => {
     fireEvent.keyDown(list, { key: 'ArrowLeft' });
     // Active descendant unchanged
     expect(list).toHaveAttribute('aria-activedescendant', 'dr-turn-0');
+  });
+});
+
+describe('Diarization Keyboard Contract — Ctrl+Z undoes the most recent bulk-accept', () => {
+  it('Ctrl+Z reverts decisions to pre-bulk-accept state and toasts', async () => {
+    const onComplete = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DiarizationReviewView
+        turns={makeTurns()}
+        speakerLabel={speakerLabel}
+        onComplete={onComplete}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    // Skip the first turn before bulk-accept: only turn 0 has a 'skip' decision.
+    fireEvent.keyDown(list, { key: 'Escape' });
+    // Bulk-accept overwrites all 3 visible turns to 'accept'.
+    fireEvent.keyDown(list, { key: ' ' });
+    // Undo: reverts to the state before bulk-accept (only turn 0 'skip').
+    fireEvent.keyDown(list, { key: 'z', ctrlKey: true });
+
+    fireEvent.click(screen.getByRole('button', { name: /Run summary now/ }));
+    await Promise.resolve();
+    expect(onComplete).toHaveBeenCalled();
+    const decisions = onComplete.mock.calls[0][0];
+    // Turn 0 retains 'skip'; turns 1 and 2 fall back to default-fill 'accept'.
+    expect(decisions.find((d: { turn_index: number }) => d.turn_index === 0).decision).toBe('skip');
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('Cmd+Z (metaKey) is treated identically to Ctrl+Z', () => {
+    render(
+      <DiarizationReviewView
+        turns={makeTurns()}
+        speakerLabel={speakerLabel}
+        onComplete={vi.fn()}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    fireEvent.keyDown(list, { key: ' ' }); // bulk-accept
+    fireEvent.keyDown(list, { key: 'z', metaKey: true }); // undo
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('Ctrl+Z is a no-op when the undo stack is empty (no toast)', () => {
+    render(
+      <DiarizationReviewView
+        turns={makeTurns()}
+        speakerLabel={speakerLabel}
+        onComplete={vi.fn()}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    fireEvent.keyDown(list, { key: 'z', ctrlKey: true });
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+
+  it('Ctrl+Z only pops one bulk-accept at a time', async () => {
+    const onComplete = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DiarizationReviewView
+        turns={makeTurns()}
+        speakerLabel={speakerLabel}
+        onComplete={onComplete}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    // First bulk-accept (snapshot A: empty)
+    fireEvent.keyDown(list, { key: ' ' });
+    // Skip turn 0 (after first bulk-accept committed turn 0 to 'accept')
+    fireEvent.keyDown(list, { key: 'Escape' });
+    // Second bulk-accept (snapshot B: {0:'skip', 1:'accept', 2:'accept'})
+    fireEvent.keyDown(list, { key: ' ' });
+    // One undo — should pop snapshot B, restoring {0:'skip', 1:'accept', 2:'accept'}.
+    fireEvent.keyDown(list, { key: 'z', ctrlKey: true });
+
+    fireEvent.click(screen.getByRole('button', { name: /Run summary now/ }));
+    await Promise.resolve();
+    const decisions = onComplete.mock.calls[0][0];
+    const byTurn: Record<number, string> = Object.fromEntries(
+      decisions.map((d: { turn_index: number; decision: string }) => [d.turn_index, d.decision]),
+    );
+    expect(byTurn[0]).toBe('skip');
+    expect(byTurn[1]).toBe('accept');
+    expect(byTurn[2]).toBe('accept');
+  });
+
+  it('Ctrl+Shift+Z is reserved for future redo and does NOT undo', () => {
+    render(
+      <DiarizationReviewView
+        turns={makeTurns()}
+        speakerLabel={speakerLabel}
+        onComplete={vi.fn()}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    fireEvent.keyDown(list, { key: ' ' });
+    fireEvent.keyDown(list, { key: 'z', ctrlKey: true, shiftKey: true });
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+
+  it('clicking "Mark all visible" button (not Space) also pushes onto the stack', () => {
+    render(
+      <DiarizationReviewView
+        turns={makeTurns()}
+        speakerLabel={speakerLabel}
+        onComplete={vi.fn()}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: /Mark all visible turns as auto-accept best guess/ }),
+    );
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'z', ctrlKey: true });
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('Ctrl+Z works from the wrapper even when listbox is not focused', () => {
+    const { container } = render(
+      <DiarizationReviewView
+        turns={makeTurns()}
+        speakerLabel={speakerLabel}
+        onComplete={vi.fn()}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    fireEvent.keyDown(list, { key: ' ' });
+    // Fire keydown on the outer wrapper (root child of container) — simulates
+    // the user being focused on the submit button or filter dropdown.
+    const wrapper = container.firstChild as HTMLElement;
+    fireEvent.keyDown(wrapper, { key: 'z', ctrlKey: true });
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
   });
 });
 
