@@ -132,8 +132,9 @@ def test_migration_idempotent(fresh_db: Path) -> None:
     # Head advances with each sprint; accept any current-or-later revision.
     # 009 = Stories 1.2/1.3, 010 = Story 1.9, 011 = Story 2.1,
     # 012 = Sprint 2 Item 2, 013 = Sprint 2 Item 3,
-    # 014 = Sprint 3 Story 4.1 (recording_speaker_aliases).
-    assert rows[0][0] in {"009", "010", "011", "012", "013", "014"}
+    # 014 = Sprint 3 Story 4.1 (recording_speaker_aliases),
+    # 015 = Sprint 4 Stories 6.2/6.3 (recordings auto-action status).
+    assert rows[0][0] in {"009", "010", "011", "012", "013", "014", "015"}
 
 
 def _read_all(db_path: Path, table: str) -> list[dict]:

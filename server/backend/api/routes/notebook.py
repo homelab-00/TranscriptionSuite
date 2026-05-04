@@ -736,6 +736,7 @@ def _run_transcription(
     event_loop: Any = None,
     audio_hash: str | None = None,
     normalized_audio_hash: str | None = None,
+    profile_snapshot: dict[str, Any] | None = None,
 ) -> None:
     """
     Run transcription in a background thread.
@@ -1002,6 +1003,44 @@ def _run_transcription(
             f"Background transcription job {job_id[:8]} completed: recording_id={recording_id}"
         )
 
+        # Issue #104, Story 5.6 — diarization-review lifecycle hook +
+        # Story 6.2 / 6.3 — auto-action coordinator dispatch.
+        # Both fire AFTER the transcript has been committed (Persist-Before-Deliver).
+        if event_loop is not None:
+            from server.core.auto_action_coordinator import trigger_auto_actions
+            from server.core.diarization_confidence import (
+                LOW_CONFIDENCE_THRESHOLD,
+                per_turn_confidence,
+            )
+            from server.core.diarization_review_lifecycle import on_transcription_complete
+            from server.database.database import get_segments, get_words
+
+            try:
+                segments_for_conf = get_segments(recording_id)
+                words_for_conf = get_words(recording_id)
+                turns = per_turn_confidence(segments_for_conf, words_for_conf)
+                has_low_conf = any(t["confidence"] < LOW_CONFIDENCE_THRESHOLD for t in turns)
+                on_transcription_complete(recording_id, has_low_conf)
+            except Exception:
+                # Lifecycle bookkeeping must never crash the transcription pipeline.
+                logger.exception(
+                    "diarization-review lifecycle hook failed for recording %d",
+                    recording_id,
+                )
+
+            # Fire-and-forget the auto-action coordinator on the main loop.
+            # Disabled toggles are a no-op inside the coordinator.
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    trigger_auto_actions(recording_id, profile_snapshot),
+                    event_loop,
+                )
+            except Exception:
+                logger.exception(
+                    "trigger_auto_actions dispatch failed for recording %d",
+                    recording_id,
+                )
+
         # Fire outgoing webhook (background thread — use fire-and-forget)
         if event_loop is not None:
             from server.core.webhook import dispatch_fire_and_forget
@@ -1064,6 +1103,7 @@ async def upload_and_transcribe(
     expected_speakers: int | None = Form(None),
     parallel_diarization: bool | None = Form(None),
     title: str | None = Form(None),
+    profile_id: int | None = Form(None),
 ) -> dict[str, Any]:
     """
     Upload an audio file and start transcription in the background.
@@ -1146,6 +1186,21 @@ async def upload_and_transcribe(
     config = request.app.state.config
     use_parallel_default = config.get("diarization", "parallel", default=True)
 
+    # Issue #104, Story 6.2 — snapshot the profile at upload time so the
+    # background thread (which may finish minutes later) sees the SAME
+    # toggles even if the user edits the profile during transcription.
+    profile_snapshot: dict[str, Any] | None = None
+    if profile_id is not None:
+        from server.database import profile_repository
+
+        profile_row = profile_repository.get_profile(profile_id)
+        if profile_row is not None:
+            profile_snapshot = {
+                "profile_id": profile_id,
+                "schema_version": profile_row.get("schema_version"),
+                "public_fields": profile_row.get("public_fields") or {},
+            }
+
     # Capture event loop for webhook dispatch from background thread
     loop = asyncio.get_running_loop()
 
@@ -1170,6 +1225,7 @@ async def upload_and_transcribe(
             event_loop=loop,
             audio_hash=audio_hash,
             normalized_audio_hash=normalized_audio_hash,
+            profile_snapshot=profile_snapshot,
         )
     )
 
