@@ -1,0 +1,88 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Alias propagation snapshot — Story 4.4 AC2 > renders 5 speakers with 2 aliased — golden snapshot 1`] = `
+<div>
+  <ul
+    data-testid="transcript"
+  >
+    <li>
+      <button
+        aria-label="Rename speaker label for SPEAKER_00, current value: Elena Vasquez"
+        title="Click to rename speaker"
+        type="button"
+      >
+        Elena Vasquez
+      </button>
+      <span>
+         · 
+        Welcome everyone.
+      </span>
+    </li>
+    <li>
+      <button
+        aria-label="Rename speaker label for SPEAKER_01, current value: Speaker 1"
+        title="Click to rename speaker"
+        type="button"
+      >
+        Speaker 1
+      </button>
+      <span>
+         · 
+        Thanks for having us.
+      </span>
+    </li>
+    <li>
+      <button
+        aria-label="Rename speaker label for SPEAKER_02, current value: Sami Patel"
+        title="Click to rename speaker"
+        type="button"
+      >
+        Sami Patel
+      </button>
+      <span>
+         · 
+        I have a question.
+      </span>
+    </li>
+    <li>
+      <button
+        aria-label="Rename speaker label for SPEAKER_00, current value: Elena Vasquez"
+        title="Click to rename speaker"
+        type="button"
+      >
+        Elena Vasquez
+      </button>
+      <span>
+         · 
+        Go ahead.
+      </span>
+    </li>
+    <li>
+      <button
+        aria-label="Rename speaker label for SPEAKER_03, current value: Speaker 2"
+        title="Click to rename speaker"
+        type="button"
+      >
+        Speaker 2
+      </button>
+      <span>
+         · 
+        Following up on that...
+      </span>
+    </li>
+    <li>
+      <button
+        aria-label="Rename speaker label for SPEAKER_04, current value: Speaker 3"
+        title="Click to rename speaker"
+        type="button"
+      >
+        Speaker 3
+      </button>
+      <span>
+         · 
+        Last point.
+      </span>
+    </li>
+  </ul>
+</div>
+`;

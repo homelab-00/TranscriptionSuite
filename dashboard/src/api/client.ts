@@ -636,6 +636,81 @@ export class APIClient {
     return this.get(`/api/notebook/recordings/${id}/transcription`);
   }
 
+  // ─── Notebook: Speaker Aliases (Issue #104, Story 4.2) ───────────────────
+
+  /** GET /api/notebook/recordings/:id/aliases */
+  async getRecordingAliases(id: number): Promise<{
+    recording_id: number;
+    aliases: { speaker_id: string; alias_name: string }[];
+  }> {
+    return this.get(`/api/notebook/recordings/${id}/aliases`);
+  }
+
+  /**
+   * PUT /api/notebook/recordings/:id/aliases
+   *
+   * Full-replace upsert. Aliases NOT included in the payload are deleted
+   * from the recording (Story 4.2 AC2). Empty alias_name strings (after
+   * trim) are dropped server-side, which has the effect of clearing
+   * the alias for that speaker_id.
+   */
+  async setRecordingAliases(
+    id: number,
+    aliases: { speaker_id: string; alias_name: string }[],
+  ): Promise<{
+    recording_id: number;
+    aliases: { speaker_id: string; alias_name: string }[];
+  }> {
+    return this.put(`/api/notebook/recordings/${id}/aliases`, { aliases });
+  }
+
+  /**
+   * GET /api/notebook/recordings/:id/diarization-confidence
+   *
+   * Issue #104, Story 5.4 — per-turn confidence derived from word-level
+   * scores. Older recordings without word-confidence return turns: [].
+   */
+  async getRecordingDiarizationConfidence(id: number): Promise<{
+    recording_id: number;
+    turns: { turn_index: number; speaker_id: string | null; confidence: number }[];
+  }> {
+    return this.get(`/api/notebook/recordings/${id}/diarization-confidence`);
+  }
+
+  // ─── Notebook: Diarization Review (Issue #104, Stories 5.6 / 5.7 / 5.9) ──
+
+  /** GET /api/notebook/recordings/:id/diarization-review */
+  async getDiarizationReview(id: number): Promise<{
+    recording_id: number;
+    status: 'pending' | 'in_review' | 'completed' | 'released' | null;
+    reviewed_turns_json: string | null;
+  }> {
+    return this.get(`/api/notebook/recordings/${id}/diarization-review`);
+  }
+
+  /**
+   * POST /api/notebook/recordings/:id/diarization-review
+   *
+   * Lifecycle trigger:
+   *   - action='open' — pending → in_review (banner CTA)
+   *   - action='complete' — in_review → completed; persists reviewed_turns
+   *
+   * 409 on illegal transitions (e.g. open when already completed).
+   */
+  async submitDiarizationReview(
+    id: number,
+    payload: {
+      action: 'open' | 'complete';
+      reviewed_turns?: { turn_index: number; decision: string; speaker_id?: string | null }[];
+    },
+  ): Promise<{
+    recording_id: number;
+    status: 'pending' | 'in_review' | 'completed' | 'released' | null;
+    reviewed_turns_json: string | null;
+  }> {
+    return this.post(`/api/notebook/recordings/${id}/diarization-review`, payload);
+  }
+
   /**
    * GET /api/notebook/recordings/:id/audio
    * Returns the audio URL for streaming playback (not fetched — use as <audio> src).

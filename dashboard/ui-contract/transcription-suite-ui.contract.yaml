@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.44
+  spec_version: 1.0.45
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -32,11 +32,19 @@ meta:
       - components/profiles/ModelProfilesPanel.tsx
       - components/profiles/ProfileSelector.tsx
       - components/profiles/TemplatePreviewField.tsx
+      - components/recording/__tests__/ConfidenceChip.test.tsx
       - components/recording/__tests__/DeleteRecordingDialog.test.tsx
+      - components/recording/__tests__/DiarizationReviewView.keyboard.test.tsx
       - components/recording/__tests__/DownloadButtons.test.tsx
+      - components/recording/__tests__/SpeakerLabelRendering.test.tsx
+      - components/recording/__tests__/SpeakerRenameInput.test.tsx
+      - components/recording/ConfidenceChip.tsx
       - components/recording/DeleteRecordingDialog.tsx
+      - components/recording/DiarizationReviewView.tsx
       - components/recording/DownloadButtons.tsx
+      - components/recording/SpeakerRenameInput.tsx
       - components/Sidebar.tsx
+      - components/ui/__tests__/PersistentInfoBanner.test.tsx
       - components/ui/__tests__/UpdateBanner.test.tsx
       - components/ui/__tests__/UpdateModal.test.tsx
       - components/ui/ActivityNotifications.tsx
@@ -51,6 +59,7 @@ meta:
       - components/ui/icons/NvidiaIcon.tsx
       - components/ui/ImageTagChips.tsx
       - components/ui/LogTerminal.tsx
+      - components/ui/PersistentInfoBanner.tsx
       - components/ui/QueuePausedBanner.tsx
       - components/ui/ShortcutCapture.tsx
       - components/ui/StatusLight.tsx
@@ -79,7 +88,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-03T22:59:12.758Z
+    generated_at: 2026-05-04T05:26:24.198Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -442,6 +451,7 @@ utility_allowlist:
     - animate-in
     - animate-ping
     - animate-pulse
+    - aria-activedescendant
     - aria-invalid
     - aria-label
     - aria-labels
@@ -467,6 +477,7 @@ utility_allowlist:
     - bg-amber-400/20
     - bg-amber-400/5
     - bg-amber-500/10
+    - bg-amber-500/20
     - bg-amber-500/5
     - bg-black/10
     - bg-black/20
@@ -477,6 +488,8 @@ utility_allowlist:
     - bg-black/70
     - bg-black/75
     - bg-blue-400
+    - bg-blue-400/10
+    - bg-blue-400/20
     - bg-blue-500/10
     - bg-cyan-400/10
     - bg-cyan-400/20
@@ -507,6 +520,7 @@ utility_allowlist:
     - bg-slate-400/10
     - bg-slate-500
     - bg-slate-500/10
+    - bg-slate-500/20
     - bg-slate-700
     - bg-slate-800
     - bg-slate-900
@@ -542,6 +556,7 @@ utility_allowlist:
     - border-amber-500/40
     - border-b
     - border-b-2
+    - border-blue-400/30
     - border-blue-500/20
     - border-cyan-400/30
     - border-dashed
@@ -567,6 +582,7 @@ utility_allowlist:
     - border-red-500/20
     - border-red-500/25
     - border-slate-400/30
+    - border-slate-500/40
     - border-slate-900
     - border-t
     - border-transparent
@@ -583,6 +599,7 @@ utility_allowlist:
     - bottom-right
     - cursor-not-allowed
     - cursor-pointer
+    - cursor-text
     - custom-scrollbar
     - delay-100
     - delay-150
@@ -675,6 +692,7 @@ utility_allowlist:
     - hover:bg-amber-400/30
     - hover:bg-amber-500/20
     - hover:bg-black/40
+    - hover:bg-blue-400/30
     - hover:bg-cyan-300
     - hover:bg-cyan-400
     - hover:bg-cyan-400/30
@@ -745,6 +763,7 @@ utility_allowlist:
     - max-h-48
     - max-h-60
     - max-h-72
+    - max-h-96
     - max-w-20
     - max-w-2xl
     - max-w-3xl
@@ -964,6 +983,8 @@ utility_allowlist:
     - text-amber-400/80
     - text-base
     - text-black
+    - text-blue-200
+    - text-blue-300
     - text-blue-400
     - text-center
     - text-cyan-100
@@ -1579,6 +1600,23 @@ component_contracts:
     state_rules:
       - id: open-accent
         rule: Open state title accent remains magenta and chevron rotates with white highlighted background.
+  ConfidenceChip:
+    file: components/recording/ConfidenceChip.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   CopyableCommand:
     file: components/views/GpuHealthCard.tsx
     required_tokens:
@@ -1673,6 +1711,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   DeleteRecordingDialog:
     file: components/recording/DeleteRecordingDialog.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  DiarizationReviewView:
+    file: components/recording/DiarizationReviewView.tsx
     required_tokens:
       - colors
       - motion
@@ -2143,6 +2198,23 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  PersistentInfoBanner:
+    file: components/ui/PersistentInfoBanner.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   PopOutWindow:
     file: components/PopOutWindow.tsx
     required_tokens:
@@ -2421,6 +2493,23 @@ component_contracts:
     state_rules:
       - id: status-dots
         rule: Session, notebook, and server nav items retain StatusLight indicators, with notebook status sharing the server status source.
+  SpeakerRenameInput:
+    file: components/recording/SpeakerRenameInput.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   StarPopupModal:
     file: components/views/StarPopupModal.tsx
     required_tokens:
@@ -2539,6 +2628,23 @@ component_contracts:
     state_rules:
       - id: compact-density-mode
         rule: Compact mode behavior is governed by visibleSlots threshold and keeps AI/duration collapse behavior.
+  TranscriptStub:
+    file: components/recording/__tests__/SpeakerLabelRendering.test.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   UpdateBanner:
     file: components/ui/UpdateBanner.tsx
     required_tokens:
