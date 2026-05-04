@@ -142,6 +142,11 @@ async def trigger_auto_actions(
         tasks.append(asyncio.create_task(_run_auto_summary(recording_id, public)))
     if public.get("auto_export_enabled"):
         tasks.append(asyncio.create_task(_run_auto_export(recording_id, public)))
+    # Issue #104, Sprint 5 — Story 7.5: webhook dispatch is a third
+    # independent branch. The producer ONLY inserts a 'pending' row;
+    # the WebhookWorker handles the HTTP fire (Persist-Before-Deliver).
+    if public.get("webhook_url"):
+        tasks.append(asyncio.create_task(_run_webhook_dispatch(recording_id, public)))
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -472,6 +477,88 @@ def _write_lost_and_found(recording_id: int, kind: str, content: str) -> None:
 # Retry plumbing (Story 6.9 — commit G adds the HTTP endpoint; commit B
 # only needs the in-process retry function for completeness)
 # ──────────────────────────────────────────────────────────────────────────
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Webhook dispatch (Story 7.5 — producer half of Persist-Before-Deliver)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+async def _run_webhook_dispatch(recording_id: int, public: Mapping[str, Any]) -> None:
+    """Insert a pending webhook_deliveries row + poke the worker.
+
+    This function does NOT issue HTTP — that's the WebhookWorker's job
+    (Story 7.3 / 7.4). The producer's responsibility is to make the
+    delivery durable BEFORE the receiver-facing call so a crash here
+    leaves a recoverable trail (NFR17 / R-EL33 / Story 7.5 AC2).
+
+    Snapshot semantics: the URL + auth header are baked into the payload
+    JSON at INSERT time. A profile edit between INSERT and the actual
+    fire does NOT silently change what gets POSTed (no-drift).
+    """
+    from server.core.webhook_payload import build_payload
+    from server.database import webhook_deliveries_repository as wdr
+    from server.database.database import get_recording
+    from server.services.webhook_worker import get_worker
+
+    recording = get_recording(recording_id) or {}
+    profile_id = recording.get("profile_id")
+    summary_present = bool(recording.get("summary"))
+
+    transcript_text: str | None = None
+    if public.get("webhook_include_transcript_text"):
+        # Build the alias-substituted full plaintext exactly as the export
+        # path does, so receivers see canonical speaker names.
+        try:
+            from server.core.alias_substitution import apply_aliases
+            from server.core.plaintext_export import stream_plaintext
+            from server.database.alias_repository import list_aliases
+            from server.database.database import get_segments
+
+            segments = get_segments(recording_id)
+            aliases = {a["speaker_id"]: a["alias_name"] for a in list_aliases(recording_id)}
+            transcript_text = "".join(stream_plaintext(recording, apply_aliases(segments, aliases)))
+        except Exception:
+            # Non-fatal — fall back to metadata-only payload + log so an
+            # operator can investigate. The webhook still goes out.
+            logger.exception(
+                "webhook transcript_text build failed for recording=%d "
+                "(falling back to metadata-only)",
+                recording_id,
+            )
+            transcript_text = None
+
+    payload = build_payload(
+        recording_id=recording_id,
+        profile_id=profile_id,
+        summary_present=summary_present,
+        transcript_text=transcript_text,
+    )
+
+    # Frozen-at-INSERT-time URL + auth header. The worker pops these
+    # from the payload before POST so the receiver only sees the public
+    # body. Naming uses double-underscore prefix to make the intent
+    # ("private to the delivery pipeline") legible at any inspection.
+    payload["__webhook_url__"] = public.get("webhook_url", "")
+    auth_header = public.get("webhook_auth_header")
+    if isinstance(auth_header, str) and auth_header:
+        payload["__auth_header__"] = auth_header
+
+    try:
+        await asyncio.to_thread(wdr.create_pending, recording_id, profile_id, payload)
+    except Exception:
+        # Best-effort — if the row insert fails we cannot recover, but
+        # we MUST NOT propagate exception to the caller (would cancel
+        # the sibling auto-summary / auto-export tasks via gather).
+        logger.exception("webhook create_pending failed for recording=%d", recording_id)
+        return
+
+    try:
+        get_worker().notify_new_delivery()
+    except Exception:
+        # The worker may not be running (tests, disabled config) — the
+        # row is already durable, so this is purely a nice-to-have wake.
+        logger.debug("webhook notify_new_delivery failed (worker may not be running)")
 
 
 async def retry_auto_action_internal(recording_id: int, action_type: str) -> None:
