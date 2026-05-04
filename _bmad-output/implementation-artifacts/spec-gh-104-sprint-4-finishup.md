@@ -2,7 +2,7 @@
 title: 'Sprint 4 finish-up — wire deferred items 1–4 from Issue #104'
 type: 'chore'
 created: '2026-05-04'
-status: 'in-progress'
+status: 'in-review'
 baseline_commit: 'a237b186d6ca94e382780ccfae029f5d2c9e5e24'
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/sprint-4-design.md'
@@ -76,27 +76,27 @@ context:
 **Execution:**
 
 *Commit 1 — sweeper lifespan wiring (Sprint 4 no. 1)*
-- [ ] `server/backend/api/main.py` -- in `lifespan`, after the audio_cleanup block, read `auto_actions.deferred_export_sweep_interval_s` from `config.config`, `asyncio.create_task(periodic_deferred_export_sweep(interval_s))`, store handle, cancel + await on shutdown alongside the other cleanup tasks.
-- [ ] `server/backend/tests/test_main_lifespan_sweeper.py` (new) -- async test that drives the lifespan with a tiny interval (e.g. 0.05s), inserts a `deferred` row + creates the destination dir, awaits ~0.2s, asserts `auto_export_status='success'`. Patch `LLMClient`/external bits as needed.
+- [x] `server/backend/api/main.py` -- in `lifespan`, after the audio_cleanup block, read `auto_actions.deferred_export_sweep_interval_s` from `config.config`, `asyncio.create_task(periodic_deferred_export_sweep(interval_s))`, store handle, cancel + await on shutdown alongside the other cleanup tasks.
+- [x] `server/backend/tests/test_main_lifespan_sweeper.py` (new) -- async test that drives the lifespan with a tiny interval (e.g. 0.05s), inserts a `deferred` row + creates the destination dir, awaits ~0.2s, asserts `auto_export_status='success'`. Patch `LLMClient`/external bits as needed.
 
 *Commit 2 — dashboard sends profile_id (Sprint 4 no. 2)*
-- [ ] `dashboard/components/views/NotebookView.tsx` -- in the manual notebook-upload `addFiles` call (~line 1695), pass `profile_id: activeProfileId ?? undefined` so a null pointer doesn't end up in FormData.
-- [ ] `dashboard/components/__tests__/NotebookView.profile-id.test.tsx` (new) -- mount NotebookView with `useActiveProfileStore` set to a known id, mock `apiClient.uploadAndTranscribe`, trigger an upload, assert the second-arg options carry `profile_id`. Add a paired test for `activeProfileId=null` → options.profile_id === undefined.
+- [x] `dashboard/components/views/NotebookView.tsx` -- in the manual notebook-upload `addFiles` call (~line 1695), pass `profile_id: activeProfileId ?? undefined` so a null pointer doesn't end up in FormData.
+- [x] `dashboard/components/__tests__/NotebookView.profile-id.test.tsx` (new) -- mount NotebookView with `useActiveProfileStore` set to a known id, mock `apiClient.uploadAndTranscribe`, trigger an upload, assert the second-arg options carry `profile_id`. Add a paired test for `activeProfileId=null` → options.profile_id === undefined.
 
 *Commit 3 — recording-detail surfaces auto-action status + badge renders in AudioNoteModal (Sprint 4 no. 3)*
-- [ ] `server/backend/api/routes/notebook.py` -- extend `RecordingResponse` with the five auto-action fields (status, error for both; plus `auto_export_path`); `RecordingDetailResponse` inherits them automatically. `get_recording_detail` already passes `**recording`, so the row-as-dict already carries them — no projection change needed.
-- [ ] `server/backend/tests/test_recording_detail_auto_action_fields.py` (new) -- write a recording row with auto_summary_status='success', auto_export_status='deferred', call get_recording_detail directly per CLAUDE.md route-test pattern, assert all five fields appear in the JSON response.
-- [ ] `dashboard/src/api/types.ts` -- add `auto_summary_status: string | null`, `auto_summary_error: string | null`, `auto_export_status: string | null`, `auto_export_error: string | null`, `auto_export_path: string | null` to `Recording` interface.
-- [ ] `dashboard/components/views/AudioNoteModal.tsx` -- import `AutoActionStatusBadge` + `statusToBadgeProps` + `useAutoActionRetry`. Inside the summary panel area (near the existing summary block, anchored on `recording`), compute summaryProps/exportProps via statusToBadgeProps, render two badges when not null, wire `onRetry` to `retry.mutate`. Use existing Tailwind utility classes only (no new className tokens) to avoid a UI-contract update.
-- [ ] `dashboard/components/views/__tests__/AudioNoteModal.auto-actions.test.tsx` (new) -- render the modal with a stubbed `useRecording` returning recording with auto_summary_status='success' + auto_export_status='failed', assert two badges render, assert clicking the export retry button calls the retry endpoint via the hook.
+- [x] `server/backend/api/routes/notebook.py` -- extend `RecordingResponse` with the five auto-action fields (status, error for both; plus `auto_export_path`); `RecordingDetailResponse` inherits them automatically. `get_recording_detail` already passes `**recording`, so the row-as-dict already carries them — no projection change needed.
+- [x] `server/backend/tests/test_recording_detail_auto_action_fields.py` (new) -- write a recording row with auto_summary_status='success', auto_export_status='deferred', call get_recording_detail directly per CLAUDE.md route-test pattern, assert all five fields appear in the JSON response.
+- [x] `dashboard/src/api/types.ts` -- add `auto_summary_status: string | null`, `auto_summary_error: string | null`, `auto_export_status: string | null`, `auto_export_error: string | null`, `auto_export_path: string | null` to `Recording` interface.
+- [x] `dashboard/components/views/AudioNoteModal.tsx` -- import `AutoActionStatusBadge` + `statusToBadgeProps` + `useAutoActionRetry`. Inside the summary panel area (near the existing summary block, anchored on `recording`), compute summaryProps/exportProps via statusToBadgeProps, render two badges when not null, wire `onRetry` to `retry.mutate`. Use existing Tailwind utility classes only (no new className tokens) to avoid a UI-contract update.
+- [x] `dashboard/components/views/__tests__/AudioNoteModal.auto-actions.test.tsx` (new) -- render the modal with a stubbed `useRecording` returning recording with auto_summary_status='success' + auto_export_status='failed', assert two badges render, assert clicking the export retry button calls the retry endpoint via the hook.
 
 *Commit 4 — diarization-review attribution cycling (Sprint 4 no. 4)*
-- [ ] `server/backend/core/diarization_confidence.py` -- before the per-turn loop, scan all segments to build `appearance_order: list[str]` of distinct non-null speaker_ids in first-seen order. Each emitted turn gets `alternative_speakers = [s for s in appearance_order if s != current_speaker_id]`.
-- [ ] `server/backend/api/routes/notebook.py` -- extend `TurnConfidence` with `alternative_speakers: list[str] = []` (default [] keeps response shape backward-compat for serialized clients).
-- [ ] `server/backend/tests/test_diarization_confidence.py` -- add a case with 3 distinct speakers; assert each turn's `alternative_speakers` excludes the current speaker and preserves appearance order.
-- [ ] `dashboard/src/utils/diarizationReviewFilter.ts` -- add `alternative_speakers?: string[]` to `ReviewTurn`.
-- [ ] `dashboard/components/recording/DiarizationReviewView.tsx` -- add `attributionIndexByTurn: Map<number, number>` state. ←/→ updates `attributionIndexByTurn[currentTurnIndex]` clamped to `[0, alternative_speakers.length - 1]`; reset to 0 when `activeIndex` changes. The current attribution = `turn.alternative_speakers?.[idx] ?? turn.speaker_id`. `recordDecision('accept', …)` reads the current attribution from the map and writes it to `speaker_id` in the decision payload (so an Enter after cycling persists the chosen speaker, not the original). Announce the cycled speaker via `useAriaAnnouncer`.
-- [ ] `dashboard/components/recording/__tests__/DiarizationReviewView.keyboard.test.tsx` -- add: ArrowRight cycles to next alternative; ArrowLeft cycles back; ArrowRight does NOT change aria-activedescendant (regression of existing case); accept-after-cycle puts the chosen speaker into the decision payload.
+- [x] `server/backend/core/diarization_confidence.py` -- before the per-turn loop, scan all segments to build `appearance_order: list[str]` of distinct non-null speaker_ids in first-seen order. Each emitted turn gets `alternative_speakers = [s for s in appearance_order if s != current_speaker_id]`.
+- [x] `server/backend/api/routes/notebook.py` -- extend `TurnConfidence` with `alternative_speakers: list[str] = []` (default [] keeps response shape backward-compat for serialized clients).
+- [x] `server/backend/tests/test_diarization_confidence.py` -- add a case with 3 distinct speakers; assert each turn's `alternative_speakers` excludes the current speaker and preserves appearance order.
+- [x] `dashboard/src/utils/diarizationReviewFilter.ts` -- add `alternative_speakers?: string[]` to `ReviewTurn`.
+- [x] `dashboard/components/recording/DiarizationReviewView.tsx` -- add `attributionIndexByTurn: Map<number, number>` state. ←/→ updates `attributionIndexByTurn[currentTurnIndex]` clamped to `[0, alternative_speakers.length - 1]`; reset to 0 when `activeIndex` changes. The current attribution = `turn.alternative_speakers?.[idx] ?? turn.speaker_id`. `recordDecision('accept', …)` reads the current attribution from the map and writes it to `speaker_id` in the decision payload (so an Enter after cycling persists the chosen speaker, not the original). Announce the cycled speaker via `useAriaAnnouncer`.
+- [x] `dashboard/components/recording/__tests__/DiarizationReviewView.keyboard.test.tsx` -- add: ArrowRight cycles to next alternative; ArrowLeft cycles back; ArrowRight does NOT change aria-activedescendant (regression of existing case); accept-after-cycle puts the chosen speaker into the decision payload.
 
 **Acceptance Criteria:**
 - Given a server boot with one deferred-export row whose destination becomes available, when the sweeper interval elapses, then `auto_export_status` flips to `success` without a manual retry call.
