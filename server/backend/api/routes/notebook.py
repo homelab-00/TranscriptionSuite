@@ -541,35 +541,47 @@ async def update_recording_aliases(
     if not get_recording(recording_id):
         raise HTTPException(status_code=404, detail="Recording not found")
 
+    from server.core.auto_action_coordinator import (
+        notify_alias_mutation_finished,
+        notify_alias_mutation_started,
+    )
     from server.database import alias_repository
 
-    cleaned: list[dict[str, str]] = []
-    for entry in payload.aliases:
-        # Validate speaker_id — must be a non-empty token. Whitespace and
-        # NUL bytes are rejected because `speaker_id` is used as a join
-        # key against `segments.speaker` and a malformed value would
-        # silently produce a label miss (the alias never matches a turn).
-        speaker_id = entry.speaker_id.strip() if entry.speaker_id else ""
-        if not speaker_id or "\x00" in speaker_id:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Invalid speaker_id: {entry.speaker_id!r} — must be a "
-                    "non-empty string without NUL bytes."
-                ),
-            )
-        trimmed = entry.alias_name.strip()
-        if not trimmed:
-            # Empty alias → drop the row (full-replace semantics handle it)
-            continue
-        cleaned.append({"speaker_id": speaker_id, "alias_name": trimmed})
+    # Story 6.11 (cross-feature constraint #1) — F1 auto-summary must
+    # not race with F4 alias propagation. We bracket this PUT with the
+    # coordinator's race-guard so any in-flight auto-summary trigger
+    # waits for this mutation to complete.
+    notify_alias_mutation_started(recording_id)
+    try:
+        cleaned: list[dict[str, str]] = []
+        for entry in payload.aliases:
+            # Validate speaker_id — must be a non-empty token. Whitespace
+            # and NUL bytes are rejected because `speaker_id` is used as a
+            # join key against `segments.speaker` and a malformed value
+            # would silently produce a label miss.
+            speaker_id = entry.speaker_id.strip() if entry.speaker_id else ""
+            if not speaker_id or "\x00" in speaker_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Invalid speaker_id: {entry.speaker_id!r} — must be a "
+                        "non-empty string without NUL bytes."
+                    ),
+                )
+            trimmed = entry.alias_name.strip()
+            if not trimmed:
+                # Empty alias → drop the row (full-replace semantics handle it)
+                continue
+            cleaned.append({"speaker_id": speaker_id, "alias_name": trimmed})
 
-    alias_repository.replace_aliases(recording_id, cleaned)
+        alias_repository.replace_aliases(recording_id, cleaned)
 
-    return AliasesResponse(
-        recording_id=recording_id,
-        aliases=[AliasItem(**row) for row in alias_repository.list_aliases(recording_id)],
-    )
+        return AliasesResponse(
+            recording_id=recording_id,
+            aliases=[AliasItem(**row) for row in alias_repository.list_aliases(recording_id)],
+        )
+    finally:
+        notify_alias_mutation_finished(recording_id)
 
 
 @router.get("/recordings/{recording_id}/audio")

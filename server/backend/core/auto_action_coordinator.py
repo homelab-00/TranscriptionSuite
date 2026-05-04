@@ -174,11 +174,11 @@ async def _run_auto_summary(recording_id: int, public: Mapping[str, Any]) -> Non
     try:
         result = await summarize_for_auto_action(recording_id, public)
     except AutoSummaryError as exc:
-        repo.set_auto_summary_status(recording_id, "failed", error=str(exc))
+        await _handle_auto_action_failure(recording_id, "auto_summary", str(exc))
         return
     except Exception as exc:  # noqa: BLE001 — last-resort
         logger.exception("auto_summary unexpected exception")
-        repo.set_auto_summary_status(recording_id, "failed", error=f"unexpected: {exc}")
+        await _handle_auto_action_failure(recording_id, "auto_summary", f"unexpected: {exc}")
         return
 
     summary_text = result.get("text") or ""
@@ -324,7 +324,7 @@ async def _run_auto_export(
             await asyncio.to_thread(_write_atomic, summary_path, summary)
         repo.set_auto_export_status(recording_id, "success", path=str(base))
     except (FileNotFoundError, PermissionError, OSError) as exc:
-        repo.set_auto_export_status(recording_id, "failed", error=str(exc), path=destination)
+        await _handle_auto_action_failure(recording_id, "auto_export", str(exc), path=destination)
 
 
 def _write_atomic(target: Path, content: str) -> None:
@@ -375,6 +375,75 @@ def _write_transcript_atomic(base: Path, recording_id: int) -> None:
 # ──────────────────────────────────────────────────────────────────────────
 # Lost-and-found fallback (CLAUDE.md "AVOID DATA LOSS AT ALL COSTS")
 # ──────────────────────────────────────────────────────────────────────────
+
+
+async def _handle_auto_action_failure(
+    recording_id: int,
+    action_type: str,
+    error: str,
+    *,
+    path: str | None = None,
+) -> None:
+    """Escalation policy (Story 6.11 / R-EL18 / NFR19):
+
+    * First failure → status='retry_pending' + schedule one delayed retry.
+    * Second consecutive failure → status='manual_intervention_required'.
+    * The sweeper (commit F) and any user retry can clear the row; once
+      cleared, the next failure is treated as a fresh first attempt.
+
+    The 30s backoff is implemented as a separate ``asyncio.Task`` (not
+    ``await asyncio.sleep(30)`` inline) so a server shutdown during the
+    backoff is safe — the row stays at ``retry_pending`` and the sweeper
+    re-fires it on next start.
+
+    Auto-export failures pass ``path`` to preserve the destination for
+    the badge / sweeper. Auto-summary failures do not.
+    """
+    attempts = repo.get_auto_action_attempts(recording_id, action_type)
+    repo.increment_auto_action_attempts(recording_id, action_type)
+
+    if attempts >= 1:
+        # Auto-retry budget already used — escalate to manual.
+        kwargs: dict[str, Any] = {"error": error}
+        if action_type == "auto_export" and path is not None:
+            kwargs["path"] = path
+        repo.set_auto_action_status(
+            recording_id, action_type, "manual_intervention_required", **kwargs
+        )
+        logger.warning(
+            "auto-action escalated to manual_intervention_required: "
+            "recording=%d action=%s attempts=%d error=%s",
+            recording_id,
+            action_type,
+            attempts + 1,
+            error,
+        )
+        return
+
+    # First failure — schedule one auto-retry after 30s.
+    kwargs: dict[str, Any] = {"error": error}
+    if action_type == "auto_export" and path is not None:
+        kwargs["path"] = path
+    repo.set_auto_action_status(recording_id, action_type, "retry_pending", **kwargs)
+    asyncio.create_task(_delayed_retry(recording_id, action_type, delay_s=30.0))
+
+
+async def _delayed_retry(recording_id: int, action_type: str, *, delay_s: float) -> None:
+    """Sleep `delay_s`, then re-fire the action. Cancel-safe: if the task
+    is cancelled mid-sleep (server shutdown), the row stays at
+    'retry_pending' and the sweeper picks it up on next start."""
+    try:
+        await asyncio.sleep(delay_s)
+    except asyncio.CancelledError:
+        return
+    try:
+        await retry_auto_action_internal(recording_id, action_type)
+    except Exception:  # noqa: BLE001 — defensive
+        logger.exception(
+            "_delayed_retry: retry_auto_action_internal raised for recording=%d action=%s",
+            recording_id,
+            action_type,
+        )
 
 
 def _write_lost_and_found(recording_id: int, kind: str, content: str) -> None:

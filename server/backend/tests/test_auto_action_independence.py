@@ -64,7 +64,8 @@ def test_summary_failure_does_not_block_export(
 ) -> None:
     """LLM unreachable + auto_export enabled → export still runs.
 
-    Outcome: auto_summary_status='failed', auto_export_status='success'.
+    Outcome: auto_summary_status='retry_pending' (Story 6.11 — first
+    failure schedules one auto-retry), auto_export_status='success'.
     """
     _seed_recording(fresh_db)
 
@@ -74,6 +75,12 @@ def test_summary_failure_does_not_block_export(
         raise AutoSummaryError("LLM unreachable")
 
     monkeypatch.setattr("server.core.auto_summary_engine.summarize_for_auto_action", _summary_fails)
+
+    # Avoid the real 30s sleep when the escalation policy schedules a retry
+    async def _noop(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(coord, "_delayed_retry", _noop)
 
     dest = tmp_path / "exports"
     dest.mkdir()
@@ -89,8 +96,8 @@ def test_summary_failure_does_not_block_export(
 
     asyncio.run(coord.trigger_auto_actions(1, snapshot))
 
-    # Summary failed
-    assert repo.get_auto_action_status(1, "auto_summary") == "failed"
+    # Summary first-failure → retry_pending (Story 6.11)
+    assert repo.get_auto_action_status(1, "auto_summary") == "retry_pending"
     # Export succeeded — independence proven
     assert repo.get_auto_action_status(1, "auto_export") == "success"
     assert (dest / "RecTitle.txt").exists()
@@ -150,7 +157,9 @@ def test_both_fail_independently_two_distinct_statuses(
 ) -> None:
     """LLM down AND destination missing → two distinct failure states.
 
-    Recording has TWO badges: ⚠ summary failed (red), ⚠ export deferred (amber).
+    Auto-summary first-failure → retry_pending (Story 6.11 escalation).
+    Auto-export missing destination → deferred (sweeper-recoverable).
+    Two independent badges visible to the user.
     """
     _seed_recording(fresh_db)
 
@@ -160,6 +169,11 @@ def test_both_fail_independently_two_distinct_statuses(
         raise AutoSummaryError("LLM unreachable")
 
     monkeypatch.setattr("server.core.auto_summary_engine.summarize_for_auto_action", _summary_fails)
+
+    async def _noop(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(coord, "_delayed_retry", _noop)
 
     snapshot = {
         "profile_id": 1,
@@ -175,7 +189,7 @@ def test_both_fail_independently_two_distinct_statuses(
 
     state = repo.get_auto_action_state(1)
     # Two independent failure states — neither badge is the other's status
-    assert state["auto_summary_status"] == "failed"
+    assert state["auto_summary_status"] == "retry_pending"  # Story 6.11
     assert state["auto_export_status"] == "deferred"
     # Errors are also independent
     assert "LLM unreachable" in (state["auto_summary_error"] or "")

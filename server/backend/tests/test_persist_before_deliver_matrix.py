@@ -155,8 +155,11 @@ def test_db_commit_failure_triggers_lost_and_found_recovery(
 
     monkeypatch.setattr(db, "update_recording_summary", _exploding_update)
 
-    # Run the coordinator. The exception is caught at the outermost
-    # try/except inside _run_auto_summary, marking status='failed'.
+    # Run the coordinator. The exception is caught inside _run_auto_summary,
+    # which now marks status='failed' on persist failure (the persist branch
+    # bypasses the escalation policy because the LLM was successful — it's
+    # only the persist that failed; the recovery file is the actionable
+    # signal, not a retry).
     asyncio.run(coord._run_auto_summary(1, {"auto_summary_enabled": True}))
 
     # 1. The status is NOT 'success' — coordinator caught the persist

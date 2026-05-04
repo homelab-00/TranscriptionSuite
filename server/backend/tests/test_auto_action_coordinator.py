@@ -154,9 +154,10 @@ def test_auto_summary_success_persists_then_marks_status(
     assert summary == "This is a long enough summary about the recording."
 
 
-def test_auto_summary_failure_marks_status_failed(
+def test_auto_summary_first_failure_marks_retry_pending(
     fresh_db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Story 6.11 escalation: first failure schedules one auto-retry."""
     _seed_recording(fresh_db)
     from server.core.auto_summary_engine import AutoSummaryError
 
@@ -164,10 +165,13 @@ def test_auto_summary_failure_marks_status_failed(
         raise AutoSummaryError("LLM unreachable")
 
     monkeypatch.setattr("server.core.auto_summary_engine.summarize_for_auto_action", _fail)
+    # Avoid the real 30s sleep
+    monkeypatch.setattr(coord, "_delayed_retry", _noop_async)
     asyncio.run(coord._run_auto_summary(1, {"auto_summary_enabled": True}))
     state = repo.get_auto_action_state(1)
-    assert state["auto_summary_status"] == "failed"
+    assert state["auto_summary_status"] == "retry_pending"
     assert "LLM unreachable" in (state["auto_summary_error"] or "")
+    assert state["auto_summary_attempts"] == 1
 
 
 def test_auto_summary_empty_response_marks_summary_empty(
