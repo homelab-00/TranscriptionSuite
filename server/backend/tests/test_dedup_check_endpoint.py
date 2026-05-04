@@ -110,11 +110,14 @@ def test_dedup_check_no_outbound_network(fresh_db: Path, monkeypatch: pytest.Mon
 
     # httpx (FastAPI's recommended async HTTP client) — patch the send
     # method on both client classes that anything in the project uses.
+    # NOTE: TID251 normally bans httpx.Client/AsyncClient in tests, but here
+    # we reference the classes only as monkeypatch targets to make any
+    # accidental outbound HTTP call raise. No client instances are created.
     try:
         import httpx
 
-        monkeypatch.setattr(httpx.Client, "send", _raise_outbound)
-        monkeypatch.setattr(httpx.AsyncClient, "send", _raise_outbound)
+        monkeypatch.setattr(httpx.Client, "send", _raise_outbound)  # noqa: TID251
+        monkeypatch.setattr(httpx.AsyncClient, "send", _raise_outbound)  # noqa: TID251
     except ImportError:
         pass
 

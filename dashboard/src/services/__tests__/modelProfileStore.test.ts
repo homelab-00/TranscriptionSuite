@@ -128,13 +128,19 @@ describe('modelProfileStore — Story 8.3 / 8.4 (active selector + persistence)'
 
 describe('modelProfileStore — update + delete', () => {
   it('update() patches fields and bumps updatedAt', async () => {
-    const created = await modelProfileStore.create(SAMPLE);
-    // Force a clock advance so updatedAt is strictly greater than createdAt.
-    await new Promise((r) => setTimeout(r, 5));
-    const updated = await modelProfileStore.update(created.id, { name: 'Renamed' });
-    expect(updated).not.toBeNull();
-    expect(updated!.name).toBe('Renamed');
-    expect(updated!.updatedAt >= created.updatedAt).toBe(true);
+    vi.useFakeTimers();
+    try {
+      const created = await modelProfileStore.create(SAMPLE);
+      // Force a clock advance so updatedAt is strictly greater than createdAt.
+      // Vitest fake timers also mock Date, so nowIso() picks up the new time.
+      vi.advanceTimersByTime(5);
+      const updated = await modelProfileStore.update(created.id, { name: 'Renamed' });
+      expect(updated).not.toBeNull();
+      expect(updated!.name).toBe('Renamed');
+      expect(updated!.updatedAt >= created.updatedAt).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('update() returns null when no profile matches', async () => {
