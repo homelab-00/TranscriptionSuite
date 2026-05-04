@@ -2139,6 +2139,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 7.1: `webhook_deliveries` table migration (R-EL33, ADR-006)
 
+**Status: DONE (sprint 5 — commit A; migration 016 creates webhook_deliveries with CHECK constraint on status enum, partial index idx_webhook_deliveries_status WHERE status IN ('pending','in_flight') for sweeper, idx_webhook_deliveries_recording for dashboard latest-status lookup, ON DELETE CASCADE on recording_id, ON DELETE SET NULL on profile_id; webhook_deliveries_repository module with parameterized helpers create_pending/mark_in_flight/mark_success/mark_failed/mark_manual_intervention/list_pending/get_latest_for_recording/count_consecutive_recent_failures/cleanup_older_than/requeue_failed_row/requeue_in_flight_to_pending; 30 tests in test_webhook_deliveries_migration.py + test_webhook_deliveries_repository.py)**
+
 **As a** backend engineer
 **I want** the `webhook_deliveries` table created
 **So that** Story 7.5's Persist-Before-Deliver pattern has a place to write attempts (R-EL33, ADR-006, NFR17).
@@ -2172,6 +2174,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 ---
 
 ### Story 7.2: Webhook URL configuration on profile + scheme/IP allowlist validation
+
+**Status: DONE (sprint 5 — commit B; ProfilePublicFields extended with webhook_url + webhook_include_transcript_text fields; core/webhook_url_validation.py implements validate_webhook_url with scheme allowlist (HTTPS + http://localhost exact-match) and IP allowlist iterating ALL getaddrinfo records (DNS rebinding defense) covering RFC1918 + 169.254/16 + 127/8 + IPv6 ::1/fc00::/7/fe80::/10; profiles route create/update endpoints call _validate_webhook_url_field returning 400 with error code dict; 37 tests in test_webhook_url_validation.py + test_profile_routes_webhook_validation.py covering all FR44/NFR9/NFR10/R-EL25/R-EL28 paths via private_ip_resolver fixture)**
 
 **As a** Configurator (Vassilis)
 **I want** to configure a webhook URL on my profile, with the system rejecting non-HTTPS URLs and private-IP URLs at SAVE time
@@ -2219,6 +2223,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 7.3: WebhookWorker service skeleton + lifespan integration
 
+**Status: DONE (sprint 5 — commit C; services/webhook_worker.py implements WebhookWorker class with start/stop/notify_new_delivery; main.py lifespan starts the worker after Sprint 4's deferred-export sweep block + drains it on shutdown with 30s grace deadline; worker drains 'pending'+'in_flight' rows via list_pending so bootstrap recovers any in-flight rows from prior session (NFR24a/b); stop() requeues remaining 'in_flight' to 'pending' for next-start rescue (AC5); 7 lifecycle tests including test_worker_starts_and_stops_cleanly, test_worker_picks_up_in_flight_on_restart, test_stop_requeues_in_flight_back_to_pending, test_notify_new_delivery_wakes_loop, test_cancel_safe_shutdown)**
+
 **As a** backend engineer
 **I want** a dedicated `WebhookWorker` service module wired into the FastAPI lifespan via `start()`/`stop()`
 **So that** the `main.py` diff is minimal (preserves the 868-test baseline + live-mode model-swap) and the worker can be unit-tested in isolation.
@@ -2265,6 +2271,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 7.4: Webhook delivery contract — 10s timeout, no redirects, no decompression
 
+**Status: DONE (sprint 5 — commit D; WebhookWorker._http_post_with_contract enforces httpx.Timeout(10.0) + follow_redirects=False + Accept-Encoding: identity header + body discarded without decoding; 2xx → mark_success, everything else → mark_failed/escalate; 13 contract tests including test_timeout_marks_failed (HTTP_TIMEOUT_S monkeypatched to 0.5s for fast test), test_no_redirect_following (asserts receiver saw exactly 1 request), test_accept_encoding_identity_sent (verifies header), parametrized 2xx-status-success and non-2xx-status-failed across 200/201/204/400/401/404/500/502/503; tests use webhook_mock_receiver aiohttp fixture so no real network IO)**
+
 **As a** security-conscious deployer
 **I want** webhook delivery to have a 10-second deadline, refuse to follow 3xx redirects, refuse to decompress response bodies, and treat HTTP status as ground truth
 **So that** SSRF-via-redirect, zip-bomb, and indefinite-hang attacks are mitigated (FR45, R-EL26, NFR5, NFR11, NFR12).
@@ -2309,6 +2317,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 7.5: Persist-Before-Deliver for webhook attempts (R-EL33)
 
+**Status: DONE (sprint 5 — commit E; producer/consumer split: auto_action_coordinator._run_webhook_dispatch INSERTs row at status='pending' and calls notify_new_delivery; WebhookWorker._deliver_one then transitions status='in_flight' (committed) BEFORE the httpx call, then marks success/failed/manual after the response; URL + auth header are baked into payload_json at INSERT time as __webhook_url__/__auth_header__ (frozen-at-insert, no drift on profile edit); TOCTOU re-validation runs validate_webhook_url at delivery time; bootstrap recovery picks up both 'pending' and 'in_flight' rows; 6 PBD tests including test_pending_row_exists_before_http_fire (event-log ordering), test_in_flight_committed_before_http_fire (separate-connection visibility check), test_payload_json_persisted_for_diagnostic, test_worker_picks_up_in_flight_on_restart)**
+
 **As a** project maintainer
 **I want** every webhook delivery attempt persisted to `webhook_deliveries` BEFORE the actual fire
 **So that** crashes don't lose webhook intent, AND failures remain queryable for debugging (FR47, NFR17, R-EL33).
@@ -2342,6 +2352,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 
 ### Story 7.6: Webhook payload — metadata-default + opt-in transcript-text + payload versioning
 
+**Status: DONE (sprint 5 — commit F; core/webhook_payload.py::build_payload returns {event:'transcription.completed', recording_id, profile_id, transcript_url:'/api/notebook/recordings/{id}/segments', summary_url:'/api/notebook/recordings/{id}'-or-null, payload_version:'1.0' (string), webhook_version:1 (integer forward-compat envelope), timestamp_iso (UTC)}; transcript_text key added only when webhook_include_transcript_text=true on the profile; large-payload >1MB advisory warning logged but delivery proceeds; 14 tests in test_webhook_payload.py covering exact key set, version constants, summary_url null/non-null branches, timestamp UTC suffix, opt-in transcript text, large-payload warning at 1MB threshold)**
+
 **As a** Configurator
 **I want** the webhook payload to default to metadata-only (recording_id, transcript_url, summary_url, profile_id, timestamp, payload_version) and opt-in to including transcript text
 **So that** large transcripts don't accidentally leak across the network (FR46, NFR31, NFR37, R-EL31).
@@ -2374,6 +2386,8 @@ The view MUST implement the canonical keyboard spec defined in the PRD's "Diariz
 ---
 
 ### Story 7.7: Failed delivery surfacing in recording status + retention cleanup
+
+**Status: DONE (sprint 5 — commit G; AutoActionType extended with 'webhook' literal in dashboard; statusToBadgeProps maps webhook 'pending'/'in_flight'→processing, 'success'→ok ('Webhook delivered'), 'failed'→error ('Webhook delivery failed: <error>'), 'manual_intervention_required'→retryable error; AudioNoteModal renders third badge; backend GET /api/notebook/recordings/{id} response extended with webhook_status + webhook_error fields derived from get_latest_for_recording (defensive against missing-table for legacy fixtures); AutoActionRetryRequest.action_type Literal extended to include 'webhook'; retry endpoint webhook branch calls _run_webhook_dispatch with idempotency on already-success/already-in-progress, 400 no_webhook_configured when snapshot lacks URL; database/webhook_cleanup.py::periodic_webhook_cleanup mirrors audio_cleanup pattern (immediate first run + while-True interval loop + cancel-safe), config-flagged via webhook_deliveries.retention_enabled/retention_days/retention_interval_hours; lifespan starts cleanup task next to audio_cleanup; one-auto-retry-then-manual escalation in worker._handle_failure with count_consecutive_recent_failures (skips in-flight rows so the in-progress attempt doesn't break the counter loop); 18 tests across test_webhook_cleanup_periodic.py + test_webhook_retry_endpoint.py + test_webhook_dispatch_producer.py + escalation tests in test_webhook_worker.py + 10 frontend Vitest tests in AutoActionStatusBadge.webhook.test.tsx)**
 
 **As a** Configurator (Maria, J3)
 **I want** failed webhook deliveries to surface as a status badge on the recording (R-EL1) AND be queryable in the persistence table for diagnostics — and have the table auto-clean after 30 days
