@@ -183,13 +183,19 @@ async def _run_auto_summary(recording_id: int, public: Mapping[str, Any]) -> Non
 
     summary_text = result.get("text") or ""
 
-    # Empty / truncated detection (Story 6.7 — commit F adds the
-    # provider-specific signal). Commit B treats both as success
-    # placeholders so the lifecycle is testable end-to-end.
+    # Story 6.7 — empty / truncated detection.
+    # Empty: <10 chars after strip → 'summary_empty' (still persist what
+    # we got so the user can review / retry from the UI; AC2).
     if len(summary_text.strip()) < 10:
-        # Persist whatever we got so the user can retry from the UI.
         _persist_summary_with_durability_guard(recording_id, summary_text, result.get("model"))
         repo.set_auto_summary_status(recording_id, "summary_empty")
+        return
+    # Truncated: provider signaled / heuristic detected. Persist the
+    # partial content (Story 6.7 AC2) so the user can either review
+    # it or retry to attempt regeneration with adjusted prompt.
+    if result.get("truncated"):
+        _persist_summary_with_durability_guard(recording_id, summary_text, result.get("model"))
+        repo.set_auto_summary_status(recording_id, "summary_truncated")
         return
 
     # 4. Persist BEFORE delivering (NFR16). On persist failure we LEAVE the

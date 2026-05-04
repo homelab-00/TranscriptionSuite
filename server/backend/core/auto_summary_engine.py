@@ -1,4 +1,4 @@
-"""Auto-summary engine wrapper (Issue #104, Story 6.2).
+"""Auto-summary engine wrapper (Issue #104, Story 6.2 + Story 6.7).
 
 Programmatic equivalent of the ``POST /api/llm/summarize/{id}`` route —
 callable from the auto-action coordinator without going through HTTP.
@@ -6,6 +6,15 @@ Reuses the same alias-aware text builder, the same ``process_with_llm``
 LLM call, and the same persistence path. The only difference is the
 return shape: a plain dict the coordinator can inspect, instead of an
 HTTP response.
+
+Story 6.7 (R-EL17) truncation detection — heuristic until provider
+hooks land:
+  - If ``tokens_used`` is at least ``max_tokens * 0.95`` (within 5% of
+    the cap) AND the text does not end in terminal punctuation
+    (``.``, ``!``, ``?``, ``"``, or whitespace-stripped equivalents),
+    treat as truncated.
+  - Smaller responses are never flagged truncated even if they end mid
+    word — the heuristic only fires when we're at the token budget.
 
 Verbatim guarantee R-EL3: alias names are passed through
 ``apply_aliases`` exactly as stored — no normalization (Sprint 3 contract).
@@ -71,9 +80,50 @@ async def summarize_for_auto_action(
     except Exception as exc:  # network/timeout — also transient
         raise AutoSummaryError(f"LLM call failed: {exc}") from exc
 
+    text = llm_response.response or ""
+    tokens_used = llm_response.tokens_used
     return {
-        "text": llm_response.response or "",
+        "text": text,
         "model": llm_response.model,
-        "tokens_used": llm_response.tokens_used,
-        "truncated": False,  # Commit F (Story 6.7) will add the heuristic
+        "tokens_used": tokens_used,
+        "truncated": _looks_truncated(text, tokens_used),
     }
+
+
+_TERMINAL_PUNCT = {".", "!", "?", '"', "'", ")", "]"}
+
+
+def _looks_truncated(text: str, tokens_used: int | None) -> bool:
+    """Heuristic truncation detector (Story 6.7 / R-EL17).
+
+    Provider-specific signals (OpenAI ``finish_reason='length'``, Anthropic
+    ``stop_reason='max_tokens'``) are not currently surfaced through
+    ``process_with_llm``; this heuristic catches the common case until
+    that lands.
+
+    A response is treated as truncated when:
+      1. ``tokens_used`` reaches at least 95% of the configured max
+         (proxied via the LLM config), AND
+      2. The trimmed text does not end in terminal punctuation.
+
+    Empty/short text is never flagged truncated — Story 6.7 AC1's
+    ``summary_empty`` predicate handles those.
+    """
+    if not text or tokens_used is None:
+        return False
+    stripped = text.rstrip()
+    if not stripped:
+        return False
+    if stripped[-1] in _TERMINAL_PUNCT:
+        return False
+    # Pull max_tokens from the same config the LLM call used.
+    try:
+        from server.api.routes.llm import get_llm_config
+
+        cfg = get_llm_config()
+        max_tokens = int(cfg.get("max_tokens", 0) or 0)
+    except Exception:  # noqa: BLE001 — config unavailable, skip heuristic
+        return False
+    if max_tokens <= 0:
+        return False
+    return tokens_used >= int(max_tokens * 0.95)
