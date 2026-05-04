@@ -71,6 +71,13 @@ export function DiarizationReviewView({ turns, speakerLabel, onComplete, onCance
   const [decisions, setDecisions] = useState<Map<number, ReviewDecision>>(new Map());
   const [undoStack, setUndoStack] = useState<Map<number, ReviewDecision>[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  // Sprint 4 deferred-work no. 4 — per-turn attribution-cycle index. Indexes
+  // into the turn's alternative_speakers list; -1 means "current speaker"
+  // (no cycle yet). Resets to -1 when activeIndex changes so each newly-
+  // focused turn starts at its original speaker.
+  const [attributionIndexByTurn, setAttributionIndexByTurn] = useState<Map<number, number>>(
+    new Map(),
+  );
   const announce = useAriaAnnouncer();
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -83,15 +90,27 @@ export function DiarizationReviewView({ turns, speakerLabel, onComplete, onCance
     }
   }, [visibleTurns.length, activeIndex]);
 
+  /** Resolve the speaker_id the user has cycled to (or the original if no cycle). */
+  const currentAttribution = useCallback(
+    (turn: ReviewTurn | undefined): string | null => {
+      if (!turn) return null;
+      const idx = attributionIndexByTurn.get(turn.turn_index);
+      if (idx === undefined || idx < 0) return turn.speaker_id;
+      const alts = turn.alternative_speakers ?? [];
+      return alts[idx] ?? turn.speaker_id;
+    },
+    [attributionIndexByTurn],
+  );
+
   const announceTurn = useCallback(
     (turn: ReviewTurn | undefined) => {
       if (!turn) return;
       const bucket = bucketFor(turn.confidence);
       announce(
-        `${turn.text ?? ''} · current speaker: ${speakerLabel(turn.speaker_id)} · confidence: ${bucket}`,
+        `${turn.text ?? ''} · current speaker: ${speakerLabel(currentAttribution(turn))} · confidence: ${bucket}`,
       );
     },
-    [announce, speakerLabel],
+    [announce, speakerLabel, currentAttribution],
   );
 
   const moveSelection = useCallback(
@@ -105,22 +124,50 @@ export function DiarizationReviewView({ turns, speakerLabel, onComplete, onCance
     [visibleTurns, announceTurn],
   );
 
+  const cycleAttribution = useCallback(
+    (delta: 1 | -1) => {
+      const turn = visibleTurns[activeIndex];
+      if (!turn) return;
+      const alts = turn.alternative_speakers ?? [];
+      if (alts.length === 0) return;
+      setAttributionIndexByTurn((prev) => {
+        const next = new Map(prev);
+        const cur = prev.get(turn.turn_index) ?? -1;
+        // Index space: -1 = original speaker, 0..alts.length-1 = alternatives.
+        // Clamp to that range so → past the last alt and ← past the original
+        // are no-ops (consistent with ↑/↓ bounding behavior).
+        const candidate = cur + delta;
+        const clamped = Math.max(-1, Math.min(alts.length - 1, candidate));
+        if (clamped === cur) return prev;
+        next.set(turn.turn_index, clamped);
+        const chosen = clamped < 0 ? turn.speaker_id : alts[clamped];
+        announce(`Attribution: ${speakerLabel(chosen)}`);
+        return next;
+      });
+    },
+    [activeIndex, visibleTurns, announce, speakerLabel],
+  );
+
   const recordDecision = useCallback(
     (decision: 'accept' | 'skip', advance: boolean) => {
       const turn = visibleTurns[activeIndex];
       if (!turn) return;
+      // Sprint 4 deferred-work no. 4 — record the user's chosen attribution
+      // (post-cycling), not the original speaker, so Enter persists what the
+      // user actually picked. 'skip' decisions still record the original.
+      const chosenSpeaker = decision === 'accept' ? currentAttribution(turn) : turn.speaker_id;
       setDecisions((prev) => {
         const next = new Map(prev);
         next.set(turn.turn_index, {
           turn_index: turn.turn_index,
           decision,
-          speaker_id: turn.speaker_id,
+          speaker_id: chosenSpeaker,
         });
         return next;
       });
       if (advance) moveSelection(+1);
     },
-    [activeIndex, visibleTurns, moveSelection],
+    [activeIndex, visibleTurns, moveSelection, currentAttribution],
   );
 
   const bulkAccept = useCallback(() => {
@@ -177,11 +224,12 @@ export function DiarizationReviewView({ turns, speakerLabel, onComplete, onCance
         moveSelection(-1);
         break;
       case 'ArrowLeft':
+        e.preventDefault();
+        cycleAttribution(-1);
+        break;
       case 'ArrowRight':
         e.preventDefault();
-        // Attribution cycling — placeholder for now (Sprint 4 will wire the
-        // alternative-speaker list per turn). The contract requires the keys
-        // be consumed (not bubble), so we preventDefault even when no-op.
+        cycleAttribution(+1);
         break;
       case 'Enter':
         e.preventDefault();
@@ -295,20 +343,25 @@ export function DiarizationReviewView({ turns, speakerLabel, onComplete, onCance
                 : decision?.decision === 'skip'
                   ? 'skipped'
                   : null;
+            // Sprint 4 deferred-work no. 4 — render the cycled attribution
+            // (or the original if the user hasn't cycled this turn yet).
+            const displaySpeakerId = currentAttribution(t);
             return (
               <div
                 key={t.turn_index}
                 id={`dr-turn-${t.turn_index}`}
                 role="option"
                 aria-selected={i === activeIndex}
-                aria-label={`${t.text ?? ''} · current speaker: ${speakerLabel(t.speaker_id)} · confidence: ${bucketFor(t.confidence)}`}
+                aria-label={`${t.text ?? ''} · current speaker: ${speakerLabel(displaySpeakerId)} · confidence: ${bucketFor(t.confidence)}`}
                 onClick={() => setActiveIndex(i)}
                 className={`cursor-pointer border-b border-white/5 px-3 py-2 text-sm last:border-b-0 ${
                   i === activeIndex ? 'bg-amber-400/10' : 'hover:bg-white/5'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-slate-200">{speakerLabel(t.speaker_id)}</span>
+                  <span className="font-semibold text-slate-200">
+                    {speakerLabel(displaySpeakerId)}
+                  </span>
                   <span className="text-xs text-slate-400">
                     {Math.round(t.confidence * 100)}%
                     {decisionTag && (

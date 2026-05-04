@@ -35,7 +35,7 @@ def test_init_db_stamps_head_and_remains_stable(
     db.set_data_directory(data_dir)
 
     db.init_db()
-    assert _read_alembic_versions(db.get_db_path()) == ["014"]
+    assert _read_alembic_versions(db.get_db_path()) == ["015"]
 
     db.init_db()
-    assert _read_alembic_versions(db.get_db_path()) == ["014"]
+    assert _read_alembic_versions(db.get_db_path()) == ["015"]

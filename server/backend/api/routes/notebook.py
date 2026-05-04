@@ -29,7 +29,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from server.api.routes.utils import get_client_name, sanitize_for_log
 from server.config import get_config
 from server.core.stt.backends.factory import detect_backend_type
@@ -98,6 +98,14 @@ class RecordingResponse(BaseModel):
     summary: str | None = None
     summary_model: str | None = None
     transcription_backend: str | None = None
+    # Issue #104 Sprint 4 — auto-action lifecycle (migration 015). Surfaced
+    # on the response so the dashboard's AutoActionStatusBadge can render
+    # without a second round-trip. Status enum is documented in the migration.
+    auto_summary_status: str | None = None
+    auto_summary_error: str | None = None
+    auto_export_status: str | None = None
+    auto_export_error: str | None = None
+    auto_export_path: str | None = None
 
 
 class RecordingDetailResponse(RecordingResponse):
@@ -127,11 +135,20 @@ class DateUpdate(BaseModel):
 
 
 class TurnConfidence(BaseModel):
-    """One per-turn diarization confidence entry. Story 5.4 (Issue #104)."""
+    """One per-turn diarization confidence entry. Story 5.4 (Issue #104).
+
+    ``alternative_speakers`` (Sprint 4 deferred-work no. 4) is the set of
+    other speaker_ids in the recording (excluding this turn's current
+    speaker), in first-appearance order. The dashboard's diarization-
+    review view uses it to drive the ←/→ attribution-cycling keys. Default
+    [] keeps the response shape backward-compatible for older serialized
+    clients.
+    """
 
     turn_index: int
     speaker_id: str | None = None
     confidence: float
+    alternative_speakers: list[str] = []
 
 
 class DiarizationConfidenceResponse(BaseModel):
@@ -541,35 +558,47 @@ async def update_recording_aliases(
     if not get_recording(recording_id):
         raise HTTPException(status_code=404, detail="Recording not found")
 
+    from server.core.auto_action_coordinator import (
+        notify_alias_mutation_finished,
+        notify_alias_mutation_started,
+    )
     from server.database import alias_repository
 
-    cleaned: list[dict[str, str]] = []
-    for entry in payload.aliases:
-        # Validate speaker_id — must be a non-empty token. Whitespace and
-        # NUL bytes are rejected because `speaker_id` is used as a join
-        # key against `segments.speaker` and a malformed value would
-        # silently produce a label miss (the alias never matches a turn).
-        speaker_id = entry.speaker_id.strip() if entry.speaker_id else ""
-        if not speaker_id or "\x00" in speaker_id:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Invalid speaker_id: {entry.speaker_id!r} — must be a "
-                    "non-empty string without NUL bytes."
-                ),
-            )
-        trimmed = entry.alias_name.strip()
-        if not trimmed:
-            # Empty alias → drop the row (full-replace semantics handle it)
-            continue
-        cleaned.append({"speaker_id": speaker_id, "alias_name": trimmed})
+    # Story 6.11 (cross-feature constraint #1) — F1 auto-summary must
+    # not race with F4 alias propagation. We bracket this PUT with the
+    # coordinator's race-guard so any in-flight auto-summary trigger
+    # waits for this mutation to complete.
+    notify_alias_mutation_started(recording_id)
+    try:
+        cleaned: list[dict[str, str]] = []
+        for entry in payload.aliases:
+            # Validate speaker_id — must be a non-empty token. Whitespace
+            # and NUL bytes are rejected because `speaker_id` is used as a
+            # join key against `segments.speaker` and a malformed value
+            # would silently produce a label miss.
+            speaker_id = entry.speaker_id.strip() if entry.speaker_id else ""
+            if not speaker_id or "\x00" in speaker_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Invalid speaker_id: {entry.speaker_id!r} — must be a "
+                        "non-empty string without NUL bytes."
+                    ),
+                )
+            trimmed = entry.alias_name.strip()
+            if not trimmed:
+                # Empty alias → drop the row (full-replace semantics handle it)
+                continue
+            cleaned.append({"speaker_id": speaker_id, "alias_name": trimmed})
 
-    alias_repository.replace_aliases(recording_id, cleaned)
+        alias_repository.replace_aliases(recording_id, cleaned)
 
-    return AliasesResponse(
-        recording_id=recording_id,
-        aliases=[AliasItem(**row) for row in alias_repository.list_aliases(recording_id)],
-    )
+        return AliasesResponse(
+            recording_id=recording_id,
+            aliases=[AliasItem(**row) for row in alias_repository.list_aliases(recording_id)],
+        )
+    finally:
+        notify_alias_mutation_finished(recording_id)
 
 
 @router.get("/recordings/{recording_id}/audio")
@@ -736,6 +765,7 @@ def _run_transcription(
     event_loop: Any = None,
     audio_hash: str | None = None,
     normalized_audio_hash: str | None = None,
+    profile_snapshot: dict[str, Any] | None = None,
 ) -> None:
     """
     Run transcription in a background thread.
@@ -1002,6 +1032,44 @@ def _run_transcription(
             f"Background transcription job {job_id[:8]} completed: recording_id={recording_id}"
         )
 
+        # Issue #104, Story 5.6 — diarization-review lifecycle hook +
+        # Story 6.2 / 6.3 — auto-action coordinator dispatch.
+        # Both fire AFTER the transcript has been committed (Persist-Before-Deliver).
+        if event_loop is not None:
+            from server.core.auto_action_coordinator import trigger_auto_actions
+            from server.core.diarization_confidence import (
+                LOW_CONFIDENCE_THRESHOLD,
+                per_turn_confidence,
+            )
+            from server.core.diarization_review_lifecycle import on_transcription_complete
+            from server.database.database import get_segments, get_words
+
+            try:
+                segments_for_conf = get_segments(recording_id)
+                words_for_conf = get_words(recording_id)
+                turns = per_turn_confidence(segments_for_conf, words_for_conf)
+                has_low_conf = any(t["confidence"] < LOW_CONFIDENCE_THRESHOLD for t in turns)
+                on_transcription_complete(recording_id, has_low_conf)
+            except Exception:
+                # Lifecycle bookkeeping must never crash the transcription pipeline.
+                logger.exception(
+                    "diarization-review lifecycle hook failed for recording %d",
+                    recording_id,
+                )
+
+            # Fire-and-forget the auto-action coordinator on the main loop.
+            # Disabled toggles are a no-op inside the coordinator.
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    trigger_auto_actions(recording_id, profile_snapshot),
+                    event_loop,
+                )
+            except Exception:
+                logger.exception(
+                    "trigger_auto_actions dispatch failed for recording %d",
+                    recording_id,
+                )
+
         # Fire outgoing webhook (background thread — use fire-and-forget)
         if event_loop is not None:
             from server.core.webhook import dispatch_fire_and_forget
@@ -1064,6 +1132,7 @@ async def upload_and_transcribe(
     expected_speakers: int | None = Form(None),
     parallel_diarization: bool | None = Form(None),
     title: str | None = Form(None),
+    profile_id: int | None = Form(None),
 ) -> dict[str, Any]:
     """
     Upload an audio file and start transcription in the background.
@@ -1146,6 +1215,21 @@ async def upload_and_transcribe(
     config = request.app.state.config
     use_parallel_default = config.get("diarization", "parallel", default=True)
 
+    # Issue #104, Story 6.2 — snapshot the profile at upload time so the
+    # background thread (which may finish minutes later) sees the SAME
+    # toggles even if the user edits the profile during transcription.
+    profile_snapshot: dict[str, Any] | None = None
+    if profile_id is not None:
+        from server.database import profile_repository
+
+        profile_row = profile_repository.get_profile(profile_id)
+        if profile_row is not None:
+            profile_snapshot = {
+                "profile_id": profile_id,
+                "schema_version": profile_row.get("schema_version"),
+                "public_fields": profile_row.get("public_fields") or {},
+            }
+
     # Capture event loop for webhook dispatch from background thread
     loop = asyncio.get_running_loop()
 
@@ -1170,6 +1254,7 @@ async def upload_and_transcribe(
             event_loop=loop,
             audio_hash=audio_hash,
             normalized_audio_hash=normalized_audio_hash,
+            profile_snapshot=profile_snapshot,
         )
     )
 
@@ -1576,6 +1661,87 @@ async def reexport_recording(recording_id: int, body: ReexportRequest) -> Reexpo
         status="reexported",
         path=str(target_path),
         filename=rendered,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Auto-action retry endpoint (Issue #104, Stories 6.9 / 6.10)
+# ---------------------------------------------------------------------------
+# Mounted on the notebook router rather than a top-level
+# /api/recordings/* router (per Sprint 3/4 design — see
+# `_bmad-output/implementation-artifacts/sprint-4-design.md` §1).
+
+
+class AutoActionRetryRequest(BaseModel):
+    action_type: str  # validated below — keep as plain str so 400 instead of 422
+
+    @field_validator("action_type")
+    @classmethod
+    def _validate_action_type(cls, v: str) -> str:
+        if v not in ("auto_summary", "auto_export"):
+            raise ValueError(f"action_type must be 'auto_summary' or 'auto_export'; received {v!r}")
+        return v
+
+
+class AutoActionRetryResponse(BaseModel):
+    recording_id: int
+    action_type: str
+    status: str  # "retry_initiated" | "already_complete" | "already_in_progress"
+
+
+@router.post("/recordings/{recording_id}/auto-actions/retry")
+async def retry_auto_action(
+    recording_id: int, payload: AutoActionRetryRequest, response: Response
+) -> AutoActionRetryResponse:
+    """Idempotent retry for auto-summary or auto-export (Story 6.9 / R-EL27).
+
+    Response shape:
+      - 202 + retry_initiated      — happy path; coordinator dispatched
+      - 200 + already_complete     — status was already 'success'; no-op
+      - 200 + already_in_progress  — concurrent click while a retry is in flight
+
+    Manual retry RESETS the auto-retry counter (Story 6.11 — escalation
+    only counts AUTO retries, not user-initiated retries). The retry
+    runs the same coordinator path as the original auto-action.
+    """
+    from server.core.auto_action_coordinator import retry_auto_action_internal
+    from server.database import auto_action_repository as aar
+
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    current = aar.get_auto_action_status(recording_id, payload.action_type)
+
+    # Idempotent on success — Story 6.9 AC2 / R-EL27 — no re-execution.
+    if current == "success":
+        response.status_code = 200
+        return AutoActionRetryResponse(
+            recording_id=recording_id,
+            action_type=payload.action_type,
+            status="already_complete",
+        )
+    # Don't double-fire while already in flight. `retry_pending` means a
+    # 30s-delayed auto-retry is scheduled (Story 6.11) — clicking the
+    # button while that's pending would dispatch a second retry against
+    # the same row. Treat as "already in progress".
+    if current in {"in_progress", "pending", "retry_pending"}:
+        response.status_code = 200
+        return AutoActionRetryResponse(
+            recording_id=recording_id,
+            action_type=payload.action_type,
+            status="already_in_progress",
+        )
+
+    # Reset attempts so manual retry is treated as a fresh attempt
+    # (R-EL18 specifies "automatic retry exhausted", not "user gave up").
+    aar.reset_auto_action_attempts(recording_id, payload.action_type)
+    aar.set_auto_action_status(recording_id, payload.action_type, "pending")
+    asyncio.create_task(retry_auto_action_internal(recording_id, payload.action_type))
+    response.status_code = 202
+    return AutoActionRetryResponse(
+        recording_id=recording_id,
+        action_type=payload.action_type,
+        status="retry_initiated",
     )
 
 

@@ -155,3 +155,5 @@ if auto_summary_is_held(recording_id):
 
 **Re-triage trigger:** Sprint 4 Story 6.2 kickoff.
 
+---
+

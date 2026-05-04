@@ -171,6 +171,48 @@ def test_delete_profile_returns_204(fresh_db: Path) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# Story 6.1 — auto-action toggle persistence + GET roundtrip
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_create_profile_defaults_auto_actions_off(fresh_db: Path) -> None:
+    """Story 6.1 AC2 — sane defaults: both toggles default to OFF (Lurker-safe)."""
+    created = asyncio.run(profiles_route.create_profile_endpoint(_create_body()))
+    fetched = asyncio.run(profiles_route.get_profile_endpoint(created.id))
+    assert fetched.public_fields.auto_summary_enabled is False
+    assert fetched.public_fields.auto_export_enabled is False
+
+
+def test_create_profile_persists_auto_action_toggles(fresh_db: Path) -> None:
+    """Story 6.1 AC1 — toggles enabled at create-time roundtrip via GET."""
+    body = _create_body(
+        public_fields=profiles_route.ProfilePublicFields(
+            auto_summary_enabled=True,
+            auto_export_enabled=True,
+        ),
+    )
+    created = asyncio.run(profiles_route.create_profile_endpoint(body))
+    fetched = asyncio.run(profiles_route.get_profile_endpoint(created.id))
+    assert fetched.public_fields.auto_summary_enabled is True
+    assert fetched.public_fields.auto_export_enabled is True
+
+
+def test_update_profile_toggles_auto_actions(fresh_db: Path) -> None:
+    """Story 6.1 — flipping a toggle via PUT persists across GET."""
+    created = asyncio.run(profiles_route.create_profile_endpoint(_create_body()))
+    update = profiles_route.ProfileUpdate(
+        public_fields=profiles_route.ProfilePublicFields(
+            auto_summary_enabled=True,
+            auto_export_enabled=False,
+        ),
+    )
+    asyncio.run(profiles_route.update_profile_endpoint(created.id, update))
+    fetched = asyncio.run(profiles_route.get_profile_endpoint(created.id))
+    assert fetched.public_fields.auto_summary_enabled is True
+    assert fetched.public_fields.auto_export_enabled is False
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # AC5 — last-write-wins concurrent-edit semantics
 # ──────────────────────────────────────────────────────────────────────────
 

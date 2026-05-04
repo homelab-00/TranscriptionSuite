@@ -793,6 +793,27 @@ export class APIClient {
   }
 
   /**
+   * POST /api/notebook/recordings/{id}/auto-actions/retry — Issue #104, Stories 6.6 + 6.9.
+   * Idempotent retry of a failed/deferred/empty/truncated auto-action.
+   * Returns:
+   *   - 202 + status='retry_initiated' on happy path
+   *   - 200 + status='already_complete' if status was already 'success'
+   *   - 200 + status='already_in_progress' if a retry is in-flight
+   */
+  async retryAutoAction(
+    recordingId: number,
+    actionType: 'auto_summary' | 'auto_export',
+  ): Promise<{
+    recording_id: number;
+    action_type: string;
+    status: 'retry_initiated' | 'already_complete' | 'already_in_progress';
+  }> {
+    return this.post(`/api/notebook/recordings/${recordingId}/auto-actions/retry`, {
+      action_type: actionType,
+    });
+  }
+
+  /**
    * POST /api/transcribe/import — start a background file-import transcription.
    * Returns 202 Accepted with { job_id }. Poll /api/admin/status for result.
    */

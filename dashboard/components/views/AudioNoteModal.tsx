@@ -40,6 +40,8 @@ import { useConfirm } from '../../src/hooks/useConfirm';
 import { ConfidenceChip } from '../recording/ConfidenceChip';
 import { DeleteRecordingDialog } from '../recording/DeleteRecordingDialog';
 import { SpeakerRenameInput } from '../recording/SpeakerRenameInput';
+import { AutoActionStatusBadge, statusToBadgeProps } from '../recording/AutoActionStatusBadge';
+import { useAutoActionRetry } from '../../src/hooks/useAutoActionRetry';
 import { PersistentInfoBanner } from '../ui/PersistentInfoBanner';
 import { useActiveProfileStore } from '../../src/stores/activeProfileStore';
 import { useDiarizationConfidence } from '../../src/hooks/useDiarizationConfidence';
@@ -585,6 +587,25 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
 
   // Issue #104 Story 5.7 — review state drives the persistent banner.
   const reviewState = useDiarizationReview(recordingId);
+
+  // Issue #104 Sprint 4 deferred-work no. 3 — surface the auto-summary /
+  // auto-export lifecycle status. statusToBadgeProps returns null when the
+  // backend column is null (toggle off / not run yet) so the badge simply
+  // does not render in those cases.
+  const autoActionRetry = useAutoActionRetry(recordingId ?? 0);
+  const summaryBadgeProps = statusToBadgeProps(
+    recording?.auto_summary_status ?? null,
+    'auto_summary',
+    { error: recording?.auto_summary_error ?? null },
+  );
+  const exportBadgeProps = statusToBadgeProps(
+    recording?.auto_export_status ?? null,
+    'auto_export',
+    {
+      error: recording?.auto_export_error ?? null,
+      path: recording?.auto_export_path ?? null,
+    },
+  );
   const lowConfTurnCount = useMemo(() => {
     let n = 0;
     for (const t of confidenceState.turns) {
@@ -1991,6 +2012,37 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                 ref={transcriptContainerRef}
                 className="custom-scrollbar flex-1 space-y-8 overflow-y-auto p-8"
               >
+                {/* Issue #104 Sprint 4 — auto-summary / auto-export status badges
+                    (Story 6.6). Each badge renders only when its corresponding
+                    backend column is non-null, so toggle-off recordings show
+                    nothing here. */}
+                {(summaryBadgeProps || exportBadgeProps) && note?.recordingId && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {summaryBadgeProps && (
+                      <AutoActionStatusBadge
+                        recordingId={note.recordingId}
+                        recordingName={note.title}
+                        actionType="auto_summary"
+                        severity={summaryBadgeProps.severity}
+                        message={summaryBadgeProps.message}
+                        retryable={summaryBadgeProps.retryable}
+                        onRetry={(t) => autoActionRetry.mutate(t)}
+                      />
+                    )}
+                    {exportBadgeProps && (
+                      <AutoActionStatusBadge
+                        recordingId={note.recordingId}
+                        recordingName={note.title}
+                        actionType="auto_export"
+                        severity={exportBadgeProps.severity}
+                        message={exportBadgeProps.message}
+                        retryable={exportBadgeProps.retryable}
+                        onRetry={(t) => autoActionRetry.mutate(t)}
+                      />
+                    )}
+                  </div>
+                )}
+
                 {/* 2. AI Summary Section - Editable */}
                 <div
                   className={`overflow-hidden rounded-2xl border border-white/10 transition-all duration-500 ease-in-out ${summaryExpanded ? 'from-accent-magenta/5 bg-linear-to-br to-purple-900/10' : 'bg-glass-100 hover:bg-white/5'}`}

@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.45
+  spec_version: 1.0.46
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -32,12 +32,14 @@ meta:
       - components/profiles/ModelProfilesPanel.tsx
       - components/profiles/ProfileSelector.tsx
       - components/profiles/TemplatePreviewField.tsx
+      - components/recording/__tests__/AutoActionStatusBadge.test.tsx
       - components/recording/__tests__/ConfidenceChip.test.tsx
       - components/recording/__tests__/DeleteRecordingDialog.test.tsx
       - components/recording/__tests__/DiarizationReviewView.keyboard.test.tsx
       - components/recording/__tests__/DownloadButtons.test.tsx
       - components/recording/__tests__/SpeakerLabelRendering.test.tsx
       - components/recording/__tests__/SpeakerRenameInput.test.tsx
+      - components/recording/AutoActionStatusBadge.tsx
       - components/recording/ConfidenceChip.tsx
       - components/recording/DeleteRecordingDialog.tsx
       - components/recording/DiarizationReviewView.tsx
@@ -88,7 +90,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-04T05:26:24.198Z
+    generated_at: 2026-05-04T09:01:14.032Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -719,6 +721,7 @@ utility_allowlist:
     - hover:text-accent-cyan/80
     - hover:text-amber-300
     - hover:text-black
+    - hover:text-cyan-200
     - hover:text-cyan-300
     - hover:text-green-300
     - hover:text-red-300
@@ -1491,6 +1494,23 @@ component_contracts:
     state_rules:
       - id: responsive-resize
         rule: Visualizer dimensions track parent element resize — canvas via window resize listener, idle SVG via viewBox.
+  AutoActionStatusBadge:
+    file: components/recording/AutoActionStatusBadge.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   BugReportModal:
     file: components/views/BugReportModal.tsx
     required_tokens:

@@ -200,6 +200,179 @@ describe('Diarization Keyboard Contract — ←/→ are consumed', () => {
   });
 });
 
+// ──────────────────────────────────────────────────────────────────────────
+// Sprint 4 deferred-work no. 4 — ←/→ cycle attribution within focused turn
+// ──────────────────────────────────────────────────────────────────────────
+
+function makeTurnsWithAlternatives(): ReviewTurn[] {
+  // Three speakers; turn 0's alternatives are SPEAKER_01 then SPEAKER_02 in
+  // first-appearance order.
+  return [
+    {
+      turn_index: 0,
+      speaker_id: 'SPEAKER_00',
+      confidence: 0.45,
+      text: 'First.',
+      alternative_speakers: ['SPEAKER_01', 'SPEAKER_02'],
+    },
+    {
+      turn_index: 1,
+      speaker_id: 'SPEAKER_01',
+      confidence: 0.55,
+      text: 'Second.',
+      alternative_speakers: ['SPEAKER_00', 'SPEAKER_02'],
+    },
+    {
+      turn_index: 2,
+      speaker_id: 'SPEAKER_02',
+      confidence: 0.4,
+      text: 'Third.',
+      alternative_speakers: ['SPEAKER_00', 'SPEAKER_01'],
+    },
+  ];
+}
+
+describe('Diarization Keyboard Contract — ←/→ cycle attribution (Sprint 4 no. 4)', () => {
+  it('ArrowRight cycles displayed speaker through alternative_speakers', () => {
+    render(
+      <DiarizationReviewView
+        turns={makeTurnsWithAlternatives()}
+        speakerLabel={speakerLabel}
+        onComplete={vi.fn()}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    const turn0 = document.getElementById('dr-turn-0')!;
+    expect(turn0.textContent).toContain('SPEAKER_00');
+
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    expect(turn0.textContent).toContain('SPEAKER_01');
+
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    expect(turn0.textContent).toContain('SPEAKER_02');
+  });
+
+  it('ArrowRight does NOT change aria-activedescendant (regression of existing contract)', () => {
+    render(
+      <DiarizationReviewView
+        turns={makeTurnsWithAlternatives()}
+        speakerLabel={speakerLabel}
+        onComplete={vi.fn()}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    expect(list).toHaveAttribute('aria-activedescendant', 'dr-turn-0');
+  });
+
+  it('ArrowRight clamps at the last alternative (does not wrap)', () => {
+    render(
+      <DiarizationReviewView
+        turns={makeTurnsWithAlternatives()}
+        speakerLabel={speakerLabel}
+        onComplete={vi.fn()}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    const turn0 = document.getElementById('dr-turn-0')!;
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    fireEvent.keyDown(list, { key: 'ArrowRight' }); // overshoot
+    fireEvent.keyDown(list, { key: 'ArrowRight' }); // overshoot more
+    expect(turn0.textContent).toContain('SPEAKER_02');
+  });
+
+  it('ArrowLeft cycles back through alternatives toward original', () => {
+    render(
+      <DiarizationReviewView
+        turns={makeTurnsWithAlternatives()}
+        speakerLabel={speakerLabel}
+        onComplete={vi.fn()}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    const turn0 = document.getElementById('dr-turn-0')!;
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    expect(turn0.textContent).toContain('SPEAKER_02');
+
+    fireEvent.keyDown(list, { key: 'ArrowLeft' });
+    expect(turn0.textContent).toContain('SPEAKER_01');
+
+    fireEvent.keyDown(list, { key: 'ArrowLeft' });
+    expect(turn0.textContent).toContain('SPEAKER_00'); // back to original
+
+    // Further ← clamps; original stays.
+    fireEvent.keyDown(list, { key: 'ArrowLeft' });
+    expect(turn0.textContent).toContain('SPEAKER_00');
+  });
+
+  it('Enter after cycling persists the chosen speaker_id in the decision', async () => {
+    const onComplete = vi.fn().mockResolvedValue(undefined);
+    render(
+      <DiarizationReviewView
+        turns={makeTurnsWithAlternatives()}
+        speakerLabel={speakerLabel}
+        onComplete={onComplete}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    // Cycle turn 0 to SPEAKER_02 (two →s) then Enter → accept with cycled speaker.
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    fireEvent.keyDown(list, { key: 'Enter' });
+
+    fireEvent.click(screen.getByRole('button', { name: /Run summary now/ }));
+    await Promise.resolve();
+    expect(onComplete).toHaveBeenCalled();
+    const decisions = onComplete.mock.calls[0][0];
+    const turn0Decision = decisions.find(
+      (d: { turn_index: number; decision: string; speaker_id: string }) => d.turn_index === 0,
+    );
+    expect(turn0Decision.decision).toBe('accept');
+    expect(turn0Decision.speaker_id).toBe('SPEAKER_02');
+  });
+
+  it("cycling resets per-turn (turn 1 starts at its original speaker, not turn 0's cycle)", () => {
+    render(
+      <DiarizationReviewView
+        turns={makeTurnsWithAlternatives()}
+        speakerLabel={speakerLabel}
+        onComplete={vi.fn()}
+      />,
+    );
+    const list = screen.getByRole('listbox');
+    const turn1 = document.getElementById('dr-turn-1')!;
+    // Cycle turn 0
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    // Move down to turn 1 — its display is unaffected
+    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    expect(turn1.textContent).toContain('SPEAKER_01'); // turn 1's original
+  });
+
+  it('on a single-speaker recording (no alternatives), ←/→ are no-ops', () => {
+    const turns: ReviewTurn[] = [
+      {
+        turn_index: 0,
+        speaker_id: 'SPEAKER_00',
+        confidence: 0.4,
+        text: 'Solo.',
+        alternative_speakers: [],
+      },
+    ];
+    render(
+      <DiarizationReviewView turns={turns} speakerLabel={speakerLabel} onComplete={vi.fn()} />,
+    );
+    const list = screen.getByRole('listbox');
+    const turn0 = document.getElementById('dr-turn-0')!;
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    fireEvent.keyDown(list, { key: 'ArrowRight' });
+    expect(turn0.textContent).toContain('SPEAKER_00');
+    expect(list).toHaveAttribute('aria-activedescendant', 'dr-turn-0');
+  });
+});
+
 describe('Diarization Keyboard Contract — Ctrl+Z undoes the most recent bulk-accept', () => {
   it('Ctrl+Z reverts decisions to pre-bulk-accept state and toasts', async () => {
     const onComplete = vi.fn().mockResolvedValue(undefined);

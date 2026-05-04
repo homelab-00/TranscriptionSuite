@@ -153,6 +153,15 @@ export interface Recording {
   summary: string | null;
   summary_model: string | null;
   transcription_backend?: 'whisper' | 'parakeet' | 'canary' | 'vibevoice_asr' | null;
+  // Issue #104 Sprint 4 — auto-action lifecycle (migration 015). Optional on
+  // older serialized clients; null when the toggle is off or the action has
+  // not run yet. Status enum lives in the migration; the dashboard's
+  // statusToBadgeProps handles all known values.
+  auto_summary_status?: string | null;
+  auto_summary_error?: string | null;
+  auto_export_status?: string | null;
+  auto_export_error?: string | null;
+  auto_export_path?: string | null;
 }
 
 export interface RecordingDetail extends Recording {

@@ -1470,6 +1470,12 @@ const ImportTab = ({
   const updateNotebookConfig = useImportQueueStore((s) => s.updateNotebookConfig);
   const setLanguagesCache = useImportQueueStore((s) => s.setLanguagesCache);
 
+  // Issue #104, Sprint 4 deferred-work no. 2 — manual notebook uploads must
+  // forward the active profile id so the backend snapshots it onto the
+  // transcription job; without this the auto-summary / auto-export coordinator
+  // sees profile_snapshot=None and short-circuits as a no-op.
+  const activeProfileId = useActiveProfileStore((s) => s.activeProfileId);
+
   const {
     notebookWatchPath,
     notebookWatchActive,
@@ -1699,6 +1705,10 @@ const ImportTab = ({
         enable_diarization: diarization,
         enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
         parallel_diarization: diarization ? parallelDiarization : undefined,
+        // Sprint 4 deferred-work no. 2 — pass undefined (not null) when no
+        // active profile is set so apiClient.uploadAndTranscribe's `!= null`
+        // guard correctly omits the FormData field.
+        profile_id: activeProfileId ?? undefined,
       });
 
       // 4.6 — track manual import count and possibly show hint
@@ -1713,6 +1723,7 @@ const ImportTab = ({
     },
     [
       addFiles,
+      activeProfileId,
       diarization,
       parallelDiarization,
       supportsExplicitWordTimestampToggle,
