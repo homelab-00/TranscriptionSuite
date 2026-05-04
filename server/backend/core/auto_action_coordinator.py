@@ -192,8 +192,25 @@ async def _run_auto_summary(recording_id: int, public: Mapping[str, Any]) -> Non
         repo.set_auto_summary_status(recording_id, "summary_empty")
         return
 
-    # 4. Persist BEFORE delivering (NFR16).
-    _persist_summary_with_durability_guard(recording_id, summary_text, result.get("model"))
+    # 4. Persist BEFORE delivering (NFR16). On persist failure we LEAVE the
+    #    status at 'in_progress' (set earlier) so the retry endpoint /
+    #    deferred-export sweeper can pick this up — the LLM result is in
+    #    data/lost-and-found/ for forensic recovery (Story 6.4 AC2).
+    try:
+        _persist_summary_with_durability_guard(recording_id, summary_text, result.get("model"))
+    except Exception:  # noqa: BLE001 — last-resort, lost-and-found has the data
+        logger.exception(
+            "auto-summary persist failed for recording %d; status stays at "
+            "'in_progress', LLM result in lost-and-found",
+            recording_id,
+        )
+        # Mark 'failed' so the badge surfaces something actionable. The
+        # retry endpoint resets attempts on manual retry (Story 6.9), so
+        # this does not eat the user's retry budget.
+        repo.set_auto_summary_status(
+            recording_id, "failed", error="persist failure (LLM result in lost-and-found)"
+        )
+        return
     repo.set_auto_summary_status(recording_id, "success")
     _on_auto_summary_fired_safe(recording_id)
 
