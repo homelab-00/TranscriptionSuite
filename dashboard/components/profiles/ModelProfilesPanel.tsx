@@ -16,7 +16,9 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { Plus } from 'lucide-react';
 
+import { Button } from '../ui/Button';
 import { modelProfileStore, type ModelProfile } from '../../src/services/modelProfileStore';
 
 interface FormState {
@@ -109,13 +111,9 @@ export const ModelProfilesPanel: React.FC<ModelProfilesPanelProps> = ({
       <header className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-200">Model profiles</h3>
         {form === null && (
-          <button
-            type="button"
-            onClick={startNew}
-            className="rounded bg-cyan-500/80 px-3 py-1 text-xs text-black hover:bg-cyan-400"
-          >
+          <Button variant="primary" size="sm" icon={<Plus size={14} />} onClick={startNew}>
             New profile
-          </button>
+          </Button>
         )}
       </header>
 

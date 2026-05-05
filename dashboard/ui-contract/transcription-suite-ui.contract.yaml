@@ -93,7 +93,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-04T15:52:40.913Z
+    generated_at: 2026-05-05T13:32:14.626Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
