@@ -47,7 +47,11 @@ ENV PYTHONWARNINGS="ignore::UserWarning:pyannote.audio.core.io"
 
 # Install runtime + bootstrap build prerequisites.
 # Some Python packages still need local compilation on first bootstrap.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Acquire::Retries + per-protocol Timeout make apt resilient to transient
+# Launchpad/PPA CDN failures (e.g. handshake errors against deadsnakes).
+RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+        > /etc/apt/apt.conf.d/80-retries \
+    && apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update \
