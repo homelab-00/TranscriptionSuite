@@ -1275,8 +1275,21 @@ def test_run_dependency_sync_legacy_cu126_drops_frozen_and_overrides_cu129_name(
         "cu126 path must reuse the `pytorch-cu129` name with the cu126 URL — "
         "adding a new index name would not override the `[tool.uv.sources]` pin"
     )
-    # No --index-strategy override — only one named index is in play post-amendment.
-    assert "--index-strategy" not in cmd
+    # Issue #115: the CLI form `--index name=url` redefines the index but does
+    # not preserve the `explicit = true` flag from pyproject, so uv would apply
+    # the default first-index policy to non-torch packages on cu126 and refuse
+    # to fall back to PyPI for newer transitive deps (e.g. tqdm>=4.67.1 needed
+    # by pyannote-pipeline 4.0.0). `unsafe-best-match` lets uv consider every
+    # index for non-explicit packages while keeping torch/torchaudio pinned to
+    # the cu126-swapped index via [tool.uv.sources].
+    assert "--index-strategy" in cmd, (
+        "cu126 path must pass --index-strategy unsafe-best-match (Issue #115)"
+    )
+    strategy_idx = cmd.index("--index-strategy")
+    assert cmd[strategy_idx + 1] == "unsafe-best-match", (
+        "cu126 path must use unsafe-best-match so uv considers PyPI for "
+        "non-torch packages whose pinned versions don't exist on cu126"
+    )
 
 
 def test_run_dependency_sync_legacy_propagates_extras(

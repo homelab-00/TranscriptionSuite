@@ -385,6 +385,21 @@ def run_dependency_sync(
                           untouched and uv would still install cu129 wheels.
                           uv.lock pins wheel hashes to the cu129 URL, so
                           --frozen would reject the cu126 wheels; hence drop it.
+
+    Index strategy on cu126 (Issue #115):
+        The CLI form `--index name=url` redefines the named index but does
+        not preserve the `explicit = true` flag set in pyproject.toml, so uv
+        treats cu126 as a general-purpose index and applies the default
+        first-index-only policy to *every* package it happens to host
+        (numpy, tqdm, etc.). When pyannote-pipeline 4.0.0 (transitive from
+        pyannote.audio>=4.0.4) requires tqdm>=4.67.1 but cu126 hosts only
+        tqdm 4.66.5, that policy refuses to fall back to PyPI and the sync
+        fails with "your project's requirements are unsatisfiable". Passing
+        `--index-strategy unsafe-best-match` tells uv to consider every
+        index for non-explicit packages and pick the highest matching
+        version — torch/torchaudio still resolve from cu126 because they
+        are explicitly source-pinned, while everything else resolves from
+        whichever index has a satisfying version (PyPI, in practice).
     """
     cmd: list[str] = [
         "uv",
@@ -399,6 +414,8 @@ def run_dependency_sync(
             [
                 "--index",
                 "pytorch-cu129=https://download.pytorch.org/whl/cu126",
+                "--index-strategy",
+                "unsafe-best-match",
             ]
         )
     else:
