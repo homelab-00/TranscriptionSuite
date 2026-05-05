@@ -578,6 +578,85 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setIsDirty(true);
   }, []);
 
+  // Recording-profiles fetch — runs whenever the Profiles tab becomes active
+  // and when a profile is created/deleted (refreshKey bump). Failures surface
+  // inline (profileError) rather than throwing — the user can retry by
+  // re-opening the tab.
+  useEffect(() => {
+    if (activeTab !== 'Profiles') return;
+    let cancelled = false;
+    setProfilesLoading(true);
+    setProfileError(null);
+    void apiClient
+      .listProfiles()
+      .then((list) => {
+        if (!cancelled) setRecordingProfiles(list);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setProfileError(err instanceof Error ? err.message : 'Failed to load profiles');
+      })
+      .finally(() => {
+        if (!cancelled) setProfilesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
+  const refreshRecordingProfiles = useCallback(async () => {
+    setProfilesLoading(true);
+    setProfileError(null);
+    try {
+      const list = await apiClient.listProfiles();
+      setRecordingProfiles(list);
+    } catch (err: unknown) {
+      setProfileError(err instanceof Error ? err.message : 'Failed to load profiles');
+    } finally {
+      setProfilesLoading(false);
+    }
+  }, []);
+
+  const handleDeleteRecordingProfile = useCallback(
+    async (profile: Profile) => {
+      const ok = await confirm(
+        `Delete profile "${profile.name}"? Existing transcriptions are unaffected — only future jobs lose this preset.`,
+        { danger: true, confirmLabel: 'Delete' },
+      );
+      if (!ok) return;
+      try {
+        await apiClient.deleteProfile(profile.id);
+        toast.success(`Deleted "${profile.name}"`);
+        await refreshRecordingProfiles();
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : 'Delete failed');
+      }
+    },
+    [confirm, refreshRecordingProfiles],
+  );
+
+  // Translation targets list — Canary supports translation to a fixed set of
+  // EU target languages; we surface those by intersecting with the languages
+  // list returned by the server (which has display names) so the dropdown
+  // reads "German" rather than "de".
+  const translationTargetOptions = React.useMemo(() => {
+    const codes = new Set<string>(CANARY_TRANSLATION_TARGETS);
+    return sttLanguages
+      .filter((l) => codes.has(l.code))
+      .map((l) => ({ code: l.code, label: l.name }));
+  }, [sttLanguages]);
+
+  const availableLanguageOptions = React.useMemo(
+    () =>
+      sttLanguages.filter((l) => l.code !== 'auto').map((l) => ({ code: l.code, label: l.name })),
+    [sttLanguages],
+  );
+
+  const availableModelOptions = React.useMemo(
+    () => MAIN_MODEL_PRESETS.map((id) => ({ id, label: id })),
+    [],
+  );
+
   if (!isRendered) return null;
 
   const sampleRateHz =
@@ -2005,85 +2084,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         </Button>
       </Section>
     </div>
-  );
-
-  // Recording-profiles fetch — runs whenever the Profiles tab becomes active
-  // and when a profile is created/deleted (refreshKey bump). Failures surface
-  // inline (profileError) rather than throwing — the user can retry by
-  // re-opening the tab.
-  useEffect(() => {
-    if (activeTab !== 'Profiles') return;
-    let cancelled = false;
-    setProfilesLoading(true);
-    setProfileError(null);
-    void apiClient
-      .listProfiles()
-      .then((list) => {
-        if (!cancelled) setRecordingProfiles(list);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setProfileError(err instanceof Error ? err.message : 'Failed to load profiles');
-      })
-      .finally(() => {
-        if (!cancelled) setProfilesLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab]);
-
-  const refreshRecordingProfiles = useCallback(async () => {
-    setProfilesLoading(true);
-    setProfileError(null);
-    try {
-      const list = await apiClient.listProfiles();
-      setRecordingProfiles(list);
-    } catch (err: unknown) {
-      setProfileError(err instanceof Error ? err.message : 'Failed to load profiles');
-    } finally {
-      setProfilesLoading(false);
-    }
-  }, []);
-
-  const handleDeleteRecordingProfile = useCallback(
-    async (profile: Profile) => {
-      const ok = await confirm(
-        `Delete profile "${profile.name}"? Existing transcriptions are unaffected — only future jobs lose this preset.`,
-        { danger: true, confirmLabel: 'Delete' },
-      );
-      if (!ok) return;
-      try {
-        await apiClient.deleteProfile(profile.id);
-        toast.success(`Deleted "${profile.name}"`);
-        await refreshRecordingProfiles();
-      } catch (err: unknown) {
-        toast.error(err instanceof Error ? err.message : 'Delete failed');
-      }
-    },
-    [confirm, refreshRecordingProfiles],
-  );
-
-  // Translation targets list — Canary supports translation to a fixed set of
-  // EU target languages; we surface those by intersecting with the languages
-  // list returned by the server (which has display names) so the dropdown
-  // reads "German" rather than "de".
-  const translationTargetOptions = React.useMemo(() => {
-    const codes = new Set<string>(CANARY_TRANSLATION_TARGETS);
-    return sttLanguages
-      .filter((l) => codes.has(l.code))
-      .map((l) => ({ code: l.code, label: l.name }));
-  }, [sttLanguages]);
-
-  const availableLanguageOptions = React.useMemo(
-    () =>
-      sttLanguages.filter((l) => l.code !== 'auto').map((l) => ({ code: l.code, label: l.name })),
-    [sttLanguages],
-  );
-
-  const availableModelOptions = React.useMemo(
-    () => MAIN_MODEL_PRESETS.map((id) => ({ id, label: id })),
-    [],
   );
 
   const renderProfilesTab = () => (
