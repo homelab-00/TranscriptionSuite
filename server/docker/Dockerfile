@@ -111,7 +111,12 @@ ENV SERVER_HOST="0.0.0.0"
 ENV SERVER_PORT="9786"
 ENV LOG_LEVEL="INFO"
 # Prioritize PyTorch bundled libraries from runtime venv.
-ENV LD_LIBRARY_PATH="/runtime/.venv/lib/python3.13/site-packages/nvidia/cudnn/lib:/runtime/.venv/lib/python3.13/site-packages/torch/lib:$LD_LIBRARY_PATH"
+# No `:$LD_LIBRARY_PATH` suffix: the ubuntu:24.04 base does not set this var
+# and no earlier ENV declares it, so BuildKit would substitute an empty
+# string — the resulting trailing colon would tell ld.so to also search
+# the current working directory (`/app`), which is a latent foot-gun if
+# anything ever drops a .so into the source tree.
+ENV LD_LIBRARY_PATH="/runtime/.venv/lib/python3.13/site-packages/nvidia/cudnn/lib:/runtime/.venv/lib/python3.13/site-packages/torch/lib"
 ENV PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8"
 
 # Expose port
