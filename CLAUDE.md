@@ -54,6 +54,17 @@ point when planning new features, creating PRDs, or onboarding to an unfamiliar 
 When creating a brownfield PRD or planning a feature, point the planning workflow to
 `docs/index.md` so it has full project context.
 
+## Branching Policy
+
+When committing, create a new feature branch. Feature branch *within* feature
+branch is allowed. Do not create a new branch if the change is minor (applies
+to both main and feature branches) or if already on feature branch and new
+commit is about the same feature.
+
+## PR Drafts
+
+Save PR descriptions to `~/Downloads/PR-[concise-description].md`.
+
 ## Quick Reference
 
 - Never use `pip`, always `uv`.
