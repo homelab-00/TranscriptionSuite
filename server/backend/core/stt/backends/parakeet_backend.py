@@ -76,6 +76,23 @@ def _import_nemo_asr() -> Any:
 class ParakeetBackend(STTBackend):
     """NVIDIA Parakeet / NeMo ASR backend."""
 
+    # ------------------------------------------------------------------
+    # Subclass override hooks
+    # ------------------------------------------------------------------
+    # Concrete NeMo model class used by ``load()``. Subclasses targeting
+    # different NeMo model families (e.g. CanaryBackend's AED multitask
+    # model) override this instead of duplicating the full ``load()`` body.
+    _NEMO_MODEL_CLASS_NAME: str = "EncDecRNNTBPEModel"
+    # Optional Hydra override config written to a temp YAML and passed as
+    # ``override_config_path`` to ``from_pretrained()`` / ``restore_from()``.
+    # Disables NeMo's CUDA graph decoder for CUDA ≥ 12.8 (RNN-T-specific).
+    # Subclasses whose model class rejects this minimal override (e.g. the
+    # Canary AED model, which insists the override include a tokenizer
+    # section) set this to ``None`` to skip pre-load patching entirely.
+    _LOAD_OVERRIDE_CONFIG: dict[str, Any] | None = {
+        "decoding": {"greedy": {"use_cuda_graph_decoder": False}}
+    }
+
     def __init__(self) -> None:
         self._model: Any | None = None
         self._model_name: str | None = None
@@ -218,7 +235,7 @@ class ParakeetBackend(STTBackend):
 
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         nemo_asr = _import_nemo_asr()
-        logger.info(f"Loading Parakeet model: {model_name}")
+        logger.info(f"Loading {self.backend_name.capitalize()} model: {model_name}")
 
         # Fix 5: Check if model is cached locally and use restore_from()
         import tempfile
@@ -231,18 +248,26 @@ class ParakeetBackend(STTBackend):
         config_override_path = None
 
         try:
-            # Create a minimal config override to disable CUDA graphs (Fix 2)
-            override_dict = {"decoding": {"greedy": {"use_cuda_graph_decoder": False}}}
+            # Optional Hydra override (RNN-T-specific CUDA-graph disable, Fix 2).
+            # Subclasses set ``_LOAD_OVERRIDE_CONFIG = None`` to skip this when
+            # their NeMo model class rejects the minimal override at restore
+            # time (e.g. Canary's AED model demands a full tokenizer section).
+            override_dict = self._LOAD_OVERRIDE_CONFIG
 
-            # Write to a temporary YAML file
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
-                yaml.dump(override_dict, tmp)
-                config_override_path = tmp.name
+            if override_dict is not None:
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
+                    yaml.dump(override_dict, tmp)
+                    config_override_path = tmp.name
 
-            # Use concrete EncDecRNNTBPEModel instead of abstract ASRModel
-            # to avoid "Can't instantiate abstract class ASRModel" errors
-            # when NeMo fails to resolve the target class from config.
-            model_cls = nemo_asr.models.EncDecRNNTBPEModel
+            # Resolve the concrete NeMo model class from the subclass-overridable
+            # ``_NEMO_MODEL_CLASS_NAME`` attribute. Using a concrete class
+            # (rather than abstract ``ASRModel``) avoids "Can't instantiate
+            # abstract class" errors when NeMo's saved-config target lookup
+            # fails. CanaryBackend overrides this to ``"EncDecMultiTaskModel"``
+            # so its AED checkpoint is loaded by the right class — using the
+            # default RNN-T BPE class on a Canary model crashes inside
+            # ``rnnt_bpe_models.py`` with ``cfg.decoder`` not in struct.
+            model_cls = getattr(nemo_asr.models, self._NEMO_MODEL_CLASS_NAME)
 
             def _load_with_optional_override(
                 load_fn: Any, load_name: str, **load_kwargs: Any
@@ -311,9 +336,31 @@ class ParakeetBackend(STTBackend):
 
         model = model.to(device)
         model.eval()
+        self._apply_post_load_setup(model)
+
+        self._model = model
+        self._model_name = model_name
+        logger.info(
+            "%s model loaded (max_chunk_duration_s=%d)",
+            self.backend_name.capitalize(),
+            self._max_chunk_duration_s,
+        )
+
+    def _apply_post_load_setup(self, model: Any) -> None:
+        """Apply RNN-T / Parakeet-specific post-load configuration.
+
+        Disables NeMo's CUDA graph decoder (incompatible with CUDA ≥ 12.8),
+        applies optional Conformer encoder optimisations from the
+        ``parakeet:`` config block, and resolves ``_max_chunk_duration_s``.
+
+        Subclasses targeting non-RNN-T NeMo models (e.g. Canary's AED
+        multitask backend) override this — both the CUDA-graph patch and
+        the encoder helpers are tied to the RNN-T decoding stack and the
+        Conformer encoder respectively, neither of which apply to AED
+        attention-encoder-decoder models.
+        """
         self._disable_cuda_graphs(model)
 
-        # Apply NeMo memory optimizations from config
         cfg = get_config()
         parakeet_cfg = cfg.get("parakeet", default={}) or {}
 
@@ -326,7 +373,6 @@ class ParakeetBackend(STTBackend):
             model.change_subsampling_conv_chunking_factor(1)
             logger.info("Enabled subsampling conv chunking (factor=1)")
 
-        # Configurable chunk duration (default 300s = 5 min)
         try:
             self._max_chunk_duration_s = max(
                 60,
@@ -334,10 +380,6 @@ class ParakeetBackend(STTBackend):
             )
         except (TypeError, ValueError):
             self._max_chunk_duration_s = 300
-
-        self._model = model
-        self._model_name = model_name
-        logger.info("Parakeet model loaded (max_chunk_duration_s=%d)", self._max_chunk_duration_s)
 
     def unload(self) -> None:
         self._model = None

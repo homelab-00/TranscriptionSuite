@@ -33,9 +33,45 @@ logger = logging.getLogger(__name__)
 class CanaryBackend(ParakeetBackend):
     """NVIDIA Canary / NeMo multitask ASR + translation backend."""
 
+    # NeMo loads Canary checkpoints via ``EncDecMultiTaskModel`` — the AED
+    # (Attention Encoder-Decoder) class. Loading them with the inherited
+    # Parakeet default (``EncDecRNNTBPEModel``) crashes in
+    # ``rnnt_bpe_models.py`` with ``ConfigAttributeError: Key 'decoder' is
+    # not in struct`` because the saved Canary config has ``encoder`` and
+    # ``decoding`` only — there is no top-level ``decoder`` key for the
+    # RNN-T transducer. Confirmed via NeMo's official Canary tutorial,
+    # which loads ``nvidia/canary-1b-v2`` with ``EncDecMultiTaskModel``.
+    _NEMO_MODEL_CLASS_NAME: str = "EncDecMultiTaskModel"
+    # Canary's AED model rejects Parakeet's minimal ``decoding.greedy``
+    # override at restore time (the AED loader insists the override config
+    # supply a full ``tokenizer`` section). Skip the pre-load Hydra patch
+    # entirely — the RNN-T-specific CUDA-graph workaround it carries does
+    # not apply to AED decoding.
+    _LOAD_OVERRIDE_CONFIG: dict[str, Any] | None = None
+
     # ------------------------------------------------------------------
     # STTBackend interface overrides
     # ------------------------------------------------------------------
+
+    def _apply_post_load_setup(self, model: Any) -> None:
+        """Canary AED post-load configuration.
+
+        The Parakeet superclass applies the RNN-T CUDA-graph workaround and
+        the optional ``parakeet:`` Conformer-encoder tweaks. Both target
+        constructs that do not exist on the Canary AED model:
+
+        * the CUDA-graph patch reads ``cfg.decoding.greedy.use_cuda_graph_decoder``,
+          which Canary's beam-search-over-Transformer-decoder configuration
+          does not define;
+        * ``change_attention_model`` / ``change_subsampling_conv_chunking_factor``
+          target the Conformer encoder helpers and are gated on the
+          ``parakeet:`` config block — applying them implicitly to a
+          Canary load would silently re-shape its encoder.
+
+        Just record ``_max_chunk_duration_s`` so the inherited chunking
+        path in ``_transcribe_long`` has a sane value.
+        """
+        self._max_chunk_duration_s = MAX_CHUNK_DURATION
 
     def _do_warmup(self) -> None:
         """Internal method to perform actual Canary warmup."""
