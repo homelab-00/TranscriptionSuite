@@ -62,9 +62,9 @@ RUN set -eux; \
 # Sanity: confirm the dzn ICD manifest is now present. If this fails, the
 # kisak PPA shape changed and the image will not enumerate /dev/dxg correctly
 # at runtime — fail the build loudly so the maintainer notices immediately.
-RUN test -f /usr/share/vulkan/icd.d/dzn_icd.x86_64.json \
+RUN test -f /usr/share/vulkan/icd.d/dzn_icd.json \
     || (echo "ERROR: dzn ICD manifest missing after PPA install — Mesa build does not include dzn. Aborting image build." >&2 && exit 1)
 
 # Default env hints — overridden by docker-compose.vulkan-wsl2.yml at runtime.
 ENV LD_LIBRARY_PATH=/usr/lib/wsl/lib \
-    VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/dzn_icd.x86_64.json
+    VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/dzn_icd.json

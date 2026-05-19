@@ -16,12 +16,19 @@ if "server" not in sys.modules:
     sys.modules["server"] = server_pkg
 
 
-def test_live_mode_accepts_whisper_models_only() -> None:
+def test_live_mode_accepts_whisper_and_whispercpp_models() -> None:
     pytest.importorskip("fastapi")
     from server.api.routes.live import is_live_mode_model_supported
 
     assert is_live_mode_model_supported("Systran/faster-whisper-large-v3")
     assert is_live_mode_model_supported("Systran/faster-whisper-small")
+
+    # whisper.cpp (GGML) is supported via the Vulkan sidecar: AudioToTextRecorder
+    # drives VAD chunking and dispatches each utterance to WhisperCppBackend.
+    assert is_live_mode_model_supported("ggml-small.bin")
+    assert is_live_mode_model_supported("ggml-large-v3-turbo-q8_0.bin")
+    assert is_live_mode_model_supported("ggml-medium.en.bin")
+    assert is_live_mode_model_supported("large-v3.gguf")
 
     assert not is_live_mode_model_supported("nvidia/parakeet-tdt-0.6b-v3")
     assert not is_live_mode_model_supported("nvidia/canary-1b-v2")

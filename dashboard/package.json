@@ -138,6 +138,10 @@
         "to": "docker/docker-compose.vulkan.yml"
       },
       {
+        "from": "../server/docker/docker-compose.vulkan-wsl2.yml",
+        "to": "docker/docker-compose.vulkan-wsl2.yml"
+      },
+      {
         "from": "../server/config.yaml",
         "to": "config.yaml"
       },

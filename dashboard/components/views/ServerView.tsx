@@ -44,7 +44,11 @@ import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { formatDateDMY, compareVersionTags } from '../../src/services/versionUtils';
-import { isWhisperModel, isMLXModel } from '../../src/services/modelCapabilities';
+import {
+  isWhisperModel,
+  isWhisperCppModel,
+  isMLXModel,
+} from '../../src/services/modelCapabilities';
 import { MODEL_REGISTRY, getModelsByFamily } from '../../src/services/modelRegistry';
 import {
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
@@ -171,9 +175,13 @@ function findCaseInsensitivePreset(value: string, options: string[]): string | n
   return match ?? null;
 }
 
+function isLiveCompatibleModel(modelName: string): boolean {
+  return isWhisperModel(modelName) || isWhisperCppModel(modelName);
+}
+
 function normalizeLiveModelToWhisper(modelName: string): string {
   if (modelName === DISABLED_MODEL_SENTINEL) return modelName;
-  return isWhisperModel(modelName) ? modelName : FALLBACK_LIVE_WHISPER_MODEL;
+  return isLiveCompatibleModel(modelName) ? modelName : FALLBACK_LIVE_WHISPER_MODEL;
 }
 
 function mapMainModelToSelection(modelName: string): { selection: string; custom: string } {
@@ -199,7 +207,7 @@ function mapLiveModelToSelection(
 
   const normalizedLiveModel = normalizeLiveModelToWhisper(modelName);
   if (
-    isWhisperModel(mainModelName) &&
+    isLiveCompatibleModel(mainModelName) &&
     normalizeModelName(normalizedLiveModel) === normalizeModelName(mainModelName)
   ) {
     return { selection: LIVE_MODEL_SAME_AS_MAIN_OPTION, custom: '' };
@@ -490,7 +498,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             resolvedMainModel,
             '',
           );
-          if (resolvedLiveModel !== DISABLED_MODEL_SENTINEL && !isWhisperModel(resolvedLiveModel)) {
+          if (
+            resolvedLiveModel !== DISABLED_MODEL_SENTINEL &&
+            !isLiveCompatibleModel(resolvedLiveModel)
+          ) {
             nextLiveSelection = FALLBACK_LIVE_WHISPER_MODEL;
             nextLiveCustom = '';
           }
@@ -834,8 +845,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   );
   const normalizedLiveModel = normalizeLiveModelToWhisper(activeLiveModel);
   const liveModelWhisperOnlyCompatible =
-    activeLiveModel === DISABLED_MODEL_SENTINEL || isWhisperModel(activeLiveModel);
-  const liveModeModelConstraintMessage = 'Live Mode only supports faster-whisper models.';
+    activeLiveModel === DISABLED_MODEL_SENTINEL || isLiveCompatibleModel(activeLiveModel);
+  const liveModeModelConstraintMessage =
+    'Live Mode supports faster-whisper and whisper.cpp (GGML) models.';
 
   // Active diarization model name — empty string = Sortformer (server auto-select)
   const activeDiarizationModel =
@@ -974,12 +986,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     activeDiarizationModel,
   ]);
 
-  // Hard-reset any non-whisper live model selection to the default whisper model.
+  // Hard-reset any non-Live-compatible model selection to the default whisper model.
+  // Live Mode accepts faster-whisper and whisper.cpp (GGML) backends.
   useEffect(() => {
     if (
       !localSelectionsHydrated ||
       activeLiveModel === DISABLED_MODEL_SENTINEL ||
-      isWhisperModel(activeLiveModel)
+      isLiveCompatibleModel(activeLiveModel)
     )
       return;
     setLiveModelSelection(FALLBACK_LIVE_WHISPER_MODEL);

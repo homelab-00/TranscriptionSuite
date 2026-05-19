@@ -1,0 +1,32 @@
+{"id": "lifespan-start", "category": "server", "label": "Starting server...", "status": "active", "ts": 1778967364.3320408, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "Checking GPU...", "status": "active", "ts": 1778967377.4289715, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "GPU check complete", "status": "complete", "ts": 1778967377.9674234, "durationMs": 538, "phase": "lifespan"}
+{"id": "warn-gpu", "category": "warning", "label": "No GPU detected \u2014 CPU mode", "status": "active", "ts": 1778967377.9723902, "persistent": true}
+{"id": "server-ready", "category": "server", "label": "Server ready", "status": "complete", "ts": 1778967391.3385127, "phase": "ready", "durationMs": 27011}
+{"id": "lifespan-start", "category": "server", "label": "Starting server...", "status": "active", "ts": 1778968239.953718, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "Checking GPU...", "status": "active", "ts": 1778968256.791269, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "GPU check complete", "status": "complete", "ts": 1778968257.350201, "durationMs": 559, "phase": "lifespan"}
+{"id": "warn-gpu", "category": "warning", "label": "No GPU detected \u2014 CPU mode", "status": "active", "ts": 1778968257.352562, "persistent": true}
+{"id": "server-ready", "category": "server", "label": "Server ready", "status": "complete", "ts": 1778968264.5098515, "phase": "ready", "durationMs": 24562}
+{"id": "lifespan-start", "category": "server", "label": "Starting server...", "status": "active", "ts": 1778968736.1415586, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "Checking GPU...", "status": "active", "ts": 1778968774.417536, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "GPU check complete", "status": "complete", "ts": 1778968774.9544697, "durationMs": 537, "phase": "lifespan"}
+{"id": "warn-gpu", "category": "warning", "label": "No GPU detected \u2014 CPU mode", "status": "active", "ts": 1778968774.9618297, "persistent": true}
+{"id": "server-ready", "category": "server", "label": "Server ready", "status": "complete", "ts": 1778968784.5521293, "phase": "ready", "durationMs": 48415}
+{"id": "lifespan-start", "category": "server", "label": "Starting server...", "status": "active", "ts": 1779019505.7318087, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "Checking GPU...", "status": "active", "ts": 1779019515.2681177, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "GPU check complete", "status": "complete", "ts": 1779019515.778881, "durationMs": 511, "phase": "lifespan"}
+{"id": "warn-gpu", "category": "warning", "label": "No GPU detected \u2014 CPU mode", "status": "active", "ts": 1779019515.7820027, "persistent": true}
+{"id": "server-ready", "category": "server", "label": "Server ready", "status": "complete", "ts": 1779019520.4133084, "phase": "ready", "durationMs": 14685}
+{"id": "lifespan-start", "category": "server", "label": "Starting server...", "status": "active", "ts": 1779019565.8607574, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "Checking GPU...", "status": "active", "ts": 1779019575.4533308, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "GPU check complete", "status": "complete", "ts": 1779019575.989822, "durationMs": 536, "phase": "lifespan"}
+{"id": "warn-gpu", "category": "warning", "label": "No GPU detected \u2014 CPU mode", "status": "active", "ts": 1779019576.03264, "persistent": true}
+{"id": "server-ready", "category": "server", "label": "Server ready", "status": "complete", "ts": 1779019585.4258988, "phase": "ready", "durationMs": 19570}
+{"id": "lifespan-start", "category": "server", "label": "Starting server...", "status": "active", "ts": 1779020840.8748362, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "Checking GPU...", "status": "active", "ts": 1779020855.6617558, "phase": "lifespan"}
+{"id": "lifespan-gpu", "category": "server", "label": "GPU check complete", "status": "complete", "ts": 1779020856.186135, "durationMs": 524, "phase": "lifespan"}
+{"id": "warn-gpu", "category": "warning", "label": "No GPU detected \u2014 CPU mode", "status": "active", "ts": 1779020856.1900418, "persistent": true}
+{"id": "server-ready", "category": "server", "label": "Server ready", "status": "complete", "ts": 1779020864.5121512, "phase": "ready", "durationMs": 23640}
+{"id": "model-load-ggml-small.en.bin", "category": "download", "label": "Loading ggml-small.en.bin...", "status": "active", "ts": 1779024561.5158129}
+{"id": "model-load-ggml-small.en.bin", "category": "download", "label": "ggml-small.en.bin loaded from cache", "status": "complete", "ts": 1779024566.6214433, "durationMs": 5109}

@@ -47,6 +47,7 @@ import {
   filterLanguagesForModel,
   isCanaryModel,
   isWhisperModel,
+  isWhisperCppModel,
   pickDefaultLanguage,
   supportsAutoDetect,
   CANARY_TRANSLATION_TARGETS,
@@ -313,16 +314,17 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const canTranslateLive = supportsTranslation(activeLiveModel);
   const mainModelDisabled = isModelDisabled(activeModel);
   const liveModelDisabled = isModelDisabled(activeLiveModel);
-  const liveModeWhisperOnlyCompatible = !liveModelDisabled && isWhisperModel(activeLiveModel);
+  const liveModeWhisperOnlyCompatible =
+    !liveModelDisabled && (isWhisperModel(activeLiveModel) || isWhisperCppModel(activeLiveModel));
   const liveModeUnsupportedMessage = activeLiveModel
-    ? `Live Mode is not compatible with "${activeLiveModel}" — only faster-whisper models are supported in v1. Set a faster-whisper model as the Live Mode model in Server settings.`
-    : 'Live Mode only supports faster-whisper models in v1. Change the Live Mode model in Server settings.';
+    ? `Live Mode is not compatible with "${activeLiveModel}" — only faster-whisper and whisper.cpp (GGML) models are supported. Set a supported model as the Live Mode model in Server settings.`
+    : 'Live Mode only supports faster-whisper and whisper.cpp (GGML) models. Change the Live Mode model in Server settings.';
   const liveModeDisabledReason = (() => {
     if (!clientRunning) return 'Server is not running';
     if (!serverConnection.ready) return 'Server is not ready';
     if (liveModelDisabled) return 'No live model selected — configure one in Server settings';
     if (!liveModeWhisperOnlyCompatible)
-      return `"${activeLiveModel}" is not a faster-whisper model — Live Mode requires a faster-whisper model`;
+      return `"${activeLiveModel}" is not a supported Live Mode backend — use a faster-whisper or whisper.cpp (GGML) model`;
     return '';
   })();
   // gh-86 #1 follow-up — `isLive` is referenced both by the IIFE below and the

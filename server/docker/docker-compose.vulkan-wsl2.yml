@@ -72,7 +72,7 @@ services:
       # Force the Vulkan loader to use Mesa's dzn ICD (Vulkan-on-D3D12).
       # Without this, the loader can fall back to llvmpipe (CPU rasterizer)
       # silently, which would masquerade as GPU acceleration.
-      - VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/dzn_icd.x86_64.json
+      - VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/dzn_icd.json
       # Optional: Mesa's adapter selector for multi-GPU Windows hosts.
       # Empty string lets dzn pick the default — power users can override
       # via the dashboard's process env (e.g. "Nvidia", "Intel", "AMD").

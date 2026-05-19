@@ -19,7 +19,7 @@ import {
   type ModelFamily,
   type ModelRole,
 } from '../../src/services/modelRegistry';
-import { isWhisperModel } from '../../src/services/modelCapabilities';
+import { isWhisperModel, isWhisperCppModel } from '../../src/services/modelCapabilities';
 import {
   MAIN_MODEL_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
@@ -392,7 +392,9 @@ const CustomModelRow = React.memo(function CustomModelRow({
 
   const roleOptions: { role: ModelRole; label: string }[] = [
     { role: 'main', label: 'Main Transcriber' },
-    ...(isWhisperModel(modelId) ? [{ role: 'live' as ModelRole, label: 'Live Model' }] : []),
+    ...(isWhisperModel(modelId) || isWhisperCppModel(modelId)
+      ? [{ role: 'live' as ModelRole, label: 'Live Model' }]
+      : []),
     { role: 'diarization', label: 'Diarization Model' },
   ];
 
@@ -630,12 +632,15 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
           showToast(`Set ${modelId} as Main Transcriber`);
           break;
         case 'live':
-          if (!isWhisperModel(modelId)) {
-            showToast('Live Mode only supports faster-whisper models in v1.');
+          if (!isWhisperModel(modelId) && !isWhisperCppModel(modelId)) {
+            showToast('Live Mode supports faster-whisper and whisper.cpp (GGML) models.');
             break;
           }
-          if (isPreset && registryModel?.family === 'whisper') {
-            // Whisper models are in the live preset dropdown
+          if (
+            isPreset &&
+            (registryModel?.family === 'whisper' || registryModel?.family === 'whispercpp')
+          ) {
+            // Both whisper and whispercpp presets are in the live preset dropdown
             setLiveModelSelection(modelId);
             setLiveCustomModel('');
           } else {
