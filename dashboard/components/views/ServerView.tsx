@@ -1954,7 +1954,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                             mainTranscriberModel: sanitizeModelName(activeTranscriber),
                             liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
                             diarizationModel: sanitizeModelName(activeDiarizationModel),
-                            ...(runtimeProfile === 'vulkan'
+                            ...((runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2')
                               ? {
                                   whispercppModel: `/models/${GGML_DISPLAY_TO_ID.get(whispercppModelSelection) ?? 'ggml-large-v3-turbo.bin'}`,
                                 }
@@ -1983,7 +1983,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                             mainTranscriberModel: sanitizeModelName(activeTranscriber),
                             liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
                             diarizationModel: sanitizeModelName(activeDiarizationModel),
-                            ...(runtimeProfile === 'vulkan'
+                            ...((runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2')
                               ? {
                                   whispercppModel: `/models/${GGML_DISPLAY_TO_ID.get(whispercppModelSelection) ?? 'ggml-large-v3-turbo.bin'}`,
                                 }
@@ -2423,12 +2423,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         </button>
                       </p>
                     )}
-                    {runtimeProfile === 'vulkan' && (
+                    {(runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2') && (
                       <p className="text-xs text-slate-500 italic">
                         Switching models requires a server restart.
                       </p>
                     )}
-                    {runtimeProfile === 'vulkan' && (
+                    {(runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2') && (
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-purple-400">
                           GGML Sidecar Model

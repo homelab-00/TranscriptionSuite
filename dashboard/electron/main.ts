@@ -1300,6 +1300,14 @@ ipcMain.handle('docker:downloadModelToCache', async (_event, modelId: string) =>
   return dockerManager.downloadModelToCache(modelId);
 });
 
+ipcMain.handle('docker:isGgmlModelDownloadedOnHost', async (_event, fileName: string) => {
+  return dockerManager.isGgmlModelDownloadedOnHost(fileName);
+});
+
+ipcMain.handle('docker:downloadGgmlModelToHost', async (_event, fileName: string) => {
+  return dockerManager.downloadGgmlModelToHost(fileName);
+});
+
 ipcMain.handle('docker:removeVolume', async (_event, name: string) => {
   return dockerManager.removeVolume(name);
 });

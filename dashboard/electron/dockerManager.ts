@@ -1286,16 +1286,10 @@ export function composeFileArgs(
     files.push('docker-compose.vulkan.yml');
   }
 
-  // Vulkan-WSL2 sidecar overlay — opt-in experimental Windows path (GH-101).
-  // Uses the locally-built sidecar image with Mesa's `dzn` Vulkan-on-D3D12 ICD;
-  // mounts /dev/dxg + /usr/lib/wsl for WSL2 GPU paravirtualization.
-  // Defense in depth: only attach the overlay on Win32 even if the profile
-  // value somehow leaked to another platform — the existing checkVulkanSupport
-  // pre-flight rejects this case but compose-file selection should not produce
-  // an unrunnable command if any future caller bypasses the pre-flight.
-  if (runtimeProfile === 'vulkan-wsl2' && process.platform === 'win32') {
-    files.push('docker-compose.vulkan-wsl2.yml');
-  }
+  // vulkan-wsl2: whisper-server.exe runs natively on Windows (no AVX2 in the
+  // host CPU means the containerised whisper-server cannot start).  Docker only
+  // handles the main transcription backend; it reaches the native exe via
+  // host.docker.internal:8080.  No sidecar overlay needed.
 
   // Flatten into compose args
   return files.flatMap((f) => ['-f', f]);
@@ -2067,34 +2061,42 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     }
   }
 
-  // Pre-flight Vulkan validation. Surfaces a clear message before Docker
-  // tries to mount /dev/dri (docker-compose.vulkan.yml: devices: /dev/dri).
-  // Covers non-Linux platforms (Issue #101) and Linux hosts without DRI.
-  // For 'vulkan-wsl2' (GH-101 follow-up), gates on the cached WSL2 probe and
-  // verifies the locally-built sidecar image is present (no GHCR publish yet).
-  if (runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2') {
-    const fs = await import('fs');
-    const gpuInfo = runtimeProfile === 'vulkan-wsl2' ? await checkGpu() : undefined;
+  // Pre-flight: Linux Vulkan (DRI device passthrough).
+  if (runtimeProfile === 'vulkan') {
     const vulkanError = checkVulkanSupport({
       platform: process.platform,
       exists: (p) => fs.existsSync(p),
-      wslSupport: gpuInfo?.wslSupport,
-      profile: runtimeProfile,
+      profile: 'vulkan',
     });
     if (vulkanError) {
       throw new Error(vulkanError);
     }
-    if (runtimeProfile === 'vulkan-wsl2') {
-      const imagePresent = await hasVulkanWsl2SidecarImage();
-      if (!imagePresent) {
-        throw new Error(
-          `Vulkan-WSL2 sidecar image "${VULKAN_WSL2_SIDECAR_IMAGE}" was not found locally. ` +
-            'This image is not published to GHCR — build it once with one of: ' +
-            '"powershell -ExecutionPolicy Bypass -File server\\docker\\build-vulkan-wsl2.ps1" ' +
-            'or "bash server/docker/build-vulkan-wsl2.sh" ' +
-            '(see README §2.5.2 Windows + WSL2 for the full setup).',
-        );
-      }
+  }
+
+  // Pre-flight: Windows vulkan-wsl2 (native whisper-server.exe, no AVX2 needed).
+  // Docker Desktop with WSL2 backend is still required for the main backend
+  // container; only the whisper sidecar is replaced by the native exe.
+  if (runtimeProfile === 'vulkan-wsl2') {
+    if (process.platform !== 'win32') {
+      throw new Error(
+        'The vulkan-wsl2 profile is only supported on Windows. ' +
+          'Switch to the standard "Vulkan" profile on Linux.',
+      );
+    }
+    const gpuInfo = await checkGpu();
+    if (!gpuInfo.wslSupport?.available) {
+      throw new Error(
+        gpuInfo.wslSupport?.reason ??
+          'Docker Desktop is not running with the WSL2 backend. ' +
+          'Switch to WSL2 in Docker Desktop settings, then try again.',
+      );
+    }
+    const exePath = getWhisperServerExePath();
+    if (!fs.existsSync(exePath)) {
+      throw new Error(
+        `whisper-server.exe was not found at: ${exePath}\n` +
+          'Please reinstall TranscriptionSuite to restore it.',
+      );
     }
   }
 
@@ -2206,14 +2208,17 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     envUpdates['DIARIZATION_MODEL'] = diarizationModel;
   }
 
-  // Vulkan + Vulkan-WSL2 sidecar: set whisper-server URL based on networking
-  // mode and optionally pass a custom GGML model path. Vulkan-WSL2 (GH-101
-  // follow-up) always runs Docker Desktop bridge networking on Windows, so
-  // the URL is the Docker DNS name; the legacy Vulkan path is host-network on
-  // Linux and bridge elsewhere.
+  // Vulkan profiles: set whisper-server URL and optional GGML model path.
+  // vulkan (Linux): host-network mode → localhost; bridge elsewhere → Docker DNS.
+  // vulkan-wsl2 (Windows): whisper-server.exe runs natively on the Windows host,
+  //   reachable from inside Docker Desktop bridge via host.docker.internal.
   if (runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2') {
-    const useHostNetwork = runtimeProfile === 'vulkan' && process.platform === 'linux';
-    const serverUrl = useHostNetwork ? 'http://localhost:8080' : 'http://whisper-server:8080';
+    let serverUrl: string;
+    if (runtimeProfile === 'vulkan-wsl2') {
+      serverUrl = 'http://host.docker.internal:8080';
+    } else {
+      serverUrl = process.platform === 'linux' ? 'http://localhost:8080' : 'http://whisper-server:8080';
+    }
     composeEnv['WHISPERCPP_SERVER_URL'] = serverUrl;
     envUpdates['WHISPERCPP_SERVER_URL'] = serverUrl;
 
@@ -2221,40 +2226,15 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
       composeEnv['WHISPERCPP_MODEL'] = whispercppModel;
       envUpdates['WHISPERCPP_MODEL'] = whispercppModel;
     }
-
-    // Vulkan-WSL2 only: pass through the Mesa adapter selector for systems
-    // with multiple GPUs (NVIDIA + Intel/AMD on the same Windows host).
-    // Empty string lets dzn pick the default adapter — most users won't need
-    // to override this. Read from process env so power users can set it
-    // before launching the dashboard. Empty string is intentional — the env
-    // var must always be present in compose so docker-compose interpolation
-    // doesn't warn about an unset variable.
-    //
-    // Validate strictly before persisting: this string ends up in the .env
-    // file via upsertComposeEnvValues. A value containing newlines or `=`
-    // could inject an extra key. Restrict to the alphabet Microsoft documents
-    // for adapter selection (vendor names like "Nvidia", "AMD", "Intel" plus
-    // common adapter SKUs). Anything else is silently dropped.
-    if (runtimeProfile === 'vulkan-wsl2') {
-      const rawAdapter = process.env.MESA_D3D12_DEFAULT_ADAPTER_NAME ?? '';
-      const adapterName = /^[A-Za-z0-9 _.\-]{0,128}$/.test(rawAdapter) ? rawAdapter : '';
-      if (rawAdapter && !adapterName) {
-        console.warn(
-          '[DockerManager] Ignoring MESA_D3D12_DEFAULT_ADAPTER_NAME with disallowed characters; using default adapter.',
-        );
-      }
-      composeEnv['MESA_D3D12_DEFAULT_ADAPTER_NAME'] = adapterName;
-      envUpdates['MESA_D3D12_DEFAULT_ADAPTER_NAME'] = adapterName;
-    } else {
-      envUpdates['MESA_D3D12_DEFAULT_ADAPTER_NAME'] = '';
-    }
   } else {
     // Clear stale vulkan env vars from a previous profile switch so they
     // don't linger in the .env file.
     envUpdates['WHISPERCPP_SERVER_URL'] = '';
     envUpdates['WHISPERCPP_MODEL'] = '';
-    envUpdates['MESA_D3D12_DEFAULT_ADAPTER_NAME'] = '';
   }
+  // Always clear MESA_D3D12_DEFAULT_ADAPTER_NAME — it was only used by the
+  // now-retired containerised whisper-server sidecar (docker-compose.vulkan-wsl2.yml).
+  envUpdates['MESA_D3D12_DEFAULT_ADAPTER_NAME'] = '';
 
   upsertComposeEnvValues(envUpdates);
 
@@ -2279,6 +2259,26 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
 
   // Rotate the persistent server log — adds a session marker and trims old sessions.
   rotateServerLog();
+
+  // vulkan-wsl2: launch native whisper-server.exe before docker compose so the
+  // backend can reach it at host.docker.internal:8080 as soon as it starts.
+  if (runtimeProfile === 'vulkan-wsl2') {
+    const portFree = await isPort8080Free();
+    if (!portFree) {
+      throw new Error(
+        'Port 8080 is already in use by another process. ' +
+          'Free port 8080 and try again.',
+      );
+    }
+    await killExistingWhisperServer();
+    const ggmlFilename = (whispercppModel ?? 'ggml-large-v3-turbo.bin').replace(/^\/models\//, '');
+    const hostModelPath = path.join(getWhisperModelsDir(), ggmlFilename);
+    if (!fs.existsSync(hostModelPath)) {
+      console.log(`[DockerManager] Model not found at ${hostModelPath} — downloading...`);
+      await downloadGgmlModelToHost(ggmlFilename);
+    }
+    await launchWhisperServerNative(hostModelPath);
+  }
 
   const fileArgs = composeFileArgs(
     runtimeProfile,
@@ -2309,6 +2309,10 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
  * Stop the container via docker compose.
  */
 async function stopContainer(): Promise<string> {
+  // Best-effort: clean up native whisper-server.exe if it was started by us.
+  await killExistingWhisperServer().catch((err) => {
+    console.warn('[DockerManager] killExistingWhisperServer on stop failed:', err?.message ?? err);
+  });
   try {
     return await exec(await runtimeBin(), ['compose', 'stop'], { cwd: getComposeDir() });
   } catch (composeErr: any) {
@@ -3255,6 +3259,146 @@ async function hasVulkanWsl2SidecarImage(): Promise<boolean> {
   }
 }
 
+// ─── Native whisper-server.exe (vulkan-wsl2) ────────────────────────────────
+
+function getWhisperServerExePath(): string {
+  return path.join(app.getPath('appData'), 'TranscriptionSuite', 'whisper-server', 'whisper-server.exe');
+}
+
+function getWhisperServerPidPath(): string {
+  return path.join(app.getPath('appData'), 'TranscriptionSuite', 'whisper-server.pid');
+}
+
+function getWhisperModelsDir(): string {
+  return path.join(app.getPath('appData'), 'TranscriptionSuite', 'whisper-models');
+}
+
+/**
+ * Returns true if nothing is listening on localhost:8080.
+ */
+async function isPort8080Free(): Promise<boolean> {
+  return new Promise((resolve) => {
+    // Dynamic import keeps `net` out of the module-level scope.
+    import('net').then(({ createConnection }) => {
+      const socket = createConnection({ host: '127.0.0.1', port: 8080 });
+      socket.once('connect', () => {
+        socket.destroy();
+        resolve(false); // something is already listening
+      });
+      socket.once('error', () => {
+        resolve(true); // connection refused → port is free
+      });
+    });
+  });
+}
+
+/**
+ * Kill any whisper-server.exe process previously started by us (identified by
+ * the PID file).  No-op if the PID file does not exist or the process is
+ * already gone.
+ */
+async function killExistingWhisperServer(): Promise<void> {
+  const pidPath = getWhisperServerPidPath();
+  if (!fs.existsSync(pidPath)) return;
+
+  let pid: number;
+  try {
+    pid = parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10);
+    if (isNaN(pid) || pid <= 0) return;
+  } catch {
+    return;
+  }
+
+  try {
+    // Signal 0 checks liveness without actually killing; on Windows this
+    // throws if the process does not exist.
+    process.kill(pid, 0);
+    process.kill(pid);
+    console.log(`[DockerManager] Killed whisper-server.exe (pid ${pid})`);
+  } catch {
+    // Process already gone — nothing to do.
+  } finally {
+    try { fs.unlinkSync(pidPath); } catch { /* best-effort */ }
+  }
+}
+
+/**
+ * Check whether a GGML model file exists in the host-side whisper-models dir
+ * (used by the native whisper-server.exe on Windows; separate from the Docker volume).
+ */
+async function isGgmlModelDownloadedOnHost(fileName: string): Promise<boolean> {
+  const sanitized = path.basename(fileName.trim());
+  if (!isGgmlFileName(sanitized)) return false;
+  return fs.existsSync(path.join(getWhisperModelsDir(), sanitized));
+}
+
+/**
+ * Download a GGML model file directly to the host-side whisper-models directory
+ * (used by native whisper-server.exe on Windows; does not touch the Docker volume).
+ * Uses electron.net so redirects, proxies, and TLS are handled automatically.
+ */
+async function downloadGgmlModelToHost(fileName: string): Promise<void> {
+  const sanitized = path.basename(fileName.trim());
+  if (!isGgmlFileName(sanitized)) {
+    throw new Error(`Invalid GGML file name: ${fileName}`);
+  }
+
+  const modelsDir = getWhisperModelsDir();
+  fs.mkdirSync(modelsDir, { recursive: true });
+
+  const dest = path.join(modelsDir, sanitized);
+  const tmp = `${dest}.tmp`;
+  const url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${sanitized}`;
+
+  const { net } = await import('electron');
+
+  await new Promise<void>((resolve, reject) => {
+    const request = net.request({ url, redirect: 'follow' });
+    const file = fs.createWriteStream(tmp);
+
+    request.on('response', (response) => {
+      if (response.statusCode >= 400) {
+        file.destroy();
+        reject(new Error(`HTTP ${response.statusCode} downloading ${sanitized}`));
+        return;
+      }
+      response.on('data', (chunk) => file.write(chunk));
+      response.on('end', () => file.close(() => resolve()));
+      response.on('error', (err) => { file.destroy(); reject(err); });
+    });
+
+    request.on('error', (err) => { file.destroy(); reject(err); });
+    request.end();
+  }).catch((err) => {
+    try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
+    throw err;
+  });
+
+  fs.renameSync(tmp, dest);
+}
+
+/**
+ * Spawn whisper-server.exe as a detached background process and persist its
+ * PID so it can be killed on the next start or on clean app exit.
+ */
+async function launchWhisperServerNative(modelPath: string): Promise<void> {
+  const exePath = getWhisperServerExePath();
+  const child = spawn(exePath, ['--model', modelPath, '--host', '0.0.0.0', '--port', '8080'], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+
+  const pid = child.pid;
+  if (!pid) {
+    throw new Error('whisper-server.exe failed to start (no PID assigned).');
+  }
+
+  fs.mkdirSync(path.dirname(getWhisperServerPidPath()), { recursive: true });
+  fs.writeFileSync(getWhisperServerPidPath(), String(pid), { encoding: 'utf-8', mode: 0o600 });
+  console.log(`[DockerManager] Launched whisper-server.exe (pid ${pid}) with model: ${modelPath}`);
+}
+
 // ─── Model Cache Inspection ─────────────────────────────────────────────────
 
 export interface ModelCacheEntry {
@@ -3726,6 +3870,8 @@ export const dockerManager = {
   removeModelCache,
   downloadModelToCache,
   isGgmlModelDownloaded,
+  isGgmlModelDownloadedOnHost,
+  downloadGgmlModelToHost,
   checkTailscaleCertsExist,
   subscribeToDownloadEvents,
   unsubscribeFromDownloadEvents,

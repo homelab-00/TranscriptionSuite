@@ -166,6 +166,7 @@ export const ModelManagerView: React.FC = () => {
           isRunning={isRunning}
           refreshCacheStatus={refreshCacheStatus}
           isMetal={runtimeProfile === 'metal'}
+          runtimeProfile={runtimeProfile}
         />
       </div>
     </div>
