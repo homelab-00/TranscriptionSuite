@@ -367,6 +367,10 @@ def create_diarization_engine(config: dict[str, Any]) -> DiarizationEngine | Any
     no HuggingFace token required, up to 4 speakers).  Otherwise falls back
     to the PyAnnote-based :class:`DiarizationEngine`.
 
+    When a PyAnnote model is explicitly requested on Apple Silicon (MPS device),
+    the engine forces CPU execution to avoid known MPS kernel crashes in
+    pyannote.audio 4.x (see pyannote/pyannote-audio#1886, #1337).
+
     Args:
         config: Configuration with diarization settings.
                 Expects 'diarization' key at top level of config dict.
@@ -383,7 +387,8 @@ def create_diarization_engine(config: dict[str, Any]) -> DiarizationEngine | Any
 
     explicit_model = diar_config.get("model")
     max_speakers = diar_config.get("max_speakers")
-    resolved_device = _resolve_device(diar_config.get("device", "cuda"))
+    requested_device = diar_config.get("device", "cuda")
+    resolved_device = _resolve_device(requested_device)
 
     use_sortformer = (
         sortformer_available()
@@ -402,10 +407,23 @@ def create_diarization_engine(config: dict[str, Any]) -> DiarizationEngine | Any
             max_speakers=max_speakers,
         )
 
+    # Determine device for PyAnnote DiarizationEngine:
+    # On Apple Silicon (MPS), force CPU to avoid known pyannote.audio MPS crashes.
+    # See: pyannote/pyannote-audio#1886 (M4 kernel crash), #1337 (wrong timestamps on M1)
+    engine_device = resolved_device
+    if explicit_model and "pyannote" in explicit_model:
+        if resolved_device == "mps":
+            logger.warning(
+                "PyAnnote on MPS (Metal) has known crashes on macOS. "
+                "Forcing CPU execution to ensure stability. "
+                "See: pyannote/pyannote-audio#1886"
+            )
+            engine_device = "cpu"
+
     return DiarizationEngine(
         model=diar_config.get("model", "pyannote/speaker-diarization-community-1"),
         hf_token=diar_config.get("hf_token") or os.environ.get("HF_TOKEN"),
-        device=resolved_device,
+        device=engine_device,
         num_speakers=diar_config.get("num_speakers"),
         min_speakers=diar_config.get("min_speakers"),
         max_speakers=diar_config.get("max_speakers"),

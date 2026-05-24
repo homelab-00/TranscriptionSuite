@@ -304,13 +304,32 @@ class ModelManager:
         token = (
             os.environ.get("HF_TOKEN", "").strip() or str(diar_cfg.get("hf_token") or "").strip()
         )
+
+        # Check if we're on Apple Silicon (MPS available but PyAnnote has issues)
+        from server.core.diarization_engine import _resolve_device as resolve_torch_device
+
+        resolved_device = resolve_torch_device(diar_cfg.get("device", "cuda"))
+        on_apple_silicon = resolved_device == "mps"
+
+        explicit_model = diar_cfg.get("model", "")
+        is_explicit_pyannote = bool(explicit_model and "pyannote" in explicit_model.lower())
+
         if token:
-            self._set_diarization_feature_status(True, "ready")
+            # PyAnnote is available with a token
+            if on_apple_silicon and not is_explicit_pyannote:
+                # On Apple Silicon: PyAnnote works but only on CPU (MPS has known issues)
+                # Signal as ready with a warning about CPU fallback
+                self._set_diarization_feature_status(True, "ready_cpu_fallback")
+            else:
+                self._set_diarization_feature_status(True, "ready")
         else:
-            # Sortformer (mlx-audio) works without a token on Apple Silicon.
+            # No token: Sortformer can work without a token on Apple Silicon
             from server.core.sortformer_engine import sortformer_available
 
-            if sortformer_available():
+            if on_apple_silicon and is_explicit_pyannote:
+                # User explicitly requested PyAnnote but has no token
+                self._set_diarization_feature_status(False, "token_missing")
+            elif sortformer_available():
                 self._set_diarization_feature_status(True, "ready")
             else:
                 self._set_diarization_feature_status(False, "token_missing")
