@@ -206,10 +206,17 @@ class TranscriptionSession:
             # Get transcription engine (lazy import to avoid startup delay).
             # ensure_transcription_loaded() lazily reloads the model if a
             # prior Live-Mode restore left it detached (Issue #76).
+            #
+            # NOTE: Call synchronously (not via asyncio.to_thread) because MLX Metal
+            # streams are thread-local. If the model loads on a different thread than
+            # where transcription runs, MLX will fail with "There is no Stream(gpu, 0)
+            # in current thread." By calling synchronously here on the async loop
+            # thread, we ensure model loading and transcription share the same thread
+            # context for MLX operations.
             from server.core.model_manager import get_model_manager
 
             model_manager = get_model_manager()
-            engine = await asyncio.to_thread(model_manager.ensure_transcription_loaded)
+            engine = model_manager.ensure_transcription_loaded()
 
             # Transcribe — run in a thread so the event loop stays responsive.
             # Without this, the synchronous transcribe_file() blocks the entire

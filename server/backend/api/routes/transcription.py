@@ -128,8 +128,16 @@ async def transcribe_audio(
     # (Issue #76) — a failed reload must not hold the single-slot tracker or
     # leave an orphan DB row. BackendDependencyError surfaces HTTP 503 with
     # the remedy; any other reload failure propagates to the generic handler.
+    #
+    # NOTE: Call synchronously (not via asyncio.to_thread) because MLX Metal
+    # streams are thread-local. If the model loads on a different thread than
+    # where transcription runs, MLX will fail with "There is no Stream(gpu, 0)
+    # in current thread." By calling synchronously here on the async loop
+    # thread, we ensure model loading and transcription (which runs in
+    # _run_file_import via asyncio.to_thread but uses the already-loaded model)
+    # share the same thread context for MLX operations.
     try:
-        await asyncio.to_thread(model_manager.ensure_transcription_loaded)
+        model_manager.ensure_transcription_loaded()
     except BackendDependencyError as dep_err:
         remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
         detail_message = f"Backend dependency missing: {dep_err}{remedy_suffix}"
@@ -620,12 +628,19 @@ async def transcribe_quick(
 
     # Ensure the transcription model is loaded BEFORE acquiring a job slot
     # (Issue #76) — see transcribe_audio for rationale.
+    #
+    # NOTE: Call synchronously (not via asyncio.to_thread) because MLX Metal
+    # streams are thread-local. If the model loads on a different thread than
+    # where transcription runs, MLX will fail with "There is no Stream(gpu, 0)
+    # in current thread." By calling synchronously here on the async loop
+    # thread, we ensure model loading and transcription share the same thread
+    # context for MLX operations.
     try:
-        await asyncio.to_thread(model_manager.ensure_transcription_loaded)
+        model_manager.ensure_transcription_loaded()
     except BackendDependencyError as dep_err:
         remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
-        detail_message = f"Backend dependency missing: {dep_err}{remedy_suffix}"
-        logger.warning("Quick transcription pre-check failed — %s", detail_message)
+        detail_message = f"Quick transcription pre-check failed — {dep_err}{remedy_suffix}"
+        logger.warning("Transcription pre-check failed — %s", detail_message)
         raise HTTPException(status_code=503, detail=detail_message) from dep_err
 
     # Try to acquire a job slot
@@ -1458,7 +1473,9 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
     try:
         # Lazily reload the model if a prior Live-Mode restore left it
         # detached (Issue #76).
-        engine = await asyncio.to_thread(model_manager.ensure_transcription_loaded)
+        #
+        # NOTE: Call synchronously because MLX Metal streams are thread-local.
+        engine = model_manager.ensure_transcription_loaded()
 
         result = await asyncio.to_thread(
             engine.transcribe_file,

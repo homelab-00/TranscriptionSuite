@@ -358,8 +358,15 @@ async def create_transcription(
     # occupy the single-slot tracker. `model_manager.engine` was a typo — the
     # attribute does not exist; ensure_transcription_loaded() is the canonical
     # self-heal path and returns the attached engine.
+    #
+    # NOTE: Call synchronously (not via asyncio.to_thread) because MLX Metal
+    # streams are thread-local. If the model loads on a different thread than
+    # where transcription runs, MLX will fail with "There is no Stream(gpu, 0)
+    # in current thread." By calling synchronously here on the async loop
+    # thread, we ensure model loading and transcription share the same thread
+    # context for MLX operations.
     try:
-        await asyncio.to_thread(model_manager.ensure_transcription_loaded)
+        model_manager.ensure_transcription_loaded()
     except BackendDependencyError as dep_err:
         remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
         logger.warning(
@@ -474,8 +481,15 @@ async def create_translation(
 
     # Lazy-reload BEFORE try_start_job (Issue #76 pattern); see the
     # transcription handler above for the full rationale.
+    #
+    # NOTE: Call synchronously (not via asyncio.to_thread) because MLX Metal
+    # streams are thread-local. If the model loads on a different thread than
+    # where transcription runs, MLX will fail with "There is no Stream(gpu, 0)
+    # in current thread." By calling synchronously here on the async loop
+    # thread, we ensure model loading and transcription share the same thread
+    # context for MLX operations.
     try:
-        await asyncio.to_thread(model_manager.ensure_transcription_loaded)
+        model_manager.ensure_transcription_loaded()
     except BackendDependencyError as dep_err:
         remedy_suffix = f". {dep_err.remedy}" if dep_err.remedy else ""
         logger.warning(
