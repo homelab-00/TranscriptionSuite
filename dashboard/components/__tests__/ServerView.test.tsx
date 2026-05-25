@@ -265,23 +265,14 @@ describe('[P2] ServerView', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Issue #86 #2 — Pyannote diarization gate on Mac Metal
+// Pyannote diarization on Mac Metal — Issue #112 / GitHub
 //
-// Background: pyannote.audio 4.x has no working MPS path
-// (pyannote/pyannote-audio#1886 / #1337 / #1091 — all closed wontfix).
-// On Mac Metal, the dashboard must hide the Pyannote dropdown option,
-// auto-migrate any persisted Pyannote selection to Sortformer, render
-// an inline reason, and warn beside the Custom HF-repo input when its
-// value matches a pyannote pattern.
-//
-// Note on the mid-session profile-toggle row from the spec I/O matrix:
-// the migration useEffect's dependency array includes `isMetal`, so it
-// fires on any false→true transition of `isMetal`. Testing the mount-time
-// case with `runtimeProfile === 'metal'` therefore exercises the same
-// code path as a mid-session toggle from cpu→metal.
+// Background: pyannote.audio 4.x has no working MPS path, but the backend now
+// routes PyAnnote to CPU on Apple Silicon (see diarization_engine.py), so the
+// dropdown shows PyAnnote as an option with a CPU warning instead of hiding it.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Pyannote diarization gate on Mac Metal', () => {
+describe('Pyannote diarization on Mac Metal', () => {
   const SORTFORMER = 'Sortformer (Metal; ≤ 4 speakers)';
   const PYANNOTE = 'pyannote/speaker-diarization-community-1';
   const CUSTOM = 'Custom (HuggingFace repo)';
@@ -319,13 +310,10 @@ describe('Pyannote diarization gate on Mac Metal', () => {
     mockDocker.images = [];
     mockDocker.container = { exists: false, running: false, status: 'unknown', health: undefined };
     mockDocker.operationError = null;
-    // Truthy adminStatus so the diarization-hydration effect at ServerView.tsx:774
-    // can flip `diarizationHydrated` to true — which our migration effect depends on.
-    // The shape only needs to satisfy the `?.` chains at lines 725-744.
     mockAdminStatus.status = { models: {} };
   });
 
-  it('on Mac Metal with persisted Pyannote, migrates selection to Sortformer and persists it exactly once', async () => {
+  it('on Mac Metal with persisted Pyannote, does NOT migrate to Sortformer', async () => {
     const setSpy = setupElectronAPI({
       'server.runtimeProfile': 'metal',
       'server.diarizationModelSelection': PYANNOTE,
@@ -334,48 +322,6 @@ describe('Pyannote diarization gate on Mac Metal', () => {
 
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
 
-    await waitFor(() => {
-      expect(setSpy).toHaveBeenCalledWith('server.diarizationModelSelection', SORTFORMER);
-    });
-    // Persistence flows through the existing auto-persist effect — assert that
-    // the SORTFORMER write happens exactly once (the explicit set in the migration
-    // effect was removed as redundant after the edge-case-hunter review).
-    const sortformerWrites = setSpy.mock.calls.filter(
-      ([k, v]) => k === 'server.diarizationModelSelection' && v === SORTFORMER,
-    );
-    expect(sortformerWrites.length).toBe(1);
-  });
-
-  it('on Mac Metal, removes Pyannote from the dropdown DOM and renders the inline reason', async () => {
-    setupElectronAPI({
-      'server.runtimeProfile': 'metal',
-      'server.diarizationModelSelection': SORTFORMER,
-      'server.diarizationCustomModel': '',
-    });
-
-    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
-
-    await waitFor(() => {
-      expect(screen.queryByText(/pyannote.audio MPS path/i)).toBeTruthy();
-    });
-    // The pyannote model option must NOT appear anywhere (dropdown filtered, not selected).
-    expect(screen.queryAllByText(PYANNOTE).length).toBe(0);
-    // Sortformer is selected → appears in both ListboxButton and ListboxOption (>=1 match).
-    expect(screen.queryAllByText(SORTFORMER).length).toBeGreaterThanOrEqual(1);
-    // Custom is an available option (not selected) → appears in dropdown.
-    expect(screen.queryAllByText(CUSTOM).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('on non-Metal profile (cpu), does NOT migrate Pyannote and keeps all three options', async () => {
-    const setSpy = setupElectronAPI({
-      'server.runtimeProfile': 'cpu',
-      'server.diarizationModelSelection': PYANNOTE,
-      'server.diarizationCustomModel': '',
-    });
-
-    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
-
-    // Pyannote is selected → appears in both ListboxButton AND ListboxOption.
     await waitFor(() => {
       expect(screen.queryAllByText(PYANNOTE).length).toBeGreaterThanOrEqual(1);
     });
@@ -384,14 +330,43 @@ describe('Pyannote diarization gate on Mac Metal', () => {
       ([k, v]) => k === 'server.diarizationModelSelection' && v === SORTFORMER,
     );
     expect(sortformerSet).toBe(false);
-    // Inline reason must NOT be visible on non-Metal.
-    expect(screen.queryByText(/pyannote.audio MPS path/i)).toBeNull();
-    // All three options remain in the dropdown DOM.
-    expect(screen.queryAllByText(SORTFORMER).length).toBeGreaterThanOrEqual(1);
-    expect(screen.queryAllByText(CUSTOM).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('on Mac Metal with Custom selection and pyannote-prefixed value, shows the amber warning', async () => {
+  it('on Mac Metal, shows Pyannote in the dropdown with CPU warning', async () => {
+    setupElectronAPI({
+      'server.runtimeProfile': 'metal',
+      'server.diarizationModelSelection': PYANNOTE,
+      'server.diarizationCustomModel': '',
+    });
+
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Pyannote runs on CPU/i)).toBeTruthy();
+    });
+    // Pyannote model option appears in dropdown.
+    expect(screen.queryAllByText(PYANNOTE).length).toBeGreaterThanOrEqual(1);
+    // Sortformer is also available.
+    expect(screen.queryAllByText(SORTFORMER).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('on non-Metal profile (cpu), keeps all three options without CPU warning', async () => {
+    const setSpy = setupElectronAPI({
+      'server.runtimeProfile': 'cpu',
+      'server.diarizationModelSelection': PYANNOTE,
+      'server.diarizationCustomModel': '',
+    });
+
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(screen.queryAllByText(PYANNOTE).length).toBeGreaterThanOrEqual(1);
+    });
+    // No CPU warning on non-Metal.
+    expect(screen.queryByText(/runs on CPU/i)).toBeNull();
+  });
+
+  it('on Mac Metal with Custom selection and pyannote-prefixed value, shows CPU info text', async () => {
     setupElectronAPI({
       'server.runtimeProfile': 'metal',
       'server.diarizationModelSelection': CUSTOM,
@@ -401,13 +376,11 @@ describe('Pyannote diarization gate on Mac Metal', () => {
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
 
     await waitFor(() => {
-      expect(
-        screen.queryByText(/Custom pyannote repos are not supported on Apple Silicon/i),
-      ).toBeTruthy();
+      expect(screen.queryByText(/Pyannote runs on CPU/i)).toBeTruthy();
     });
   });
 
-  it('on Mac Metal with Custom selection and a non-pyannote value, does NOT show the warning', async () => {
+  it('on Mac Metal with Custom selection and a non-pyannote value, does NOT show CPU warning', async () => {
     setupElectronAPI({
       'server.runtimeProfile': 'metal',
       'server.diarizationModelSelection': CUSTOM,
@@ -416,32 +389,7 @@ describe('Pyannote diarization gate on Mac Metal', () => {
 
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
 
-    // Wait for hydration to settle by asserting the inline reason renders (it always does on Metal).
-    await waitFor(() => {
-      expect(screen.queryByText(/pyannote\.audio MPS path/i)).toBeTruthy();
-    });
-    // The custom-input warning must NOT appear for a non-pyannote value.
-    expect(
-      screen.queryByText(/Custom pyannote repos are not supported on Apple Silicon/i),
-    ).toBeNull();
-  });
-
-  it('on Mac Metal with Custom + whitespace-prefixed pyannote value, still shows the warning', async () => {
-    // Edge-case-hunter finding #2: `activeDiarizationModel` at ServerView.tsx:815-819
-    // calls `.trim()` before sending to the server, so a leading-whitespace pyannote
-    // value would otherwise bypass the gate while still reaching the broken backend.
-    setupElectronAPI({
-      'server.runtimeProfile': 'metal',
-      'server.diarizationModelSelection': CUSTOM,
-      'server.diarizationCustomModel': '  pyannote/community  ',
-    });
-
-    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
-
-    await waitFor(() => {
-      expect(
-        screen.queryByText(/Custom pyannote repos are not supported on Apple Silicon/i),
-      ).toBeTruthy();
-    });
+    // CPU warning only shows for pyannote repos.
+    expect(screen.queryByText(/Pyannote runs on CPU/i)).toBeNull();
   });
 });
