@@ -6,6 +6,9 @@
   "author": "homelab-00",
   "type": "module",
   "main": "dist-electron/main.js",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "vite",
     "dev:electron": "node scripts/dev-electron.mjs",
