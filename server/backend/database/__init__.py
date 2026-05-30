@@ -46,6 +46,7 @@ __all__ = [
     "get_recordings_for_hour",
     "delete_recording",
     "update_recording_summary",
+    "update_recording_corrected_transcript",
     "update_recording_date",
     "get_recording_summary",
     "get_transcription",

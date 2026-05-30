@@ -49,6 +49,7 @@ from server.database.database import (
     get_time_slot_info,
     get_words,
     save_longform_to_database,
+    update_recording_corrected_transcript,
     update_recording_date,
     update_recording_summary,
     update_recording_title,
@@ -136,6 +137,16 @@ class SummaryUpdate(BaseModel):
 
     summary: str | None = None
     summary_model: str | None = None
+
+
+class TranscriptUpdate(BaseModel):
+    """Request body for the non-destructive corrected transcript.
+
+    A null/empty ``transcript`` clears the correction (a revert), restoring the
+    original word-timestamped segment view.
+    """
+
+    transcript: str | None = None
 
 
 class TitleUpdate(BaseModel):
@@ -400,6 +411,33 @@ async def update_summary_patch(
         }
     else:
         raise HTTPException(status_code=500, detail="Failed to update summary")
+
+
+@router.patch("/recordings/{recording_id}/transcript")
+async def update_transcript_patch(
+    recording_id: int,
+    body: TranscriptUpdate,
+) -> dict[str, Any]:
+    """
+    Set or clear (revert) a recording's non-destructive corrected transcript.
+
+    The original segments / word-timestamps are never modified — this only
+    writes the additive ``transcript_corrected`` column.
+    """
+    if not get_recording(recording_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    # Normalize blank/whitespace-only input to NULL (a revert) so the persisted
+    # value, the echoed response, and the dashboard's hasCorrected check agree.
+    corrected = body.transcript if (body.transcript and body.transcript.strip()) else None
+    if update_recording_corrected_transcript(recording_id, corrected):
+        return {
+            "status": "updated",
+            "id": recording_id,
+            "transcript_corrected": corrected,
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to update transcript")
 
 
 @router.patch("/recordings/{recording_id}/title")

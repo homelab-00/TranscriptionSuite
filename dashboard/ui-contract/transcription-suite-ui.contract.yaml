@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.47
+  spec_version: 1.0.48
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -20,6 +20,9 @@ meta:
       - components/__tests__/SessionView.test.tsx
       - components/AriaLiveRegion.tsx
       - components/AudioVisualizer.tsx
+      - components/editor/FindReplaceTextEditor.test.tsx
+      - components/editor/FindReplaceTextEditor.tsx
+      - components/editor/FindReplaceToolbar.tsx
       - components/import/__tests__/DedupChoiceContainer.test.tsx
       - components/import/__tests__/DedupPromptModal.test.tsx
       - components/import/DedupChoiceContainer.tsx
@@ -79,6 +82,7 @@ meta:
       - components/views/FullscreenVisualizer.tsx
       - components/views/GpuDiagnosticModal.tsx
       - components/views/GpuHealthCard.tsx
+      - components/views/LiveTranscriptView.tsx
       - components/views/LogsView.tsx
       - components/views/ModelManagerTab.tsx
       - components/views/ModelManagerView.tsx
@@ -93,7 +97,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-05T13:32:14.626Z
+    generated_at: 2026-05-30T12:29:56.511Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -188,6 +192,7 @@ foundation:
         - rgba(217, 70, 239, 0.5)
         - rgba(217,70,239,0.5)
         - rgba(22,31,50,0.9)
+        - rgba(22,31,50,0.95)
         - rgba(239,22,238,0.5)
         - rgba(239,68,68,0.35)
         - rgba(239,68,68,0.6)
@@ -246,6 +251,7 @@ foundation:
           shadow: shadow-blue-400/50
     blur_levels:
       backdrop:
+        - backdrop-blur
         - backdrop-blur-2xl
         - backdrop-blur-3xl
         - backdrop-blur-md
@@ -340,7 +346,9 @@ foundation:
         - max-h-[80vh]
         - max-h-[90vh]
         - min-h-[38px]
+        - min-h-[8rem]
         - min-h-[calc(100vh-30rem)]
+        - min-w-[2.5rem]
         - min-w-[5rem]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
@@ -458,6 +466,7 @@ utility_allowlist:
     - aria-invalid
     - aria-label
     - aria-labels
+    - backdrop-blur
     - backdrop-blur-2xl
     - backdrop-blur-3xl
     - backdrop-blur-md
@@ -480,6 +489,7 @@ utility_allowlist:
     - bg-amber-400/20
     - bg-amber-400/5
     - bg-amber-500/10
+    - bg-amber-500/15
     - bg-amber-500/20
     - bg-amber-500/5
     - bg-black/10
@@ -499,6 +509,7 @@ utility_allowlist:
     - bg-cyan-400/70
     - bg-cyan-500/80
     - bg-emerald-400/10
+    - bg-emerald-500/20
     - bg-glass-100
     - bg-glass-100/30
     - bg-glass-100/50
@@ -553,6 +564,7 @@ utility_allowlist:
     - border-accent-magenta/5
     - border-accent-orange/20
     - border-amber-400/20
+    - border-amber-400/25
     - border-amber-400/30
     - border-amber-400/40
     - border-amber-500/20
@@ -564,6 +576,7 @@ utility_allowlist:
     - border-blue-500/20
     - border-cyan-400/30
     - border-dashed
+    - border-emerald-400/30
     - border-emerald-400/40
     - border-glass-100
     - border-glass-border
@@ -698,6 +711,7 @@ utility_allowlist:
     - hover:bg-cyan-300
     - hover:bg-cyan-400
     - hover:bg-cyan-400/30
+    - hover:bg-emerald-500/30
     - hover:bg-glass-100
     - hover:bg-glass-300
     - hover:bg-neutral-600
@@ -707,6 +721,7 @@ utility_allowlist:
     - hover:bg-red-500/35
     - hover:bg-white/10
     - hover:bg-white/15
+    - hover:bg-white/20
     - hover:bg-white/5
     - hover:bg-white/8
     - hover:bg-yellow-400/30
@@ -718,6 +733,7 @@ utility_allowlist:
     - hover:shadow-accent-cyan/40
     - hover:shadow-lg
     - hover:text-accent-cyan
+    - hover:text-amber-100
     - hover:text-amber-300
     - hover:text-black
     - hover:text-cyan-200
@@ -767,6 +783,7 @@ utility_allowlist:
     - max-h-60
     - max-h-72
     - max-h-96
+    - max-height
     - max-w-20
     - max-w-2xl
     - max-w-3xl
@@ -1099,6 +1116,7 @@ utility_allowlist:
     - bg-[#0b1120]
     - bg-[#0f172a]
     - bg-[rgba(22,31,50,0.9)]
+    - bg-[rgba(22,31,50,0.95)]
     - ease-[cubic-bezier(0.22,1,0.36,1)]
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
     - ease-[cubic-bezier(0.32,0.72,0,1)]
@@ -1110,7 +1128,9 @@ utility_allowlist:
     - max-h-[90vh]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[38px]
+    - min-h-[8rem]
     - min-h-[calc(100vh-30rem)]
+    - min-w-[2.5rem]
     - min-w-[5rem]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
@@ -1828,6 +1848,40 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  FindReplaceTextEditor:
+    file: components/editor/FindReplaceTextEditor.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  FindReplaceToolbar:
+    file: components/editor/FindReplaceToolbar.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   FullscreenVisualizer:
     file: components/views/FullscreenVisualizer.tsx
     required_tokens:
@@ -1893,6 +1947,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   GpuHealthCard:
     file: components/views/GpuHealthCard.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  Harness:
+    file: components/editor/FindReplaceTextEditor.test.tsx
     required_tokens:
       - colors
       - motion
@@ -2012,6 +2083,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   IssueRow:
     file: components/views/GpuDiagnosticModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  LiveTranscriptView:
+    file: components/views/LiveTranscriptView.tsx
     required_tokens:
       - colors
       - motion
