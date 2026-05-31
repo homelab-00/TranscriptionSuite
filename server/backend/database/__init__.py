@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         update_conversation_model,
         update_conversation_response_id,
         update_conversation_title,
+        update_recording_corrected_transcript,
     )
 
 

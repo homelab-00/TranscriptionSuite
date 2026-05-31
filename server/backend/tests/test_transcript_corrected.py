@@ -115,7 +115,7 @@ def _recording(recording_id: int = 1) -> dict:
 
 def test_route_sets_transcript(monkeypatch) -> None:
     captured: dict = {}
-    monkeypatch.setattr(notebook, "get_recording", lambda rid: _recording(rid))
+    monkeypatch.setattr(notebook, "get_recording", _recording)
 
     def fake_update(rid: int, text: str | None) -> bool:
         captured["rid"] = rid
@@ -132,7 +132,7 @@ def test_route_sets_transcript(monkeypatch) -> None:
 
 
 def test_route_clears_transcript(monkeypatch) -> None:
-    monkeypatch.setattr(notebook, "get_recording", lambda rid: _recording(rid))
+    monkeypatch.setattr(notebook, "get_recording", _recording)
     monkeypatch.setattr(notebook, "update_recording_corrected_transcript", lambda rid, text: True)
 
     body = notebook.TranscriptUpdate(transcript=None)
@@ -143,7 +143,7 @@ def test_route_clears_transcript(monkeypatch) -> None:
 
 def test_route_normalizes_whitespace_to_null(monkeypatch) -> None:
     captured: dict = {}
-    monkeypatch.setattr(notebook, "get_recording", lambda rid: _recording(rid))
+    monkeypatch.setattr(notebook, "get_recording", _recording)
 
     def fake_update(rid: int, text: str | None) -> bool:
         captured["text"] = text
@@ -169,7 +169,7 @@ def test_route_404_when_recording_missing(monkeypatch) -> None:
 
 
 def test_route_500_on_repo_failure(monkeypatch) -> None:
-    monkeypatch.setattr(notebook, "get_recording", lambda rid: _recording(rid))
+    monkeypatch.setattr(notebook, "get_recording", _recording)
     monkeypatch.setattr(notebook, "update_recording_corrected_transcript", lambda rid, text: False)
 
     body = notebook.TranscriptUpdate(transcript="x")
