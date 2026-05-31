@@ -19,6 +19,7 @@ const {
   mockSymlinkSync,
   mockCopyFileSync,
   mockWriteFileSync,
+  mockApp,
 } = vi.hoisted(() => ({
   mockSpawn: vi.fn(),
   mockExistsSync: vi.fn().mockReturnValue(false),
@@ -26,6 +27,8 @@ const {
   mockSymlinkSync: vi.fn(),
   mockCopyFileSync: vi.fn(),
   mockWriteFileSync: vi.fn(),
+  // Mutable so individual tests can flip packaged-vs-dev and override getVersion().
+  mockApp: { isPackaged: false, getVersion: (): string => '1.3.5' },
 }));
 
 vi.mock('child_process', () => ({
@@ -56,6 +59,10 @@ vi.mock('electron', () => ({
   app: {
     getAppPath: () => '/mock/dashboard',
     getPath: (name: string) => `/mock/${name}`,
+    get isPackaged() {
+      return mockApp.isPackaged;
+    },
+    getVersion: () => mockApp.getVersion(),
   },
   BrowserWindow: class {
     webContents = { send: vi.fn() };
@@ -250,5 +257,161 @@ describe('[P2] MLXServerManager with injected log sink', () => {
     // Ring buffer is the source for getLogs(tail) and must keep working.
     expect(manager.getLogs()).toContain('ring-line');
     expect(sinkAppend).toHaveBeenCalledWith('ring-line');
+  });
+});
+
+// ── GH #124 — actionable diagnostics when the uvicorn binary is missing ─────
+//
+// The resolution logic is correct; a miss is almost always environmental (wrong/thin
+// DMG or a lost venv). These tests lock the three message branches and assert the
+// diagnostic reaches the log ring/sink BEFORE start() throws (symptom 3: empty logs).
+
+describe('[GH #124] MLXServerManager uvicorn-missing diagnostics', () => {
+  const proc = process as unknown as { resourcesPath?: string; arch: string };
+  const originalResourcesPath = proc.resourcesPath;
+  const originalArch = proc.arch;
+  let mockWindow: ReturnType<typeof makeMockWindow>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWindow = makeMockWindow();
+    mockApp.isPackaged = false;
+    mockApp.getVersion = () => '1.3.5';
+    // Default the packaged cases to Apple Silicon — the platform these messages target.
+    // process.arch is writable:false but configurable:true, so redefine rather than assign.
+    Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    proc.resourcesPath = originalResourcesPath;
+    Object.defineProperty(process, 'arch', { value: originalArch, configurable: true });
+  });
+
+  it('thin DMG (packaged arm64, no Resources/backend): names the -metal.dmg and logs the checked path before throwing', async () => {
+    mockApp.isPackaged = true;
+    proc.resourcesPath = '/mock/Resources';
+    // Nothing exists: no uvicorn candidate, and Resources/backend is absent.
+    mockExistsSync.mockReturnValue(false);
+
+    const manager = new MLXServerManager(() => mockWindow as never);
+    await expect(manager.start({ port: 8000 })).rejects.toThrow(/dashboard-only build/);
+
+    const logs = manager.getLogs();
+    expect(logs.some((l: string) => l.includes('dashboard-only build'))).toBe(true);
+    expect(
+      logs.some((l: string) => l.includes('TranscriptionSuite-1.3.5-arm64-mac-metal.dmg')),
+    ).toBe(true);
+    // Probed-path evidence (I/O matrix) must reach the log.
+    expect(
+      logs.some((l: string) => l.includes('/mock/Resources/backend') && l.includes('not found')),
+    ).toBe(true);
+    expect(manager.getStatus()).toBe('error');
+    expect(mockWindow.send).toHaveBeenCalledWith('mlx:statusChanged', 'error');
+  });
+
+  it('thin DMG on Intel (x64): directs to Docker/remote, NOT an arm64-only metal DMG', async () => {
+    mockApp.isPackaged = true;
+    proc.resourcesPath = '/mock/Resources';
+    Object.defineProperty(process, 'arch', { value: 'x64', configurable: true });
+    mockExistsSync.mockReturnValue(false);
+
+    const manager = new MLXServerManager(() => mockWindow as never);
+    await expect(manager.start({ port: 8000 })).rejects.toThrow(/not available on Intel/i);
+
+    const logs = manager.getLogs();
+    expect(logs.some((l: string) => l.includes('Intel'))).toBe(true);
+    expect(logs.some((l: string) => l.includes('Docker'))).toBe(true);
+    // Must NOT misdirect Intel users to the Apple-Silicon-only metal DMG.
+    expect(logs.some((l: string) => l.includes('arm64-mac-metal.dmg'))).toBe(false);
+  });
+
+  it('corrupted bundle (packaged, Resources/backend exists, uvicorn missing): env incomplete; probed list excludes the dev path', async () => {
+    mockApp.isPackaged = true;
+    proc.resourcesPath = '/mock/Resources';
+    // Resources/backend exists, but no uvicorn binary anywhere. Match the EXACT
+    // backend dir, not a suffix, so the assertion documents the precise path.
+    mockExistsSync.mockImplementation((p: string) => {
+      if (typeof p !== 'string') return false;
+      if (p.includes('uvicorn')) return false;
+      return p === '/mock/Resources/backend';
+    });
+
+    const manager = new MLXServerManager(() => mockWindow as never);
+    await expect(manager.start({ port: 8000 })).rejects.toThrow(/environment is incomplete/);
+
+    const logs = manager.getLogs();
+    expect(logs.some((l: string) => l.includes('environment is incomplete'))).toBe(true);
+    expect(logs.some((l: string) => l.includes('-arm64-mac-metal.dmg'))).toBe(true);
+    // Probed list is shown and contains the packaged candidate…
+    expect(logs.some((l: string) => l.includes('Probed:'))).toBe(true);
+    expect(logs.some((l: string) => l.includes('/mock/Resources/backend/.venv/bin/uvicorn'))).toBe(
+      true,
+    );
+    // …but NOT the meaningless dev candidate path.
+    expect(logs.some((l: string) => l.includes('/dashboard/../server/backend'))).toBe(false);
+  });
+
+  it('development (not packaged, venv not built): keeps the uv sync hint and logs status before throwing', async () => {
+    mockApp.isPackaged = false;
+    mockExistsSync.mockReturnValue(false);
+
+    const manager = new MLXServerManager(() => mockWindow as never);
+    await expect(manager.start({ port: 8000 })).rejects.toThrow(/uv sync --extra mlx/);
+
+    const logs = manager.getLogs();
+    expect(logs.some((l: string) => l.includes('uv sync --extra mlx'))).toBe(true);
+    expect(manager.getStatus()).toBe('error');
+    expect(mockWindow.send).toHaveBeenCalledWith('mlx:statusChanged', 'error');
+  });
+
+  it('throws only the single-line headline (multi-line probed detail stays in the log)', async () => {
+    mockApp.isPackaged = true;
+    proc.resourcesPath = '/mock/Resources';
+    mockExistsSync.mockReturnValue(false);
+
+    const manager = new MLXServerManager(() => mockWindow as never);
+    await manager.start({ port: 8000 }).then(
+      () => {
+        throw new Error('expected start() to reject');
+      },
+      (err: Error) => {
+        expect(err.message).not.toContain('\n');
+        expect(err.message).toContain('dashboard-only build');
+        expect(err.message).not.toContain('Checked:');
+      },
+    );
+  });
+
+  it('survives app.getVersion() throwing on a damaged bundle (still actionable, still logged)', async () => {
+    mockApp.isPackaged = true;
+    proc.resourcesPath = '/mock/Resources';
+    mockApp.getVersion = () => {
+      throw new Error('Info.plist unreadable');
+    };
+    mockExistsSync.mockReturnValue(false);
+
+    const manager = new MLXServerManager(() => mockWindow as never);
+    // The getVersion failure must NOT replace the actionable diagnostic (symptom 3 guard).
+    await expect(manager.start({ port: 8000 })).rejects.toThrow(/dashboard-only build/);
+    const logs = manager.getLogs();
+    expect(logs.some((l: string) => l.includes('-arm64-mac-metal.dmg'))).toBe(true);
+  });
+
+  it('routes the diagnostic through an injected sink before throwing', async () => {
+    mockApp.isPackaged = true;
+    proc.resourcesPath = '/mock/Resources';
+    mockExistsSync.mockReturnValue(false);
+
+    const sinkAppend = vi.fn();
+    const manager = new MLXServerManager(() => mockWindow as never, {
+      append: sinkAppend as (line: string) => void,
+      flush: vi.fn() as () => void,
+    });
+
+    await expect(manager.start({ port: 8000 })).rejects.toThrow(/dashboard-only build/);
+
+    const appended: string[] = sinkAppend.mock.calls.map((c) => c[0] as string);
+    expect(appended.some((l) => l.includes('dashboard-only build'))).toBe(true);
   });
 });
