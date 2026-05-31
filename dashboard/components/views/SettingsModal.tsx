@@ -38,6 +38,7 @@ import { isMLXModel, isVibeVoiceASRModel } from '../../src/services/modelCapabil
 import { mergeConfigUpdates } from '../../src/utils/configTree';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 import { readPersistedBlurEffects } from '../../src/utils/blurEffectsBoot';
+import { readPersistedLowIdleUsage } from '../../src/utils/lowIdleUsageBoot';
 import type { AuthToken, LLMModel } from '../../src/api/types';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { ServerConfigEditor } from './ServerConfigEditor';
@@ -183,6 +184,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     runtimeProfile: 'cpu' as RuntimeProfile,
     pasteAtCursor: false,
     blurEffectsEnabled: true,
+    lowIdleUsageEnabled: false,
   });
   // Issue #87 — track the LAST SAVED Blur effects value so we can revert any
   // unsaved live-preview DOM changes if the modal closes via X without Save.
@@ -196,6 +198,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   // persisted write). The toggle onChange applies the change to the DOM
   // immediately for live preview; this ref is the rollback target.
   const savedBlurEffectsRef = useRef<boolean>(readPersistedBlurEffects());
+  // GH-124 Part C / issue 87 — track the LAST SAVED Low idle usage value so we
+  // can revert any unsaved live-preview DOM change if the modal closes via X
+  // without Save. Lazy-initialised from the same localStorage source the boot
+  // probe in dashboard/index.tsx reads (default OFF), so the ref agrees with the
+  // attribute the boot probe actually applied. Same rollback-target role as
+  // savedBlurEffectsRef; updated in the load effect and in handleSave.
+  const savedLowIdleUsageRef = useRef<boolean>(readPersistedLowIdleUsage());
   const [shortcutSettings, setShortcutSettings] = useState<{
     startRecording: string;
     stopTranscribe: string;
@@ -378,6 +387,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               }));
               const loadedBlurEffectsEnabled = (cfg['ui.blurEffectsEnabled'] as boolean) ?? true;
               savedBlurEffectsRef.current = loadedBlurEffectsEnabled;
+              const loadedLowIdleUsageEnabled = (cfg['ui.lowIdleUsageEnabled'] as boolean) ?? false;
+              savedLowIdleUsageRef.current = loadedLowIdleUsageEnabled;
               setAppSettings((prev) => ({
                 ...prev,
                 autoCopy: (cfg['app.autoCopy'] as boolean) ?? prev.autoCopy,
@@ -395,6 +406,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   (cfg['server.runtimeProfile'] as RuntimeProfile) ?? prev.runtimeProfile,
                 pasteAtCursor: (cfg['app.pasteAtCursor'] as boolean) ?? prev.pasteAtCursor,
                 blurEffectsEnabled: loadedBlurEffectsEnabled,
+                lowIdleUsageEnabled: loadedLowIdleUsageEnabled,
               }));
               setShortcutSettings((prev) => ({
                 ...prev,
@@ -448,6 +460,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         delete document.documentElement.dataset.blurEffects;
       } else {
         document.documentElement.dataset.blurEffects = 'off';
+      }
+      // GH-124 Part C / issue 87 — revert any unsaved live-preview Low idle
+      // usage DOM change back to the last-saved baseline. After Save the ref
+      // matches the new state so this revert is a no-op; after close via X it
+      // restores the visible state to the actually-persisted choice.
+      if (savedLowIdleUsageRef.current) {
+        document.documentElement.dataset.lowIdleUsage = 'on';
+      } else {
+        delete document.documentElement.dataset.lowIdleUsage;
       }
     }
     // Subscribe to portal shortcut changes
@@ -519,6 +540,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['server.runtimeProfile', appSettings.runtimeProfile],
         ['app.pasteAtCursor', appSettings.pasteAtCursor],
         ['ui.blurEffectsEnabled', appSettings.blurEffectsEnabled],
+        ['ui.lowIdleUsageEnabled', appSettings.lowIdleUsageEnabled],
         ['shortcuts.startRecording', shortcutSettings.startRecording.trim()],
         ['shortcuts.stopTranscribe', shortcutSettings.stopTranscribe.trim()],
       ];
@@ -539,6 +561,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       // Non-fatal — electron-store remains the canonical source of truth.
     }
     savedBlurEffectsRef.current = appSettings.blurEffectsEnabled;
+
+    // GH-124 Part C / issue 87 — Mirror the Low idle usage choice to
+    // localStorage so the synchronous bootstrap probe in `dashboard/index.tsx`
+    // can read it before first render on next launch (electron-store is async
+    // via IPC). Without this, a user who has just turned the mode ON would
+    // briefly see full-cost blur and animating waves on the next cold start.
+    try {
+      localStorage.setItem(
+        'ts-config:ui.lowIdleUsageEnabled',
+        JSON.stringify(appSettings.lowIdleUsageEnabled),
+      );
+    } catch {
+      // Non-fatal — electron-store remains the canonical source of truth.
+    }
+    savedLowIdleUsageRef.current = appSettings.lowIdleUsageEnabled;
 
     // Sync API client with new config so connection target updates immediately
     await apiClient.syncFromConfig();
@@ -895,6 +932,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           }}
           label="Blur effects"
           description="Disable backdrop blur to reduce CPU/GPU usage. May help on older Mac, Linux, or low-power devices."
+        />
+        <AppleSwitch
+          checked={appSettings.lowIdleUsageEnabled}
+          onChange={(v) => {
+            setAppSettings((prev) => ({ ...prev, lowIdleUsageEnabled: v }));
+            setIsDirty(true);
+            // Live preview — apply the DOM attribute immediately so the user
+            // sees the effect before clicking Save. If they close via X
+            // without saving, the load-effect close branch reverts to the
+            // last-saved baseline tracked by `savedLowIdleUsageRef`.
+            if (v) {
+              document.documentElement.dataset.lowIdleUsage = 'on';
+            } else {
+              delete document.documentElement.dataset.lowIdleUsage;
+            }
+          }}
+          label="Low idle usage"
+          description="Disable blur and idle animations to cut idle CPU/GPU. Recommended on laptops and Apple Silicon Macs."
         />
       </Section>
       <Section title="Keyboard Shortcuts">

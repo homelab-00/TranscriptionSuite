@@ -77,6 +77,13 @@ export interface ClientConfig {
      * (Tailwind utilities, inline styles, custom CSS). Default true.
      */
     blurEffectsEnabled: boolean;
+    /**
+     * GH-124 Part C / issue 87 — when true, a global CSS override on `<html
+     * data-low-idle-usage="on">` disables backdrop blur and freezes the idle
+     * AudioVisualizer waves to cut idle CPU/GPU. Default false (OFF) on every
+     * platform, so the shipped design is preserved unless the user opts in.
+     */
+    lowIdleUsageEnabled: boolean;
   };
 }
 
@@ -139,6 +146,7 @@ const DEFAULT_CONFIG: ClientConfig = {
   ui: {
     sidebarCollapsed: false,
     blurEffectsEnabled: true,
+    lowIdleUsageEnabled: false,
   },
 };
 
