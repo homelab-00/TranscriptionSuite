@@ -79,6 +79,36 @@ On first container start, the server installs Python dependencies into `/runtime
 
 **Timeout:** 30 minutes default (`BOOTSTRAP_TIMEOUT_SECONDS=1800`)
 
+### TLS interception / corporate network (`UnknownIssuer`)
+
+If first-run `uv sync` fails with `invalid peer certificate: UnknownIssuer` (or
+`certificate verify failed`), your network is intercepting HTTPS — a corporate
+proxy or antivirus "HTTPS scanning" feature presents a re-signed certificate
+whose root CA is trusted on your host but **not** inside the container. uv ships
+its own CA roots and ignores the system store by default, so it rejects the
+re-signed cert. The bootstrap now detects this and prints an actionable hint
+instead of a bare traceback.
+
+Fix (certificate verification stays ON — never disable it):
+
+1. **Trust the system CA store:** set `UV_NATIVE_TLS=true` (already wired into
+   `docker-compose.yml`). uv then reads the container's CA trust store instead
+   of its bundled roots.
+2. **Add your corporate root CA** so that store actually contains it. Easiest is
+   a small derived image:
+   ```dockerfile
+   FROM ghcr.io/homelab-00/transcriptionsuite-server:latest
+   COPY corp-root-ca.crt /usr/local/share/ca-certificates/corp-root-ca.crt
+   RUN update-ca-certificates
+   ```
+   Point `IMAGE_REPO`/`TAG` at your derived image and run with
+   `UV_NATIVE_TLS=true`. Alternatively, mount the CA and set
+   `SSL_CERT_FILE=/path/to/corp-root-ca.pem` in your own compose override.
+
+CPU-only hosts hit this most often because the default install pulls multi-GB
+CUDA wheels. Selecting the **CPU profile** in the dashboard (or
+`PYTORCH_VARIANT=cpu`) skips those wheels and shrinks the download surface.
+
 ## TLS / Remote Access
 
 ### Tailscale Setup
@@ -220,6 +250,8 @@ non-flipping cu129 path is zero-cost.
 | `INSTALL_WHISPER` | false | Install faster-whisper extras |
 | `INSTALL_NEMO` | false | Install NeMo toolkit |
 | `INSTALL_VIBEVOICE_ASR` | false | Install VibeVoice backend |
+| `PYTORCH_VARIANT` | cu129 | PyTorch wheels: `cu129`, `cu126` (legacy GPU), or `cpu` (no CUDA, GH #125) |
+| `UV_NATIVE_TLS` | false | Trust the system CA store for `uv` (corporate TLS interception, GH #125) |
 | `TLS_ENABLED` | false | Enable HTTPS + auth |
 | `LM_STUDIO_URL` | http://127.0.0.1:1234 | LM Studio API endpoint |
 

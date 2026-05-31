@@ -44,7 +44,7 @@ import { useDockerContext } from '../../src/hooks/DockerContext';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { formatDateDMY, compareVersionTags } from '../../src/services/versionUtils';
-import { isWhisperModel, isMLXModel } from '../../src/services/modelCapabilities';
+import { isWhisperModel, isMLXModel, isNemoModel } from '../../src/services/modelCapabilities';
 import { MODEL_REGISTRY, getModelsByFamily } from '../../src/services/modelRegistry';
 import {
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
@@ -567,6 +567,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           api?.config?.set('server.mainModelSelection', MAIN_RECOMMENDED_MODEL);
         }
         if (MLX_MODEL_IDS.has(liveModelSelection)) {
+          setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
+          api?.config?.set('server.liveModelSelection', LIVE_MODEL_SAME_AS_MAIN_OPTION);
+        }
+      }
+      // Switching to CPU: NeMo models (Parakeet/Canary) need a GPU to be
+      // practical and pull in the heavy `nemo` extra (GH-125). Reset a NeMo
+      // selection to a CPU-friendly faster-whisper default so CPU hosts skip the
+      // CUDA wheels and the NeMo install entirely.
+      if (profile === 'cpu') {
+        if (isNemoModel(mainModelSelection)) {
+          setMainModelSelection(WHISPER_MEDIUM);
+          api?.config?.set('server.mainModelSelection', WHISPER_MEDIUM);
+        }
+        if (isNemoModel(liveModelSelection)) {
           setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
           api?.config?.set('server.liveModelSelection', LIVE_MODEL_SAME_AS_MAIN_OPTION);
         }

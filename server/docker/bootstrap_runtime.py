@@ -361,6 +361,14 @@ def build_uv_sync_env(venv_dir: Path, cache_dir: Path) -> dict[str, str]:
     env["UV_PROJECT_ENVIRONMENT"] = str(venv_dir)
     env["UV_CACHE_DIR"] = str(cache_dir)
     env["UV_PYTHON"] = "/usr/bin/python3.13"
+    # GH #125: on TLS-intercepting networks (corporate proxy / antivirus HTTPS
+    # scanning) uv's bundled webpki roots reject the re-signed certificate
+    # ("UnknownIssuer"). Opt-in UV_NATIVE_TLS makes uv trust the system/container
+    # CA store instead, so a mounted corporate root CA is honored. SSL_CERT_FILE,
+    # if set, already flows through via os.environ.copy() above. Certificate
+    # verification stays ON — this never disables TLS checking.
+    if parse_bool_env("UV_NATIVE_TLS", False):
+        env["UV_NATIVE_TLS"] = "true"
     return env
 
 
@@ -373,7 +381,7 @@ def run_dependency_sync(
 ) -> None:
     """Run dependency sync into the runtime virtual environment.
 
-    Variant handling (Issue #83):
+    Variant handling (Issue #83; cpu variant added in GH #125, same URL-swap):
         cu129 (default) — frozen sync against the lock-pinned PyTorch index.
         cu126 (legacy)  — drops --frozen and overrides the URL of the named
                           index `pytorch-cu129` with the cu126 wheel URL via
@@ -408,12 +416,22 @@ def run_dependency_sync(
         "--project",
         str(PROJECT_DIR),
     ]
-    if pytorch_variant == "cu126":
-        # Legacy-GPU path — Pascal/Maxwell support requires cu126 wheels (sm_50..sm_90).
+    # Non-default variants swap the URL of the *named* index `pytorch-cu129`
+    # (which [tool.uv.sources] pins torch/torchaudio to): cu126 for legacy GPUs
+    # (Pascal/Maxwell, sm_50..sm_90) and cpu for CPU-only hosts (GH #125 — no
+    # multi-GB CUDA wheels). --frozen is dropped because uv.lock pins cu129 wheel
+    # hashes; --index-strategy unsafe-best-match lets non-torch packages fall
+    # back to PyPI (Issue #115).
+    variant_index_urls = {
+        "cu126": "https://download.pytorch.org/whl/cu126",
+        "cpu": "https://download.pytorch.org/whl/cpu",
+    }
+    index_url = variant_index_urls.get(pytorch_variant)
+    if index_url is not None:
         cmd.extend(
             [
                 "--index",
-                "pytorch-cu129=https://download.pytorch.org/whl/cu126",
+                f"pytorch-cu129={index_url}",
                 "--index-strategy",
                 "unsafe-best-match",
             ]
@@ -428,6 +446,57 @@ def run_dependency_sync(
         timeout_seconds=max(timeout_seconds, 10800),
         env=build_uv_sync_env(venv_dir=venv_dir, cache_dir=cache_dir),
     )
+
+
+# GH #125: substrings that indicate the package-index TLS certificate could not
+# be verified — almost always a corporate proxy or antivirus intercepting HTTPS
+# whose root CA is not trusted inside the container.
+_TLS_INTERCEPTION_MARKERS: tuple[str, ...] = (
+    "invalid peer certificate",
+    "unknownissuer",
+    "self-signed certificate",
+    "self signed certificate",
+    "certificate verify failed",
+    "unable to get local issuer",
+)
+
+_TLS_INTERCEPTION_HINT = (
+    "TLS certificate verification failed while downloading dependencies. Your "
+    "network appears to intercept HTTPS (corporate proxy or antivirus HTTPS "
+    "scanning), so the package-index certificate is not trusted inside the "
+    "container. Fix: set UV_NATIVE_TLS=true to trust the system CA store, and/or "
+    "mount your organization's root CA into the container. See "
+    "docs/deployment-guide.md (TLS interception / corporate network)."
+)
+
+
+def detect_tls_interception(error_text: str) -> bool:
+    """Return True when *error_text* looks like an untrusted-CA / TLS-intercept failure."""
+    lowered = error_text.lower()
+    return any(marker in lowered for marker in _TLS_INTERCEPTION_MARKERS)
+
+
+def _raise_dependency_sync_failure(exc: Exception, final_sync_mode: str) -> None:
+    """Log an actionable hint for recognized causes, then raise a RuntimeError.
+
+    Always raises. The full error text is inspected for TLS-interception markers
+    *before* it is truncated for the RuntimeError message, so the actionable hint
+    is never lost to truncation (GH #125).
+    """
+    error_text = str(exc).strip()
+    if detect_tls_interception(error_text):
+        log(_TLS_INTERCEPTION_HINT)
+        emit_event(
+            "bootstrap-tls",
+            "server",
+            _TLS_INTERCEPTION_HINT,
+            status="error",
+            phase="bootstrap",
+        )
+    failure_snippet = error_text if len(error_text) <= 240 else f"{error_text[:237]}..."
+    raise RuntimeError(
+        f"Dependency sync failed for mode={final_sync_mode}: {failure_snippet}"
+    ) from exc
 
 
 def summarize_package_delta(
@@ -667,12 +736,7 @@ def ensure_runtime_dependencies(
                         f"dependency sync failed (mode={final_sync_mode})",
                         sync_start,
                     )
-                    failure_snippet = str(exc).strip()
-                    if len(failure_snippet) > 240:
-                        failure_snippet = f"{failure_snippet[:237]}..."
-                    raise RuntimeError(
-                        f"Dependency sync failed for mode={final_sync_mode}: {failure_snippet}"
-                    ) from exc
+                    _raise_dependency_sync_failure(exc, final_sync_mode)
         else:
             # Rebuild-sync: venv missing, structural mismatch, or force rebuild
             if force_rebuild:
@@ -712,12 +776,7 @@ def ensure_runtime_dependencies(
                     f"dependency sync failed (mode={final_sync_mode})",
                     sync_start,
                 )
-                failure_snippet = str(exc).strip()
-                if len(failure_snippet) > 240:
-                    failure_snippet = f"{failure_snippet[:237]}..."
-                raise RuntimeError(
-                    f"Dependency sync failed for mode={final_sync_mode}: {failure_snippet}"
-                ) from exc
+                _raise_dependency_sync_failure(exc, final_sync_mode)
 
         venv_python = venv_dir / "bin/python"
         if not venv_python.exists():
@@ -1445,8 +1504,8 @@ def main() -> int:
     raw_variant = (os.environ.get("PYTORCH_VARIANT") or "").strip().lower()
     if raw_variant in {"", "cu129"}:
         pytorch_variant = "cu129"
-    elif raw_variant == "cu126":
-        pytorch_variant = "cu126"
+    elif raw_variant in {"cu126", "cpu"}:
+        pytorch_variant = raw_variant
     else:
         log(f"Unknown PYTORCH_VARIANT={raw_variant!r}; falling back to cu129")
         pytorch_variant = "cu129"
@@ -1465,15 +1524,24 @@ def main() -> int:
         except OSError:
             baked_variant = ""
         if baked_variant and baked_variant != pytorch_variant:
-            log(
-                f"WARNING: image was built with PYTORCH_VARIANT={baked_variant!r} "
-                f"but runtime env reports {pytorch_variant!r} — trusting the "
-                "baked build-arg (installed wheels are the ground truth). This "
-                "usually indicates a manual `compose build` that paired "
-                "IMAGE_REPO and PYTORCH_VARIANT incorrectly; see "
-                "docs/deployment-guide.md."
-            )
-            pytorch_variant = baked_variant
+            if pytorch_variant == "cpu":
+                # GH #125: cpu is a safe downgrade — CPU wheels install over any
+                # baked GPU image — so an explicit runtime cpu request wins. This
+                # is what lets a prebuilt cu129 image run on a CPU-only host.
+                log(
+                    f"Runtime requested PYTORCH_VARIANT=cpu over baked "
+                    f"{baked_variant!r}; honoring the CPU downgrade (GH #125)."
+                )
+            else:
+                log(
+                    f"WARNING: image was built with PYTORCH_VARIANT={baked_variant!r} "
+                    f"but runtime env reports {pytorch_variant!r} — trusting the "
+                    "baked build-arg (installed wheels are the ground truth). This "
+                    "usually indicates a manual `compose build` that paired "
+                    "IMAGE_REPO and PYTORCH_VARIANT incorrectly; see "
+                    "docs/deployment-guide.md."
+                )
+                pytorch_variant = baked_variant
     log(f"PyTorch variant: {pytorch_variant}")
 
     if require_hf_token and not hf_token:

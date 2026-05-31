@@ -84,6 +84,15 @@ services:
       - BOOTSTRAP_TIMEOUT_SECONDS=${BOOTSTRAP_TIMEOUT_SECONDS:-1800}
       - BOOTSTRAP_REQUIRE_HF_TOKEN=false
       - BOOTSTRAP_LOG_CHANGES=${BOOTSTRAP_LOG_CHANGES:-true}
+      # PyTorch wheel variant for the runtime venv: cu129 (default), cu126
+      # (legacy GPU, Issue #83), or cpu (no CUDA). The dashboard's CPU profile
+      # sets cpu so CPU-only hosts skip the multi-GB CUDA wheels (GH #125).
+      - PYTORCH_VARIANT=${PYTORCH_VARIANT:-cu129}
+      # GH #125: opt-in for TLS-intercepting networks (corporate proxy / antivirus
+      # HTTPS scanning). true makes uv trust the system/container CA store instead
+      # of its bundled roots — mount your corporate root CA so it is honored.
+      # Certificate verification stays ON. See docs/deployment-guide.md.
+      - UV_NATIVE_TLS=${UV_NATIVE_TLS:-false}
       # ASR model overrides (set by dashboard, empty = use config.yaml defaults)
       - MAIN_TRANSCRIBER_MODEL=${MAIN_TRANSCRIBER_MODEL:-}
       - LIVE_TRANSCRIBER_MODEL=${LIVE_TRANSCRIBER_MODEL:-}
