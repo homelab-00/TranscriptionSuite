@@ -34,8 +34,6 @@ import {
 } from './containerRuntime.js';
 import {
   type WslSupport,
-  type WslDetectDeps,
-  detectWslGpuPassthrough,
   resetWslSupportCache,
 } from './wslDetect.js';
 
@@ -3115,31 +3113,33 @@ async function checkGpu(): Promise<{
     }
   }
 
-  // Win32 only: probe Docker Desktop for WSL2 backend + /dev/dxg passthrough
-  // (GH-101 follow-up). Result feeds the experimental 'vulkan-wsl2' profile
-  // gating in Settings — never auto-selected by checkGpu(). Single-flight
-  // cached at the wslDetect module level, so repeated calls are cheap.
+  // Win32: surface the `vulkan-wsl2` profile unconditionally.
+  //
+  // Historical note: this used to run a `docker run alpine:3 --device /dev/dxg`
+  // probe (via `detectWslGpuPassthrough`) to test whether a Linux container
+  // could see the GPU through WSL2 paravirtualization. That probe was written
+  // for the dzn-era meaning of `vulkan-wsl2` (Mesa-on-D3D12 inside a sidecar).
+  // The 2026-05-14 brainstorm pivoted the profile's implementation to launch
+  // native `whisper-server.exe` on the Windows host (see `launchWhisperServerNative`)
+  // and reach it from the backend via `host.docker.internal:8080`. That path
+  // does NOT consume /dev/dxg or the WSL UMD bundle, so the probe was testing
+  // preconditions the actual code path no longer needs — yet still blocked the
+  // UI option behind a manual `docker pull alpine:3` step.
+  //
+  // For now we just expose the profile to every Windows user and let the
+  // native preflight at `dockerManager.ts` line ~2080 catch the real failure
+  // modes (missing `whisper-server.exe`, port 8080 in use, etc.). A future
+  // pass can replace this with a Vulkan-ICD registry check if needed.
   let wslSupport: WslSupport | undefined;
   if (process.platform === 'win32') {
-    try {
-      wslSupport = await detectWslGpuPassthrough(getWslDetectDeps());
-      if (wslSupport.available && wslSupport.gpuPassthroughDetected) {
-        console.log(
-          '[DockerManager] WSL2 GPU passthrough detected — Vulkan WSL2 profile available',
-        );
-      } else {
-        console.log(
-          `[DockerManager] WSL2 GPU passthrough not available: ${wslSupport.reason ?? 'unknown reason'}`,
-        );
-      }
-    } catch (err: any) {
-      console.warn('[DockerManager] WSL2 detection failed:', err.message);
-      wslSupport = {
-        available: false,
-        gpuPassthroughDetected: false,
-        reason: err instanceof Error ? err.message : 'WSL2 detection failed',
-      };
-    }
+    wslSupport = {
+      available: true,
+      gpuPassthroughDetected: true,
+      reason: 'vulkan-wsl2 profile is unconditionally available on Windows (native whisper-server.exe path)',
+    };
+    console.log(
+      '[DockerManager] Win32: vulkan-wsl2 profile offered unconditionally (probe retired)',
+    );
   }
 
   return { gpu, toolkit, vulkan, wslSupport };
@@ -3156,86 +3156,6 @@ function resetGpuCache(): void {
   // Force `checkGpu()` to re-detect the toolkit mode (CDI vs legacy) too —
   // a user who installs nvidia-container-toolkit mid-session benefits.
   detectedGpuMode = null;
-}
-
-/**
- * Build the dependency injection bundle for `detectWslGpuPassthrough`.
- * Kept inside dockerManager so the wslDetect module stays free of
- * runtime/binary-resolution logic and remains trivially unit-testable.
- *
- * The probe is gated on a local `alpine:3` image being already present —
- * it never triggers a network pull. This avoids hanging the dashboard's
- * first-run detection for up to 30s on slow or air-gapped networks; if the
- * image is absent we report a clean "skipped" reason instead.
- */
-const PROBE_IMAGE = 'alpine:3';
-const PROBE_CONTAINER_NAME = 'transcriptionsuite-wsl-probe';
-
-function getWslDetectDeps(): WslDetectDeps {
-  return {
-    runDockerInfo: async () => {
-      const bin = await runtimeBin();
-      return exec(bin, ['info'], { timeoutMs: 15_000 });
-    },
-    runDockerInfoJson: async () => {
-      const bin = await runtimeBin();
-      // `--format '{{json .}}'` returns the structured object the parser
-      // prefers (vs grep'ing labels). doDetect falls back to runDockerInfo
-      // if this returns malformed output, so a future Docker tweak can't
-      // regress detection.
-      return exec(bin, ['info', '--format', '{{json .}}'], { timeoutMs: 15_000 });
-    },
-    runDockerProbe: async () => {
-      const bin = await runtimeBin();
-      // Defensive cleanup: a prior dashboard hard-kill (Electron crash, OS
-      // forced shutdown) during the 15s probe window can leave the named
-      // --rm container stuck in "Created" or "Exited" state, which would
-      // make the next probe fail with "container name already in use".
-      // Tolerate the error regardless — first-run / clean-state is the norm.
-      try {
-        await exec(bin, ['rm', '-f', PROBE_CONTAINER_NAME], { timeoutMs: 5_000 });
-      } catch {
-        // Container didn't exist — expected on a clean session.
-      }
-      // Pre-check: only run the probe if the alpine image is already cached
-      // locally. This avoids surprise network pulls and silent timeouts.
-      try {
-        await exec(bin, ['image', 'inspect', PROBE_IMAGE], { timeoutMs: 5_000 });
-      } catch {
-        // Image not local — skip probe; gpuPassthroughDetected stays false.
-        return false;
-      }
-      // Throwaway probe with /dev/dxg + /usr/lib/wsl bound. Both binds must
-      // resolve and `libd3d12.so` must exist for gpuPassthroughDetected to
-      // flip true. Named so any leak is identifiable. `--pull=never` ensures
-      // we never reach out to the network even if the image was tagged but
-      // not actually present.
-      try {
-        await exec(
-          bin,
-          [
-            'run',
-            '--rm',
-            '--name',
-            PROBE_CONTAINER_NAME,
-            '--pull=never',
-            '--device',
-            '/dev/dxg',
-            '-v',
-            '/usr/lib/wsl:/usr/lib/wsl:ro',
-            PROBE_IMAGE,
-            'sh',
-            '-c',
-            'test -e /dev/dxg && test -e /usr/lib/wsl/lib/libd3d12.so',
-          ],
-          { timeoutMs: 15_000 },
-        );
-        return true;
-      } catch {
-        return false;
-      }
-    },
-  };
 }
 
 /**
