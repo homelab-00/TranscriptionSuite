@@ -90,7 +90,7 @@ feat/fix/chore/etc(impacted area e.g. tests, stt, dashboard, ui, server, etc): s
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **TranscriptionSuite** (18122 symbols, 30352 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **TranscriptionSuite** (18335 symbols, 30674 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

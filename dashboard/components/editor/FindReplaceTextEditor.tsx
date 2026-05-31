@@ -30,8 +30,11 @@ export interface FindReplaceTextEditorProps {
   enableFindReplace?: boolean;
   /**
    * When true (default), the textarea grows to fit content (capped by its CSS
-   * max-height). When false, it fills its container (`h-full`) and scrolls —
-   * use for flex-sized regions like the Live box and Audio-Note transcript.
+   * max-height). When false, the editor becomes a flex column and the textarea
+   * flex-fills its container, then scrolls — use for flex-sized regions like the
+   * Live box and Audio-Note transcript. Flex fill (not `h-full`) is required so
+   * the textarea fills containers sized only by `min-height`, where a percentage
+   * height would not resolve.
    */
   autoGrow?: boolean;
   ariaLabel?: string;
@@ -93,7 +96,7 @@ export function FindReplaceTextEditor({
 
   return (
     <div
-      className={`relative ${className}`}
+      className={`relative ${autoGrow ? '' : 'flex flex-col'} ${className}`}
       onKeyDown={onContainerKeyDown}
       onFocus={() => setHasFocus(true)}
       onBlur={(e) => {
@@ -108,7 +111,7 @@ export function FindReplaceTextEditor({
         placeholder={placeholder}
         aria-label={ariaLabel}
         spellCheck={false}
-        className={`w-full resize-none bg-transparent outline-none ${autoGrow ? '' : 'h-full'} ${textClassName}`}
+        className={`w-full resize-none bg-transparent outline-none ${autoGrow ? '' : 'min-h-0 flex-1'} ${textClassName}`}
       />
       {showControl && <FindReplaceToolbar state={fr} />}
     </div>

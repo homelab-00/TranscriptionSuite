@@ -97,7 +97,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-30T12:29:56.511Z
+    generated_at: 2026-05-31T07:10:55.757Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -271,6 +271,7 @@ foundation:
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
+        - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
@@ -296,6 +297,7 @@ foundation:
         - 700
       easings:
         - ease-[cubic-bezier(0.16, 1, 0.3, 1)]
+        - ease-[cubic-bezier(0.22, 1, 0.36, 1)]
         - ease-[cubic-bezier(0.22,1,0.36,1)]
         - ease-[cubic-bezier(0.25,0.1,0.25,1)]
         - ease-[cubic-bezier(0.32,0.72,0,1)]
@@ -345,6 +347,7 @@ foundation:
         - h-[85vh]
         - max-h-[80vh]
         - max-h-[90vh]
+        - min-h-[20rem]
         - min-h-[38px]
         - min-h-[8rem]
         - min-h-[calc(100vh-30rem)]
@@ -359,6 +362,7 @@ foundation:
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
+        - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
@@ -535,7 +539,6 @@ utility_allowlist:
     - bg-slate-500
     - bg-slate-500/10
     - bg-slate-500/20
-    - bg-slate-600
     - bg-slate-700
     - bg-slate-800
     - bg-slate-900
@@ -616,6 +619,7 @@ utility_allowlist:
     - bottom-right
     - cursor-not-allowed
     - cursor-pointer
+    - cursor-text
     - custom-scrollbar
     - delay-100
     - delay-150
@@ -642,6 +646,7 @@ utility_allowlist:
     - font-light
     - font-medium
     - font-mono
+    - font-normal
     - font-sans
     - font-semibold
     - font-src
@@ -701,6 +706,7 @@ utility_allowlist:
     - hover:-translate-y-1
     - hover:bg-accent-cyan
     - hover:bg-accent-cyan/10
+    - hover:bg-accent-cyan/20
     - hover:bg-accent-cyan/30
     - hover:bg-accent-cyan/5
     - hover:bg-amber-400/20
@@ -733,6 +739,7 @@ utility_allowlist:
     - hover:shadow-accent-cyan/40
     - hover:shadow-lg
     - hover:text-accent-cyan
+    - hover:text-accent-cyan/80
     - hover:text-amber-100
     - hover:text-amber-300
     - hover:text-black
@@ -773,7 +780,6 @@ utility_allowlist:
     - lg:grid-cols-2
     - lg:grid-cols-3
     - lg:p-10
-    - lg:p-8
     - line-clamp-2
     - m-0
     - mask-gradient-right
@@ -811,6 +817,7 @@ utility_allowlist:
     - min-h-0
     - min-h-32
     - min-h-full
+    - min-height
     - min-w-0
     - min-w-100
     - min-w-25
@@ -838,10 +845,10 @@ utility_allowlist:
     - mt-6
     - mt-8
     - mt-auto
-    - mx-1
     - mx-auto
     - my-1
     - my-2
+    - my-4
     - opacity-0
     - opacity-10
     - opacity-30
@@ -882,6 +889,7 @@ utility_allowlist:
     - pl-5
     - pl-6
     - pl-8
+    - pointer-events-auto
     - pointer-events-none
     - pr-10
     - pr-12
@@ -987,6 +995,7 @@ utility_allowlist:
     - text-2xl
     - text-3xl
     - text-accent-cyan
+    - text-accent-cyan/70
     - text-accent-magenta
     - text-accent-orange
     - text-accent-violet
@@ -1009,6 +1018,7 @@ utility_allowlist:
     - text-cyan-200
     - text-cyan-300
     - text-emerald-200
+    - text-emerald-300/70
     - text-emerald-400
     - text-green-400
     - text-indigo-400
@@ -1127,6 +1137,7 @@ utility_allowlist:
     - max-h-[80vh]
     - max-h-[90vh]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
+    - min-h-[20rem]
     - min-h-[38px]
     - min-h-[8rem]
     - min-h-[calc(100vh-30rem)]
@@ -1141,6 +1152,7 @@ utility_allowlist:
     - shadow-[0_0_18px_rgba(239,68,68,0.35)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
+    - shadow-[0_0_5px_rgba(239,22,238,0.5)]
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
@@ -1224,6 +1236,7 @@ inline_style_allowlist:
   animation_strings: []
   cubic_beziers:
     - cubic-bezier(0.16, 1, 0.3, 1)
+    - cubic-bezier(0.22, 1, 0.36, 1)
     - cubic-bezier(0.22,1,0.36,1)
     - cubic-bezier(0.25,0.1,0.25,1)
     - cubic-bezier(0.32,0.72,0,1)

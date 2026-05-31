@@ -59,7 +59,7 @@ export function LiveTranscriptView({
         autoGrow={false}
         ariaLabel="Live transcript"
         className="selectable-text relative min-h-0 flex-1 rounded-xl border border-white/5 bg-black/20 p-4 shadow-inner"
-        textClassName="custom-scrollbar h-full overflow-y-auto font-mono text-sm leading-relaxed text-slate-300"
+        textClassName="custom-scrollbar overflow-y-auto font-mono text-sm leading-relaxed text-slate-300"
       />
     );
   }
