@@ -2016,6 +2016,51 @@ async function getContainerStatus(): Promise<ContainerStatus> {
   }
 }
 
+// GH-125: NeMo models (Parakeet/Canary/Nemotron-speech) need a GPU to be
+// practical and pull in the heavy `nemo` extra that broke first-run CPU installs.
+// Detection mirrors server/backend/core/stt/backends/factory.py and
+// src/services/modelCapabilities.ts — the Electron main process cannot import the
+// renderer-side service, so keep these in sync.
+const CPU_FALLBACK_MAIN_MODEL = 'Systran/faster-whisper-medium';
+
+export function isNemoModelName(model: string | undefined | null): boolean {
+  if (!model) return false;
+  const normalized = model.trim().toLowerCase();
+  return (
+    normalized.startsWith('nvidia/parakeet') ||
+    normalized.startsWith('nvidia/canary') ||
+    normalized.startsWith('nvidia/nemotron-speech')
+  );
+}
+
+export interface CpuModelDefaults {
+  mainTranscriberModel?: string;
+  installNemo?: boolean;
+  installWhisper?: boolean;
+}
+
+/**
+ * On the CPU profile, substitute a faster-whisper main model when a NeMo model
+ * was selected so CPU launches never install or run NeMo (GH-125). This is the
+ * authoritative guard: every start path funnels through startContainer, so it
+ * also covers the first-run auto-detect path where the UI-side reset in
+ * ServerView may not have fired yet. A no-op for non-CPU profiles or non-NeMo
+ * models — values pass through unchanged.
+ */
+export function applyCpuModelDefaults(
+  profile: RuntimeProfile,
+  opts: CpuModelDefaults,
+): CpuModelDefaults {
+  if (profile !== 'cpu' || !isNemoModelName(opts.mainTranscriberModel)) {
+    return opts;
+  }
+  return {
+    mainTranscriberModel: CPU_FALLBACK_MAIN_MODEL,
+    installNemo: false,
+    installWhisper: true,
+  };
+}
+
 /**
  * Start the container via docker compose with layered compose files.
  * @param options - Container start options including mode, runtime profile, and optional TLS env.
@@ -2145,10 +2190,27 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     composeEnv['TLS_ENABLED'] = 'false';
   }
 
-  // For CPU mode, force CUDA invisible so the server deterministically uses CPU
+  // For CPU mode, force CUDA invisible so the server deterministically uses CPU,
+  // and select the cpu PyTorch wheels so the bootstrap skips the multi-GB CUDA
+  // wheels a CPU-only host can't use (GH-125). Set on composeEnv only (not
+  // persisted to .env) so a later GPU launch is unaffected.
   if (runtimeProfile === 'cpu') {
     composeEnv['CUDA_VISIBLE_DEVICES'] = '';
+    composeEnv['PYTORCH_VARIANT'] = 'cpu';
   }
+
+  // GH-125: guarantee CPU launches never request a NeMo model. The UI-side
+  // reset can be bypassed on first-run auto-detect (profile is set before the
+  // model selection hydrates), so enforce the faster-whisper substitution here
+  // at the single funnel all start paths pass through. No-op otherwise.
+  const cpuDefaults = applyCpuModelDefaults(runtimeProfile, {
+    mainTranscriberModel,
+    installNemo,
+    installWhisper,
+  });
+  const effectiveMainTranscriberModel = cpuDefaults.mainTranscriberModel;
+  const effectiveInstallNemo = cpuDefaults.installNemo;
+  const effectiveInstallWhisper = cpuDefaults.installWhisper;
 
   // Pass HuggingFace token to the container for diarization model access
   if (hfToken !== undefined) {
@@ -2172,15 +2234,15 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     envUpdates['HUGGINGFACE_TOKEN_DECISION'] = normalizedHfDecision;
   }
 
-  if (installWhisper !== undefined) {
-    const whisperValue = installWhisper ? 'true' : 'false';
+  if (effectiveInstallWhisper !== undefined) {
+    const whisperValue = effectiveInstallWhisper ? 'true' : 'false';
     composeEnv['INSTALL_WHISPER'] = whisperValue;
     envUpdates['INSTALL_WHISPER'] = whisperValue;
   }
 
   // Pass NeMo install preference to the container for Parakeet ASR support
-  if (installNemo !== undefined) {
-    const nemoValue = installNemo ? 'true' : 'false';
+  if (effectiveInstallNemo !== undefined) {
+    const nemoValue = effectiveInstallNemo ? 'true' : 'false';
     composeEnv['INSTALL_NEMO'] = nemoValue;
     envUpdates['INSTALL_NEMO'] = nemoValue;
   }
@@ -2193,9 +2255,9 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   }
 
   // Pass ASR model selections to the container (empty string = use config.yaml default)
-  if (mainTranscriberModel !== undefined) {
-    composeEnv['MAIN_TRANSCRIBER_MODEL'] = mainTranscriberModel;
-    envUpdates['MAIN_TRANSCRIBER_MODEL'] = mainTranscriberModel;
+  if (effectiveMainTranscriberModel !== undefined) {
+    composeEnv['MAIN_TRANSCRIBER_MODEL'] = effectiveMainTranscriberModel;
+    envUpdates['MAIN_TRANSCRIBER_MODEL'] = effectiveMainTranscriberModel;
   }
   if (liveTranscriberModel !== undefined) {
     composeEnv['LIVE_TRANSCRIBER_MODEL'] = liveTranscriberModel;

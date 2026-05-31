@@ -877,6 +877,16 @@ sudo systemctl enable --now nvidia-persistence.service
 
 **Alternative:** Reboot the host to fully reset the driver state.
 
+### Windows / CPU-only: local start fails
+
+**Symptom:** On a CPU-only machine (no NVIDIA GPU), first start fails during dependency install — either with `invalid peer certificate: UnknownIssuer` while downloading packages, or later with `UnicodeEncodeError: 'latin-1' codec can't encode ...` when loading the model.
+
+**Steps:**
+
+1. **Use the CPU profile.** In **Settings > Server**, select the **CPU** profile before starting. CPU-only hosts no longer download the multi-GB NVIDIA CUDA wheels and default to a lighter faster-whisper model instead of the GPU-only NeMo model.
+2. **`UnknownIssuer` / certificate errors** mean your network (a corporate proxy or antivirus HTTPS scanning) is intercepting HTTPS, so the container can't verify the package index. Set `UV_NATIVE_TLS=true` and add your organization's root CA — see the [deployment guide](deployment-guide.md#tls-interception--corporate-network-unknownissuer).
+3. **`UnicodeEncodeError` on model load** means a HuggingFace token containing a non-ASCII character was provided. Clear the token (most models don't need one); the server now also ignores non-ASCII tokens automatically and downloads anonymously.
+
 ### Advanced Troubleshooting
 
 For more advanced troubleshooting steps, head over to README_DEV's [Troubleshooting section](README_DEV.md#13-troubleshooting).
