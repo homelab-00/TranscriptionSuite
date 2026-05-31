@@ -60,13 +60,23 @@ export class MLXServerManager {
       await this.stop();
     }
 
-    const uvicornPath = this._resolveUvicornPath();
+    const candidates = this._uvicornCandidates();
+    const uvicornPath = candidates.find((c) => fs.existsSync(c)) ?? null;
     if (!uvicornPath) {
+      const message = this._diagnoseMissingUvicorn(candidates);
+      const lines = message.split('\n');
+      // Surface the FULL diagnostic (headline + probed paths) to the Metal log
+      // (disk + panel) BEFORE throwing so "check logs" is actionable instead of
+      // empty (GH #124 symptom 3): start() otherwise throws before the first
+      // _appendLog, leaving the log ring empty.
+      for (const line of lines) {
+        this._appendLog(`[MLX] ${line}`);
+      }
       this._setStatus('error');
       this._emit('mlx:statusChanged', 'error');
-      throw new Error(
-        'Cannot find uvicorn binary. Run `uv sync --extra mlx` inside server/backend first.',
-      );
+      // Throw only the headline so the renderer toast stays single-line and
+      // actionable; the multi-line path detail lives in the log above.
+      throw new Error(lines[0]);
     }
 
     const dataDir = this._resolveDataDir();
@@ -296,7 +306,7 @@ export class MLXServerManager {
   // Private helpers
   // ──────────────────────────────────────────────────────────────────────────
 
-  private _resolveUvicornPath(): string | null {
+  private _uvicornCandidates(): string[] {
     const candidates: string[] = [];
 
     // Development: app.getAppPath() = <project>/dashboard/ → go up one level.
@@ -310,10 +320,85 @@ export class MLXServerManager {
       candidates.push(path.join(process.resourcesPath, 'backend/.venv/bin/uvicorn'));
     }
 
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) return candidate;
+    return candidates;
+  }
+
+  /**
+   * Build an actionable error message when the uvicorn binary can't be found.
+   *
+   * The resolution logic is correct (verified against v1.3.3↔v1.3.5: byte-identical,
+   * and the CI logs show both Metal DMGs were built with a working venv), so a miss is
+   * almost always ENVIRONMENTAL: the user installed the thin dashboard-only DMG, or a
+   * manual bundle swap lost the venv. Distinguish the cases so the popup/log tells the
+   * user exactly what to do, instead of the developer-only "run uv sync" hint (GH #124).
+   */
+  private _diagnoseMissingUvicorn(candidates: string[]): string {
+    // Only show paths relevant to the runtime context — a "Probed:" block, omitted
+    // entirely when there are no paths (avoids a dangling "• " bullet).
+    const probedBlock = (paths: string[]): string =>
+      paths.length ? `\nProbed:\n  • ${paths.join('\n  • ')}` : '';
+
+    // Packaged app: tell a thin DMG (no backend at all) apart from a corrupted bundle.
+    // Gate on app.isPackaged — in dev, process.resourcesPath is also set (to Electron's
+    // own resources), so resourcesPath alone would misclassify a dev machine.
+    if (app.isPackaged && process.resourcesPath) {
+      const resources = process.resourcesPath;
+      const backendDir = path.join(resources, 'backend');
+      // In a packaged context only the resourcesPath candidate(s) are meaningful;
+      // the dev candidate (appDir/../server/backend/…) would just confuse the user.
+      const packagedProbed = candidates.filter((c) => c.startsWith(resources));
+
+      if (!fs.existsSync(backendDir)) {
+        // No bundled backend at all → almost always the dashboard-only (thin) DMG.
+        // MLX/Metal is Apple-Silicon only; Intel Macs never get a bundled Metal build,
+        // so do not send an x64 user after an arm64-only DMG (GH #124 review).
+        if (process.arch !== 'arm64') {
+          return (
+            'This is the dashboard-only build, and Metal (MLX) acceleration is not ' +
+            'available on Intel Macs. Start the server with Docker (GPU or CPU), or ' +
+            'connect the dashboard to a remote server instead.\n' +
+            `Checked: ${backendDir} (not found).`
+          );
+        }
+        return (
+          'This is the dashboard-only build — it does not include the Metal (MLX) ' +
+          'Python backend, so the Metal server cannot start. Download ' +
+          `"${this._metalDmgName()}" (the build whose name ends in "-metal") and reinstall.\n` +
+          `Checked: ${backendDir} (not found).`
+        );
+      }
+
+      // Backend present but uvicorn missing → incomplete/corrupted bundle.
+      return (
+        'The Metal backend is installed but its Python environment is incomplete ' +
+        `(uvicorn was not found). The app bundle may be damaged — reinstall from ` +
+        `"${this._metalDmgName()}".` +
+        probedBlock(packagedProbed)
+      );
     }
-    return null;
+
+    // Development (running from source): the venv simply has not been built yet.
+    return (
+      'Cannot find uvicorn binary. Run `uv sync --extra mlx` inside server/backend first.' +
+      probedBlock(candidates)
+    );
+  }
+
+  /**
+   * Name of the bundled Metal DMG the user should reinstall. Resolves the app
+   * version defensively: app.getVersion() reads Info.plist/package.json, which can
+   * throw on exactly the kind of damaged bundle this diagnostic exists to report —
+   * a throw here would replace the actionable message with an opaque error and
+   * re-create GH #124 symptom 3. Fall back to a still-actionable name.
+   */
+  private _metalDmgName(): string {
+    let version = '<version>';
+    try {
+      version = app.getVersion();
+    } catch {
+      // Keep the actionable "-metal" suffix even without a resolvable version.
+    }
+    return `TranscriptionSuite-${version}-arm64-mac-metal.dmg`;
   }
 
   private _resolveDataDir(): string {
