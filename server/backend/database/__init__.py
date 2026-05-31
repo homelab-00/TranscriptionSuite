@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         update_conversation_model,
         update_conversation_response_id,
         update_conversation_title,
+        update_recording_corrected_transcript,
     )
 
 
@@ -46,6 +47,7 @@ __all__ = [
     "get_recordings_for_hour",
     "delete_recording",
     "update_recording_summary",
+    "update_recording_corrected_transcript",
     "update_recording_date",
     "get_recording_summary",
     "get_transcription",

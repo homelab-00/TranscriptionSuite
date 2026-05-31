@@ -30,6 +30,8 @@ import { AudioVisualizer } from '../AudioVisualizer';
 import { CustomSelect } from '../ui/CustomSelect';
 import { FullscreenVisualizer } from './FullscreenVisualizer';
 import { PopOutWindow } from '../PopOutWindow';
+import { FindReplaceTextEditor } from '../editor/FindReplaceTextEditor';
+import { LiveTranscriptView } from './LiveTranscriptView';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLanguages } from '../../src/hooks/useLanguages';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
@@ -164,6 +166,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Active analyser: live mode takes priority when active, then one-shot
   const activeAnalyser = live.analyser ?? transcription.analyser;
+
+  // Session main-result editing (client-only): hand-corrections flow into
+  // Copy/Download. Reset whenever a new transcription replaces the text.
+  const [editedResultText, setEditedResultText] = useState('');
+  useEffect(() => {
+    setEditedResultText(transcription.result?.text ?? '');
+  }, [transcription.result?.text]);
 
   // Audio device enumeration
   const [micDevices, setMicDevices] = useState<string[]>([]);
@@ -346,6 +355,30 @@ export const SessionView: React.FC<SessionViewProps> = ({
     if (isLive) return 'Live Mode is active — stop Live Mode to start recording.';
     return '';
   })();
+
+  // Live-mode editing (client-only): editable only after capture stops. Seeded
+  // from the captured transcript via live.getText(); reset when a new session
+  // starts. Drives the Live Copy button. Nothing is persisted (design D2).
+  const [editedLiveText, setEditedLiveText] = useState('');
+  const liveEditDirtyRef = useRef(false);
+  useEffect(() => {
+    if (isLive) {
+      liveEditDirtyRef.current = false;
+      setEditedLiveText('');
+    } else if (!liveEditDirtyRef.current) {
+      setEditedLiveText(live.getText());
+    }
+  }, [isLive, live]);
+  const handleEditedLiveChange = useCallback((next: string) => {
+    liveEditDirtyRef.current = true;
+    setEditedLiveText(next);
+  }, []);
+  const handleLiveCopyAndClear = useCallback(() => {
+    writeToClipboard(editedLiveText || live.getText()).catch(() => {});
+    live.clearHistory();
+    liveEditDirtyRef.current = false;
+    setEditedLiveText('');
+  }, [editedLiveText, live]);
 
   // Filter language options per model — Parakeet models only support 25 languages
   const mainLanguageOptions = useMemo(
@@ -828,16 +861,18 @@ export const SessionView: React.FC<SessionViewProps> = ({
     }
   }, [transcription, isLinux]);
 
-  // Copy transcription result to clipboard
+  // Copy transcription result to clipboard (prefers the edited text)
   const handleCopyTranscription = useCallback(() => {
-    if (!transcription.result?.text) return;
-    writeToClipboard(transcription.result.text).catch(() => {});
-  }, [transcription.result?.text]);
+    const text = editedResultText ?? transcription.result?.text;
+    if (!text) return;
+    writeToClipboard(text).catch(() => {});
+  }, [editedResultText, transcription.result?.text]);
 
-  // Download transcription as TXT file
+  // Download transcription as TXT file (prefers the edited text)
   const handleDownloadTranscription = useCallback(() => {
-    if (!transcription.result?.text) return;
-    const blob = new Blob([transcription.result.text], { type: 'text/plain' });
+    const text = editedResultText ?? transcription.result?.text;
+    if (!text) return;
+    const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1672,15 +1707,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   {/* Transcription Result */}
                   {transcription.result && (
                     <div className="space-y-2">
-                      <div className="selectable-text custom-scrollbar max-h-32 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300">
-                        {transcription.result.text}
-                        {transcription.result.language && (
-                          <div className="mt-2 text-xs text-slate-500">
-                            Detected: {transcription.result.language} &middot;{' '}
-                            {transcription.result.duration?.toFixed(1)}s
-                          </div>
-                        )}
-                      </div>
+                      <FindReplaceTextEditor
+                        value={editedResultText}
+                        onChange={setEditedResultText}
+                        ariaLabel="Transcription result"
+                        placeholder="Transcription result"
+                        className="selectable-text rounded-xl border border-white/5 bg-black/20 p-4"
+                        textClassName="custom-scrollbar max-h-72 min-h-[8rem] overflow-y-auto font-mono text-sm leading-relaxed text-slate-300"
+                      />
+                      {transcription.result.language && (
+                        <div className="text-xs text-slate-500">
+                          Detected: {transcription.result.language} &middot;{' '}
+                          {transcription.result.duration?.toFixed(1)}s
+                        </div>
+                      )}
                       <div className="flex items-center gap-2">
                         <Button
                           variant="secondary"
@@ -2123,84 +2163,27 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           variant="ghost"
                           size="sm"
                           icon={<Copy size={14} />}
-                          onClick={() => {
-                            writeToClipboard(live.getText());
-                            live.clearHistory();
-                          }}
+                          onClick={handleLiveCopyAndClear}
                           className="ml-auto h-8 shrink-0 whitespace-nowrap"
                         >
                           Copy
                         </Button>
                       </div>
                       {/* Transcript Area */}
-                      <div
-                        ref={liveTranscriptRef}
-                        className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner"
-                      >
-                        {(serverRunning || isRemoteMode) &&
-                          serverConnection.ready &&
-                          liveModelDisabled && (
-                            <div className="mb-3 text-xs text-amber-300">
-                              Live model not selected.
-                            </div>
-                          )}
-                        {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
-                          <div className="mb-3 text-xs text-red-400">
-                            {liveModeUnsupportedMessage}
-                          </div>
-                        )}
-                        {isLive || live.sentences.length > 0 || live.partial ? (
-                          <>
-                            {live.statusMessage && (
-                              <div className="text-accent-cyan mb-3 flex animate-pulse items-center gap-2">
-                                <Loader2 size={14} className="animate-spin" />
-                                <span className="text-xs">{live.statusMessage}</span>
-                              </div>
-                            )}
-                            {live.sentences.map((s, i) => (
-                              <div key={i} className="mb-2">
-                                {!hideTimestamps && (
-                                  <span className="mr-2 text-slate-500 select-none">
-                                    {new Date(s.timestamp).toLocaleTimeString('en-US', {
-                                      hour12: false,
-                                    })}
-                                  </span>
-                                )}
-                                <span>{s.text}</span>
-                              </div>
-                            ))}
-                            {live.partial && (
-                              <div className="mb-2 opacity-60">
-                                {!hideTimestamps && (
-                                  <span className="mr-2 text-slate-500 select-none">
-                                    {new Date().toLocaleTimeString('en-US', { hour12: false })}
-                                  </span>
-                                )}
-                                <span className="italic">{live.partial}</span>
-                                <span className="bg-accent-cyan ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom"></span>
-                              </div>
-                            )}
-                            {live.sentences.length === 0 &&
-                              !live.partial &&
-                              !live.statusMessage && (
-                                <div className="absolute inset-4 flex flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
-                                  <Activity size={32} strokeWidth={1} className="animate-pulse" />
-                                  <p>Listening... speak to see transcription.</p>
-                                </div>
-                              )}
-                            {live.error && (
-                              <div className="mt-2 text-xs text-red-400">{live.error}</div>
-                            )}
-                          </>
-                        ) : (
-                          <div className="absolute inset-4 flex items-center justify-center">
-                            <div className="flex flex-col items-center space-y-3 text-center text-slate-600 opacity-60 select-none">
-                              <Radio size={48} strokeWidth={1} />
-                              <p>Live mode is off. Toggle the switch to start.</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                      <LiveTranscriptView
+                        live={live}
+                        isLive={isLive}
+                        hideTimestamps={hideTimestamps}
+                        serverRunning={serverRunning}
+                        isRemoteMode={isRemoteMode}
+                        serverReady={serverConnection.ready}
+                        liveModelDisabled={liveModelDisabled}
+                        liveModeWhisperOnlyCompatible={liveModeWhisperOnlyCompatible}
+                        liveModeUnsupportedMessage={liveModeUnsupportedMessage}
+                        transcriptRef={liveTranscriptRef}
+                        editedLiveText={editedLiveText}
+                        onEditedLiveChange={handleEditedLiveChange}
+                      />
                     </div>
                   </PopOutWindow>
                 </>
@@ -2299,10 +2282,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       variant="ghost"
                       size="sm"
                       icon={<Copy size={14} />}
-                      onClick={() => {
-                        writeToClipboard(live.getText());
-                        live.clearHistory();
-                      }}
+                      onClick={handleLiveCopyAndClear}
                       className="ml-auto h-8 shrink-0 whitespace-nowrap"
                     >
                       Copy
@@ -2310,68 +2290,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   </div>
 
                   {/* Transcript Area */}
-                  <div
-                    ref={liveTranscriptRef}
-                    className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner"
-                  >
-                    {(serverRunning || isRemoteMode) &&
-                      serverConnection.ready &&
-                      liveModelDisabled && (
-                        <div className="mb-3 text-xs text-amber-300">Live model not selected.</div>
-                      )}
-                    {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
-                      <div className="mb-3 text-xs text-red-400">{liveModeUnsupportedMessage}</div>
-                    )}
-                    {isLive || live.sentences.length > 0 || live.partial ? (
-                      <>
-                        {live.statusMessage && (
-                          <div className="text-accent-cyan mb-3 flex animate-pulse items-center gap-2">
-                            <Loader2 size={14} className="animate-spin" />
-                            <span className="text-xs">{live.statusMessage}</span>
-                          </div>
-                        )}
-                        {live.sentences.map((s, i) => (
-                          <div key={i} className="mb-2">
-                            {!hideTimestamps && (
-                              <span className="mr-2 text-slate-500 select-none">
-                                {new Date(s.timestamp).toLocaleTimeString('en-US', {
-                                  hour12: false,
-                                })}
-                              </span>
-                            )}
-                            <span>{s.text}</span>
-                          </div>
-                        ))}
-                        {live.partial && (
-                          <div className="mb-2 opacity-60">
-                            {!hideTimestamps && (
-                              <span className="mr-2 text-slate-500 select-none">
-                                {new Date().toLocaleTimeString('en-US', { hour12: false })}
-                              </span>
-                            )}
-                            <span className="italic">{live.partial}</span>
-                            <span className="bg-accent-cyan ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom"></span>
-                          </div>
-                        )}
-                        {live.sentences.length === 0 && !live.partial && !live.statusMessage && (
-                          <div className="absolute inset-4 flex flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
-                            <Activity size={32} strokeWidth={1} className="animate-pulse" />
-                            <p>Listening... speak to see transcription.</p>
-                          </div>
-                        )}
-                        {live.error && (
-                          <div className="mt-2 text-xs text-red-400">{live.error}</div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="absolute inset-4 flex items-center justify-center">
-                        <div className="flex flex-col items-center space-y-3 text-center text-slate-600 opacity-60 select-none">
-                          <Radio size={48} strokeWidth={1} />
-                          <p>Live mode is off. Toggle the switch to start.</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <LiveTranscriptView
+                    live={live}
+                    isLive={isLive}
+                    hideTimestamps={hideTimestamps}
+                    serverRunning={serverRunning}
+                    isRemoteMode={isRemoteMode}
+                    serverReady={serverConnection.ready}
+                    liveModelDisabled={liveModelDisabled}
+                    liveModeWhisperOnlyCompatible={liveModeWhisperOnlyCompatible}
+                    liveModeUnsupportedMessage={liveModeUnsupportedMessage}
+                    transcriptRef={liveTranscriptRef}
+                    editedLiveText={editedLiveText}
+                    onEditedLiveChange={handleEditedLiveChange}
+                  />
                 </GlassCard>
               )}
             </div>

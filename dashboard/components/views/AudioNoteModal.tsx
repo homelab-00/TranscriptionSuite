@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -35,6 +35,8 @@ import { StatusLight } from '../ui/StatusLight';
 import { AudioVisualizer } from '../AudioVisualizer';
 import { useRecording } from '../../src/hooks/useRecording';
 import { apiClient } from '../../src/api/client';
+import { FindReplaceTextEditor } from '../editor/FindReplaceTextEditor';
+import { flattenSegmentsToText } from '../../src/services/transcriptFlatten';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { ConfidenceChip } from '../recording/ConfidenceChip';
@@ -465,6 +467,75 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const summaryEditRef = useRef<HTMLTextAreaElement>(null);
   const summarySaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Transcript editing state (non-destructive). Mirrors the Summary edit chain:
+  // debounced 2s autosave to the additive transcript_corrected column, silent
+  // fail + retry on next keystroke. Original segments are never touched.
+  const [correctedTranscript, setCorrectedTranscript] = useState<string | null>(null);
+  const [isTranscriptEditing, setIsTranscriptEditing] = useState(false);
+  const [transcriptDraft, setTranscriptDraft] = useState('');
+  const [isTranscriptSaving, setIsTranscriptSaving] = useState(false);
+  const transcriptSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Text as loaded into the editor; a correction is only persisted when the
+  // draft actually diverges from this seed (so "Done" with no edits is a no-op).
+  const transcriptSeedRef = useRef('');
+
+  // Sticky-header scroll affordance: once the Transcript header sticks to the top
+  // of the scroll container, the "TRANSCRIPT" chip fades out and the edit controls
+  // glide to the right edge of the transcript box (FLIP-animated; see below).
+  const transcriptHeaderRef = useRef<HTMLDivElement | null>(null);
+  const transcriptControlsRef = useRef<HTMLDivElement | null>(null);
+  const transcriptControlsLeftRef = useRef<number | null>(null);
+  const [isTranscriptHeaderStuck, setIsTranscriptHeaderStuck] = useState(false);
+
+  // Detect when the sticky Transcript header pins to the top of the scroll
+  // container. position:sticky pins relative to the scroll container's CONTENT
+  // box, so the stuck header.top settles at container.top + padding-top (the
+  // container has p-8) — not container.top. rAF-throttled; bails when there is no
+  // layout (e.g. jsdom in tests), leaving the header unstuck so the chip +
+  // left-aligned controls render normally.
+  useEffect(() => {
+    const root = transcriptContainerRef.current;
+    const header = transcriptHeaderRef.current;
+    if (!root || !header) return;
+    let raf = 0;
+    const padTop = parseFloat(getComputedStyle(root).paddingTop) || 0;
+    const update = () => {
+      raf = 0;
+      const rootRect = root.getBoundingClientRect();
+      if (rootRect.height === 0) return; // no layout — leave the header unstuck
+      const stuck = header.getBoundingClientRect().top <= rootRect.top + padTop + 1;
+      setIsTranscriptHeaderStuck((prev) => (prev === stuck ? prev : stuck));
+    };
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    update();
+    root.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      root.removeEventListener('scroll', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [isRendered, portalContainer, note]);
+
+  // FLIP the edit-control group when stuck toggles: counter-translate by the
+  // layout delta, then transition back to 0 so it slides between the left
+  // (next to the chip) and right (top-right of the box) positions.
+  useLayoutEffect(() => {
+    const el = transcriptControlsRef.current;
+    if (!el) return;
+    const newLeft = el.getBoundingClientRect().left;
+    const prevLeft = transcriptControlsLeftRef.current;
+    transcriptControlsLeftRef.current = newLeft;
+    if (prevLeft === null) return; // first measurement — nothing to animate from
+    const dx = prevLeft - newLeft;
+    if (Math.abs(dx) < 1) return;
+    el.style.transition = 'none';
+    el.style.transform = `translateX(${dx}px)`;
+    void el.offsetWidth; // flush the start frame so the transition has somewhere to go
+    el.style.transition = 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1)';
+    el.style.transform = 'translateX(0)';
+  }, [isTranscriptHeaderStuck]);
+
   // Date editing state
   const [isDateEditing, setIsDateEditing] = useState(false);
   const [dateEditValue, setDateEditValue] = useState('');
@@ -671,6 +742,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       setSummaryExpanded(false);
       setSummaryText('');
       setIsGenerating(false);
+      setIsTranscriptEditing(false);
       apiClient
         .getLLMStatus()
         .then((s) => {
@@ -904,6 +976,89 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     },
     [note?.recordingId, summaryText, handleSaveSummary],
   );
+
+  // Seed the local corrected transcript from the recording (load / switch).
+  useEffect(() => {
+    setCorrectedTranscript(recording?.transcript_corrected ?? null);
+  }, [recording?.transcript_corrected]);
+
+  // Cancel any pending autosave on unmount so it cannot fire after teardown.
+  useEffect(
+    () => () => {
+      if (transcriptSaveTimerRef.current) clearTimeout(transcriptSaveTimerRef.current);
+    },
+    [],
+  );
+
+  const hasCorrected = !!correctedTranscript?.trim();
+
+  const handleSaveCorrectedTranscript = useCallback(
+    async (text: string) => {
+      if (!recordingId) return;
+      const value = text.trim() ? text : undefined; // blank text → clear (revert)
+      setIsTranscriptSaving(true);
+      try {
+        await apiClient.updateRecordingCorrectedTranscript(recordingId, value);
+        setCorrectedTranscript(value ?? null);
+      } catch {
+        // silently fail — user can retry on next keystroke (mirror Summary)
+      } finally {
+        setIsTranscriptSaving(false);
+      }
+    },
+    [recordingId],
+  );
+
+  const handleEnterTranscriptEdit = useCallback(() => {
+    const seed = correctedTranscript ?? flattenSegmentsToText(segments);
+    transcriptSeedRef.current = seed;
+    setTranscriptDraft(seed);
+    setIsTranscriptEditing(true);
+  }, [correctedTranscript, segments]);
+
+  const handleTranscriptEditChange = useCallback(
+    (text: string) => {
+      setTranscriptDraft(text);
+      // Debounced auto-save (2s after the user stops typing). Skip when the text
+      // is unchanged from the loaded seed — never persist a no-op "correction".
+      if (transcriptSaveTimerRef.current) clearTimeout(transcriptSaveTimerRef.current);
+      transcriptSaveTimerRef.current = setTimeout(() => {
+        if (text !== transcriptSeedRef.current) handleSaveCorrectedTranscript(text);
+      }, 2000);
+    },
+    [handleSaveCorrectedTranscript],
+  );
+
+  const handleExitTranscriptEdit = useCallback(
+    (save: boolean) => {
+      if (transcriptSaveTimerRef.current) {
+        clearTimeout(transcriptSaveTimerRef.current);
+        transcriptSaveTimerRef.current = null;
+      }
+      // Only persist when the draft actually diverges from what was loaded —
+      // clicking "Done" without editing must NOT create a flattened correction.
+      if (save && transcriptDraft !== transcriptSeedRef.current) {
+        handleSaveCorrectedTranscript(transcriptDraft);
+      }
+      setIsTranscriptEditing(false);
+    },
+    [transcriptDraft, handleSaveCorrectedTranscript],
+  );
+
+  const handleRevertTranscript = useCallback(async () => {
+    if (transcriptSaveTimerRef.current) {
+      clearTimeout(transcriptSaveTimerRef.current);
+      transcriptSaveTimerRef.current = null;
+    }
+    if (!recordingId) return;
+    try {
+      await apiClient.updateRecordingCorrectedTranscript(recordingId, undefined);
+      setCorrectedTranscript(null);
+      setIsTranscriptEditing(false);
+    } catch {
+      // silently fail — original segments are intact regardless
+    }
+  }, [recordingId]);
 
   const handleClearSummary = useCallback(async () => {
     if (!note?.recordingId) return;
@@ -2172,12 +2327,80 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
 
                 {/* 3. Transcript - Added selectable-text to paragraphs */}
                 <div className="space-y-6">
-                  <div className="pointer-events-none sticky top-0 z-10 py-4 select-none">
-                    <span className="pointer-events-auto inline-flex items-center rounded-full border border-white/10 bg-[rgba(22,31,50,0.9)] px-4 py-1.5 text-xs font-bold tracking-widest text-slate-400 uppercase shadow-lg backdrop-blur-xl">
+                  <div
+                    ref={transcriptHeaderRef}
+                    className="pointer-events-none sticky top-0 z-10 flex items-center gap-2 py-4 select-none"
+                  >
+                    <span
+                      className={`pointer-events-auto inline-flex items-center rounded-full border border-white/10 bg-[rgba(22,31,50,0.9)] px-4 py-1.5 text-xs font-bold tracking-widest text-slate-400 uppercase shadow-lg backdrop-blur-xl transition-opacity duration-300 ${isTranscriptHeaderStuck ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
+                    >
                       Transcript
                     </span>
+                    {/* Edit controls — FLIP-slid to the right when the header is stuck. */}
+                    <div
+                      ref={transcriptControlsRef}
+                      className={`flex items-center gap-2 ${isTranscriptHeaderStuck ? 'ml-auto' : ''}`}
+                    >
+                      {(segments.length > 0 || hasCorrected) &&
+                        (isTranscriptEditing ? (
+                          <button
+                            type="button"
+                            onClick={() => handleExitTranscriptEdit(true)}
+                            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/30"
+                            title="Done editing"
+                          >
+                            <Check size={13} />
+                            Done
+                            {isTranscriptSaving && (
+                              <span className="font-normal text-emerald-300/70">· Saving…</span>
+                            )}
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleEnterTranscriptEdit}
+                              className="pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-[rgba(22,31,50,0.95)] text-slate-400 transition hover:bg-white/10 hover:text-white"
+                              title="Edit transcript"
+                              aria-label="Edit transcript"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            {hasCorrected && (
+                              <span className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-amber-400/25 bg-amber-500/15 px-3 py-1 text-[11px] font-semibold tracking-wide text-amber-200 uppercase">
+                                Edited
+                                <button
+                                  type="button"
+                                  onClick={handleRevertTranscript}
+                                  className="inline-flex items-center gap-1 rounded text-amber-300 transition hover:text-amber-100"
+                                  title="Revert to original transcript"
+                                  aria-label="Revert transcript"
+                                >
+                                  <RotateCw size={12} />
+                                  Revert
+                                </button>
+                              </span>
+                            )}
+                          </>
+                        ))}
+                    </div>
                   </div>
-                  {segments.length > 0 ? (
+                  {isTranscriptEditing ? (
+                    <FindReplaceTextEditor
+                      autoFocus
+                      autoGrow={false}
+                      value={transcriptDraft}
+                      onChange={handleTranscriptEditChange}
+                      ariaLabel="Edit transcript"
+                      placeholder="Edit the transcript…"
+                      className="min-h-[20rem] rounded-xl border border-white/10 bg-black/30 p-4"
+                      textClassName="custom-scrollbar overflow-y-auto leading-relaxed text-slate-300"
+                    />
+                  ) : hasCorrected ? (
+                    <div className="selectable-text min-w-0 leading-relaxed wrap-break-word whitespace-pre-wrap text-slate-300">
+                      {correctedTranscript}
+                    </div>
+                  ) : segments.length > 0 ? (
                     hasSegmentDetail ? (
                       segments.map((seg, i) => (
                         <div

@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.47
+  spec_version: 1.0.48
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -20,6 +20,9 @@ meta:
       - components/__tests__/SessionView.test.tsx
       - components/AriaLiveRegion.tsx
       - components/AudioVisualizer.tsx
+      - components/editor/FindReplaceTextEditor.test.tsx
+      - components/editor/FindReplaceTextEditor.tsx
+      - components/editor/FindReplaceToolbar.tsx
       - components/import/__tests__/DedupChoiceContainer.test.tsx
       - components/import/__tests__/DedupPromptModal.test.tsx
       - components/import/DedupChoiceContainer.tsx
@@ -79,6 +82,7 @@ meta:
       - components/views/FullscreenVisualizer.tsx
       - components/views/GpuDiagnosticModal.tsx
       - components/views/GpuHealthCard.tsx
+      - components/views/LiveTranscriptView.tsx
       - components/views/LogsView.tsx
       - components/views/ModelManagerTab.tsx
       - components/views/ModelManagerView.tsx
@@ -93,7 +97,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-05-05T13:32:14.626Z
+    generated_at: 2026-05-31T07:10:55.757Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -188,6 +192,7 @@ foundation:
         - rgba(217, 70, 239, 0.5)
         - rgba(217,70,239,0.5)
         - rgba(22,31,50,0.9)
+        - rgba(22,31,50,0.95)
         - rgba(239,22,238,0.5)
         - rgba(239,68,68,0.35)
         - rgba(239,68,68,0.6)
@@ -246,6 +251,7 @@ foundation:
           shadow: shadow-blue-400/50
     blur_levels:
       backdrop:
+        - backdrop-blur
         - backdrop-blur-2xl
         - backdrop-blur-3xl
         - backdrop-blur-md
@@ -265,6 +271,7 @@ foundation:
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
+        - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
@@ -290,6 +297,7 @@ foundation:
         - 700
       easings:
         - ease-[cubic-bezier(0.16, 1, 0.3, 1)]
+        - ease-[cubic-bezier(0.22, 1, 0.36, 1)]
         - ease-[cubic-bezier(0.22,1,0.36,1)]
         - ease-[cubic-bezier(0.25,0.1,0.25,1)]
         - ease-[cubic-bezier(0.32,0.72,0,1)]
@@ -339,8 +347,11 @@ foundation:
         - h-[85vh]
         - max-h-[80vh]
         - max-h-[90vh]
+        - min-h-[20rem]
         - min-h-[38px]
+        - min-h-[8rem]
         - min-h-[calc(100vh-30rem)]
+        - min-w-[2.5rem]
         - min-w-[5rem]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
@@ -351,6 +362,7 @@ foundation:
         - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
+        - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
@@ -458,6 +470,7 @@ utility_allowlist:
     - aria-invalid
     - aria-label
     - aria-labels
+    - backdrop-blur
     - backdrop-blur-2xl
     - backdrop-blur-3xl
     - backdrop-blur-md
@@ -480,6 +493,7 @@ utility_allowlist:
     - bg-amber-400/20
     - bg-amber-400/5
     - bg-amber-500/10
+    - bg-amber-500/15
     - bg-amber-500/20
     - bg-amber-500/5
     - bg-black/10
@@ -499,6 +513,7 @@ utility_allowlist:
     - bg-cyan-400/70
     - bg-cyan-500/80
     - bg-emerald-400/10
+    - bg-emerald-500/20
     - bg-glass-100
     - bg-glass-100/30
     - bg-glass-100/50
@@ -524,7 +539,6 @@ utility_allowlist:
     - bg-slate-500
     - bg-slate-500/10
     - bg-slate-500/20
-    - bg-slate-600
     - bg-slate-700
     - bg-slate-800
     - bg-slate-900
@@ -553,6 +567,7 @@ utility_allowlist:
     - border-accent-magenta/5
     - border-accent-orange/20
     - border-amber-400/20
+    - border-amber-400/25
     - border-amber-400/30
     - border-amber-400/40
     - border-amber-500/20
@@ -564,6 +579,7 @@ utility_allowlist:
     - border-blue-500/20
     - border-cyan-400/30
     - border-dashed
+    - border-emerald-400/30
     - border-emerald-400/40
     - border-glass-100
     - border-glass-border
@@ -603,6 +619,7 @@ utility_allowlist:
     - bottom-right
     - cursor-not-allowed
     - cursor-pointer
+    - cursor-text
     - custom-scrollbar
     - delay-100
     - delay-150
@@ -629,6 +646,7 @@ utility_allowlist:
     - font-light
     - font-medium
     - font-mono
+    - font-normal
     - font-sans
     - font-semibold
     - font-src
@@ -688,6 +706,7 @@ utility_allowlist:
     - hover:-translate-y-1
     - hover:bg-accent-cyan
     - hover:bg-accent-cyan/10
+    - hover:bg-accent-cyan/20
     - hover:bg-accent-cyan/30
     - hover:bg-accent-cyan/5
     - hover:bg-amber-400/20
@@ -698,6 +717,7 @@ utility_allowlist:
     - hover:bg-cyan-300
     - hover:bg-cyan-400
     - hover:bg-cyan-400/30
+    - hover:bg-emerald-500/30
     - hover:bg-glass-100
     - hover:bg-glass-300
     - hover:bg-neutral-600
@@ -707,6 +727,7 @@ utility_allowlist:
     - hover:bg-red-500/35
     - hover:bg-white/10
     - hover:bg-white/15
+    - hover:bg-white/20
     - hover:bg-white/5
     - hover:bg-white/8
     - hover:bg-yellow-400/30
@@ -718,6 +739,8 @@ utility_allowlist:
     - hover:shadow-accent-cyan/40
     - hover:shadow-lg
     - hover:text-accent-cyan
+    - hover:text-accent-cyan/80
+    - hover:text-amber-100
     - hover:text-amber-300
     - hover:text-black
     - hover:text-cyan-200
@@ -757,7 +780,6 @@ utility_allowlist:
     - lg:grid-cols-2
     - lg:grid-cols-3
     - lg:p-10
-    - lg:p-8
     - line-clamp-2
     - m-0
     - mask-gradient-right
@@ -767,6 +789,7 @@ utility_allowlist:
     - max-h-60
     - max-h-72
     - max-h-96
+    - max-height
     - max-w-20
     - max-w-2xl
     - max-w-3xl
@@ -794,6 +817,7 @@ utility_allowlist:
     - min-h-0
     - min-h-32
     - min-h-full
+    - min-height
     - min-w-0
     - min-w-100
     - min-w-25
@@ -821,10 +845,10 @@ utility_allowlist:
     - mt-6
     - mt-8
     - mt-auto
-    - mx-1
     - mx-auto
     - my-1
     - my-2
+    - my-4
     - opacity-0
     - opacity-10
     - opacity-30
@@ -865,6 +889,7 @@ utility_allowlist:
     - pl-5
     - pl-6
     - pl-8
+    - pointer-events-auto
     - pointer-events-none
     - pr-10
     - pr-12
@@ -970,6 +995,7 @@ utility_allowlist:
     - text-2xl
     - text-3xl
     - text-accent-cyan
+    - text-accent-cyan/70
     - text-accent-magenta
     - text-accent-orange
     - text-accent-violet
@@ -992,6 +1018,7 @@ utility_allowlist:
     - text-cyan-200
     - text-cyan-300
     - text-emerald-200
+    - text-emerald-300/70
     - text-emerald-400
     - text-green-400
     - text-indigo-400
@@ -1099,6 +1126,7 @@ utility_allowlist:
     - bg-[#0b1120]
     - bg-[#0f172a]
     - bg-[rgba(22,31,50,0.9)]
+    - bg-[rgba(22,31,50,0.95)]
     - ease-[cubic-bezier(0.22,1,0.36,1)]
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
     - ease-[cubic-bezier(0.32,0.72,0,1)]
@@ -1109,8 +1137,11 @@ utility_allowlist:
     - max-h-[80vh]
     - max-h-[90vh]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
+    - min-h-[20rem]
     - min-h-[38px]
+    - min-h-[8rem]
     - min-h-[calc(100vh-30rem)]
+    - min-w-[2.5rem]
     - min-w-[5rem]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
@@ -1121,6 +1152,7 @@ utility_allowlist:
     - shadow-[0_0_18px_rgba(239,68,68,0.35)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
+    - shadow-[0_0_5px_rgba(239,22,238,0.5)]
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
@@ -1204,6 +1236,7 @@ inline_style_allowlist:
   animation_strings: []
   cubic_beziers:
     - cubic-bezier(0.16, 1, 0.3, 1)
+    - cubic-bezier(0.22, 1, 0.36, 1)
     - cubic-bezier(0.22,1,0.36,1)
     - cubic-bezier(0.25,0.1,0.25,1)
     - cubic-bezier(0.32,0.72,0,1)
@@ -1828,6 +1861,40 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  FindReplaceTextEditor:
+    file: components/editor/FindReplaceTextEditor.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  FindReplaceToolbar:
+    file: components/editor/FindReplaceToolbar.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   FullscreenVisualizer:
     file: components/views/FullscreenVisualizer.tsx
     required_tokens:
@@ -1893,6 +1960,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   GpuHealthCard:
     file: components/views/GpuHealthCard.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  Harness:
+    file: components/editor/FindReplaceTextEditor.test.tsx
     required_tokens:
       - colors
       - motion
@@ -2012,6 +2096,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   IssueRow:
     file: components/views/GpuDiagnosticModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  LiveTranscriptView:
+    file: components/views/LiveTranscriptView.tsx
     required_tokens:
       - colors
       - motion

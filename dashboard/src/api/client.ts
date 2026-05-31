@@ -620,6 +620,14 @@ export class APIClient {
     });
   }
 
+  /** PATCH /api/notebook/recordings/:id/transcript — set or clear (revert) the corrected transcript */
+  async updateRecordingCorrectedTranscript(
+    id: number,
+    transcript?: string,
+  ): Promise<{ status: string; id: number; transcript_corrected: string | null }> {
+    return this.patch(`/api/notebook/recordings/${id}/transcript`, { transcript });
+  }
+
   /** PUT /api/notebook/recordings/:id/summary — query-param variant */
   async setRecordingSummary(
     id: number,
