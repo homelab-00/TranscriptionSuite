@@ -805,7 +805,7 @@ const TimeSection: React.FC<{
     });
   };
   return (
-    <div className="bg-glass-surface border-glass-border flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border shadow-xl backdrop-blur-xl">
+    <div className="blur-panel bg-glass-surface border-glass-border flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border shadow-xl backdrop-blur-xl">
       <div
         className={`z-10 flex h-14 shrink-0 items-center justify-between border-b border-white/5 px-5 backdrop-blur-md ${headerGradient}`}
       >

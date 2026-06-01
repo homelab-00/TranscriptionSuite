@@ -203,7 +203,7 @@ export function GpuDiagnosticModal({
         aria-hidden="true"
       />
 
-      <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-white/20 bg-black/40 bg-linear-to-b from-white/5 to-black/20 shadow-2xl backdrop-blur-xl">
+      <div className="blur-panel relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-white/20 bg-black/40 bg-linear-to-b from-white/5 to-black/20 shadow-2xl backdrop-blur-xl">
         <div className="bg-accent-cyan/20 pointer-events-none absolute top-0 left-0 h-32 w-32 rounded-full blur-2xl" />
         <div className="bg-accent-magenta/10 pointer-events-none absolute right-0 bottom-0 h-32 w-32 rounded-full blur-2xl" />
         <div className="pointer-events-none absolute inset-0 bg-black/20" />

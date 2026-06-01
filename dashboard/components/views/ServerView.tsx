@@ -2799,7 +2799,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       >
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" aria-hidden="true" />
         <div className="fixed inset-0 flex items-center justify-center p-4">
-          <DialogPanel className="w-full max-w-lg overflow-hidden rounded-3xl border border-red-500/25 bg-black/75 shadow-2xl backdrop-blur-xl">
+          <DialogPanel className="blur-panel w-full max-w-lg overflow-hidden rounded-3xl border border-red-500/25 bg-black/75 shadow-2xl backdrop-blur-xl">
             <div className="border-b border-red-500/20 bg-red-500/10 px-6 py-4">
               <DialogTitle className="text-lg font-semibold text-red-100">Clean All</DialogTitle>
               <p className="mt-1 text-sm text-red-200/90">
@@ -2892,7 +2892,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       >
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" aria-hidden="true" />
         <div className="fixed inset-0 flex items-center justify-center p-4">
-          <DialogPanel className="border-accent-orange/25 w-full max-w-lg overflow-hidden rounded-3xl border bg-black/75 shadow-2xl backdrop-blur-xl">
+          <DialogPanel className="border-accent-orange/25 blur-panel w-full max-w-lg overflow-hidden rounded-3xl border bg-black/75 shadow-2xl backdrop-blur-xl">
             <div className="border-accent-orange/20 bg-accent-orange/10 border-b px-6 py-4">
               <DialogTitle className="text-accent-orange text-lg font-semibold">
                 {pendingLegacyGpuValue ? 'Enable legacy-GPU image?' : 'Disable legacy-GPU image?'}

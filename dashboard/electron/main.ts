@@ -481,11 +481,12 @@ const store = new Store({
     // Default true preserves the iOS-glass design; users can opt out per
     // installation via Settings → App → Blur effects.
     'ui.blurEffectsEnabled': true,
-    /* GH-124 Part C / issue 87 — single cross-platform low idle usage mode.
-       When true, disables backdrop blur and freezes idle visualizer waves to
-       cut idle CPU/GPU. Default false (OFF) on every platform, so behavior is
-       unchanged unless the user opts in via Settings -> App -> Low idle usage. */
-    'ui.lowIdleUsageEnabled': false,
+    /* GH-87 — "Idle animations" toggle, independent of blur. When false,
+       freezes the idle visualizer waves to cut idle CPU/GPU. Default true (ON)
+       on every platform, so the animating design is preserved unless the user
+       opts out via Settings -> App -> Idle animations. Legacy
+       ui.lowIdleUsageEnabled values are migrated client-side at boot. */
+    'ui.idleAnimationsEnabled': true,
     'server.host': 'localhost',
     'server.port': 9786,
     'server.https': false,

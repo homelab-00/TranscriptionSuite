@@ -829,7 +829,7 @@ const AppInner: React.FC = () => {
               })
             }
           />
-          <div className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
+          <div className="blur-panel relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
             <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
               <h2 className="text-lg font-semibold text-white">Choose Models Before Setup</h2>
             </div>
@@ -904,7 +904,7 @@ const AppInner: React.FC = () => {
             className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out"
             onClick={() => resolveDependencyInstallPrompt(null)}
           />
-          <div className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
+          <div className="blur-panel relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
             <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
               <h2 className="text-lg font-semibold text-white">Additional Dependencies Required</h2>
             </div>
@@ -941,7 +941,7 @@ const AppInner: React.FC = () => {
             className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out"
             onClick={() => resolveHfPrompt({ action: 'cancel', token: '' })}
           />
-          <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
+          <div className="blur-panel relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
             <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
               <h2 className="text-lg font-semibold text-white">Optional Diarization Setup</h2>
             </div>
@@ -1019,7 +1019,7 @@ const AppInner: React.FC = () => {
             className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ease-in-out"
             onClick={() => resolveRemoteProfilePrompt({ action: 'cancel', profile: 'tailscale' })}
           />
-          <div className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
+          <div className="blur-panel relative flex w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]">
             <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">
               <h2 className="text-lg font-semibold text-white">Remote Connection Profile</h2>
             </div>

@@ -42,7 +42,7 @@ export function useConfirm() {
     <Dialog open onClose={() => handleClose(false)} className="relative z-10000">
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" aria-hidden="true" />
       <div className="fixed inset-0 flex items-center justify-center p-4">
-        <DialogPanel className="flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl">
+        <DialogPanel className="blur-panel flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl">
           <div className="flex items-center border-b border-white/10 bg-white/5 px-6 py-4 select-none">
             <DialogTitle className="text-base font-semibold text-white">
               {state.options.title ?? 'Confirm'}

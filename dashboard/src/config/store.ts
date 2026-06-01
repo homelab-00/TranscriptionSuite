@@ -78,12 +78,12 @@ export interface ClientConfig {
      */
     blurEffectsEnabled: boolean;
     /**
-     * GH-124 Part C / issue 87 — when true, a global CSS override on `<html
-     * data-low-idle-usage="on">` disables backdrop blur and freezes the idle
-     * AudioVisualizer waves to cut idle CPU/GPU. Default false (OFF) on every
-     * platform, so the shipped design is preserved unless the user opts in.
+     * GH-87 — when false, a global CSS override on `<html
+     * data-idle-animations="off">` freezes the idle AudioVisualizer waves to
+     * cut idle CPU/GPU. Independent of `blurEffectsEnabled`. Default true (ON),
+     * so the shipped animating design is preserved unless the user opts out.
      */
-    lowIdleUsageEnabled: boolean;
+    idleAnimationsEnabled: boolean;
   };
 }
 
@@ -146,7 +146,7 @@ const DEFAULT_CONFIG: ClientConfig = {
   ui: {
     sidebarCollapsed: false,
     blurEffectsEnabled: true,
-    lowIdleUsageEnabled: false,
+    idleAnimationsEnabled: true,
   },
 };
 

@@ -1328,7 +1328,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
               {/* Unified Control Center */}
               <GlassCard
                 title="Control Center"
-                className={`from-glass-200 to-glass-100 relative flex-none bg-linear-to-b transition-all duration-500 ease-in-out ${isSystemHealthy ? 'border-accent-cyan/50! z-10 shadow-[0_20px_25px_-5px_rgba(0,0,0,0.3),0_8px_10px_-6px_rgba(0,0,0,0.3),inset_0_0_30px_rgba(34,211,238,0.15)]!' : ''}`}
+                className={`blur-panel from-glass-200 to-glass-100 relative flex-none bg-linear-to-b transition-all duration-500 ease-in-out ${isSystemHealthy ? 'border-accent-cyan/50! z-10 shadow-[0_20px_25px_-5px_rgba(0,0,0,0.3),0_8px_10px_-6px_rgba(0,0,0,0.3),inset_0_0_30px_rgba(34,211,238,0.15)]!' : ''}`}
               >
                 <div className="space-y-5">
                   {/* Server Control */}
