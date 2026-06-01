@@ -282,6 +282,22 @@ body {
   animation: dropdown-appear 100ms ease-out 20ms both;
 }
 
+/* Reflow entrance — plays when a side panel stacks below the main column at narrow
+ * widths (Session right panel; Notebook Morning/Afternoon). Applied via a
+ * `@max-[…]:motion-safe:animate-[reflowStackIn_…]` container-query variant, so
+ * prefers-reduced-motion users get an instant (un-animated) reflow. Timing/easing
+ * match the existing slideInLeft/slideInRight reflow keyframes (0.3s, same cubic-bezier). */
+@keyframes reflowStackIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* ── Capture gain slider (System Audio card) ──────────────────────────── */
 .ts-gain-slider {
   -webkit-appearance: none;

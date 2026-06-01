@@ -1165,14 +1165,14 @@ const CalendarTab: React.FC<{
   );
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-1 gap-6 lg:grid-cols-3">
+    <div className="custom-scrollbar grid h-full min-h-0 grid-cols-1 gap-6 @max-[860px]:overflow-y-auto @min-[860px]:grid-cols-3">
       <style>{`
                 @keyframes slideInRight { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
                 @keyframes slideInLeft { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
                 .anim-slide-right { animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
                 .anim-slide-left { animation: slideInLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
             `}</style>
-      <div className="flex min-h-0 flex-col lg:col-span-2">
+      <div className="flex min-h-0 flex-col @max-[860px]:h-[70vh] @max-[860px]:min-h-[440px] @min-[860px]:col-span-2">
         <GlassCard
           className="flex h-full flex-col"
           title={calendarHeader}
@@ -1277,7 +1277,7 @@ const CalendarTab: React.FC<{
           </div>
         </GlassCard>
       </div>
-      <div className="flex h-full min-h-0 flex-col space-y-4 overflow-hidden">
+      <div className="flex h-full min-h-0 flex-col space-y-4 overflow-hidden @max-[860px]:h-[70vh] @max-[860px]:min-h-[440px] @max-[860px]:motion-safe:animate-[reflowStackIn_0.3s_cubic-bezier(0.16,1,0.3,1)]">
         <TimeSection
           title="Morning"
           headerColor="text-accent-orange"
