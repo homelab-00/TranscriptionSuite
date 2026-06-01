@@ -7,6 +7,7 @@ with the unified transcription engine.
 
 import logging
 import os
+import time
 import warnings
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,25 @@ try:
 except ImportError:
     torch = None  # type: ignore
     HAS_TORCH = False
+
+
+# Backoff delays (seconds) for transient CUDA errors during diarization inference.
+# Mirrors the exponential-backoff pattern in audio_utils.cuda_health_check.
+_CUDA_RETRY_DELAYS = (1, 2, 4)
+
+
+def _is_transient_cuda_error(exc: BaseException) -> bool:
+    """True for CUDA errors that are typically transient and worth retrying.
+
+    Targets the WSL2 cold-start race that surfaces as ``CUDA driver error:
+    device not ready`` (cudaErrorNotReady) right after a model load/unload swap,
+    plus the driver-settling ``error 999`` / ``unknown error``.  Deliberately
+    excludes out-of-memory, which retrying cannot fix.
+    """
+    msg = str(exc).lower()
+    if "out of memory" in msg:
+        return False
+    return "device not ready" in msg or "error 999" in msg or "unknown error" in msg
 
 
 def _resolve_device(requested: str) -> str:
@@ -290,12 +310,37 @@ class DiarizationEngine:
                     category=UserWarning,
                 )
 
-                diarization = self._pipeline(
-                    audio_input,
-                    num_speakers=n_speakers,
-                    min_speakers=self.min_speakers,
-                    max_speakers=self.max_speakers,
-                )
+                # Bounded retry on transient CUDA errors (e.g. WSL2 "device not
+                # ready" after a model swap). Non-transient errors propagate
+                # immediately; once retries are exhausted the last error is
+                # re-raised so the caller can degrade to transcript-without-speakers.
+                diarization = None
+                for attempt in range(len(_CUDA_RETRY_DELAYS) + 1):
+                    try:
+                        diarization = self._pipeline(
+                            audio_input,
+                            num_speakers=n_speakers,
+                            min_speakers=self.min_speakers,
+                            max_speakers=self.max_speakers,
+                        )
+                        break
+                    except Exception as exc:
+                        if not _is_transient_cuda_error(exc) or attempt >= len(_CUDA_RETRY_DELAYS):
+                            raise
+                        delay = _CUDA_RETRY_DELAYS[attempt]
+                        logger.warning(
+                            "Diarization: transient CUDA error (attempt %d/%d), "
+                            "clearing GPU cache and retrying in %ds: %s",
+                            attempt + 1,
+                            len(_CUDA_RETRY_DELAYS) + 1,
+                            delay,
+                            exc,
+                        )
+                        clear_gpu_cache()
+                        time.sleep(delay)
+
+            if diarization is None:  # pragma: no cover - loop always breaks or raises
+                raise RuntimeError("Diarization pipeline returned no result")
 
             # Convert to segments
             segments: list[DiarizationSegment] = []

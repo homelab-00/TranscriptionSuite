@@ -282,8 +282,15 @@ class WhisperXBackend(STTBackend):
         vad_filter: bool = True,
         num_speakers: int | None = None,
         hf_token: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> DiarizedTranscriptionResult | None:
-        """Full single-pass pipeline: transcribe → align → diarize → assign speakers."""
+        """Full single-pass pipeline: transcribe → align → diarize → assign speakers.
+
+        ``progress_callback`` is required to honour the :class:`STTBackend` base
+        contract — the file-import route always passes it. We report coarse
+        phase-level progress (transcribe → align → diarize) rather than per-chunk,
+        since WhisperX processes the whole file in one pass.
+        """
         del audio_sample_rate
         whisperx, diarize_module = _import_whisperx_modules(include_diarize=True)
         if diarize_module is None:
@@ -301,6 +308,16 @@ class WhisperXBackend(STTBackend):
                 "Set HUGGINGFACE_TOKEN or HF_TOKEN environment variable."
             )
 
+        def _report(pct: int) -> None:
+            # Progress reporting must never be able to discard a completed,
+            # irreplaceable transcription result — isolate callback failures.
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(pct, 100)
+            except Exception:
+                logger.debug("WhisperX progress_callback raised; ignoring", exc_info=True)
+
         # 1. Transcribe
         logger.info("WhisperX: transcribing audio")
         wx_result = self._whisperx_transcribe(
@@ -313,6 +330,7 @@ class WhisperXBackend(STTBackend):
             vad_filter=vad_filter,
         )
         detected_language = wx_result.get("language", language)
+        _report(60)  # transcription done
 
         # 2. Align (wav2vec2 forced alignment for precise word timestamps)
         if wx_result.get("segments"):
@@ -321,6 +339,7 @@ class WhisperXBackend(STTBackend):
                 wx_result = self._align(wx_result, audio, detected_language)
             except Exception as e:
                 logger.warning(f"WhisperX alignment failed, continuing with raw timestamps: {e}")
+        _report(80)  # alignment done
 
         # 3. Diarize
         logger.info("WhisperX: running diarization")
@@ -377,6 +396,8 @@ class WhisperXBackend(STTBackend):
             num_speakers_found,
             len(all_segments),
         )
+
+        _report(100)  # diarization + speaker assignment done
 
         return DiarizedTranscriptionResult(
             segments=all_segments,
