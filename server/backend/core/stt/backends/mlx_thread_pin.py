@@ -25,7 +25,16 @@ import functools
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, TypeVar
+
+# Classic typing.TypeVar — deliberately NOT a PEP 695 ``def f[T]`` type parameter:
+# CodeQL's Python extractor does not yet understand PEP 695 type parameters and
+# raises a false py/uninitialized-local-variable on the type variable when it is
+# referenced inside a nested function (the ``wrapper`` below). A module-level
+# TypeVar is unambiguously initialized, so CodeQL stays quiet. ``mlx_pinned`` thus
+# carries a matching ``# noqa: UP047`` for ruff, which would otherwise push it back
+# to the PEP 695 form that breaks CodeQL. See GH #134 / PR #138.
+_T = TypeVar("_T")
 
 # Serializes lazy executor creation across instances. Creation is rare (once per
 # backend instance), so a single shared lock has no meaningful contention cost.
@@ -61,7 +70,7 @@ class MLXThreadAffinityMixin:
             self._mlx_executor: ThreadPoolExecutor = executor
             return executor
 
-    def _run_on_mlx_thread[T](self, fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+    def _run_on_mlx_thread(self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
         """Run ``fn`` on this instance's owning MLX thread and return its result.
 
         Re-raises the callee's exception with its original type and traceback.
@@ -83,7 +92,7 @@ class MLXThreadAffinityMixin:
             self._mlx_owning_thread_id = None
 
 
-def mlx_pinned[T](method: Callable[..., T]) -> Callable[..., T]:
+def mlx_pinned(method: Callable[..., _T]) -> Callable[..., _T]:  # noqa: UP047
     """Decorator: run a backend method on its instance's owning MLX thread.
 
     The wrapped method's signature, return value, and exceptions are preserved.
@@ -93,7 +102,7 @@ def mlx_pinned[T](method: Callable[..., T]) -> Callable[..., T]:
     """
 
     @functools.wraps(method)
-    def wrapper(self: MLXThreadAffinityMixin, *args: Any, **kwargs: Any) -> T:
+    def wrapper(self: MLXThreadAffinityMixin, *args: Any, **kwargs: Any) -> _T:
         return self._run_on_mlx_thread(method, self, *args, **kwargs)
 
     return wrapper
