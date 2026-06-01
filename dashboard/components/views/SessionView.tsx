@@ -1316,7 +1316,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           {/* Main Scrollable Area for Left Column */}
           <div
             ref={leftScrollRef}
-            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0 @max-[840px]:overflow-visible"
+            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0 @max-[840px]:flex-none @max-[840px]:overflow-visible"
           >
             {/* Baseline min-height keeps short content filling the column in the two-column
                 layout only — applied via a CSS var gated behind @min-[840px] so it no-ops
@@ -1971,7 +1971,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           {/* Right Column Scroll Container */}
           <div
             ref={rightScrollRef}
-            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0 @max-[840px]:overflow-visible"
+            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0 @max-[840px]:flex-none @max-[840px]:overflow-visible"
           >
             {/* Baseline min-height applies in the two-column layout only (see left column);
                 gated behind @min-[840px] so it no-ops when stacked. */}
