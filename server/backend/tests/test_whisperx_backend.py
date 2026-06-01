@@ -505,6 +505,62 @@ def test_whisperx_diarization_forwards_initial_prompt_and_suppress_tokens(monkey
 # ------------------------------------------------------------------
 
 
+def test_whisperx_diarization_progress_callback_failure_does_not_discard_result(
+    monkeypatch,
+) -> None:
+    """GH #122: a throwing progress_callback must never abort a completed diarization.
+
+    Progress reporting is subordinate to result preservation (data-loss invariant).
+    """
+    module = _import_whisperx_backend()
+    backend = module.WhisperXBackend()
+    fake_model = _ModernFakeModel()
+    backend._model = fake_model
+    backend._device = "cpu"
+    backend._align = lambda wx_result, audio, language: wx_result
+
+    whisperx_mod = types.ModuleType("whisperx")
+
+    def assign_word_speakers(diarize_segments, wx_result):
+        wx_result["segments"][0]["speaker"] = "SPEAKER_00"
+        wx_result["segments"][0]["words"] = [
+            {"word": "hi", "start": 0.0, "end": 0.1, "score": 0.9, "speaker": "SPEAKER_00"}
+        ]
+        return wx_result
+
+    whisperx_mod.assign_word_speakers = assign_word_speakers
+
+    diarize_mod = types.ModuleType("whisperx.diarize")
+
+    class FakeDiarizationPipeline:
+        def __init__(self, use_auth_token, device) -> None:
+            pass
+
+        def __call__(self, audio, **kwargs):
+            return [{"speaker": "SPEAKER_00"}]
+
+    diarize_mod.DiarizationPipeline = FakeDiarizationPipeline
+    monkeypatch.setitem(sys.modules, "whisperx", whisperx_mod)
+    monkeypatch.setitem(sys.modules, "whisperx.diarize", diarize_mod)
+
+    calls: list[tuple[int, int]] = []
+
+    def exploding_callback(current: int, total: int) -> None:
+        calls.append((current, total))
+        raise RuntimeError("client socket closed")
+
+    audio = np.zeros(16000, dtype=np.float32)
+    result = backend.transcribe_with_diarization(
+        audio, hf_token="hf_test", progress_callback=exploding_callback
+    )
+
+    # The result survives despite every progress emit raising.
+    assert result is not None
+    assert result.num_speakers == 1
+    # All three phase emits were attempted (each raised and was swallowed).
+    assert calls == [(60, 100), (80, 100), (100, 100)]
+
+
 def test_configure_decode_options_creates_instance_copy() -> None:
     """configure_decode_options() must store an instance copy, not mutate class default."""
     module = _import_whisperx_backend()
