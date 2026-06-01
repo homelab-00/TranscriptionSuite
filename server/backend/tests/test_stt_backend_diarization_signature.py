@@ -50,10 +50,11 @@ def _base_param_names() -> set[str]:
 @pytest.mark.parametrize(("module_path", "class_name"), _BACKENDS)
 def test_override_signature_is_superset_of_base(module_path: str, class_name: str) -> None:
     _install_soundfile_stub()
-    try:
-        module = importlib.import_module(module_path)
-    except Exception as exc:  # e.g. mlx unavailable off Apple Silicon
-        pytest.skip(f"{module_path} not importable in this env: {exc}")
+    # importorskip returns the module, or skips cleanly if its deps are absent
+    # (e.g. the `mlx` runtime off Apple Silicon). Using it instead of a
+    # try/except + pytest.skip keeps `module` unconditionally bound, avoiding a
+    # CodeQL py/uninitialized-local-variable false positive.
+    module = pytest.importorskip(module_path, reason=f"{module_path} not importable in this env")
 
     from server.core.stt.backends.base import STTBackend
 
