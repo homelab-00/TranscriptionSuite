@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from server.database.database import (
         create_conversation,
+        delete_recording,
         get_conversation,
         get_conversations,
+        get_recordings_for_hour,
         search_recordings,
         search_words,
         search_words_enhanced,
@@ -18,6 +20,7 @@ if TYPE_CHECKING:
         update_conversation_response_id,
         update_conversation_title,
         update_recording_corrected_transcript,
+        update_recording_summary,
     )
 
 

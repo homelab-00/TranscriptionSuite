@@ -37,6 +37,7 @@ from server.core.stt.backends.base import (
     BackendTranscriptionInfo,
     STTBackend,
 )
+from server.core.stt.backends.mlx_thread_pin import MLXThreadAffinityMixin, mlx_pinned
 
 SAMPLE_RATE = 16000
 
@@ -101,7 +102,7 @@ def _tokens_to_words(tokens: list[Any]) -> list[dict[str, Any]]:
     return words
 
 
-class MLXParakeetBackend(STTBackend):
+class MLXParakeetBackend(MLXThreadAffinityMixin, STTBackend):
     """Apple MLX / Metal-accelerated Parakeet-TDT backend.
 
     Wraps ``parakeet-mlx`` for NVIDIA Parakeet-TDT inference on Apple Silicon.
@@ -118,6 +119,7 @@ class MLXParakeetBackend(STTBackend):
     # STTBackend interface
     # ------------------------------------------------------------------
 
+    @mlx_pinned
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         """Load the Parakeet model via ``parakeet_mlx.from_pretrained``."""
         del device, kwargs
@@ -142,6 +144,7 @@ class MLXParakeetBackend(STTBackend):
         except Exception as exc:
             raise RuntimeError(f"Failed to load MLX Parakeet model '{model_name}': {exc}") from exc
 
+    @mlx_pinned
     def unload(self) -> None:
         if self._model is not None:
             import mlx.core as mx
@@ -157,6 +160,7 @@ class MLXParakeetBackend(STTBackend):
     def is_loaded(self) -> bool:
         return self._loaded
 
+    @mlx_pinned
     def warmup(self) -> None:
         if not self._loaded or self._model is None:
             return
@@ -173,6 +177,7 @@ class MLXParakeetBackend(STTBackend):
         except Exception as e:
             logger.warning(f"MLX Parakeet warmup failed (non-critical): {e}")
 
+    @mlx_pinned
     def transcribe(
         self,
         audio: np.ndarray,
