@@ -29,13 +29,14 @@ from server.core.stt.backends.base import (
     DiarizedTranscriptionResult,
     STTBackend,
 )
+from server.core.stt.backends.mlx_thread_pin import MLXThreadAffinityMixin, mlx_pinned
 
 INPUT_SAMPLE_RATE = 16000
 
 logger = logging.getLogger(__name__)
 
 
-class MLXVibeVoiceBackend(STTBackend):
+class MLXVibeVoiceBackend(MLXThreadAffinityMixin, STTBackend):
     """STT backend for VibeVoice-ASR via mlx-audio on Apple Silicon."""
 
     def __init__(self) -> None:
@@ -44,6 +45,7 @@ class MLXVibeVoiceBackend(STTBackend):
 
     # ── STTBackend interface ──────────────────────────────────────────
 
+    @mlx_pinned
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         del device  # MLX always uses Metal
         from mlx_audio.stt import load as mlx_stt_load
@@ -53,6 +55,7 @@ class MLXVibeVoiceBackend(STTBackend):
         self._model_name = model_name
         logger.info("MLX VibeVoice model loaded: %s", model_name)
 
+    @mlx_pinned
     def unload(self) -> None:
         if self._model is not None:
             import gc
@@ -69,6 +72,7 @@ class MLXVibeVoiceBackend(STTBackend):
     def is_loaded(self) -> bool:
         return self._model is not None
 
+    @mlx_pinned
     def warmup(self) -> None:
         if self._model is None:
             return
@@ -79,6 +83,7 @@ class MLXVibeVoiceBackend(STTBackend):
         except Exception as exc:
             logger.debug("MLX VibeVoice warmup (non-fatal): %s", exc)
 
+    @mlx_pinned
     def transcribe(
         self,
         audio: np.ndarray,
@@ -128,6 +133,7 @@ class MLXVibeVoiceBackend(STTBackend):
         info = BackendTranscriptionInfo(language=language, language_probability=0.0)
         return segments, info
 
+    @mlx_pinned
     def transcribe_with_diarization(
         self,
         audio: np.ndarray,

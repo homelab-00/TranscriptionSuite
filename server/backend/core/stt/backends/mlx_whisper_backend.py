@@ -30,13 +30,14 @@ from server.core.stt.backends.base import (
     BackendTranscriptionInfo,
     STTBackend,
 )
+from server.core.stt.backends.mlx_thread_pin import MLXThreadAffinityMixin, mlx_pinned
 
 SAMPLE_RATE = 16000
 
 logger = logging.getLogger(__name__)
 
 
-class MLXWhisperBackend(STTBackend):
+class MLXWhisperBackend(MLXThreadAffinityMixin, STTBackend):
     """Apple MLX / Metal-accelerated Whisper backend via mlx-audio.
 
     Uses ``mlx-audio`` (https://github.com/ml-explore/mlx-audio) for Whisper
@@ -51,6 +52,7 @@ class MLXWhisperBackend(STTBackend):
     # STTBackend interface
     # ------------------------------------------------------------------
 
+    @mlx_pinned
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         del device  # MLX always uses Metal
         try:
@@ -73,6 +75,7 @@ class MLXWhisperBackend(STTBackend):
         self._model_name = model_name
         logger.info("MLX Whisper model loaded: %s", model_name)
 
+    @mlx_pinned
     def unload(self) -> None:
         if self._model is not None:
             import gc
@@ -89,6 +92,7 @@ class MLXWhisperBackend(STTBackend):
     def is_loaded(self) -> bool:
         return self._model is not None
 
+    @mlx_pinned
     def warmup(self) -> None:
         if self._model is None:
             return
@@ -98,6 +102,7 @@ class MLXWhisperBackend(STTBackend):
         except Exception as exc:
             logger.debug("MLX Whisper warmup (non-fatal): %s", exc)
 
+    @mlx_pinned
     def transcribe(
         self,
         audio: np.ndarray,
