@@ -16,6 +16,7 @@ import {
   RotateCcw,
   Copy,
   Check,
+  FolderOpen,
   Eye,
   EyeOff,
   Users,
@@ -285,6 +286,33 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         setNativeModelsDir(dir + '/models');
       })
       .catch(() => {});
+  }, []);
+
+  // Per-row "copied" feedback for the persistent-volume path actions (GH-137).
+  const [copiedPath, setCopiedPath] = useState<string | null>(null);
+
+  // Open a native directory in the OS file manager; on failure (e.g. the dir
+  // does not exist yet) fall back to its parent.
+  const handleOpenNativePath = useCallback(async (dir: string | null) => {
+    if (!dir) return;
+    const api = (window as any).electronAPI;
+    if (!api?.app?.openPath) return;
+    try {
+      const err: string = await api.app.openPath(dir);
+      if (err) {
+        const parent = dir.replace(/[\\/]+[^\\/]*[\\/]*$/, '');
+        if (parent && parent !== dir) await api.app.openPath(parent).catch(() => {});
+      }
+    } catch {
+      /* best-effort — opening a folder must never crash the view */
+    }
+  }, []);
+
+  const handleCopyNativePath = useCallback((dir: string | null, label: string) => {
+    if (!dir) return;
+    writeToClipboard(dir).catch(() => {});
+    setCopiedPath(label);
+    setTimeout(() => setCopiedPath((c) => (c === label ? null : c)), 2000);
   }, []);
 
   // Derive model option lists filtered by the active runtime profile.
@@ -2635,17 +2663,38 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         color: 'bg-purple-500',
                       },
                     ].map(({ label, path: dir, color }) => (
-                      <div key={label} className="flex items-center justify-between py-1 text-sm">
-                        <div className="flex items-center gap-3">
-                          <div className={`h-2 w-2 rounded-full ${color}`} />
-                          <span className="text-slate-300">{label}</span>
+                      <div key={label} className="py-1 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-3">
+                            <div className={`h-2 w-2 rounded-full ${color}`} />
+                            <span className="text-slate-300">{label}</span>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              onClick={() => handleOpenNativePath(dir)}
+                              disabled={!dir}
+                              className="rounded p-1 text-slate-500 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                              title="Open in file manager"
+                            >
+                              <FolderOpen size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleCopyNativePath(dir, label)}
+                              disabled={!dir}
+                              className="rounded p-1 text-slate-500 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                              title="Copy path"
+                            >
+                              {copiedPath === label ? (
+                                <Check size={14} className="text-green-400" />
+                              ) : (
+                                <Copy size={14} />
+                              )}
+                            </button>
+                          </div>
                         </div>
-                        <span
-                          className="max-w-[55%] truncate text-right font-mono text-xs text-slate-400"
-                          title={dir ?? ''}
-                        >
+                        <div className="mt-1 pl-5 font-mono text-xs break-all text-slate-400">
                           {dir ?? '…'}
-                        </span>
+                        </div>
                       </div>
                     ))}
                     <p className="text-xs text-slate-500 italic">

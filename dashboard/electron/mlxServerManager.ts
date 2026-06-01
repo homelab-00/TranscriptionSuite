@@ -11,11 +11,14 @@
  *   2. `<resourcesPath>/backend/.venv/bin/uvicorn`       (packaged)
  */
 
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, spawn, execFile } from 'child_process';
+import { promisify } from 'util';
 import { app, BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { MlxLogSink } from './mlxLogSink.js';
+
+const execFileAsync = promisify(execFile);
 
 export type MLXServerStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
 
@@ -25,6 +28,11 @@ export interface MLXStartOptions {
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;
+}
+
+export interface MLXModelCacheEntry {
+  exists: boolean;
+  size?: string;
 }
 
 const MAX_LOG_LINES = 500;
@@ -303,8 +311,149 @@ export class MLXServerManager {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
+  // Native model-cache operations (Docker-free, for the Metal/MLX profile)
+  //
+  // These mirror dockerManager's downloadModelToCache/checkModelsCached/
+  // removeModelCache but run directly on the host: the HuggingFace cache lives
+  // at <HF_HOME>/hub on the local filesystem, and the download is a
+  // `snapshot_download` via the MLX venv's Python. None of these require the
+  // Metal server process to be running.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Download a model's weights into the local HuggingFace cache
+   * (<HF_HOME>/hub) without GPU-loading it. Runs `snapshot_download` via the
+   * MLX venv's Python as an independent subprocess, so it works whether or not
+   * the Metal server is running.
+   */
+  async downloadModelToCache(modelId: string): Promise<void> {
+    const trimmed = this._assertSafeModelId(modelId);
+
+    const python = this._resolveVenvPython();
+    if (!python) {
+      throw new Error(
+        'The Metal Python environment was not found, so models cannot be ' +
+          `downloaded. Reinstall from "${this._metalDmgName()}".`,
+      );
+    }
+
+    const hfHome = this._resolveHfHome();
+    const hubDir = path.join(hfHome, 'hub');
+    // Pass the model ID and cache dir as argv values — never interpolated into
+    // the Python source — to avoid any code-injection surface.
+    const pyCmd =
+      'import sys; from huggingface_hub import snapshot_download; ' +
+      'snapshot_download(sys.argv[1], cache_dir=sys.argv[2])';
+    try {
+      await execFileAsync(python, ['-c', pyCmd, trimmed, hubDir], {
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 600_000, // 10 minutes for large models
+        env: { ...process.env, HF_HOME: hfHome },
+      });
+    } catch (err: unknown) {
+      const stderr: string = (err as { stderr?: string })?.stderr ?? '';
+      if (stderr.includes('ModuleNotFoundError') || stderr.includes('No module named')) {
+        throw new Error(
+          'The Metal Python environment is incomplete (huggingface_hub was not ' +
+            `found). The app bundle may be damaged — reinstall from "${this._metalDmgName()}".`,
+        );
+      }
+      if (stderr.includes('GatedRepoError') || stderr.includes('403 Client Error')) {
+        throw new Error(
+          `Access denied for "${trimmed}". This is a gated model — ` +
+            `visit https://huggingface.co/${trimmed} to accept the license, ` +
+            `then add your HuggingFace token in Settings.`,
+        );
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Check which HuggingFace repos already exist in the local cache.
+   * Returns a record mapping each model ID to `{ exists, size? }`.
+   * Pure host-filesystem inspection — does not require the server running.
+   */
+  async checkModelsCached(modelIds: string[]): Promise<Record<string, MLXModelCacheEntry>> {
+    const result: Record<string, MLXModelCacheEntry> = {};
+    const hubDir = path.join(this._resolveHfHome(), 'hub');
+    const resolvedHub = path.resolve(hubDir);
+
+    for (const id of modelIds) {
+      result[id] = { exists: false };
+      const trimmed = id.trim();
+      // Skip unsafe IDs (mutating ops throw via _assertSafeModelId; this batch
+      // check just reports them as not-cached). Keep the char set in sync.
+      if (!trimmed || trimmed.includes('..') || trimmed.includes('\\') || trimmed.includes('\0'))
+        continue;
+
+      // HuggingFace convention: "org/name" → "models--org--name" under hub/.
+      const cacheName = `models--${trimmed.replace(/\//g, '--')}`;
+      const dir = path.resolve(path.join(hubDir, cacheName));
+      if (path.dirname(dir) !== resolvedHub) continue; // not a direct child of hub
+      if (!fs.existsSync(dir)) continue;
+
+      let size: string | undefined;
+      try {
+        const { stdout } = await execFileAsync('du', ['-sh', dir], { timeout: 15_000 });
+        const parsed = stdout.split(/\s+/)[0]?.trim();
+        if (parsed) size = parsed;
+      } catch {
+        // Keep exists=true even when the size lookup fails.
+      }
+      result[id] = size ? { exists: true, size } : { exists: true };
+    }
+    return result;
+  }
+
+  /**
+   * Remove a model's cache directory from the local HuggingFace cache.
+   * Validates the ID and refuses to touch anything outside <HF_HOME>/hub
+   * (path-traversal guard for the host filesystem).
+   */
+  async removeModelCache(modelId: string): Promise<void> {
+    const trimmed = this._assertSafeModelId(modelId);
+    const hubDir = path.join(this._resolveHfHome(), 'hub');
+    const cacheName = `models--${trimmed.replace(/\//g, '--')}`;
+    const dir = path.resolve(path.join(hubDir, cacheName));
+    if (path.dirname(dir) !== path.resolve(hubDir)) {
+      throw new Error('Refusing to remove a cache directory outside the hub directory');
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
   // Private helpers
   // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Locate the MLX venv's Python interpreter (python3 preferred). Derived from
+   * the same venv that hosts uvicorn, so huggingface_hub is guaranteed present.
+   * Returns null when no venv is found (e.g. the dashboard-only "thin" build).
+   */
+  private _resolveVenvPython(): string | null {
+    const uvicornPath = this._uvicornCandidates().find((c) => fs.existsSync(c));
+    if (!uvicornPath) return null;
+    const binDir = path.dirname(uvicornPath);
+    return (
+      (['python3', 'python'] as const).map((n) => path.join(binDir, n)).find(fs.existsSync) ?? null
+    );
+  }
+
+  /**
+   * Validate a model ID before it influences a host filesystem path or a
+   * subprocess. Rejects traversal sequences and control characters. Forward
+   * slashes are allowed (legitimate in HuggingFace "org/name" IDs) — callers
+   * map them to the "models--org--name" cache convention, and the resolved-path
+   * containment check (`path.dirname(dir) === <hub>`) is the real backstop.
+   */
+  private _assertSafeModelId(modelId: string): string {
+    const trimmed = modelId.trim();
+    if (!trimmed || trimmed.includes('..') || trimmed.includes('\\') || trimmed.includes('\0')) {
+      throw new Error(`Invalid model id: ${modelId}`);
+    }
+    return trimmed;
+  }
 
   private _uvicornCandidates(): string[] {
     const candidates: string[] = [];

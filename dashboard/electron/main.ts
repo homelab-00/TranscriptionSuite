@@ -2420,6 +2420,19 @@ ipcMain.handle('mlx:getLogs', (_event, tail?: number) => {
   return mlxServerManager.getLogs(tail);
 });
 
+// Native model-cache ops for the Metal/MLX profile (no Docker container).
+ipcMain.handle('mlx:downloadModelToCache', async (_event, modelId: string) => {
+  await mlxServerManager.downloadModelToCache(modelId);
+});
+
+ipcMain.handle('mlx:checkModelsCached', async (_event, modelIds: string[]) => {
+  return mlxServerManager.checkModelsCached(modelIds);
+});
+
+ipcMain.handle('mlx:removeModelCache', async (_event, modelId: string) => {
+  await mlxServerManager.removeModelCache(modelId);
+});
+
 // ─── Watcher IPC Handlers ────────────────────────────────────────────────────
 
 ipcMain.handle('watcher:startSession', async (_event, folderPath: string) => {
