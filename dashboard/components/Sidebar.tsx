@@ -231,7 +231,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div
-      className={`bg-glass-surface border-glass-border relative flex h-full shrink-0 flex-col border-r backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${collapsed ? 'w-20' : 'w-48'} `}
+      className={`blur-panel bg-glass-surface border-glass-border relative flex h-full shrink-0 flex-col border-r backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${collapsed ? 'w-20' : 'w-48'} `}
       style={{
         width: sidebarWidthPx,
       }}

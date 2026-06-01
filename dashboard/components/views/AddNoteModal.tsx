@@ -331,7 +331,7 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
 
       {/* Modal Window */}
       <div
-        className={`bg-glass-surface relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl backdrop-blur-xl transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-4 scale-95 opacity-0'} `}
+        className={`blur-panel bg-glass-surface relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-white/10 shadow-2xl backdrop-blur-xl transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-4 scale-95 opacity-0'} `}
       >
         {/* Header */}
         <div className="flex h-14 items-center justify-between border-b border-white/5 bg-white/5 px-6">

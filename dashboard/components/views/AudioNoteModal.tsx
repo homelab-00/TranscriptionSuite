@@ -1829,7 +1829,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setRenameDialog(null)}
             />
-            <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl">
+            <div className="blur-panel relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl">
               <div className="flex items-center border-b border-white/10 bg-white/5 px-6 py-4">
                 <span className="text-base font-semibold text-white">Rename Session</span>
               </div>
@@ -1872,7 +1872,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setRecordingRenameDialog(null)}
             />
-            <div className="relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl">
+            <div className="blur-panel relative flex w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl backdrop-blur-xl">
               <div className="flex items-center border-b border-white/10 bg-white/5 px-6 py-4">
                 <span className="text-base font-semibold text-white">Rename Recording</span>
               </div>
@@ -1920,7 +1920,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
 
           {/* Main Modal Container */}
           <div
-            className={`bg-glass-surface relative flex h-[85vh] w-full max-w-6xl overflow-hidden rounded-3xl border border-white/10 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-[100vh] opacity-0'}`}
+            className={`blur-panel bg-glass-surface relative flex h-[85vh] w-full max-w-6xl overflow-hidden rounded-3xl border border-white/10 shadow-2xl backdrop-blur-xl transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-[100vh] opacity-0'}`}
           >
             {/* Left Section: Content & Player */}
             <div className="flex min-w-0 flex-1 flex-col bg-linear-to-b from-white/5 to-transparent">
