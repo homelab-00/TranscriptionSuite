@@ -106,6 +106,34 @@
   -webkit-backdrop-filter: none !important;
 }
 
+/*
+ * GH-124 Part C / issue 87 — single cross-platform Low idle usage mode.
+ * When the user enables it in Settings, the html element gains
+ * data-low-idle-usage=on (set by SettingsModal and re-applied at boot by
+ * dashboard/index.tsx). It neutralizes backdrop blur and freezes the idle
+ * AudioVisualizer waves. It wins over the per-effect Blur effects toggle by
+ * the same forced override, so blur stays off even if Blur effects is re-
+ * enabled. The data-doc-hidden=true rule is an always-on hygiene gate that
+ * pauses the idle waves while the window is hidden (idleVisibilityGate.ts).
+ */
+:root[data-low-idle-usage='on'],
+:root[data-low-idle-usage='on'] *,
+:root[data-low-idle-usage='on'] *::before,
+:root[data-low-idle-usage='on'] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+:root[data-low-idle-usage='on'] .idle-wave-cyan,
+:root[data-low-idle-usage='on'] .idle-wave-magenta,
+:root[data-low-idle-usage='on'] .idle-wave-orange {
+  animation: none !important;
+}
+:root[data-doc-hidden='true'] .idle-wave-cyan,
+:root[data-doc-hidden='true'] .idle-wave-magenta,
+:root[data-doc-hidden='true'] .idle-wave-orange {
+  animation-play-state: paused !important;
+}
+
 /* Tailwind v4 maps bg-gradient-* to oklab interpolation; force mockup-like sRGB behavior. */
 .bg-gradient-to-b {
   --tw-gradient-position: to bottom;
