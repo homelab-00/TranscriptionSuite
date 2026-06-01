@@ -13,7 +13,6 @@ const MLX_DEFAULT_MODEL = 'mlx-community/parakeet-tdt-0.6b-v3';
 
 export const ModelManagerView: React.FC = () => {
   const docker = useDockerContext();
-  const isRunning = docker.container.running;
 
   // Model selection state — reads/writes the same electron-store keys as ServerView
   const [mainModelSelection, setMainModelSelection] = useState(MODEL_DEFAULT_LOADING_PLACEHOLDER);
@@ -29,6 +28,32 @@ export const ModelManagerView: React.FC = () => {
   const [modelCacheStatus, setModelCacheStatus] = useState<
     Record<string, { exists: boolean; size?: string }>
   >({});
+
+  const [mlxStatus, setMlxStatus] = useState<string>('stopped');
+
+  // On the Metal (bare-metal) profile there is no Docker container, so the
+  // Model Manager's "running" signal comes from the MLX server status instead
+  // of docker.container.running (which is permanently false on Metal — GH-136).
+  const isMetal = runtimeProfile === 'metal';
+  const isRunning = isMetal ? mlxStatus === 'running' : docker.container.running;
+
+  // Track MLX server status for the running signal above (Metal profile).
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.mlx?.getStatus) return;
+    let active = true;
+    api.mlx
+      .getStatus()
+      .then((s: string) => {
+        if (active) setMlxStatus(s);
+      })
+      .catch(() => {});
+    const unsub = api.mlx.onStatusChanged?.((s: string) => setMlxStatus(s));
+    return () => {
+      active = false;
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
 
   // Load persisted selections from electron store on mount
   useEffect(() => {
@@ -126,17 +151,30 @@ export const ModelManagerView: React.FC = () => {
   const refreshCacheStatus = useCallback(
     (extraIds?: string[]) => {
       const api = (window as any).electronAPI;
-      if (!api?.docker?.checkModelsCached || !isRunning) return;
       const modelIds = [...new Set(extraIds ?? [])].filter(Boolean);
       if (modelIds.length === 0) return;
+
+      const apply = (result: Record<string, { exists: boolean; size?: string }>) => {
+        setModelCacheStatus((prev) => ({ ...prev, ...result }));
+      };
+
+      if (isMetal) {
+        // Metal: pure host-filesystem check — works whether or not the server runs.
+        if (!api?.mlx?.checkModelsCached) return;
+        api.mlx
+          .checkModelsCached(modelIds)
+          .then(apply)
+          .catch(() => {});
+        return;
+      }
+      // Docker: cache lives inside the container, so it must be running.
+      if (!api?.docker?.checkModelsCached || !isRunning) return;
       api.docker
         .checkModelsCached(modelIds)
-        .then((result: Record<string, { exists: boolean; size?: string }>) => {
-          setModelCacheStatus((prev) => ({ ...prev, ...result }));
-        })
+        .then(apply)
         .catch(() => {});
     },
-    [isRunning],
+    [isRunning, isMetal],
   );
 
   return (
@@ -165,7 +203,7 @@ export const ModelManagerView: React.FC = () => {
           modelCacheStatus={modelCacheStatus}
           isRunning={isRunning}
           refreshCacheStatus={refreshCacheStatus}
-          isMetal={runtimeProfile === 'metal'}
+          isMetal={isMetal}
         />
       </div>
     </div>
