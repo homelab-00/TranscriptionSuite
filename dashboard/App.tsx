@@ -778,7 +778,10 @@ const AppInner: React.FC = () => {
         <QueuePausedBanner />
 
         {/* Scrollable View Content - Removed p-6 to allow full-width scrolling in Server View */}
-        <div className="relative h-full flex-1 overflow-hidden">
+        {/* @container: makes the content area a container-query context so SessionView/
+            NotebookView grids reflow based on available width (sidebar-collapse aware),
+            not viewport width. See spec-reduce-min-window-width-panel-reflow. */}
+        <div className="@container relative h-full flex-1 overflow-hidden">
           {/* SessionView stays mounted to preserve WebSocket/audio state across tab switches */}
           <div
             className="h-full w-full"

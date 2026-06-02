@@ -765,7 +765,10 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1530,
     height: 860,
-    minWidth: 1262,
+    // Narrow-window reflow: floor = sidebar + left-panel min. Below this width the
+    // Session/Notebook side panels reflow below the main column via container queries
+    // (spec-reduce-min-window-width-panel-reflow). Was 1262 (sidebar + both panels).
+    minWidth: 720,
     minHeight: 600,
     show: !startMinimized,
     icon: iconPath,

@@ -1285,9 +1285,16 @@ export const SessionView: React.FC<SessionViewProps> = ({
       )}
 
       {/* 2. Main Content Area */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 lg:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]">
+      <div className="custom-scrollbar grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 @max-[840px]:overflow-y-auto @min-[840px]:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]">
         {/* Left Column: Controls (40%) */}
-        <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl">
+        {/* min-h-0 is gated to @min-[840px] (wide mode) ON PURPOSE: in the two-column
+            layout it lets the inner flex-1 scroll area engage. In stacked mode it must
+            NOT apply — with min-h-0 the grid treats each row minimum as 0, sees the
+            fixed grid height as free space, and stretches both auto rows to equal
+            heights; the real (taller) content then spills out via overflow-visible and
+            the two columns paint on top of each other. Without min-h-0 the rows size to
+            content and stack cleanly as one scrolling column. */}
+        <div className="relative flex min-w-0 flex-col overflow-hidden rounded-2xl @max-[840px]:overflow-visible @min-[840px]:min-h-0">
           {/* Left Top Scroll Indicator */}
           <div
             className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
@@ -1302,7 +1309,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Left Top Corner Mask */}
           <div
-            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
+            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4 @max-[840px]:hidden"
             style={{
               ...maskStyle,
               maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
@@ -1314,14 +1321,19 @@ export const SessionView: React.FC<SessionViewProps> = ({
           {/* Main Scrollable Area for Left Column */}
           <div
             ref={leftScrollRef}
-            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0"
+            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0 @max-[840px]:overflow-visible"
           >
+            {/* Baseline min-height keeps short content filling the column in the two-column
+                layout only — applied via a CSS var gated behind @min-[840px] so it no-ops
+                when stacked (spec: baseline-height effect must no-op when stacked). */}
             <div
               ref={leftContentRef}
-              className="space-y-6"
+              className="space-y-6 @min-[840px]:[min-height:var(--ts-col-baseline)]"
               style={
                 leftColumnBaselineHeight
-                  ? { minHeight: `${leftColumnBaselineHeight}px` }
+                  ? ({
+                      '--ts-col-baseline': `${leftColumnBaselineHeight}px`,
+                    } as React.CSSProperties)
                   : undefined
               }
             >
@@ -1925,7 +1937,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Left Bottom Corner Mask */}
           <div
-            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
+            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4 @max-[840px]:hidden"
             style={{
               ...maskStyle,
               maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
@@ -1935,7 +1947,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
         </div>
 
         {/* Right Column: Visualizer & Live Mode (60%) */}
-        <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl">
+        {/* @max-[840px]: stacks below the left column as one scrolling grid, and slides in
+            via the reflowStackIn keyframe (motion-safe only — reduced-motion = instant).
+            min-h-0 is gated to @min-[840px] for the same reason as the left column: in
+            stacked mode it would let the grid stretch the rows to equal heights and cause
+            the panels to overlap. */}
+        <div className="relative flex min-w-0 flex-col overflow-hidden rounded-2xl @max-[840px]:overflow-visible @max-[840px]:motion-safe:animate-[reflowStackIn_0.3s_cubic-bezier(0.16,1,0.3,1)] @min-[840px]:min-h-0">
           {/* Right Top Scroll Indicator */}
           <div
             className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
@@ -1950,7 +1967,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Right Top Corner Mask */}
           <div
-            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
+            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4 @max-[840px]:hidden"
             style={{
               ...maskStyle,
               maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
@@ -1962,14 +1979,18 @@ export const SessionView: React.FC<SessionViewProps> = ({
           {/* Right Column Scroll Container */}
           <div
             ref={rightScrollRef}
-            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0"
+            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0 @max-[840px]:overflow-visible"
           >
+            {/* Baseline min-height applies in the two-column layout only (see left column);
+                gated behind @min-[840px] so it no-ops when stacked. */}
             <div
               ref={rightContentRef}
-              className="flex min-h-full flex-col"
+              className="flex min-h-full flex-col @min-[840px]:[min-height:var(--ts-col-baseline)]"
               style={
                 rightColumnBaselineHeight
-                  ? { minHeight: `${rightColumnBaselineHeight}px` }
+                  ? ({
+                      '--ts-col-baseline': `${rightColumnBaselineHeight}px`,
+                    } as React.CSSProperties)
                   : undefined
               }
             >
@@ -2323,7 +2344,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Right Bottom Corner Mask */}
           <div
-            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
+            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4 @max-[840px]:hidden"
             style={{
               ...maskStyle,
               maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
