@@ -49,13 +49,17 @@ const __dirname = path.dirname(__filename);
 // stays self-contained (same reason as the inline semverDescending() below).
 export const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
 export const LEGACY_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-legacy';
+export const VULKAN_WSL2_IMAGE_REPO = 'ghcr.io/loukas-pap/transcriptionsuite-server-vulkan-wsl2';
 
 /**
  * Select the GHCR image repo for this session based on the persisted
- * `server.useLegacyGpu` setting (Issue #83 — Pascal/Maxwell support).
+ * `server.useLegacyGpu` setting (Issue #83 — Pascal/Maxwell support) and
+ * the active runtime profile. Vulkan-WSL2 gets its own dedicated repo so
+ * its tag list never mixes with the standard or legacy-GPU variants.
  * The dashboard uses exactly one repo at a time — never mixes the two.
  */
-export function resolveImageRepo(useLegacyGpu: boolean): string {
+export function resolveImageRepo(useLegacyGpu: boolean, runtimeProfile?: RuntimeProfile): string {
+  if (runtimeProfile === 'vulkan-wsl2') return VULKAN_WSL2_IMAGE_REPO;
   return useLegacyGpu ? LEGACY_IMAGE_REPO : IMAGE_REPO;
 }
 
@@ -73,6 +77,27 @@ export function readUseLegacyGpuFromStore(): boolean {
   } catch {
     return false;
   }
+}
+
+export function readRuntimeProfileFromStore(): RuntimeProfile {
+  try {
+    const storePath = path.join(app.getPath('userData'), 'dashboard-config.json');
+    const raw = fs.readFileSync(storePath, 'utf8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const value = data['server.runtimeProfile'];
+    if (
+      value === 'gpu' ||
+      value === 'cpu' ||
+      value === 'vulkan' ||
+      value === 'vulkan-wsl2' ||
+      value === 'metal'
+    ) {
+      return value;
+    }
+  } catch {
+    // fall through
+  }
+  return 'gpu';
 }
 
 /**
@@ -631,23 +656,21 @@ function newestNvidiaKoMtime(root: string, fs: typeof import('fs')): number | nu
  * directory that the compose file defaults reference.
  */
 function resolveComposeDir(): string {
-  if (!app.isPackaged) {
-    return path.resolve(__dirname, '../../server/docker');
-  }
+  // In dev mode, source files come from the repo; when packaged, from the bundle.
+  // Either way, we write to AppData so that .env never lands in the source tree.
+  const sourceDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'docker')
+    : path.resolve(__dirname, '../../server/docker');
 
-  const bundledDir = path.join(process.resourcesPath, 'docker');
   const userDataDir = path.join(app.getPath('appData'), 'TranscriptionSuite');
   app.setPath('userData', userDataDir);
   const writableDir = path.join(userDataDir, 'docker');
 
-  // Ensure writable target exists
   fs.mkdirSync(writableDir, { recursive: true });
 
-  // Copy / refresh compose files from the bundle into the writable dir
-  for (const file of fs.readdirSync(bundledDir)) {
-    const src = path.join(bundledDir, file);
+  for (const file of fs.readdirSync(sourceDir)) {
+    const src = path.join(sourceDir, file);
     const dst = path.join(writableDir, file);
-    // Only copy files (not directories)
     if (fs.statSync(src).isFile()) {
       fs.copyFileSync(src, dst);
     }
@@ -1462,10 +1485,11 @@ let pullBackoffResolve: (() => void) | null = null;
  * List local Docker images matching our repo.
  *
  * The repo URL is chosen by the persisted `server.useLegacyGpu` setting
- * (Issue #83). Only one repo is scanned per call — never both.
+ * (Issue #83) and the active runtime profile. Only one repo is scanned per
+ * call — never both.
  */
 async function listImages(): Promise<DockerImage[]> {
-  const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore());
+  const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
   const parseLegacyFormat = (output: string): DockerImage[] => {
     return output
       .split('\n')
@@ -1762,7 +1786,7 @@ export function classifyPullError(
  * Retries fire only when `classifyPullError` returns `retriable: true`.
  */
 async function pullImage(tag: string): Promise<string> {
-  const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore());
+  const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
   const bin = await runtimeBin();
   const env = buildProcessEnv(undefined, detectedRuntimeKind ?? undefined);
 
@@ -1975,10 +1999,11 @@ function isSidecarPulling(): boolean {
  * Remove a local image by tag.
  *
  * Targets the repo selected by the persisted `server.useLegacyGpu` setting
- * (Issue #83) — removing from the other repo requires toggling first.
+ * (Issue #83) and the active runtime profile — removing from another repo
+ * requires switching profile first.
  */
 async function removeImage(tag: string): Promise<string> {
-  const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore());
+  const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
   return exec(await runtimeBin(), ['rmi', `${imageRepo}:${tag}`]);
 }
 
@@ -2091,10 +2116,8 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     }
     const exePath = getWhisperServerExePath();
     if (!fs.existsSync(exePath)) {
-      throw new Error(
-        `whisper-server.exe was not found at: ${exePath}\n` +
-          'Please reinstall TranscriptionSuite to restore it.',
-      );
+      console.log('[DockerManager] whisper-server.exe missing — downloading from GitHub...');
+      await downloadWhisperServerExe();
     }
   }
 
@@ -2105,7 +2128,7 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   // and compose's IMAGE_REPO env all agree (Issue #83). The setting is read
   // from electron-store at start time, not on every subsequent operation.
   const useLegacyGpu = readUseLegacyGpuFromStore();
-  const imageRepoForSession = resolveImageRepo(useLegacyGpu);
+  const imageRepoForSession = resolveImageRepo(useLegacyGpu, runtimeProfile);
   composeEnv['IMAGE_REPO'] = imageRepoForSession;
 
   // Prefer a local image tag for dev workflows when no explicit tag is provided.
@@ -3319,6 +3342,62 @@ async function launchWhisperServerNative(modelPath: string): Promise<void> {
   console.log(`[DockerManager] Launched whisper-server.exe (pid ${pid}) with model: ${modelPath}`);
 }
 
+/**
+ * Create the whisper-server and whisper-models directories under AppData if
+ * they don't already exist. Called at app startup on Windows so the folders
+ * are present before the user ever selects the Vulkan WSL2 profile.
+ */
+function ensureWhisperDirectories(): void {
+  fs.mkdirSync(path.dirname(getWhisperServerExePath()), { recursive: true });
+  fs.mkdirSync(getWhisperModelsDir(), { recursive: true });
+}
+
+/**
+ * Download whisper-server.exe from GitHub LFS into the whisper-server AppData
+ * directory. The binary is stored in the repo under
+ * `server/whisper-server/whisper-server.exe` via Git LFS; GitHub raw URLs
+ * automatically redirect to the LFS object for public repos.
+ *
+ * Downloads to a `.tmp` sidecar first and renames on success so a partial
+ * download never leaves a corrupt executable behind.
+ */
+async function downloadWhisperServerExe(): Promise<void> {
+  const exePath = getWhisperServerExePath();
+  const tmp = `${exePath}.tmp`;
+  // TODO: change ref to `v${app.getVersion()}` once whisper-server.exe is
+  // committed at each release tag (currently lives on fix-vulcan-on-windows).
+  const url = `https://github.com/homelab-00/TranscriptionSuite/raw/fix-vulcan-on-windows/whisper-server/whisper-server.exe`;
+
+  fs.mkdirSync(path.dirname(exePath), { recursive: true });
+
+  const { net } = await import('electron');
+
+  await new Promise<void>((resolve, reject) => {
+    const request = net.request({ url, redirect: 'follow' });
+    const file = fs.createWriteStream(tmp);
+
+    request.on('response', (response) => {
+      if (response.statusCode >= 400) {
+        file.destroy();
+        reject(new Error(`HTTP ${response.statusCode} downloading whisper-server.exe from ${url}`));
+        return;
+      }
+      response.on('data', (chunk) => file.write(chunk));
+      response.on('end', () => file.close(() => resolve()));
+      response.on('error', (err) => { file.destroy(); reject(err); });
+    });
+
+    request.on('error', (err) => { file.destroy(); reject(err); });
+    request.end();
+  }).catch((err) => {
+    try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
+    throw err;
+  });
+
+  fs.renameSync(tmp, exePath);
+  console.log(`[DockerManager] whisper-server.exe downloaded to ${exePath}`);
+}
+
 // ─── Model Cache Inspection ─────────────────────────────────────────────────
 
 export interface ModelCacheEntry {
@@ -3562,8 +3641,8 @@ async function downloadModelToCache(modelId: string): Promise<void> {
  * Thin wrapper over `buildGhcrUrlsForRepo` declared at the top of this module
  * alongside the repo constants.
  */
-function buildGhcrUrls(useLegacyGpu: boolean): GhcrUrls {
-  return buildGhcrUrlsForRepo(resolveImageRepo(useLegacyGpu));
+function buildGhcrUrls(useLegacyGpu: boolean, runtimeProfile?: RuntimeProfile): GhcrUrls {
+  return buildGhcrUrlsForRepo(resolveImageRepo(useLegacyGpu, runtimeProfile));
 }
 
 const TAG_RE = /^v\d+\.\d+\.\d+(rc\d*)?$/;
@@ -3672,7 +3751,8 @@ export type RemoteTagsResult =
  */
 export async function listRemoteTags(): Promise<RemoteTagsResult> {
   const useLegacyGpu = readUseLegacyGpuFromStore();
-  const { tokenUrl, tagsUrl } = buildGhcrUrls(useLegacyGpu);
+  const runtimeProfile = readRuntimeProfileFromStore();
+  const { tokenUrl, tagsUrl } = buildGhcrUrls(useLegacyGpu, runtimeProfile);
   try {
     const signal = AbortSignal.timeout(5000);
 
@@ -3681,7 +3761,8 @@ export async function listRemoteTags(): Promise<RemoteTagsResult> {
       // GH-99: legacy repo + 401 at the token step = Private package
       // (the realistic failure mode post-v1.3.3). Route to the same UI
       // affordance as a 404-on-tags-list so users see the actionable banner.
-      if (tokenResp.status === 401 && useLegacyGpu) {
+      // Same treatment for vulkan-wsl2 — a new package starts private on GHCR.
+      if (tokenResp.status === 401 && (useLegacyGpu || runtimeProfile === 'vulkan-wsl2')) {
         return { status: 'not-published', tags: [] };
       }
       return { status: 'error', tags: [] };
@@ -3717,7 +3798,7 @@ export async function listRemoteTags(): Promise<RemoteTagsResult> {
  * Returns a map of tag → ISO date string.
  */
 async function fetchRemoteTagDates(tags: string[]): Promise<Record<string, string | null>> {
-  const { tokenUrl, blobBase } = buildGhcrUrls(readUseLegacyGpuFromStore());
+  const { tokenUrl, blobBase } = buildGhcrUrls(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
   const result: Record<string, string | null> = {};
   try {
     const signal = AbortSignal.timeout(8000);
@@ -3792,6 +3873,8 @@ export const dockerManager = {
   isGgmlModelDownloaded,
   isGgmlModelDownloadedOnHost,
   downloadGgmlModelToHost,
+  ensureWhisperDirectories,
+  downloadWhisperServerExe,
   checkTailscaleCertsExist,
   subscribeToDownloadEvents,
   unsubscribeFromDownloadEvents,

@@ -2271,6 +2271,10 @@ app.whenReady().then(async () => {
   trayManager.create();
   updateManager.start();
 
+  if (process.platform === 'win32') {
+    dockerManager.ensureWhisperDirectories();
+  }
+
   // ─── M6: launch watchdog ─────────────────────────────────────────────
   // Record a launch attempt for the running version and, if the counter
   // has crossed the restore threshold AND a different-version installer
