@@ -1791,7 +1791,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   <div className="flex items-center gap-3">
                     <Button
                       variant="secondary"
-                      className="h-9 px-4"
+                      className="h-9 px-4 whitespace-nowrap"
                       onClick={handleMLXStart}
                       disabled={
                         mlxStatus === 'running' ||
@@ -1811,7 +1811,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     </Button>
                     <Button
                       variant="danger"
-                      className="h-9 px-4"
+                      className="h-9 px-4 whitespace-nowrap"
                       onClick={handleMLXStop}
                       disabled={mlxStatus !== 'running' && mlxStatus !== 'starting'}
                     >
@@ -1843,10 +1843,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               >
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                   <div className="space-y-4">
-                    <div className="flex items-center space-x-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <StatusLight status={hasImages ? 'active' : 'inactive'} />
                       <span
-                        className={`font-mono text-sm transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
+                        className={`font-mono text-sm whitespace-nowrap transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
                       >
                         {hasImages
                           ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available`
@@ -1854,12 +1854,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       </span>
 
                       {hasImages && docker.images[0] && (
-                        <div className="flex gap-2 transition-opacity duration-300">
-                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
+                        <div className="flex shrink-0 gap-2 transition-opacity duration-300">
+                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs whitespace-nowrap text-slate-400">
                             {formatDateDMY(docker.images[0].created) ??
                               docker.images[0].created.split(' ')[0]}
                           </span>
-                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
+                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs whitespace-nowrap text-slate-400">
                             {docker.images[0].size}
                           </span>
                         </div>
@@ -1896,42 +1896,53 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-col justify-end space-y-2">
-                    <Button
-                      variant="secondary"
-                      className="h-10 w-full"
-                      onClick={handleFetchFreshImage}
-                      disabled={docker.operating}
-                    >
-                      {docker.pulling ? (
-                        <>
-                          <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
-                        </>
-                      ) : (
-                        'Fetch Fresh Image'
+                  <div className="flex flex-col justify-end">
+                    {/*
+                      Give "Fetch Fresh Image" and "Remove Image" a shared width
+                      (the wider of the two labels) and right-align the pair so
+                      they no longer smoosh against the version-tag chips at
+                      narrower window widths. w-max sizes the group to its widest
+                      child; w-full makes both buttons fill that shared width.
+                    */}
+                    <div className="ml-auto flex w-max flex-col gap-2">
+                      <Button
+                        variant="secondary"
+                        className="h-10 w-full"
+                        onClick={handleFetchFreshImage}
+                        disabled={docker.operating}
+                      >
+                        {docker.pulling ? (
+                          <>
+                            <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
+                          </>
+                        ) : (
+                          'Fetch Fresh Image'
+                        )}
+                      </Button>
+                      {docker.pulling && (
+                        <Button
+                          variant="danger"
+                          className="h-10 w-full"
+                          onClick={() => {
+                            docker.cancelPull();
+                            const dlId = `docker-image-${selectedTagForActions}`;
+                            useActivityStore
+                              .getState()
+                              .updateActivity(dlId, { status: 'dismissed' });
+                          }}
+                        >
+                          Cancel Pull
+                        </Button>
                       )}
-                    </Button>
-                    {docker.pulling && (
                       <Button
                         variant="danger"
                         className="h-10 w-full"
-                        onClick={() => {
-                          docker.cancelPull();
-                          const dlId = `docker-image-${selectedTagForActions}`;
-                          useActivityStore.getState().updateActivity(dlId, { status: 'dismissed' });
-                        }}
+                        onClick={() => docker.removeImage(selectedTagForActions)}
+                        disabled={docker.operating || docker.images.length === 0}
                       >
-                        Cancel Pull
+                        Remove Image
                       </Button>
-                    )}
-                    <Button
-                      variant="danger"
-                      className="h-10 w-full"
-                      onClick={() => docker.removeImage(selectedTagForActions)}
-                      disabled={docker.operating || docker.images.length === 0}
-                    >
-                      Remove Image
-                    </Button>
+                    </div>
                   </div>
                 </div>
                 {docker.operationError && (
@@ -1983,10 +1994,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     )}
                   </div>
                   <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Button
                         variant="secondary"
-                        className="h-9 px-4"
+                        className="h-9 px-4 whitespace-nowrap"
                         onClick={() =>
                           onStartServer('local', runtimeProfile, selectedTagForStart, {
                             mainTranscriberModel: sanitizeModelName(activeTranscriber),
@@ -2015,7 +2026,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       </Button>
                       <Button
                         variant="secondary"
-                        className="h-9 px-4"
+                        className="h-9 px-4 whitespace-nowrap"
                         onClick={() =>
                           onStartServer('remote', runtimeProfile, selectedTagForStart, {
                             mainTranscriberModel: sanitizeModelName(activeTranscriber),
@@ -2040,7 +2051,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       </Button>
                       <Button
                         variant="danger"
-                        className="h-9 px-4"
+                        className="h-9 px-4 whitespace-nowrap"
                         onClick={() => docker.stopContainer()}
                         disabled={docker.operating || !isRunning}
                       >
@@ -2049,7 +2060,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     </div>
                     <Button
                       variant="danger"
-                      className="h-9 px-4"
+                      className="h-9 px-4 whitespace-nowrap"
                       onClick={() => docker.removeContainer()}
                       disabled={docker.operating || isRunning || !containerStatus.exists}
                     >
@@ -2549,7 +2560,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <div className="flex gap-2 border-t border-white/5 pt-2">
                   <Button
                     variant={adminStatus?.models_loaded === false ? 'secondary' : 'danger'}
-                    className="h-9 px-4"
+                    className="h-9 px-4 whitespace-nowrap"
                     onClick={
                       adminStatus?.models_loaded === false ? handleLoadModels : handleUnloadModels
                     }
