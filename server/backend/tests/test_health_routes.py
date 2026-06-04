@@ -171,3 +171,45 @@ def test_status_omits_recovery_hint_when_absent(test_client_local):
     body = response.json()
     assert "gpu_error" in body
     assert "gpu_error_recovery_hint" not in body
+
+
+def test_status_reports_gpu_available_true(test_client_local):
+    """
+    GET /api/status surfaces the container's actual GPU availability so the
+    dashboard can distinguish a real CUDA container from a CPU fallback.
+    """
+    mm = test_client_local.app.state.model_manager
+    mm.gpu_available = True
+
+    response = test_client_local.get("/api/status")
+
+    assert response.status_code == 200
+    assert response.json()["gpu_available"] is True
+
+
+def test_status_reports_gpu_available_false_for_cpu_container(test_client_local):
+    """
+    The bug this guards: a container started without GPU passthrough runs on
+    CPU. The host preflight can still be healthy, so /api/status must report
+    gpu_available=False to let the dashboard warn about the mismatch.
+    """
+    mm = test_client_local.app.state.model_manager
+    mm.gpu_available = False
+
+    response = test_client_local.get("/api/status")
+
+    assert response.status_code == 200
+    assert response.json()["gpu_available"] is False
+
+
+def test_status_omits_gpu_available_when_model_manager_missing(test_client_local):
+    """
+    GET /api/status omits gpu_available (rather than guessing) when the model
+    manager is not yet initialized — additive + backward compatible.
+    """
+    del test_client_local.app.state.model_manager
+
+    response = test_client_local.get("/api/status")
+
+    assert response.status_code == 200
+    assert "gpu_available" not in response.json()

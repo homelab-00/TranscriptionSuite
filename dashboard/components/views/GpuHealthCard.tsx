@@ -28,6 +28,13 @@ export interface GpuHealthCardProps {
   onRunDiagnostic: () => void;
   /** When true, the Run Full Diagnostic button is disabled and shows a "Running…" label. */
   running?: boolean;
+  /**
+   * True when the GPU (CUDA) runtime is selected but the *running container* is
+   * actually transcribing on CPU (host preflight can be green while the
+   * container was started without GPU passthrough). Forces a warning state so
+   * a silent CPU fallback cannot masquerade as "CUDA operational".
+   */
+  cpuFallbackActive?: boolean;
 }
 
 type CardState = 'green' | 'yellow' | 'red';
@@ -35,8 +42,10 @@ type CardState = 'green' | 'yellow' | 'red';
 function deriveState(
   preflight: GpuPreflightProp | null,
   backendError: GpuBackendErrorProp | null,
+  cpuFallbackActive: boolean,
 ): CardState {
   if (backendError && backendError.status === 'unrecoverable') return 'red';
+  if (cpuFallbackActive) return 'yellow';
   if (preflight && preflight.status === 'warning') return 'yellow';
   return 'green';
 }
@@ -46,6 +55,11 @@ const STATE_LABEL: Record<CardState, string> = {
   yellow: 'GPU may be misconfigured — server will fall back to CPU',
   red: 'GPU unavailable — fell back to CPU',
 };
+
+// Distinct, actionable message for the runtime-mismatch case: host CUDA is fine
+// but the running container is on CPU (e.g. started under the wrong overlay).
+const CPU_FALLBACK_LABEL =
+  'GPU (CUDA) is selected, but the running server is on CPU — stop and restart the server to apply the GPU runtime.';
 
 const STATE_CONTAINER: Record<CardState, string> = {
   green: 'border-green-500/20 bg-green-500/10',
@@ -109,19 +123,26 @@ export function GpuHealthCard({
   backendError,
   onRunDiagnostic,
   running = false,
+  cpuFallbackActive = false,
 }: GpuHealthCardProps): React.ReactElement | null {
   if (!gpuDetected) return null;
 
-  const state = deriveState(preflight, backendError);
+  const state = deriveState(preflight, backendError, cpuFallbackActive);
   const failedChecks = preflight ? preflight.checks.filter((c) => !c.pass) : [];
   const totalChecks = preflight ? preflight.checks.length : 0;
   const passedChecks = totalChecks - failedChecks.length;
+  // The mismatch message wins over the generic yellow label, but a genuine
+  // backend error (red) still takes precedence over it.
+  const bodyLabel =
+    cpuFallbackActive && state === 'yellow' ? CPU_FALLBACK_LABEL : STATE_LABEL[state];
   const headerStatus =
     state === 'red'
       ? 'backend error — CPU fallback'
-      : totalChecks > 0
-        ? `${passedChecks}/${totalChecks} checks passed`
-        : 'CUDA operational';
+      : cpuFallbackActive
+        ? 'running on CPU'
+        : totalChecks > 0
+          ? `${passedChecks}/${totalChecks} checks passed`
+          : 'CUDA operational';
 
   return (
     <section
@@ -142,9 +163,7 @@ export function GpuHealthCard({
           do not need it.
         </p>
 
-        <p className={`m-0 text-sm font-semibold ${STATE_BODY_TEXT[state]}`}>
-          {STATE_LABEL[state]}
-        </p>
+        <p className={`m-0 text-sm font-semibold ${STATE_BODY_TEXT[state]}`}>{bodyLabel}</p>
 
         {state === 'red' && backendError?.recovery_hint ? (
           <p className="m-0 rounded bg-red-500/10 p-2 text-sm text-red-200">

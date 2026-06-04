@@ -685,6 +685,56 @@ function getComposeDir(): string {
 export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'vulkan-wsl2' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 
+const RUNTIME_PROFILE_VALUES: readonly RuntimeProfile[] = [
+  'gpu',
+  'cpu',
+  'vulkan',
+  'vulkan-wsl2',
+  'metal',
+];
+
+function isRuntimeProfile(value: unknown): value is RuntimeProfile {
+  return typeof value === 'string' && (RUNTIME_PROFILE_VALUES as readonly string[]).includes(value);
+}
+
+/**
+ * Read the persisted `server.runtimeProfile` from the electron-store JSON file
+ * on disk. Returns null when the file is missing or the key is absent/invalid.
+ *
+ * The persisted value is the durable source of truth for the user's selected
+ * runtime. Renderer callers (App / SessionView / ServerView) each hydrate their
+ * own copy once on mount and can drift stale, so the start path must re-read
+ * this at launch time rather than trust whatever the renderer last sent — see
+ * `resolveEffectiveRuntimeProfile`.
+ */
+export function readRuntimeProfileFromStore(): RuntimeProfile | null {
+  try {
+    const storePath = path.join(app.getPath('userData'), 'dashboard-config.json');
+    const raw = fs.readFileSync(storePath, 'utf8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const value = data['server.runtimeProfile'];
+    return isRuntimeProfile(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the runtime profile to actually launch with. Prefers the persisted
+ * store value (durable user intent) over the renderer-supplied request, which
+ * may be a stale mount-time copy. Falls back to the request only when the store
+ * has no valid value (e.g. first run before any persist).
+ *
+ * This is the single funnel point that prevents the container from launching
+ * under a runtime the user has already changed away from.
+ */
+export function resolveEffectiveRuntimeProfile(
+  requested: RuntimeProfile,
+  persisted: RuntimeProfile | null,
+): RuntimeProfile {
+  return persisted ?? requested;
+}
+
 const VOLUME_NAMES = {
   data: 'transcriptionsuite-data',
   models: 'transcriptionsuite-models',
@@ -2068,7 +2118,7 @@ export function applyCpuModelDefaults(
 async function startContainer(options: StartContainerOptions): Promise<string> {
   const {
     mode,
-    runtimeProfile,
+    runtimeProfile: requestedRuntimeProfile,
     imageTag,
     tlsEnv,
     hfToken,
@@ -2081,6 +2131,25 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     diarizationModel,
     whispercppModel,
   } = options;
+
+  // The persisted `server.runtimeProfile` is the source of truth for what the
+  // user has selected. Renderer start surfaces (App / SessionView / ServerView)
+  // each read it once on mount and can hold a stale copy, so a container could
+  // otherwise launch under a profile the user already changed away from (e.g.
+  // started under Vulkan, switched to GPU, never restarted). Re-read at launch
+  // time and prefer the persisted value; the renderer arg is only a fallback
+  // for the first run before anything has been persisted.
+  const persistedRuntimeProfile = readRuntimeProfileFromStore();
+  const runtimeProfile = resolveEffectiveRuntimeProfile(
+    requestedRuntimeProfile,
+    persistedRuntimeProfile,
+  );
+  if (persistedRuntimeProfile && persistedRuntimeProfile !== requestedRuntimeProfile) {
+    console.warn(
+      `[DockerManager] runtimeProfile mismatch — renderer requested "${requestedRuntimeProfile}" ` +
+        `but persisted store has "${persistedRuntimeProfile}"; launching with the persisted value.`,
+    );
+  }
 
   // Guard: bail early with a human-readable message if compose is not available.
   if (_composeAvailable === false) {
