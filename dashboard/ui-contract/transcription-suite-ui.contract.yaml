@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.0.52
+  spec_version: 1.0.56
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -97,7 +97,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-06-01T21:27:07.852Z
+    generated_at: 2026-06-04T17:56:12.601Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -341,6 +341,7 @@ foundation:
         - z-10
         - z-10000
         - z-20
+        - z-30
         - z-50
         - z-60
         - z-9999
@@ -674,6 +675,8 @@ utility_allowlist:
     - gap-6
     - gap-8
     - gap-px
+    - gap-x-3
+    - gap-y-1
     - grid
     - grid-cols-1
     - grid-cols-2
@@ -1112,6 +1115,7 @@ utility_allowlist:
     - w-8
     - w-9
     - w-full
+    - w-max
     - w-px
     - w-screen
     - whitespace-nowrap
@@ -1120,6 +1124,7 @@ utility_allowlist:
     - z-10
     - z-10000
     - z-20
+    - z-30
     - z-50
     - z-60
     - z-9999
