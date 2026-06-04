@@ -1257,7 +1257,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // reports gpuError, build the structured object the GpuHealthCard expects.
   // The recovery_hint is only present when cuda_health_check matched the
   // error-999 fingerprint; we pass it through verbatim.
-  const { gpuError, gpuErrorRecoveryHint } = useServerStatus();
+  const { gpuError, gpuErrorRecoveryHint, details, reachable } = useServerStatus();
   useEffect(() => {
     if (gpuError) {
       setGpuBackendError({
@@ -1269,6 +1269,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       setGpuBackendError(null);
     }
   }, [gpuError, gpuErrorRecoveryHint]);
+
+  // CPU-fallback mismatch: GPU (CUDA) is the selected runtime, the server is up
+  // and reachable, but the running container reports CUDA is NOT available
+  // inside it (started without GPU passthrough → silently transcribing on CPU).
+  // `=== false` (not falsy) so older servers / pre-init responses that omit the
+  // field do not trip a false warning. Surfaced by the GpuHealthCard.
+  const cpuFallbackActive =
+    runtimeProfile === 'gpu' && reachable && details?.gpu_available === false;
 
   // Read host platform once via electronAPI bridge. Synchronous in production
   // (preload returns process.platform directly); defaults to 'unknown' for
@@ -1726,6 +1734,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               backendError={gpuBackendError}
               onRunDiagnostic={handleRunGpuDiagnostic}
               running={diagnosticRunning}
+              cpuFallbackActive={cpuFallbackActive}
             />
           )}
 

@@ -99,6 +99,42 @@ describe('GpuHealthCard', () => {
     expect(screen.getByText(/Run scripts\/diagnose-gpu\.sh/)).toBeInTheDocument();
   });
 
+  it('cpu-fallback: GPU selected but container on CPU → actionable warning over green', () => {
+    // The reported bug: host preflight is healthy (green) but the running
+    // container is on CPU. The card must NOT show "CUDA operational".
+    render(
+      <GpuHealthCard
+        gpuDetected={true}
+        preflight={healthyPreflight}
+        backendError={null}
+        onRunDiagnostic={vi.fn()}
+        cpuFallbackActive={true}
+      />,
+    );
+    expect(screen.getByText(/running server is on CPU/i)).toBeInTheDocument();
+    expect(screen.getByText(/restart the server/i)).toBeInTheDocument();
+    expect(screen.queryByText(/CUDA operational/i)).not.toBeInTheDocument();
+  });
+
+  it('cpu-fallback never overrides a genuine backend error (red wins)', () => {
+    const backendError = {
+      status: 'unrecoverable' as const,
+      error: 'CUDA unknown error',
+      recovery_hint: 'Run scripts/diagnose-gpu.sh.',
+    };
+    render(
+      <GpuHealthCard
+        gpuDetected={true}
+        preflight={healthyPreflight}
+        backendError={backendError}
+        onRunDiagnostic={vi.fn()}
+        cpuFallbackActive={true}
+      />,
+    );
+    expect(screen.getByText(/GPU unavailable/i)).toBeInTheDocument();
+    expect(screen.queryByText(/running server is on CPU/i)).not.toBeInTheDocument();
+  });
+
   it('clicking Run Full Diagnostic invokes the prop', async () => {
     const onRun = vi.fn();
     render(
