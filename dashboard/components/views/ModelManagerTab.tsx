@@ -152,6 +152,9 @@ interface ModelRowProps {
   cacheSize?: string;
   downloading: boolean;
   isRunning: boolean;
+  /** Whether download/remove are allowed. On Metal this is true regardless of
+   *  server state (host-local cache ops); on Docker it tracks isRunning. */
+  canManage: boolean;
   isActiveMain: boolean;
   isActiveLive: boolean;
   isActiveDiarization: boolean;
@@ -166,6 +169,7 @@ const ModelRow = React.memo(function ModelRow({
   cacheSize,
   downloading,
   isRunning,
+  canManage,
   isActiveMain,
   isActiveLive,
   isActiveDiarization,
@@ -250,7 +254,7 @@ const ModelRow = React.memo(function ModelRow({
               variant="danger"
               size="sm"
               onClick={() => onRemove(model.id)}
-              disabled={!isRunning}
+              disabled={!canManage}
             >
               <Trash2 size={13} className="mr-1.5" />
               Remove
@@ -260,7 +264,7 @@ const ModelRow = React.memo(function ModelRow({
               variant="secondary"
               size="sm"
               onClick={() => onDownload(model.id)}
-              disabled={!isRunning}
+              disabled={!canManage}
             >
               <Download size={13} className="mr-1.5" />
               Download
@@ -350,6 +354,8 @@ interface CustomModelRowProps {
   cacheSize?: string;
   downloading: boolean;
   isRunning: boolean;
+  /** See ModelRowProps.canManage. */
+  canManage: boolean;
   isActiveMain: boolean;
   isActiveLive: boolean;
   isActiveDiarization: boolean;
@@ -365,6 +371,7 @@ const CustomModelRow = React.memo(function CustomModelRow({
   cacheSize,
   downloading,
   isRunning,
+  canManage,
   isActiveMain,
   isActiveLive,
   isActiveDiarization,
@@ -440,7 +447,7 @@ const CustomModelRow = React.memo(function CustomModelRow({
               variant="danger"
               size="sm"
               onClick={() => onRemove(modelId)}
-              disabled={!isRunning}
+              disabled={!canManage}
             >
               <Trash2 size={13} className="mr-1.5" />
               Remove
@@ -450,7 +457,7 @@ const CustomModelRow = React.memo(function CustomModelRow({
               variant="secondary"
               size="sm"
               onClick={() => onDownload(modelId)}
-              disabled={!isRunning}
+              disabled={!canManage}
             >
               <Download size={13} className="mr-1.5" />
               Download
@@ -522,6 +529,9 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
   isMetal = false,
   runtimeProfile,
 }) => {
+  // On Metal there is no Docker container — model download/remove are host-local
+  // operations that work whether or not the server is running (GH-136).
+  const canManage = isMetal || isRunning;
   const isVulkanWsl2 = runtimeProfile === 'vulkan-wsl2';
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
   // Host-side GGML cache status (vulkan-wsl2 only — models live on the Windows filesystem)
@@ -606,6 +616,9 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
     async (modelId: string) => {
       const api = (window as any).electronAPI;
       const isWhisperCpp = !!getModelsByFamily('whispercpp').find((m) => m.id === modelId);
+      // Metal has no container — use the native (host-local) cache path.
+      const download = isMetal ? api?.mlx?.downloadModelToCache : api?.docker?.downloadModelToCache;
+      if (!download) return;
 
       setDownloadingModels((prev) => new Set(prev).add(modelId));
       try {
@@ -616,7 +629,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
           await refreshHostCacheStatus([modelId]);
         } else {
           if (!api?.docker?.downloadModelToCache) return;
-          await api.docker.downloadModelToCache(modelId);
+          await download(modelId);
           showToast(`Downloaded ${modelId}`);
           refreshCacheStatus([modelId]);
         }
@@ -630,7 +643,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
         });
       }
     },
-    [isVulkanWsl2, refreshCacheStatus, refreshHostCacheStatus, showToast],
+    [isVulkanWsl2, refreshCacheStatus, refreshHostCacheStatus, showToast, isMetal],
   );
 
   const handleRemove = useCallback(
@@ -644,15 +657,16 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
           showToast(`Delete manually from %APPDATA%\\TranscriptionSuite\\whisper-models\\`);
           return;
         }
-        if (!api?.docker?.removeModelCache) return;
-        await api.docker.removeModelCache(modelId);
+        const remove = isMetal ? api?.mlx?.removeModelCache : api?.docker?.removeModelCache;
+        if (!remove) return;
+        await remove(modelId);
         showToast(`Removed cache for ${modelId}`);
         refreshCacheStatus([modelId]);
       } catch (err: any) {
         showToast(`Remove failed: ${err?.message || 'Unknown error'}`);
       }
     },
-    [isVulkanWsl2, refreshCacheStatus, showToast],
+    [isVulkanWsl2, refreshCacheStatus, showToast, isMetal],
   );
 
   const handleSelectAs = useCallback(
@@ -737,13 +751,14 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
     [customModels, persistCustomModels],
   );
 
-  // Check cache for all models (registry + custom) when container is running
+  // Check cache for all models (registry + custom). On Docker this needs the
+  // container running; on Metal it is a host-local check that works anytime.
   const allModelIds = [...MODEL_REGISTRY.map((m) => m.id), ...customModels];
 
   const cacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!isRunning) return;
+    if (!isMetal && !isRunning) return;
 
     const ids = allModelIds.filter(Boolean);
     if (ids.length === 0) return;
@@ -757,7 +772,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
       if (cacheCheckRef.current) clearTimeout(cacheCheckRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRunning, customModels.length, refreshCacheStatus]);
+  }, [isRunning, isMetal, customModels.length, refreshCacheStatus]);
 
   return (
     <div className="space-y-6">
@@ -768,12 +783,18 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
         </div>
       )}
 
-      {!isRunning && (
-        <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-400">
-          Start the server to manage model downloads. Model selection is available while the server
-          is stopped.
-        </div>
-      )}
+      {!isRunning &&
+        (isMetal ? (
+          <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-400">
+            The server is stopped. You can download and manage models now — your model selection
+            takes effect the next time you start the server.
+          </div>
+        ) : (
+          <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-400">
+            Start the server to download or remove models. Your model selection is saved now and
+            applied when the server starts.
+          </div>
+        ))}
 
       {/* Family sections */}
       {FAMILY_SECTIONS.map((section) => {
@@ -815,11 +836,10 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
                     cacheSize={useHostCache ? undefined : modelCacheStatus[model.id]?.size}
                     downloading={downloadingModels.has(model.id)}
                     isRunning={canAct}
+                    canManage={canManage}
                     isActiveMain={activeMain.toLowerCase() === model.id.toLowerCase()}
                     isActiveLive={activeLive.toLowerCase() === model.id.toLowerCase()}
-                    isActiveDiarization={
-                      activeDiarization.toLowerCase() === model.id.toLowerCase()
-                    }
+                    isActiveDiarization={activeDiarization.toLowerCase() === model.id.toLowerCase()}
                     onDownload={handleDownload}
                     onRemove={handleRemove}
                     onSelectAs={handleSelectAs}
@@ -883,6 +903,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
                     cacheSize={modelCacheStatus[id]?.size}
                     downloading={downloadingModels.has(id)}
                     isRunning={isRunning}
+                    canManage={canManage}
                     isActiveMain={activeMain.toLowerCase() === id.toLowerCase()}
                     isActiveLive={activeLive.toLowerCase() === id.toLowerCase()}
                     isActiveDiarization={activeDiarization.toLowerCase() === id.toLowerCase()}

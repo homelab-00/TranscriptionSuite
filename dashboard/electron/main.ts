@@ -481,6 +481,12 @@ const store = new Store({
     // Default true preserves the iOS-glass design; users can opt out per
     // installation via Settings → App → Blur effects.
     'ui.blurEffectsEnabled': true,
+    /* GH-87 — "Idle animations" toggle, independent of blur. When false,
+       freezes the idle visualizer waves to cut idle CPU/GPU. Default true (ON)
+       on every platform, so the animating design is preserved unless the user
+       opts out via Settings -> App -> Idle animations. Legacy
+       ui.lowIdleUsageEnabled values are migrated client-side at boot. */
+    'ui.idleAnimationsEnabled': true,
     'server.host': 'localhost',
     'server.port': 9786,
     'server.https': false,
@@ -759,7 +765,10 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1530,
     height: 860,
-    minWidth: 1262,
+    // Narrow-window reflow: floor = sidebar + left-panel min. Below this width the
+    // Session/Notebook side panels reflow below the main column via container queries
+    // (spec-reduce-min-window-width-panel-reflow). Was 1262 (sidebar + both panels).
+    minWidth: 720,
     minHeight: 600,
     show: !startMinimized,
     icon: iconPath,
@@ -2425,6 +2434,19 @@ ipcMain.handle('mlx:getStatus', () => {
 
 ipcMain.handle('mlx:getLogs', (_event, tail?: number) => {
   return mlxServerManager.getLogs(tail);
+});
+
+// Native model-cache ops for the Metal/MLX profile (no Docker container).
+ipcMain.handle('mlx:downloadModelToCache', async (_event, modelId: string) => {
+  await mlxServerManager.downloadModelToCache(modelId);
+});
+
+ipcMain.handle('mlx:checkModelsCached', async (_event, modelIds: string[]) => {
+  return mlxServerManager.checkModelsCached(modelIds);
+});
+
+ipcMain.handle('mlx:removeModelCache', async (_event, modelId: string) => {
+  await mlxServerManager.removeModelCache(modelId);
 });
 
 // ─── Watcher IPC Handlers ────────────────────────────────────────────────────

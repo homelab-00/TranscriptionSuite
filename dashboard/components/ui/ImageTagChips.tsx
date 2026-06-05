@@ -106,7 +106,11 @@ export const ImageTagChips: React.FC<ImageTagChipsProps> = ({
   };
 
   return (
-    <div className="flex items-center gap-1.5">
+    // flex-wrap so the chips reflow onto additional rows instead of
+    // overflowing their container (each chip is min-w-[5rem] and cannot
+    // shrink) — prevents the chip row from spilling over the "Remove Image"
+    // button at medium widths and being clipped at the card edge when narrow.
+    <div className="flex flex-wrap items-center gap-1.5">
       {stableChips.map((rt) => {
         const date = getDate(rt);
         const isLocal = localTags.has(rt.tag);

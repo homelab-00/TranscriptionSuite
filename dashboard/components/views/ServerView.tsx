@@ -16,6 +16,7 @@ import {
   RotateCcw,
   Copy,
   Check,
+  FolderOpen,
   Eye,
   EyeOff,
   Users,
@@ -48,6 +49,7 @@ import {
   isWhisperModel,
   isWhisperCppModel,
   isMLXModel,
+  isNemoModel,
 } from '../../src/services/modelCapabilities';
 import { MODEL_REGISTRY, getModelsByFamily } from '../../src/services/modelRegistry';
 import {
@@ -291,6 +293,33 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         setNativeModelsDir(dir + '/models');
       })
       .catch(() => {});
+  }, []);
+
+  // Per-row "copied" feedback for the persistent-volume path actions (GH-137).
+  const [copiedPath, setCopiedPath] = useState<string | null>(null);
+
+  // Open a native directory in the OS file manager; on failure (e.g. the dir
+  // does not exist yet) fall back to its parent.
+  const handleOpenNativePath = useCallback(async (dir: string | null) => {
+    if (!dir) return;
+    const api = (window as any).electronAPI;
+    if (!api?.app?.openPath) return;
+    try {
+      const err: string = await api.app.openPath(dir);
+      if (err) {
+        const parent = dir.replace(/[\\/]+[^\\/]*[\\/]*$/, '');
+        if (parent && parent !== dir) await api.app.openPath(parent).catch(() => {});
+      }
+    } catch {
+      /* best-effort — opening a folder must never crash the view */
+    }
+  }, []);
+
+  const handleCopyNativePath = useCallback((dir: string | null, label: string) => {
+    if (!dir) return;
+    writeToClipboard(dir).catch(() => {});
+    setCopiedPath(label);
+    setTimeout(() => setCopiedPath((c) => (c === label ? null : c)), 2000);
   }, []);
 
   // Derive model option lists filtered by the active runtime profile.
@@ -594,6 +623,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           api?.config?.set('server.mainModelSelection', MAIN_RECOMMENDED_MODEL);
         }
         if (MLX_MODEL_IDS.has(liveModelSelection)) {
+          setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
+          api?.config?.set('server.liveModelSelection', LIVE_MODEL_SAME_AS_MAIN_OPTION);
+        }
+      }
+      // Switching to CPU: NeMo models (Parakeet/Canary) need a GPU to be
+      // practical and pull in the heavy `nemo` extra (GH-125). Reset a NeMo
+      // selection to a CPU-friendly faster-whisper default so CPU hosts skip the
+      // CUDA wheels and the NeMo install entirely.
+      if (profile === 'cpu') {
+        if (isNemoModel(mainModelSelection)) {
+          setMainModelSelection(WHISPER_MEDIUM);
+          api?.config?.set('server.mainModelSelection', WHISPER_MEDIUM);
+        }
+        if (isNemoModel(liveModelSelection)) {
           setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
           api?.config?.set('server.liveModelSelection', LIVE_MODEL_SAME_AS_MAIN_OPTION);
         }
@@ -1235,7 +1278,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // reports gpuError, build the structured object the GpuHealthCard expects.
   // The recovery_hint is only present when cuda_health_check matched the
   // error-999 fingerprint; we pass it through verbatim.
-  const { gpuError, gpuErrorRecoveryHint } = useServerStatus();
+  const { gpuError, gpuErrorRecoveryHint, details, reachable } = useServerStatus();
   useEffect(() => {
     if (gpuError) {
       setGpuBackendError({
@@ -1247,6 +1290,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       setGpuBackendError(null);
     }
   }, [gpuError, gpuErrorRecoveryHint]);
+
+  // CPU-fallback mismatch: GPU (CUDA) is the selected runtime, the server is up
+  // and reachable, but the running container reports CUDA is NOT available
+  // inside it (started without GPU passthrough → silently transcribing on CPU).
+  // `=== false` (not falsy) so older servers / pre-init responses that omit the
+  // field do not trip a false warning. Surfaced by the GpuHealthCard.
+  const cpuFallbackActive =
+    runtimeProfile === 'gpu' && reachable && details?.gpu_available === false;
 
   // Read host platform once via electronAPI bridge. Synchronous in production
   // (preload returns process.platform directly); defaults to 'unknown' for
@@ -1704,6 +1755,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               backendError={gpuBackendError}
               onRunDiagnostic={handleRunGpuDiagnostic}
               running={diagnosticRunning}
+              cpuFallbackActive={cpuFallbackActive}
             />
           )}
 
@@ -1760,7 +1812,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   <div className="flex items-center gap-3">
                     <Button
                       variant="secondary"
-                      className="h-9 px-4"
+                      className="h-9 px-4 whitespace-nowrap"
                       onClick={handleMLXStart}
                       disabled={
                         mlxStatus === 'running' ||
@@ -1780,7 +1832,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     </Button>
                     <Button
                       variant="danger"
-                      className="h-9 px-4"
+                      className="h-9 px-4 whitespace-nowrap"
                       onClick={handleMLXStop}
                       disabled={mlxStatus !== 'running' && mlxStatus !== 'starting'}
                     >
@@ -1812,10 +1864,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               >
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                   <div className="space-y-4">
-                    <div className="flex items-center space-x-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <StatusLight status={hasImages ? 'active' : 'inactive'} />
                       <span
-                        className={`font-mono text-sm transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
+                        className={`font-mono text-sm whitespace-nowrap transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
                       >
                         {hasImages
                           ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available`
@@ -1823,12 +1875,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       </span>
 
                       {hasImages && docker.images[0] && (
-                        <div className="flex gap-2 transition-opacity duration-300">
-                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
+                        <div className="flex shrink-0 gap-2 transition-opacity duration-300">
+                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs whitespace-nowrap text-slate-400">
                             {formatDateDMY(docker.images[0].created) ??
                               docker.images[0].created.split(' ')[0]}
                           </span>
-                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs text-slate-400">
+                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs whitespace-nowrap text-slate-400">
                             {docker.images[0].size}
                           </span>
                         </div>
@@ -1865,42 +1917,53 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-col justify-end space-y-2">
-                    <Button
-                      variant="secondary"
-                      className="h-10 w-full"
-                      onClick={handleFetchFreshImage}
-                      disabled={docker.operating}
-                    >
-                      {docker.pulling ? (
-                        <>
-                          <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
-                        </>
-                      ) : (
-                        'Fetch Fresh Image'
+                  <div className="flex flex-col justify-end">
+                    {/*
+                      Give "Fetch Fresh Image" and "Remove Image" a shared width
+                      (the wider of the two labels) and right-align the pair so
+                      they no longer smoosh against the version-tag chips at
+                      narrower window widths. w-max sizes the group to its widest
+                      child; w-full makes both buttons fill that shared width.
+                    */}
+                    <div className="ml-auto flex w-max flex-col gap-2">
+                      <Button
+                        variant="secondary"
+                        className="h-10 w-full"
+                        onClick={handleFetchFreshImage}
+                        disabled={docker.operating}
+                      >
+                        {docker.pulling ? (
+                          <>
+                            <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
+                          </>
+                        ) : (
+                          'Fetch Fresh Image'
+                        )}
+                      </Button>
+                      {docker.pulling && (
+                        <Button
+                          variant="danger"
+                          className="h-10 w-full"
+                          onClick={() => {
+                            docker.cancelPull();
+                            const dlId = `docker-image-${selectedTagForActions}`;
+                            useActivityStore
+                              .getState()
+                              .updateActivity(dlId, { status: 'dismissed' });
+                          }}
+                        >
+                          Cancel Pull
+                        </Button>
                       )}
-                    </Button>
-                    {docker.pulling && (
                       <Button
                         variant="danger"
                         className="h-10 w-full"
-                        onClick={() => {
-                          docker.cancelPull();
-                          const dlId = `docker-image-${selectedTagForActions}`;
-                          useActivityStore.getState().updateActivity(dlId, { status: 'dismissed' });
-                        }}
+                        onClick={() => docker.removeImage(selectedTagForActions)}
+                        disabled={docker.operating || docker.images.length === 0}
                       >
-                        Cancel Pull
+                        Remove Image
                       </Button>
-                    )}
-                    <Button
-                      variant="danger"
-                      className="h-10 w-full"
-                      onClick={() => docker.removeImage(selectedTagForActions)}
-                      disabled={docker.operating || docker.images.length === 0}
-                    >
-                      Remove Image
-                    </Button>
+                    </div>
                   </div>
                 </div>
                 {docker.operationError && (
@@ -1952,10 +2015,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     )}
                   </div>
                   <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Button
                         variant="secondary"
-                        className="h-9 px-4"
+                        className="h-9 px-4 whitespace-nowrap"
                         onClick={() =>
                           onStartServer('local', runtimeProfile, selectedTagForStart, {
                             mainTranscriberModel: sanitizeModelName(activeTranscriber),
@@ -1980,7 +2043,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       </Button>
                       <Button
                         variant="secondary"
-                        className="h-9 px-4"
+                        className="h-9 px-4 whitespace-nowrap"
                         onClick={() =>
                           onStartServer('remote', runtimeProfile, selectedTagForStart, {
                             mainTranscriberModel: sanitizeModelName(activeTranscriber),
@@ -2001,7 +2064,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       </Button>
                       <Button
                         variant="danger"
-                        className="h-9 px-4"
+                        className="h-9 px-4 whitespace-nowrap"
                         onClick={() => docker.stopContainer()}
                         disabled={docker.operating || !isRunning}
                       >
@@ -2010,7 +2073,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     </div>
                     <Button
                       variant="danger"
-                      className="h-9 px-4"
+                      className="h-9 px-4 whitespace-nowrap"
                       onClick={() => docker.removeContainer()}
                       disabled={docker.operating || isRunning || !containerStatus.exists}
                     >
@@ -2486,7 +2549,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <div className="flex gap-2 border-t border-white/5 pt-2">
                   <Button
                     variant={adminStatus?.models_loaded === false ? 'secondary' : 'danger'}
-                    className="h-9 px-4"
+                    className="h-9 px-4 whitespace-nowrap"
                     onClick={
                       adminStatus?.models_loaded === false ? handleLoadModels : handleUnloadModels
                     }
@@ -2609,17 +2672,38 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         color: 'bg-purple-500',
                       },
                     ].map(({ label, path: dir, color }) => (
-                      <div key={label} className="flex items-center justify-between py-1 text-sm">
-                        <div className="flex items-center gap-3">
-                          <div className={`h-2 w-2 rounded-full ${color}`} />
-                          <span className="text-slate-300">{label}</span>
+                      <div key={label} className="py-1 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-3">
+                            <div className={`h-2 w-2 rounded-full ${color}`} />
+                            <span className="text-slate-300">{label}</span>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              onClick={() => handleOpenNativePath(dir)}
+                              disabled={!dir}
+                              className="rounded p-1 text-slate-500 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                              title="Open in file manager"
+                            >
+                              <FolderOpen size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleCopyNativePath(dir, label)}
+                              disabled={!dir}
+                              className="rounded p-1 text-slate-500 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                              title="Copy path"
+                            >
+                              {copiedPath === label ? (
+                                <Check size={14} className="text-green-400" />
+                              ) : (
+                                <Copy size={14} />
+                              )}
+                            </button>
+                          </div>
                         </div>
-                        <span
-                          className="max-w-[55%] truncate text-right font-mono text-xs text-slate-400"
-                          title={dir ?? ''}
-                        >
+                        <div className="mt-1 pl-5 font-mono text-xs break-all text-slate-400">
                           {dir ?? '…'}
-                        </span>
+                        </div>
                       </div>
                     ))}
                     <p className="text-xs text-slate-500 italic">
@@ -2724,7 +2808,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       >
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" aria-hidden="true" />
         <div className="fixed inset-0 flex items-center justify-center p-4">
-          <DialogPanel className="w-full max-w-lg overflow-hidden rounded-3xl border border-red-500/25 bg-black/75 shadow-2xl backdrop-blur-xl">
+          <DialogPanel className="blur-panel w-full max-w-lg overflow-hidden rounded-3xl border border-red-500/25 bg-black/75 shadow-2xl backdrop-blur-xl">
             <div className="border-b border-red-500/20 bg-red-500/10 px-6 py-4">
               <DialogTitle className="text-lg font-semibold text-red-100">Clean All</DialogTitle>
               <p className="mt-1 text-sm text-red-200/90">
@@ -2817,7 +2901,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       >
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" aria-hidden="true" />
         <div className="fixed inset-0 flex items-center justify-center p-4">
-          <DialogPanel className="border-accent-orange/25 w-full max-w-lg overflow-hidden rounded-3xl border bg-black/75 shadow-2xl backdrop-blur-xl">
+          <DialogPanel className="border-accent-orange/25 blur-panel w-full max-w-lg overflow-hidden rounded-3xl border bg-black/75 shadow-2xl backdrop-blur-xl">
             <div className="border-accent-orange/20 bg-accent-orange/10 border-b px-6 py-4">
               <DialogTitle className="text-accent-orange text-lg font-semibold">
                 {pendingLegacyGpuValue ? 'Enable legacy-GPU image?' : 'Disable legacy-GPU image?'}

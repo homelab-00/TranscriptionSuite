@@ -106,6 +106,41 @@
   -webkit-backdrop-filter: none !important;
 }
 
+/*
+ * GH-87 — Opaque panel fallback when blur is off. Panels that read as frosted
+ * glass rely on backdrop-blur over a translucent background (bg-glass-surface,
+ * the glass gradient, bg-black/40-75). With blur neutralized above, that
+ * translucency lets the content behind bleed through. Any panel root tagged
+ * with `blur-panel` therefore gets an opaque slate-800 fill (and the gradient
+ * flattened) so it stays legible. Scoped to a marker class — NOT a utility
+ * selector — because scrims share the same bg-black/* values and must stay
+ * translucent dims. Inner translucent layers compose fine over the opaque root.
+ */
+:root[data-blur-effects='off'] .blur-panel {
+  background-color: var(--color-slate-800) !important;
+  background-image: none !important;
+}
+
+/*
+ * GH-87 — "Idle animations" toggle. When the user disables idle animations in
+ * Settings, the html element gains data-idle-animations=off (set by
+ * SettingsModal and re-applied at boot by dashboard/index.tsx). It freezes the
+ * idle AudioVisualizer waves only — blur is governed independently by the Blur
+ * effects toggle above. The data-doc-hidden=true rule is an always-on hygiene
+ * gate that pauses the idle waves while the window is hidden
+ * (idleVisibilityGate.ts).
+ */
+:root[data-idle-animations='off'] .idle-wave-cyan,
+:root[data-idle-animations='off'] .idle-wave-magenta,
+:root[data-idle-animations='off'] .idle-wave-orange {
+  animation: none !important;
+}
+:root[data-doc-hidden='true'] .idle-wave-cyan,
+:root[data-doc-hidden='true'] .idle-wave-magenta,
+:root[data-doc-hidden='true'] .idle-wave-orange {
+  animation-play-state: paused !important;
+}
+
 /* Tailwind v4 maps bg-gradient-* to oklab interpolation; force mockup-like sRGB behavior. */
 .bg-gradient-to-b {
   --tw-gradient-position: to bottom;
@@ -245,6 +280,22 @@ body {
 }
 .dropdown-appear {
   animation: dropdown-appear 100ms ease-out 20ms both;
+}
+
+/* Reflow entrance — plays when a side panel stacks below the main column at narrow
+ * widths (Session right panel; Notebook Morning/Afternoon). Applied via a
+ * `@max-[…]:motion-safe:animate-[reflowStackIn_…]` container-query variant, so
+ * prefers-reduced-motion users get an instant (un-animated) reflow. Timing/easing
+ * match the existing slideInLeft/slideInRight reflow keyframes (0.3s, same cubic-bezier). */
+@keyframes reflowStackIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ── Capture gain slider (System Audio card) ──────────────────────────── */

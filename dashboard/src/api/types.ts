@@ -152,6 +152,9 @@ export interface Recording {
   has_diarization: boolean;
   summary: string | null;
   summary_model: string | null;
+  // Non-destructive hand-corrected transcript (migration 017). NULL = use the
+  // original word-timestamped segments; a string = the user's corrected text.
+  transcript_corrected: string | null;
   transcription_backend?: 'whisper' | 'parakeet' | 'canary' | 'vibevoice_asr' | null;
   // Issue #104 Sprint 4 — auto-action lifecycle (migration 015). Optional on
   // older serialized clients; null when the toggle is off or the action has

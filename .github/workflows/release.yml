@@ -22,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "25.7.0"
+          node-version: "22.22.3"
           cache: "npm"
           cache-dependency-path: dashboard/package-lock.json
 
@@ -66,7 +66,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "25.7.0"
+          node-version: "22.22.3"
           cache: "npm"
           cache-dependency-path: dashboard/package-lock.json
 
@@ -122,7 +122,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "25.7.0"
+          node-version: "22.22.3"
           cache: "npm"
           cache-dependency-path: dashboard/package-lock.json
 
@@ -166,7 +166,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "25.7.0"
+          node-version: "22.22.3"
           cache: "npm"
           cache-dependency-path: dashboard/package-lock.json
 
@@ -263,6 +263,37 @@ jobs:
           # were modified by the individual signing above) gets a fresh consistent
           # signature before the outer .app is sealed.
           codesign --force --deep --sign - "$APP"
+
+      - name: Verify bundled MLX venv
+        # Fail the release if the injected venv is missing uvicorn, or if the bundled
+        # Python (reached through the relocated RELATIVE symlink) cannot import it.
+        # This converts a silently-broken Metal bundle into a hard build failure
+        # instead of a "Cannot find uvicorn binary" popup on the user's Mac (GH #124).
+        run: |
+          APP_BUNDLE="$(pwd)/dashboard/release/mac-arm64/TranscriptionSuite.app"
+          VENV_DIR="$APP_BUNDLE/Contents/Resources/backend/.venv"
+          # 0. Guard the hard-coded electron-builder output path — without this, a
+          #    moved build dir surfaces as a misleading "missing uvicorn" error.
+          if [ ! -d "$APP_BUNDLE" ]; then
+            echo "::error::App bundle not found at $APP_BUNDLE — check electron-builder output directory"
+            exit 1
+          fi
+          # 1. The presence probe that mlxServerManager._uvicornCandidates() relies on.
+          if [ ! -e "$VENV_DIR/bin/uvicorn" ]; then
+            echo "::error::Bundled MLX venv is missing bin/uvicorn ($VENV_DIR/bin/uvicorn)"
+            exit 1
+          fi
+          # 2. The real runtime invocation (`python -m uvicorn`): the bundled python
+          #    reached via the relative symlink must import uvicorn AND fastapi — this
+          #    validates relocation + pyvenv.cfg/site-packages resolution and that the
+          #    web-framework deps actually installed, not just file presence. (fastapi
+          #    is lightweight; the server module is intentionally not imported here to
+          #    avoid pulling heavy MLX/torch deps into the CI gate.)
+          if ! "$VENV_DIR/bin/python3" -c "import uvicorn, fastapi; print('uvicorn', uvicorn.__version__)"; then
+            echo "::error::Bundled python cannot import uvicorn/fastapi — broken venv or relocated symlink"
+            exit 1
+          fi
+          echo "✓ Bundled MLX venv verified (uvicorn + fastapi present and importable)"
 
       - name: Create DMG from app bundle
         run: |

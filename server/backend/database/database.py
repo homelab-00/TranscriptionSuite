@@ -157,6 +157,7 @@ def _assert_schema_sanity(conn: sqlite3.Connection) -> None:
             "has_diarization",
             "summary",
             "summary_model",
+            "transcript_corrected",
             "transcription_backend",
         },
         "segments": {
@@ -279,6 +280,8 @@ class Recording:
         self.has_diarization = bool(data.get("has_diarization", 0))
         self.summary = data.get("summary")
         self.summary_model = data.get("summary_model")
+        # Non-destructive hand-corrected transcript (NULL = use original segments)
+        self.transcript_corrected = data.get("transcript_corrected")
         self.transcription_backend = data.get("transcription_backend")
 
     def to_dict(self) -> dict[str, Any]:
@@ -294,6 +297,7 @@ class Recording:
             "has_diarization": self.has_diarization,
             "summary": self.summary,
             "summary_model": self.summary_model,
+            "transcript_corrected": self.transcript_corrected,
             "transcription_backend": self.transcription_backend,
         }
 
@@ -380,6 +384,25 @@ def update_recording_summary(
         cursor.execute(
             "UPDATE recordings SET summary = ?, summary_model = ? WHERE id = ?",
             (summary, summary_model if summary else None, recording_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def update_recording_corrected_transcript(
+    recording_id: int,
+    transcript: str | None,
+) -> bool:
+    """Set or clear the non-destructive corrected transcript for a recording.
+
+    Passing a falsy ``transcript`` stores NULL (a revert) — the original
+    segments / word-timestamps are never touched, so the rich view returns.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE recordings SET transcript_corrected = ? WHERE id = ?",
+            (transcript or None, recording_id),
         )
         conn.commit()
         return cursor.rowcount > 0

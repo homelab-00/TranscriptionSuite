@@ -134,8 +134,9 @@ def test_migration_idempotent(fresh_db: Path) -> None:
     # 012 = Sprint 2 Item 2, 013 = Sprint 2 Item 3,
     # 014 = Sprint 3 Story 4.1 (recording_speaker_aliases),
     # 015 = Sprint 4 Stories 6.2/6.3 (recordings auto-action status),
-    # 016 = Sprint 5 Story 7.1 (webhook_deliveries).
-    assert rows[0][0] in {"009", "010", "011", "012", "013", "014", "015", "016"}
+    # 016 = Sprint 5 Story 7.1 (webhook_deliveries),
+    # 017 = recordings.transcript_corrected (in-place transcript editing).
+    assert rows[0][0] in {"009", "010", "011", "012", "013", "014", "015", "016", "017"}
 
 
 def _read_all(db_path: Path, table: str) -> list[dict]:

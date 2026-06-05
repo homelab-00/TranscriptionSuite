@@ -30,6 +30,8 @@ import { AudioVisualizer } from '../AudioVisualizer';
 import { CustomSelect } from '../ui/CustomSelect';
 import { FullscreenVisualizer } from './FullscreenVisualizer';
 import { PopOutWindow } from '../PopOutWindow';
+import { FindReplaceTextEditor } from '../editor/FindReplaceTextEditor';
+import { LiveTranscriptView } from './LiveTranscriptView';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLanguages } from '../../src/hooks/useLanguages';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
@@ -165,6 +167,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Active analyser: live mode takes priority when active, then one-shot
   const activeAnalyser = live.analyser ?? transcription.analyser;
+
+  // Session main-result editing (client-only): hand-corrections flow into
+  // Copy/Download. Reset whenever a new transcription replaces the text.
+  const [editedResultText, setEditedResultText] = useState('');
+  useEffect(() => {
+    setEditedResultText(transcription.result?.text ?? '');
+  }, [transcription.result?.text]);
 
   // Audio device enumeration
   const [micDevices, setMicDevices] = useState<string[]>([]);
@@ -348,6 +357,30 @@ export const SessionView: React.FC<SessionViewProps> = ({
     if (isLive) return 'Live Mode is active — stop Live Mode to start recording.';
     return '';
   })();
+
+  // Live-mode editing (client-only): editable only after capture stops. Seeded
+  // from the captured transcript via live.getText(); reset when a new session
+  // starts. Drives the Live Copy button. Nothing is persisted (design D2).
+  const [editedLiveText, setEditedLiveText] = useState('');
+  const liveEditDirtyRef = useRef(false);
+  useEffect(() => {
+    if (isLive) {
+      liveEditDirtyRef.current = false;
+      setEditedLiveText('');
+    } else if (!liveEditDirtyRef.current) {
+      setEditedLiveText(live.getText());
+    }
+  }, [isLive, live]);
+  const handleEditedLiveChange = useCallback((next: string) => {
+    liveEditDirtyRef.current = true;
+    setEditedLiveText(next);
+  }, []);
+  const handleLiveCopyAndClear = useCallback(() => {
+    writeToClipboard(editedLiveText || live.getText()).catch(() => {});
+    live.clearHistory();
+    liveEditDirtyRef.current = false;
+    setEditedLiveText('');
+  }, [editedLiveText, live]);
 
   // Filter language options per model — Parakeet models only support 25 languages
   const mainLanguageOptions = useMemo(
@@ -830,16 +863,18 @@ export const SessionView: React.FC<SessionViewProps> = ({
     }
   }, [transcription, isLinux]);
 
-  // Copy transcription result to clipboard
+  // Copy transcription result to clipboard (prefers the edited text)
   const handleCopyTranscription = useCallback(() => {
-    if (!transcription.result?.text) return;
-    writeToClipboard(transcription.result.text).catch(() => {});
-  }, [transcription.result?.text]);
+    const text = editedResultText ?? transcription.result?.text;
+    if (!text) return;
+    writeToClipboard(text).catch(() => {});
+  }, [editedResultText, transcription.result?.text]);
 
-  // Download transcription as TXT file
+  // Download transcription as TXT file (prefers the edited text)
   const handleDownloadTranscription = useCallback(() => {
-    if (!transcription.result?.text) return;
-    const blob = new Blob([transcription.result.text], { type: 'text/plain' });
+    const text = editedResultText ?? transcription.result?.text;
+    if (!text) return;
+    const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1252,9 +1287,16 @@ export const SessionView: React.FC<SessionViewProps> = ({
       )}
 
       {/* 2. Main Content Area */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 lg:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]">
+      <div className="custom-scrollbar grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 @max-[840px]:overflow-y-auto @min-[840px]:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]">
         {/* Left Column: Controls (40%) */}
-        <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl">
+        {/* min-h-0 is gated to @min-[840px] (wide mode) ON PURPOSE: in the two-column
+            layout it lets the inner flex-1 scroll area engage. In stacked mode it must
+            NOT apply — with min-h-0 the grid treats each row minimum as 0, sees the
+            fixed grid height as free space, and stretches both auto rows to equal
+            heights; the real (taller) content then spills out via overflow-visible and
+            the two columns paint on top of each other. Without min-h-0 the rows size to
+            content and stack cleanly as one scrolling column. */}
+        <div className="relative flex min-w-0 flex-col overflow-hidden rounded-2xl @max-[840px]:overflow-visible @min-[840px]:min-h-0">
           {/* Left Top Scroll Indicator */}
           <div
             className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${leftScrollState.top ? 'opacity-100' : 'opacity-0'}`}
@@ -1269,7 +1311,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Left Top Corner Mask */}
           <div
-            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
+            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4 @max-[840px]:hidden"
             style={{
               ...maskStyle,
               maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
@@ -1281,21 +1323,26 @@ export const SessionView: React.FC<SessionViewProps> = ({
           {/* Main Scrollable Area for Left Column */}
           <div
             ref={leftScrollRef}
-            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0"
+            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0 @max-[840px]:overflow-visible"
           >
+            {/* Baseline min-height keeps short content filling the column in the two-column
+                layout only — applied via a CSS var gated behind @min-[840px] so it no-ops
+                when stacked (spec: baseline-height effect must no-op when stacked). */}
             <div
               ref={leftContentRef}
-              className="space-y-6"
+              className="space-y-6 @min-[840px]:[min-height:var(--ts-col-baseline)]"
               style={
                 leftColumnBaselineHeight
-                  ? { minHeight: `${leftColumnBaselineHeight}px` }
+                  ? ({
+                      '--ts-col-baseline': `${leftColumnBaselineHeight}px`,
+                    } as React.CSSProperties)
                   : undefined
               }
             >
               {/* Unified Control Center */}
               <GlassCard
                 title="Control Center"
-                className={`from-glass-200 to-glass-100 relative flex-none bg-linear-to-b transition-all duration-500 ease-in-out ${isSystemHealthy ? 'border-accent-cyan/50! z-10 shadow-[0_20px_25px_-5px_rgba(0,0,0,0.3),0_8px_10px_-6px_rgba(0,0,0,0.3),inset_0_0_30px_rgba(34,211,238,0.15)]!' : ''}`}
+                className={`blur-panel from-glass-200 to-glass-100 relative flex-none bg-linear-to-b transition-all duration-500 ease-in-out ${isSystemHealthy ? 'border-accent-cyan/50! z-10 shadow-[0_20px_25px_-5px_rgba(0,0,0,0.3),0_8px_10px_-6px_rgba(0,0,0,0.3),inset_0_0_30px_rgba(34,211,238,0.15)]!' : ''}`}
               >
                 <div className="space-y-5">
                   {/* Server Control */}
@@ -1674,15 +1721,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   {/* Transcription Result */}
                   {transcription.result && (
                     <div className="space-y-2">
-                      <div className="selectable-text custom-scrollbar max-h-32 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300">
-                        {transcription.result.text}
-                        {transcription.result.language && (
-                          <div className="mt-2 text-xs text-slate-500">
-                            Detected: {transcription.result.language} &middot;{' '}
-                            {transcription.result.duration?.toFixed(1)}s
-                          </div>
-                        )}
-                      </div>
+                      <FindReplaceTextEditor
+                        value={editedResultText}
+                        onChange={setEditedResultText}
+                        ariaLabel="Transcription result"
+                        placeholder="Transcription result"
+                        className="selectable-text rounded-xl border border-white/5 bg-black/20 p-4"
+                        textClassName="custom-scrollbar max-h-72 min-h-[8rem] overflow-y-auto font-mono text-sm leading-relaxed text-slate-300"
+                      />
+                      {transcription.result.language && (
+                        <div className="text-xs text-slate-500">
+                          Detected: {transcription.result.language} &middot;{' '}
+                          {transcription.result.duration?.toFixed(1)}s
+                        </div>
+                      )}
                       <div className="flex items-center gap-2">
                         <Button
                           variant="secondary"
@@ -1887,7 +1939,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Left Bottom Corner Mask */}
           <div
-            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
+            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4 @max-[840px]:hidden"
             style={{
               ...maskStyle,
               maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',
@@ -1897,7 +1949,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
         </div>
 
         {/* Right Column: Visualizer & Live Mode (60%) */}
-        <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl">
+        {/* @max-[840px]: stacks below the left column as one scrolling grid, and slides in
+            via the reflowStackIn keyframe (motion-safe only — reduced-motion = instant).
+            min-h-0 is gated to @min-[840px] for the same reason as the left column: in
+            stacked mode it would let the grid stretch the rows to equal heights and cause
+            the panels to overlap. */}
+        <div className="relative flex min-w-0 flex-col overflow-hidden rounded-2xl @max-[840px]:overflow-visible @max-[840px]:motion-safe:animate-[reflowStackIn_0.3s_cubic-bezier(0.16,1,0.3,1)] @min-[840px]:min-h-0">
           {/* Right Top Scroll Indicator */}
           <div
             className={`pointer-events-none absolute top-0 right-3 left-0 z-20 h-6 overflow-hidden rounded-t-2xl transition-opacity duration-300 ${rightScrollState.top ? 'opacity-100' : 'opacity-0'}`}
@@ -1912,7 +1969,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Right Top Corner Mask */}
           <div
-            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4"
+            className="pointer-events-none absolute top-0 right-3 z-20 h-4 w-4 @max-[840px]:hidden"
             style={{
               ...maskStyle,
               maskImage: 'radial-gradient(circle at bottom left, transparent 1rem, black 1rem)',
@@ -1924,14 +1981,18 @@ export const SessionView: React.FC<SessionViewProps> = ({
           {/* Right Column Scroll Container */}
           <div
             ref={rightScrollRef}
-            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0"
+            className="custom-scrollbar flex-1 overflow-y-auto pt-0 pr-3 pb-0 @max-[840px]:overflow-visible"
           >
+            {/* Baseline min-height applies in the two-column layout only (see left column);
+                gated behind @min-[840px] so it no-ops when stacked. */}
             <div
               ref={rightContentRef}
-              className="flex min-h-full flex-col"
+              className="flex min-h-full flex-col @min-[840px]:[min-height:var(--ts-col-baseline)]"
               style={
                 rightColumnBaselineHeight
-                  ? { minHeight: `${rightColumnBaselineHeight}px` }
+                  ? ({
+                      '--ts-col-baseline': `${rightColumnBaselineHeight}px`,
+                    } as React.CSSProperties)
                   : undefined
               }
             >
@@ -2125,84 +2186,27 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           variant="ghost"
                           size="sm"
                           icon={<Copy size={14} />}
-                          onClick={() => {
-                            writeToClipboard(live.getText());
-                            live.clearHistory();
-                          }}
+                          onClick={handleLiveCopyAndClear}
                           className="ml-auto h-8 shrink-0 whitespace-nowrap"
                         >
                           Copy
                         </Button>
                       </div>
                       {/* Transcript Area */}
-                      <div
-                        ref={liveTranscriptRef}
-                        className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner"
-                      >
-                        {(serverRunning || isRemoteMode) &&
-                          serverConnection.ready &&
-                          liveModelDisabled && (
-                            <div className="mb-3 text-xs text-amber-300">
-                              Live model not selected.
-                            </div>
-                          )}
-                        {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
-                          <div className="mb-3 text-xs text-red-400">
-                            {liveModeUnsupportedMessage}
-                          </div>
-                        )}
-                        {isLive || live.sentences.length > 0 || live.partial ? (
-                          <>
-                            {live.statusMessage && (
-                              <div className="text-accent-cyan mb-3 flex animate-pulse items-center gap-2">
-                                <Loader2 size={14} className="animate-spin" />
-                                <span className="text-xs">{live.statusMessage}</span>
-                              </div>
-                            )}
-                            {live.sentences.map((s, i) => (
-                              <div key={i} className="mb-2">
-                                {!hideTimestamps && (
-                                  <span className="mr-2 text-slate-500 select-none">
-                                    {new Date(s.timestamp).toLocaleTimeString('en-US', {
-                                      hour12: false,
-                                    })}
-                                  </span>
-                                )}
-                                <span>{s.text}</span>
-                              </div>
-                            ))}
-                            {live.partial && (
-                              <div className="mb-2 opacity-60">
-                                {!hideTimestamps && (
-                                  <span className="mr-2 text-slate-500 select-none">
-                                    {new Date().toLocaleTimeString('en-US', { hour12: false })}
-                                  </span>
-                                )}
-                                <span className="italic">{live.partial}</span>
-                                <span className="bg-accent-cyan ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom"></span>
-                              </div>
-                            )}
-                            {live.sentences.length === 0 &&
-                              !live.partial &&
-                              !live.statusMessage && (
-                                <div className="absolute inset-4 flex flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
-                                  <Activity size={32} strokeWidth={1} className="animate-pulse" />
-                                  <p>Listening... speak to see transcription.</p>
-                                </div>
-                              )}
-                            {live.error && (
-                              <div className="mt-2 text-xs text-red-400">{live.error}</div>
-                            )}
-                          </>
-                        ) : (
-                          <div className="absolute inset-4 flex items-center justify-center">
-                            <div className="flex flex-col items-center space-y-3 text-center text-slate-600 opacity-60 select-none">
-                              <Radio size={48} strokeWidth={1} />
-                              <p>Live mode is off. Toggle the switch to start.</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                      <LiveTranscriptView
+                        live={live}
+                        isLive={isLive}
+                        hideTimestamps={hideTimestamps}
+                        serverRunning={serverRunning}
+                        isRemoteMode={isRemoteMode}
+                        serverReady={serverConnection.ready}
+                        liveModelDisabled={liveModelDisabled}
+                        liveModeWhisperOnlyCompatible={liveModeWhisperOnlyCompatible}
+                        liveModeUnsupportedMessage={liveModeUnsupportedMessage}
+                        transcriptRef={liveTranscriptRef}
+                        editedLiveText={editedLiveText}
+                        onEditedLiveChange={handleEditedLiveChange}
+                      />
                     </div>
                   </PopOutWindow>
                 </>
@@ -2301,10 +2305,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       variant="ghost"
                       size="sm"
                       icon={<Copy size={14} />}
-                      onClick={() => {
-                        writeToClipboard(live.getText());
-                        live.clearHistory();
-                      }}
+                      onClick={handleLiveCopyAndClear}
                       className="ml-auto h-8 shrink-0 whitespace-nowrap"
                     >
                       Copy
@@ -2312,68 +2313,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   </div>
 
                   {/* Transcript Area */}
-                  <div
-                    ref={liveTranscriptRef}
-                    className="custom-scrollbar selectable-text relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300 shadow-inner"
-                  >
-                    {(serverRunning || isRemoteMode) &&
-                      serverConnection.ready &&
-                      liveModelDisabled && (
-                        <div className="mb-3 text-xs text-amber-300">Live model not selected.</div>
-                      )}
-                    {!liveModelDisabled && !liveModeWhisperOnlyCompatible && (
-                      <div className="mb-3 text-xs text-red-400">{liveModeUnsupportedMessage}</div>
-                    )}
-                    {isLive || live.sentences.length > 0 || live.partial ? (
-                      <>
-                        {live.statusMessage && (
-                          <div className="text-accent-cyan mb-3 flex animate-pulse items-center gap-2">
-                            <Loader2 size={14} className="animate-spin" />
-                            <span className="text-xs">{live.statusMessage}</span>
-                          </div>
-                        )}
-                        {live.sentences.map((s, i) => (
-                          <div key={i} className="mb-2">
-                            {!hideTimestamps && (
-                              <span className="mr-2 text-slate-500 select-none">
-                                {new Date(s.timestamp).toLocaleTimeString('en-US', {
-                                  hour12: false,
-                                })}
-                              </span>
-                            )}
-                            <span>{s.text}</span>
-                          </div>
-                        ))}
-                        {live.partial && (
-                          <div className="mb-2 opacity-60">
-                            {!hideTimestamps && (
-                              <span className="mr-2 text-slate-500 select-none">
-                                {new Date().toLocaleTimeString('en-US', { hour12: false })}
-                              </span>
-                            )}
-                            <span className="italic">{live.partial}</span>
-                            <span className="bg-accent-cyan ml-0.5 inline-block h-4 w-1.5 animate-pulse align-text-bottom"></span>
-                          </div>
-                        )}
-                        {live.sentences.length === 0 && !live.partial && !live.statusMessage && (
-                          <div className="absolute inset-4 flex flex-col items-center justify-center space-y-3 text-slate-600 opacity-60 select-none">
-                            <Activity size={32} strokeWidth={1} className="animate-pulse" />
-                            <p>Listening... speak to see transcription.</p>
-                          </div>
-                        )}
-                        {live.error && (
-                          <div className="mt-2 text-xs text-red-400">{live.error}</div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="absolute inset-4 flex items-center justify-center">
-                        <div className="flex flex-col items-center space-y-3 text-center text-slate-600 opacity-60 select-none">
-                          <Radio size={48} strokeWidth={1} />
-                          <p>Live mode is off. Toggle the switch to start.</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <LiveTranscriptView
+                    live={live}
+                    isLive={isLive}
+                    hideTimestamps={hideTimestamps}
+                    serverRunning={serverRunning}
+                    isRemoteMode={isRemoteMode}
+                    serverReady={serverConnection.ready}
+                    liveModelDisabled={liveModelDisabled}
+                    liveModeWhisperOnlyCompatible={liveModeWhisperOnlyCompatible}
+                    liveModeUnsupportedMessage={liveModeUnsupportedMessage}
+                    transcriptRef={liveTranscriptRef}
+                    editedLiveText={editedLiveText}
+                    onEditedLiveChange={handleEditedLiveChange}
+                  />
                 </GlassCard>
               )}
             </div>
@@ -2393,7 +2346,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           </div>
           {/* Right Bottom Corner Mask */}
           <div
-            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4"
+            className="pointer-events-none absolute right-3 bottom-0 z-20 h-4 w-4 @max-[840px]:hidden"
             style={{
               ...maskStyle,
               maskImage: 'radial-gradient(circle at top left, transparent 1rem, black 1rem)',

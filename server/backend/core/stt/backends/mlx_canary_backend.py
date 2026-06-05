@@ -36,6 +36,7 @@ from server.core.stt.backends.base import (
     BackendTranscriptionInfo,
     STTBackend,
 )
+from server.core.stt.backends.mlx_thread_pin import MLXThreadAffinityMixin, mlx_pinned
 
 SAMPLE_RATE = 16000
 
@@ -259,7 +260,7 @@ def _load_canary_model(model_name: str) -> Any:
     return model
 
 
-class MLXCanaryBackend(STTBackend):
+class MLXCanaryBackend(MLXThreadAffinityMixin, STTBackend):
     """Apple MLX / Metal-accelerated Canary backend.
 
     Wraps ``canary-mlx`` for NVIDIA Canary model inference on Apple Silicon.
@@ -276,6 +277,7 @@ class MLXCanaryBackend(STTBackend):
     # STTBackend interface
     # ------------------------------------------------------------------
 
+    @mlx_pinned
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         """Load the Canary model."""
         del device, kwargs
@@ -298,6 +300,7 @@ class MLXCanaryBackend(STTBackend):
         except Exception as exc:
             raise RuntimeError(f"Failed to load MLX Canary model '{model_name}': {exc}") from exc
 
+    @mlx_pinned
     def unload(self) -> None:
         import gc
 
@@ -314,6 +317,7 @@ class MLXCanaryBackend(STTBackend):
     def is_loaded(self) -> bool:
         return self._loaded
 
+    @mlx_pinned
     def warmup(self) -> None:
         if not self._loaded or self._model is None:
             return
@@ -330,6 +334,7 @@ class MLXCanaryBackend(STTBackend):
         except Exception as e:
             logger.warning(f"MLX Canary warmup failed (non-critical): {e}")
 
+    @mlx_pinned
     def transcribe(
         self,
         audio: np.ndarray,

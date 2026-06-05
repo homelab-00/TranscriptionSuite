@@ -74,6 +74,7 @@ from server.logging import get_logger, setup_logging  # noqa: E402
 
 _log_time("logging imported")
 
+from server.core.hf_token_guard import purge_non_ascii_hf_tokens  # noqa: E402
 from server.core.startup_events import emit_event  # noqa: E402
 
 _log_time("startup_events imported")
@@ -396,6 +397,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Initialize logging
     setup_logging(config.logging)
     _log_time("logging setup complete")
+
+    # GH #125: a non-ASCII HF token value crashes every STT backend at model
+    # load (huggingface_hub copies it verbatim into a latin-1 HTTP header).
+    # Purge any invalid token now, before any model is loaded.
+    purge_non_ascii_hf_tokens()
 
     # Initialize database
     init_db()

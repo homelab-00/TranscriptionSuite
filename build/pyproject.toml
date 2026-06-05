@@ -43,11 +43,11 @@ backend-test = [
     "structlog>=25.5.0",
     "ffmpeg-python>=0.2.0",
     "aiofiles>=25.1.0",
-    "python-multipart>=0.0.22",
+    "python-multipart>=0.0.27",
     "soundfile>=0.13.1",
     # Day-1 test fixtures (Story 1.1 — Audio Notebook QoL pack epic-foundations).
     # Mirror of server/backend/pyproject.toml [dependency-groups.dev]; keep in sync.
-    "aiohttp>=3.13.3",       # webhook_mock_receiver fixture
+    "aiohttp>=3.14.0",       # webhook_mock_receiver fixture
     "keyring>=25.0,<26",     # NFR33 — fake_keyring fixture (Story 1.7 consumer)
     "keyrings.alt>=5.0",     # NFR34 — file-encrypted fallback for headless Linux
     "freezegun>=1.5",        # frozen_clock fixture; replaces datetime.now() in tests

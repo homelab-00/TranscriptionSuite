@@ -15,7 +15,7 @@ export const GlassCard: React.FC<GlassCardProps> = ({
 }) => {
   return (
     <div
-      className={`from-glass-200 to-glass-100 border-glass-border flex flex-col overflow-hidden rounded-2xl border bg-linear-to-br shadow-xl backdrop-blur-xl ${className}`}
+      className={`blur-panel from-glass-200 to-glass-100 border-glass-border flex flex-col overflow-hidden rounded-2xl border bg-linear-to-br shadow-xl backdrop-blur-xl ${className}`}
     >
       {(title || action) && (
         <div className="border-glass-border flex h-14 shrink-0 items-center justify-between border-b bg-white/5 px-5">

@@ -77,6 +77,13 @@ export interface ClientConfig {
      * (Tailwind utilities, inline styles, custom CSS). Default true.
      */
     blurEffectsEnabled: boolean;
+    /**
+     * GH-87 — when false, a global CSS override on `<html
+     * data-idle-animations="off">` freezes the idle AudioVisualizer waves to
+     * cut idle CPU/GPU. Independent of `blurEffectsEnabled`. Default true (ON),
+     * so the shipped animating design is preserved unless the user opts out.
+     */
+    idleAnimationsEnabled: boolean;
   };
 }
 
@@ -139,6 +146,7 @@ const DEFAULT_CONFIG: ClientConfig = {
   ui: {
     sidebarCollapsed: false,
     blurEffectsEnabled: true,
+    idleAnimationsEnabled: true,
   },
 };
 

@@ -32,10 +32,7 @@ import {
   resolveRootlessSocket,
   getSocketPaths,
 } from './containerRuntime.js';
-import {
-  type WslSupport,
-  resetWslSupportCache,
-} from './wslDetect.js';
+import { type WslSupport, resetWslSupportCache } from './wslDetect.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -705,6 +702,56 @@ function getComposeDir(): string {
  */
 export type RuntimeProfile = 'gpu' | 'cpu' | 'vulkan' | 'vulkan-wsl2' | 'metal';
 export type HfTokenDecision = 'unset' | 'provided' | 'skipped';
+
+const RUNTIME_PROFILE_VALUES: readonly RuntimeProfile[] = [
+  'gpu',
+  'cpu',
+  'vulkan',
+  'vulkan-wsl2',
+  'metal',
+];
+
+function isRuntimeProfile(value: unknown): value is RuntimeProfile {
+  return typeof value === 'string' && (RUNTIME_PROFILE_VALUES as readonly string[]).includes(value);
+}
+
+/**
+ * Read the persisted `server.runtimeProfile` from the electron-store JSON file
+ * on disk. Returns null when the file is missing or the key is absent/invalid.
+ *
+ * The persisted value is the durable source of truth for the user's selected
+ * runtime. Renderer callers (App / SessionView / ServerView) each hydrate their
+ * own copy once on mount and can drift stale, so the start path must re-read
+ * this at launch time rather than trust whatever the renderer last sent — see
+ * `resolveEffectiveRuntimeProfile`.
+ */
+export function readRuntimeProfileFromStore(): RuntimeProfile | null {
+  try {
+    const storePath = path.join(app.getPath('userData'), 'dashboard-config.json');
+    const raw = fs.readFileSync(storePath, 'utf8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const value = data['server.runtimeProfile'];
+    return isRuntimeProfile(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the runtime profile to actually launch with. Prefers the persisted
+ * store value (durable user intent) over the renderer-supplied request, which
+ * may be a stale mount-time copy. Falls back to the request only when the store
+ * has no valid value (e.g. first run before any persist).
+ *
+ * This is the single funnel point that prevents the container from launching
+ * under a runtime the user has already changed away from.
+ */
+export function resolveEffectiveRuntimeProfile(
+  requested: RuntimeProfile,
+  persisted: RuntimeProfile | null,
+): RuntimeProfile {
+  return persisted ?? requested;
+}
 
 const VOLUME_NAMES = {
   data: 'transcriptionsuite-data',
@@ -2033,6 +2080,51 @@ async function getContainerStatus(): Promise<ContainerStatus> {
   }
 }
 
+// GH-125: NeMo models (Parakeet/Canary/Nemotron-speech) need a GPU to be
+// practical and pull in the heavy `nemo` extra that broke first-run CPU installs.
+// Detection mirrors server/backend/core/stt/backends/factory.py and
+// src/services/modelCapabilities.ts — the Electron main process cannot import the
+// renderer-side service, so keep these in sync.
+const CPU_FALLBACK_MAIN_MODEL = 'Systran/faster-whisper-medium';
+
+export function isNemoModelName(model: string | undefined | null): boolean {
+  if (!model) return false;
+  const normalized = model.trim().toLowerCase();
+  return (
+    normalized.startsWith('nvidia/parakeet') ||
+    normalized.startsWith('nvidia/canary') ||
+    normalized.startsWith('nvidia/nemotron-speech')
+  );
+}
+
+export interface CpuModelDefaults {
+  mainTranscriberModel?: string;
+  installNemo?: boolean;
+  installWhisper?: boolean;
+}
+
+/**
+ * On the CPU profile, substitute a faster-whisper main model when a NeMo model
+ * was selected so CPU launches never install or run NeMo (GH-125). This is the
+ * authoritative guard: every start path funnels through startContainer, so it
+ * also covers the first-run auto-detect path where the UI-side reset in
+ * ServerView may not have fired yet. A no-op for non-CPU profiles or non-NeMo
+ * models — values pass through unchanged.
+ */
+export function applyCpuModelDefaults(
+  profile: RuntimeProfile,
+  opts: CpuModelDefaults,
+): CpuModelDefaults {
+  if (profile !== 'cpu' || !isNemoModelName(opts.mainTranscriberModel)) {
+    return opts;
+  }
+  return {
+    mainTranscriberModel: CPU_FALLBACK_MAIN_MODEL,
+    installNemo: false,
+    installWhisper: true,
+  };
+}
+
 /**
  * Start the container via docker compose with layered compose files.
  * @param options - Container start options including mode, runtime profile, and optional TLS env.
@@ -2040,7 +2132,7 @@ async function getContainerStatus(): Promise<ContainerStatus> {
 async function startContainer(options: StartContainerOptions): Promise<string> {
   const {
     mode,
-    runtimeProfile,
+    runtimeProfile: requestedRuntimeProfile,
     imageTag,
     tlsEnv,
     hfToken,
@@ -2053,6 +2145,25 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     diarizationModel,
     whispercppModel,
   } = options;
+
+  // The persisted `server.runtimeProfile` is the source of truth for what the
+  // user has selected. Renderer start surfaces (App / SessionView / ServerView)
+  // each read it once on mount and can hold a stale copy, so a container could
+  // otherwise launch under a profile the user already changed away from (e.g.
+  // started under Vulkan, switched to GPU, never restarted). Re-read at launch
+  // time and prefer the persisted value; the renderer arg is only a fallback
+  // for the first run before anything has been persisted.
+  const persistedRuntimeProfile = readRuntimeProfileFromStore();
+  const runtimeProfile = resolveEffectiveRuntimeProfile(
+    requestedRuntimeProfile,
+    persistedRuntimeProfile,
+  );
+  if (persistedRuntimeProfile && persistedRuntimeProfile !== requestedRuntimeProfile) {
+    console.warn(
+      `[DockerManager] runtimeProfile mismatch — renderer requested "${requestedRuntimeProfile}" ` +
+        `but persisted store has "${persistedRuntimeProfile}"; launching with the persisted value.`,
+    );
+  }
 
   // Guard: bail early with a human-readable message if compose is not available.
   if (_composeAvailable === false) {
@@ -2111,7 +2222,7 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
       throw new Error(
         gpuInfo.wslSupport?.reason ??
           'Docker Desktop is not running with the WSL2 backend. ' +
-          'Switch to WSL2 in Docker Desktop settings, then try again.',
+            'Switch to WSL2 in Docker Desktop settings, then try again.',
       );
     }
     const exePath = getWhisperServerExePath();
@@ -2168,10 +2279,27 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     composeEnv['TLS_ENABLED'] = 'false';
   }
 
-  // For CPU mode, force CUDA invisible so the server deterministically uses CPU
+  // For CPU mode, force CUDA invisible so the server deterministically uses CPU,
+  // and select the cpu PyTorch wheels so the bootstrap skips the multi-GB CUDA
+  // wheels a CPU-only host can't use (GH-125). Set on composeEnv only (not
+  // persisted to .env) so a later GPU launch is unaffected.
   if (runtimeProfile === 'cpu') {
     composeEnv['CUDA_VISIBLE_DEVICES'] = '';
+    composeEnv['PYTORCH_VARIANT'] = 'cpu';
   }
+
+  // GH-125: guarantee CPU launches never request a NeMo model. The UI-side
+  // reset can be bypassed on first-run auto-detect (profile is set before the
+  // model selection hydrates), so enforce the faster-whisper substitution here
+  // at the single funnel all start paths pass through. No-op otherwise.
+  const cpuDefaults = applyCpuModelDefaults(runtimeProfile, {
+    mainTranscriberModel,
+    installNemo,
+    installWhisper,
+  });
+  const effectiveMainTranscriberModel = cpuDefaults.mainTranscriberModel;
+  const effectiveInstallNemo = cpuDefaults.installNemo;
+  const effectiveInstallWhisper = cpuDefaults.installWhisper;
 
   // Pass HuggingFace token to the container for diarization model access
   if (hfToken !== undefined) {
@@ -2195,15 +2323,15 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     envUpdates['HUGGINGFACE_TOKEN_DECISION'] = normalizedHfDecision;
   }
 
-  if (installWhisper !== undefined) {
-    const whisperValue = installWhisper ? 'true' : 'false';
+  if (effectiveInstallWhisper !== undefined) {
+    const whisperValue = effectiveInstallWhisper ? 'true' : 'false';
     composeEnv['INSTALL_WHISPER'] = whisperValue;
     envUpdates['INSTALL_WHISPER'] = whisperValue;
   }
 
   // Pass NeMo install preference to the container for Parakeet ASR support
-  if (installNemo !== undefined) {
-    const nemoValue = installNemo ? 'true' : 'false';
+  if (effectiveInstallNemo !== undefined) {
+    const nemoValue = effectiveInstallNemo ? 'true' : 'false';
     composeEnv['INSTALL_NEMO'] = nemoValue;
     envUpdates['INSTALL_NEMO'] = nemoValue;
   }
@@ -2216,9 +2344,9 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   }
 
   // Pass ASR model selections to the container (empty string = use config.yaml default)
-  if (mainTranscriberModel !== undefined) {
-    composeEnv['MAIN_TRANSCRIBER_MODEL'] = mainTranscriberModel;
-    envUpdates['MAIN_TRANSCRIBER_MODEL'] = mainTranscriberModel;
+  if (effectiveMainTranscriberModel !== undefined) {
+    composeEnv['MAIN_TRANSCRIBER_MODEL'] = effectiveMainTranscriberModel;
+    envUpdates['MAIN_TRANSCRIBER_MODEL'] = effectiveMainTranscriberModel;
   }
   if (liveTranscriberModel !== undefined) {
     composeEnv['LIVE_TRANSCRIBER_MODEL'] = liveTranscriberModel;
@@ -2238,7 +2366,8 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     if (runtimeProfile === 'vulkan-wsl2') {
       serverUrl = 'http://host.docker.internal:8080';
     } else {
-      serverUrl = process.platform === 'linux' ? 'http://localhost:8080' : 'http://whisper-server:8080';
+      serverUrl =
+        process.platform === 'linux' ? 'http://localhost:8080' : 'http://whisper-server:8080';
     }
     composeEnv['WHISPERCPP_SERVER_URL'] = serverUrl;
     envUpdates['WHISPERCPP_SERVER_URL'] = serverUrl;
@@ -2287,8 +2416,7 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     const portFree = await isPort8080Free();
     if (!portFree) {
       throw new Error(
-        'Port 8080 is already in use by another process. ' +
-          'Free port 8080 and try again.',
+        'Port 8080 is already in use by another process. ' + 'Free port 8080 and try again.',
       );
     }
     await killExistingWhisperServer();
@@ -3158,7 +3286,8 @@ async function checkGpu(): Promise<{
     wslSupport = {
       available: true,
       gpuPassthroughDetected: true,
-      reason: 'vulkan-wsl2 profile is unconditionally available on Windows (native whisper-server.exe path)',
+      reason:
+        'vulkan-wsl2 profile is unconditionally available on Windows (native whisper-server.exe path)',
     };
     console.log(
       '[DockerManager] Win32: vulkan-wsl2 profile offered unconditionally (probe retired)',
@@ -3205,7 +3334,12 @@ async function hasVulkanWsl2SidecarImage(): Promise<boolean> {
 // ─── Native whisper-server.exe (vulkan-wsl2) ────────────────────────────────
 
 function getWhisperServerExePath(): string {
-  return path.join(app.getPath('appData'), 'TranscriptionSuite', 'whisper-server', 'whisper-server.exe');
+  return path.join(
+    app.getPath('appData'),
+    'TranscriptionSuite',
+    'whisper-server',
+    'whisper-server.exe',
+  );
 }
 
 function getWhisperServerPidPath(): string {
@@ -3261,7 +3395,11 @@ async function killExistingWhisperServer(): Promise<void> {
   } catch {
     // Process already gone — nothing to do.
   } finally {
-    try { fs.unlinkSync(pidPath); } catch { /* best-effort */ }
+    try {
+      fs.unlinkSync(pidPath);
+    } catch {
+      /* best-effort */
+    }
   }
 }
 
@@ -3307,13 +3445,23 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
       }
       response.on('data', (chunk) => file.write(chunk));
       response.on('end', () => file.close(() => resolve()));
-      response.on('error', (err) => { file.destroy(); reject(err); });
+      response.on('error', (err) => {
+        file.destroy();
+        reject(err);
+      });
     });
 
-    request.on('error', (err) => { file.destroy(); reject(err); });
+    request.on('error', (err) => {
+      file.destroy();
+      reject(err);
+    });
     request.end();
   }).catch((err) => {
-    try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best-effort */
+    }
     throw err;
   });
 
@@ -3383,13 +3531,23 @@ async function downloadWhisperServerExe(): Promise<void> {
       }
       response.on('data', (chunk) => file.write(chunk));
       response.on('end', () => file.close(() => resolve()));
-      response.on('error', (err) => { file.destroy(); reject(err); });
+      response.on('error', (err) => {
+        file.destroy();
+        reject(err);
+      });
     });
 
-    request.on('error', (err) => { file.destroy(); reject(err); });
+    request.on('error', (err) => {
+      file.destroy();
+      reject(err);
+    });
     request.end();
   }).catch((err) => {
-    try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best-effort */
+    }
     throw err;
   });
 
@@ -3809,7 +3967,10 @@ export async function listRemoteTags(): Promise<RemoteTagsResult> {
  * Returns a map of tag → ISO date string.
  */
 async function fetchRemoteTagDates(tags: string[]): Promise<Record<string, string | null>> {
-  const { tokenUrl, blobBase } = buildGhcrUrls(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
+  const { tokenUrl, blobBase } = buildGhcrUrls(
+    readUseLegacyGpuFromStore(),
+    readRuntimeProfileFromStore(),
+  );
   const result: Record<string, string | null> = {};
   try {
     const signal = AbortSignal.timeout(8000);

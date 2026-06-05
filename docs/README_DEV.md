@@ -204,6 +204,7 @@ Technical documentation for developing and building TranscriptionSuite.
     - [13.5 Windows / macOS Docker Networking](#135-windows--macos-docker-networking)
     - [13.6 Checking Installed Packages](#136-checking-installed-packages)
     - [13.7 macOS DMG Build Failure (dmgbuild binary)](#137-macos-dmg-build-failure-dmgbuild-binary)
+    - [13.8 "Electron failed to install correctly" (Node version mismatch)](#138-electron-failed-to-install-correctly-node-version-mismatch)
   - [14. Dependencies](#14-dependencies)
     - [14.1 Server (Docker)](#141-server-docker)
     - [14.2 Dashboard](#142-dashboard)
@@ -568,12 +569,12 @@ Keep these version fields aligned for a release:
 
 ### 4.1 Step 1: Environment Setup
 
-**Required Node.js version:** 25.7.0 - use [nvm](https://github.com/nvm-sh/nvm) and run `nvm use` inside `dashboard/` to activate the pinned version from `.nvmrc`.
+**Required Node.js version:** 22.22.3 (Node 22 LTS "Jod") - use [nvm](https://github.com/nvm-sh/nvm) and run `nvm use` inside `dashboard/` to activate the pinned version from `.nvmrc`. **Do not use Node 24 or 26** - they silently fail to unpack the Electron binary (see [§13.8](#138-electron-failed-to-install-correctly-node-version-mismatch)).
 
 ```bash
 # Dashboard (Node.js)
 cd dashboard
-nvm use   # activates Node 25.7.0 from .nvmrc
+nvm use   # activates Node 22.22.3 from .nvmrc
 npm install
 cd ..
 
@@ -705,7 +706,7 @@ Prerequisite: You must have built the image first (see Step 2).
 ### 5.1 Prerequisites
 
 ```bash
-# Dashboard: Node.js 25+ and npm
+# Dashboard: Node.js 22 LTS (22.22.3, pinned in .nvmrc) and npm
 cd dashboard && npm install
 
 # Server Python tools (linting, testing)
@@ -2683,7 +2684,7 @@ The dashboard now uses model-first startup and additive dependency installs:
 
 ### 9.7 Package Management
 
-**Pinning strategy:** All direct dependencies in `dashboard/package.json` are pinned to exact versions (no `^` or `~`). This prevents silent version drift between environments and ensures the lock file remains stable across `npm install` runs. CI and the `.nvmrc` file pin Node.js to the same version used locally (25.7.0).
+**Pinning strategy:** All direct dependencies in `dashboard/package.json` are pinned to exact versions (no `^` or `~`). This prevents silent version drift between environments and ensures the lock file remains stable across `npm install` runs. CI and the `.nvmrc` file pin Node.js to the same version used locally (22.22.3).
 
 **Check for outdated packages:**
 ```bash
@@ -3361,6 +3362,65 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 
 > This applies to the **thin** DMG path only. The bundled Metal DMG (`build-macos-metal` CI job) uses `hdiutil` directly and is unaffected.
 
+### 13.8 "Electron failed to install correctly" (Node version mismatch)
+
+**Issue**: `npm run dev:electron` (or any Electron run) throws:
+```
+Error: Electron failed to install correctly, please delete node_modules/electron and try installing again
+    at getElectronPath (.../node_modules/electron/index.js:17:11)
+```
+
+**Cause**: The `electron` npm package is a thin wrapper; its ~200 MB binary is fetched
+and unzipped by a `postinstall` script that writes `path.txt` **last**, only after a
+complete extract. Under certain Node.js versions, the bundled `extract-zip` silently
+unpacks only 2 of the binary's ~74 files, exits 0 **without error**, and never writes
+`path.txt` - so the wrapper throws. A plain `npm install` does not fix it: the same
+broken extract path re-runs and keeps "succeeding" while staying broken.
+
+The breakage is **Node-version-specific and non-monotonic** (verified empirically with
+Electron 40.x, 3 clean installs each):
+
+| Node.js | Result |
+|---------|--------|
+| **22.22.3** (LTS Jod) | ✅ works - **this is the pinned version** |
+| 24.16.0 (LTS Krypton) | ❌ broken (extracts 2/74 files) |
+| 25.7.0 | ✅ works |
+| 26.x | ❌ broken |
+
+Because newer is **not** safer (24 LTS is broken, 25 works), the project pins Node
+**22.22.3** in `dashboard/.nvmrc`, enforces it via `engines` (`">=22 <23"`) in
+`dashboard/package.json`, and uses it in all CI jobs. The common real-world trigger:
+the system Node (Arch ships a rolling, ahead-of-LTS Node) leaks in because nvm wasn't
+sourced or the pinned version wasn't installed, so `nvm use` silently fell through to it.
+
+**Fix**:
+```bash
+# 1. Make nvm available in your shell (Arch's nvm package does NOT auto-load it).
+#    Add to ~/.zshrc (or ~/.bashrc), then restart the shell:
+source /usr/share/nvm/init-nvm.sh
+
+# 2. Install + activate the pinned Node, then reinstall electron cleanly:
+cd dashboard
+nvm install            # installs the version from .nvmrc (22.22.3)
+nvm use                # activates it
+rm -rf node_modules/electron
+npm install
+```
+
+**Verify** the binary unpacked correctly:
+```bash
+cat node_modules/electron/path.txt                 # -> "electron" (not "No such file")
+ls node_modules/electron/dist | wc -l              # -> ~20 (not 2)
+node -e "console.log(require('electron'))"          # -> path to dist/electron
+```
+
+> **One-time, fully hands-off:** `nvm alias default 22.22.3` makes every new shell
+> default to the correct Node so you never have to think about it.
+
+> **Note:** only the **install** step is Node-sensitive (it unpacks the binary). Running
+> an already-installed Electron works under any Node, so `dev:electron` itself is fine
+> once `node_modules/electron` is correctly populated.
+
 ---
 
 ## 14. Dependencies
@@ -3379,7 +3439,7 @@ The `build-electron-mac.sh` script does this automatically. If you run `npm run 
 
 ### 14.2 Dashboard
 
-- Node.js 25.7.0 (pinned in `dashboard/.nvmrc` and CI)
+- Node.js 22.22.3 (Node 22 LTS; pinned in `dashboard/.nvmrc` and CI) - see [§13.8](#138-electron-failed-to-install-correctly-node-version-mismatch) for why not 24/26
 - Electron 40.8.5
 - React 19 + TypeScript 5.9
 - Vite 7 (bundler)

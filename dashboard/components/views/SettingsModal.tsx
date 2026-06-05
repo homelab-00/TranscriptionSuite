@@ -38,6 +38,7 @@ import { isMLXModel, isVibeVoiceASRModel } from '../../src/services/modelCapabil
 import { mergeConfigUpdates } from '../../src/utils/configTree';
 import { DEFAULT_SERVER_PORT } from '../../src/config/store';
 import { readPersistedBlurEffects } from '../../src/utils/blurEffectsBoot';
+import { readPersistedIdleAnimations } from '../../src/utils/idleAnimationsBoot';
 import type { AuthToken, LLMModel } from '../../src/api/types';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { ServerConfigEditor } from './ServerConfigEditor';
@@ -183,6 +184,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     runtimeProfile: 'cpu' as RuntimeProfile,
     pasteAtCursor: false,
     blurEffectsEnabled: true,
+    idleAnimationsEnabled: true,
   });
   // Issue #87 — track the LAST SAVED Blur effects value so we can revert any
   // unsaved live-preview DOM changes if the modal closes via X without Save.
@@ -196,6 +198,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   // persisted write). The toggle onChange applies the change to the DOM
   // immediately for live preview; this ref is the rollback target.
   const savedBlurEffectsRef = useRef<boolean>(readPersistedBlurEffects());
+  // GH-87 — track the LAST SAVED Idle animations value so we can revert any
+  // unsaved live-preview DOM change if the modal closes via X without Save.
+  // Lazy-initialised from the same localStorage source the boot probe in
+  // dashboard/index.tsx reads (default ON), so the ref agrees with the
+  // attribute the boot probe actually applied. Same rollback-target role as
+  // savedBlurEffectsRef; updated in the load effect and in handleSave.
+  const savedIdleAnimationsRef = useRef<boolean>(readPersistedIdleAnimations());
   const [shortcutSettings, setShortcutSettings] = useState<{
     startRecording: string;
     stopTranscribe: string;
@@ -378,6 +387,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               }));
               const loadedBlurEffectsEnabled = (cfg['ui.blurEffectsEnabled'] as boolean) ?? true;
               savedBlurEffectsRef.current = loadedBlurEffectsEnabled;
+              const loadedIdleAnimationsEnabled =
+                (cfg['ui.idleAnimationsEnabled'] as boolean) ?? true;
+              savedIdleAnimationsRef.current = loadedIdleAnimationsEnabled;
               setAppSettings((prev) => ({
                 ...prev,
                 autoCopy: (cfg['app.autoCopy'] as boolean) ?? prev.autoCopy,
@@ -395,6 +407,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   (cfg['server.runtimeProfile'] as RuntimeProfile) ?? prev.runtimeProfile,
                 pasteAtCursor: (cfg['app.pasteAtCursor'] as boolean) ?? prev.pasteAtCursor,
                 blurEffectsEnabled: loadedBlurEffectsEnabled,
+                idleAnimationsEnabled: loadedIdleAnimationsEnabled,
               }));
               setShortcutSettings((prev) => ({
                 ...prev,
@@ -448,6 +461,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         delete document.documentElement.dataset.blurEffects;
       } else {
         document.documentElement.dataset.blurEffects = 'off';
+      }
+      // GH-87 — revert any unsaved live-preview Idle animations DOM change back
+      // to the last-saved baseline. After Save the ref matches the new state so
+      // this revert is a no-op; after close via X it restores the visible state
+      // to the actually-persisted choice. Polarity mirrors blur: ON = no
+      // attribute (animations play), OFF = data-idle-animations="off".
+      if (savedIdleAnimationsRef.current) {
+        delete document.documentElement.dataset.idleAnimations;
+      } else {
+        document.documentElement.dataset.idleAnimations = 'off';
       }
     }
     // Subscribe to portal shortcut changes
@@ -519,6 +542,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['server.runtimeProfile', appSettings.runtimeProfile],
         ['app.pasteAtCursor', appSettings.pasteAtCursor],
         ['ui.blurEffectsEnabled', appSettings.blurEffectsEnabled],
+        ['ui.idleAnimationsEnabled', appSettings.idleAnimationsEnabled],
         ['shortcuts.startRecording', shortcutSettings.startRecording.trim()],
         ['shortcuts.stopTranscribe', shortcutSettings.stopTranscribe.trim()],
       ];
@@ -539,6 +563,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       // Non-fatal — electron-store remains the canonical source of truth.
     }
     savedBlurEffectsRef.current = appSettings.blurEffectsEnabled;
+
+    // GH-87 — Mirror the Idle animations choice to localStorage so the
+    // synchronous bootstrap probe in `dashboard/index.tsx` can read it before
+    // first render on next launch (electron-store is async via IPC). Without
+    // this, a user who has just turned animations OFF would briefly see the
+    // animating idle waves on the next cold start.
+    try {
+      localStorage.setItem(
+        'ts-config:ui.idleAnimationsEnabled',
+        JSON.stringify(appSettings.idleAnimationsEnabled),
+      );
+    } catch {
+      // Non-fatal — electron-store remains the canonical source of truth.
+    }
+    savedIdleAnimationsRef.current = appSettings.idleAnimationsEnabled;
 
     // Sync API client with new config so connection target updates immediately
     await apiClient.syncFromConfig();
@@ -895,6 +934,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           }}
           label="Blur effects"
           description="Disable backdrop blur to reduce CPU/GPU usage. May help on older Mac, Linux, or low-power devices."
+        />
+        <AppleSwitch
+          checked={appSettings.idleAnimationsEnabled}
+          onChange={(v) => {
+            setAppSettings((prev) => ({ ...prev, idleAnimationsEnabled: v }));
+            setIsDirty(true);
+            // Live preview — apply the DOM attribute immediately so the user
+            // sees the effect before clicking Save. If they close via X
+            // without saving, the load-effect close branch reverts to the
+            // last-saved baseline tracked by `savedIdleAnimationsRef`. Polarity
+            // mirrors blur: ON = no attribute (waves animate), OFF = attribute set.
+            if (v) {
+              delete document.documentElement.dataset.idleAnimations;
+            } else {
+              document.documentElement.dataset.idleAnimations = 'off';
+            }
+          }}
+          label="Idle animations"
+          description="Stop the idle audio-visualizer animations to cut idle CPU/GPU. Recommended on laptops and Apple Silicon Macs."
         />
       </Section>
       <Section title="Keyboard Shortcuts">
@@ -2211,7 +2269,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
         {/* Modal Window */}
         <div
-          className={`bg-glass-surface border-glass-border relative flex h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border shadow-2xl backdrop-blur-xl transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'} `}
+          className={`blur-panel bg-glass-surface border-glass-border relative flex h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border shadow-2xl backdrop-blur-xl transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'} `}
         >
           {/* Header */}
           <div className="flex flex-none items-center justify-between border-b border-white/10 bg-white/5 px-6 py-4 select-none">

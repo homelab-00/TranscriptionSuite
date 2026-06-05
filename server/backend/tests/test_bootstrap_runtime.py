@@ -1698,3 +1698,186 @@ def test_main_trusts_baked_variant_over_env(
 
     assert rc == 0
     assert resolved_variant["variant"] == "cu126"
+
+
+# ---------------------------------------------------------------------------
+# GH #125 — TLS interception hint (Fix C)
+# ---------------------------------------------------------------------------
+
+
+def test_detect_tls_interception_matches_known_markers() -> None:
+    module = _load_bootstrap_module()
+    samples = [
+        "invalid peer certificate: UnknownIssuer",
+        "error: certificate verify failed: unable to get local issuer certificate",
+        "the remote host presented a self-signed certificate",
+    ]
+    for text in samples:
+        assert module.detect_tls_interception(text) is True
+
+
+def test_detect_tls_interception_ignores_unrelated_errors() -> None:
+    module = _load_bootstrap_module()
+    assert module.detect_tls_interception("No space left on device") is False
+    assert module.detect_tls_interception("your project's requirements are unsatisfiable") is False
+
+
+def test_raise_dependency_sync_failure_emits_tls_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A TLS-interception failure logs the full actionable hint before truncating."""
+    module = _load_bootstrap_module()
+    logs: list[str] = []
+    events: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(module, "log", lambda msg: logs.append(msg))
+    monkeypatch.setattr(module, "emit_event", lambda *a, **k: events.append((a, k)))
+
+    # A long error so the snippet would otherwise be truncated past the cert text.
+    long_cert_error = (
+        "Failed to download `nvidia-cuda-runtime-cu12`: client error (Connect): "
+        "invalid peer certificate: UnknownIssuer" + " padding" * 40
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        module._raise_dependency_sync_failure(RuntimeError(long_cert_error), "rebuild-sync")
+
+    assert any("UV_NATIVE_TLS" in line for line in logs), "TLS hint must be logged in full"
+    assert any(kwargs.get("status") == "error" for _, kwargs in events)
+    assert "Dependency sync failed for mode=rebuild-sync" in str(excinfo.value)
+
+
+def test_raise_dependency_sync_failure_no_hint_for_unrelated_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    logs: list[str] = []
+    monkeypatch.setattr(module, "log", lambda msg: logs.append(msg))
+    monkeypatch.setattr(module, "emit_event", lambda *a, **k: None)
+    with pytest.raises(RuntimeError):
+        module._raise_dependency_sync_failure(
+            RuntimeError("No space left on device"), "rebuild-sync"
+        )
+    assert not any("UV_NATIVE_TLS" in line for line in logs)
+
+
+# ---------------------------------------------------------------------------
+# GH #125 — CPU PyTorch variant (Fix A)
+# ---------------------------------------------------------------------------
+
+
+def test_run_dependency_sync_cpu_drops_frozen_and_targets_cpu_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cpu path mirrors cu126: drop --frozen, swap the pytorch-cu129 URL to whl/cpu."""
+    module = _load_bootstrap_module()
+    cmd = _capture_run_dependency_sync_cmd(monkeypatch, module, pytorch_variant="cpu")
+
+    assert "--frozen" not in cmd, "cpu path must drop --frozen (lock pins cu129 hashes)"
+    assert "--index" in cmd, "cpu path must supply the --index override"
+    idx = cmd.index("--index")
+    assert cmd[idx + 1] == "pytorch-cu129=https://download.pytorch.org/whl/cpu", (
+        "cpu path must reuse the `pytorch-cu129` name with the cpu URL"
+    )
+    assert "--index-strategy" in cmd
+    strategy_idx = cmd.index("--index-strategy")
+    assert cmd[strategy_idx + 1] == "unsafe-best-match"
+
+
+def test_run_dependency_sync_cpu_propagates_extras(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    cmd = _capture_run_dependency_sync_cmd(
+        monkeypatch, module, pytorch_variant="cpu", extras=("whisper",)
+    )
+    extras_pairs = [(cmd[i], cmd[i + 1]) for i in range(len(cmd) - 1) if cmd[i] == "--extra"]
+    assert ("--extra", "whisper") in extras_pairs
+    assert cmd.index("--extra") > cmd.index("--index")
+
+
+def _invoke_main_resolving_variant(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    baked_variant: str,
+    env_variant: str,
+) -> str:
+    """Run main() with the heavy startup mocked out; return the resolved pytorch variant."""
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    status_file = runtime_dir / "bootstrap-status.json"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+
+    baked_file = tmp_path / ".pytorch_variant"
+    baked_file.write_text(f"{baked_variant}\n", encoding="utf-8")
+    monkeypatch.setattr(module, "APP_ROOT", tmp_path)
+
+    resolved: dict[str, str] = {}
+
+    def fake_ensure_runtime_dependencies(**kwargs: object):  # type: ignore[no-untyped-def]
+        resolved["variant"] = str(kwargs.get("pytorch_variant"))
+        diagnostics = {"selection_reason": "hash_match_skip", "escalated_to_rebuild": False}
+        return runtime_dir / ".venv", "skip", {}, diagnostics
+
+    monkeypatch.setattr(module, "ensure_runtime_dependencies", fake_ensure_runtime_dependencies)
+    monkeypatch.setattr(
+        module,
+        "load_config_models",
+        lambda: (
+            "Systran/faster-whisper-large-v3",
+            "Systran/faster-whisper-large-v3",
+            module.DEFAULT_DIARIZATION_MODEL,
+        ),
+    )
+    monkeypatch.setattr(module, "compute_diarization_preload_cache_key", lambda **_: "k")
+    monkeypatch.setattr(
+        module,
+        "check_diarization_access",
+        lambda **_: {"available": False, "reason": "token_missing"},
+    )
+    monkeypatch.setattr(
+        module,
+        "probe_whisper_with_cudnn_fallback",
+        lambda **_: ({"available": True, "reason": "ready"}, ""),
+    )
+    monkeypatch.setattr(
+        module,
+        "check_nemo_asr_import",
+        lambda **_: {"available": False, "reason": "not_requested"},
+    )
+    monkeypatch.setattr(module, "write_status_file", lambda *_args, **_kwargs: None)
+
+    monkeypatch.setenv("BOOTSTRAP_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.setenv("BOOTSTRAP_CACHE_DIR", str(cache_dir))
+    monkeypatch.setenv("BOOTSTRAP_STATUS_FILE", str(status_file))
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "models"))
+    monkeypatch.setenv("PYTORCH_VARIANT", env_variant)
+
+    assert module.main() == 0
+    return resolved["variant"]
+
+
+def test_main_honors_cpu_request_over_baked_gpu_variant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """cpu is a safe downgrade, so a runtime cpu request overrides a baked GPU variant (GH #125)."""
+    module = _load_bootstrap_module()
+    resolved = _invoke_main_resolving_variant(
+        module, monkeypatch, tmp_path, baked_variant="cu129", env_variant="cpu"
+    )
+    assert resolved == "cpu"
+
+
+def test_main_still_trusts_baked_for_non_cpu_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-cpu env/baked mismatch must keep trusting the baked variant (Issue #83 defense)."""
+    module = _load_bootstrap_module()
+    resolved = _invoke_main_resolving_variant(
+        module, monkeypatch, tmp_path, baked_variant="cu126", env_variant="cu129"
+    )
+    assert resolved == "cu126"

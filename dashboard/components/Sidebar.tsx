@@ -231,12 +231,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div
-      className={`bg-glass-surface border-glass-border relative flex h-full shrink-0 flex-col border-r backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${collapsed ? 'w-20' : 'w-48'} `}
+      className={`blur-panel bg-glass-surface border-glass-border relative z-30 flex h-full shrink-0 flex-col border-r backdrop-blur-2xl transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${collapsed ? 'w-20' : 'w-48'} `}
       style={{
         width: sidebarWidthPx,
       }}
     >
-      {/* Toggle Button */}
+      {/*
+        Toggle Button. It is offset to straddle the sidebar right edge and so
+        overflows into the main content area. Because the sidebar uses a blur
+        backdrop it forms its own stacking context, which traps the low stacking
+        order of this button inside the sidebar. The parent z index lifts the
+        whole sidebar (and therefore this button) above the main content area,
+        so the overflowing half of the circle is no longer painted over and the
+        entire circle stays clickable.
+      */}
       <button
         onClick={() => setCollapsed(!collapsed)}
         className="hover:bg-accent-cyan absolute top-10 -right-3 z-20 rounded-full border border-white/10 bg-slate-800 p-1 text-white shadow-lg transition-colors outline-none hover:text-black focus:outline-none"

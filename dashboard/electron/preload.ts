@@ -451,6 +451,11 @@ export interface ElectronAPI {
     stop: () => Promise<void>;
     getStatus: () => Promise<'stopped' | 'starting' | 'running' | 'stopping' | 'error'>;
     getLogs: (tail?: number) => Promise<string[]>;
+    downloadModelToCache: (modelId: string) => Promise<void>;
+    checkModelsCached: (
+      modelIds: string[],
+    ) => Promise<Record<string, { exists: boolean; size?: string }>>;
+    removeModelCache: (modelId: string) => Promise<void>;
     onStatusChanged: (
       callback: (status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error') => void,
     ) => () => void;
@@ -795,6 +800,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
         'stopped' | 'starting' | 'running' | 'stopping' | 'error'
       >,
     getLogs: (tail?: number) => ipcRenderer.invoke('mlx:getLogs', tail) as Promise<string[]>,
+    downloadModelToCache: (modelId: string) =>
+      ipcRenderer.invoke('mlx:downloadModelToCache', modelId) as Promise<void>,
+    checkModelsCached: (modelIds: string[]) =>
+      ipcRenderer.invoke('mlx:checkModelsCached', modelIds) as Promise<
+        Record<string, { exists: boolean; size?: string }>
+      >,
+    removeModelCache: (modelId: string) =>
+      ipcRenderer.invoke('mlx:removeModelCache', modelId) as Promise<void>,
     onStatusChanged: (
       callback: (status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error') => void,
     ) => {
