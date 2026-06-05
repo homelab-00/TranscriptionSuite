@@ -12,7 +12,7 @@
 #   2. Logged into GHCR: docker login ghcr.io -u <username>
 #
 # Usage:
-#   ./docker-build-push.sh [--variant default|legacy] [TAG]
+#   ./docker-build-push.sh [--variant default|legacy|vulkan-wsl2] [TAG]
 #   TAG=v0.3.0 ./docker-build-push.sh
 #   VARIANT=legacy ./docker-build-push.sh v0.3.0
 #
@@ -22,15 +22,20 @@
 #   ./docker-build-push.sh --variant legacy v0.3.0
 #                                                # Pushes local legacy image 'v0.3.0' to
 #                                                # ghcr.io/homelab-00/transcriptionsuite-server-legacy
+#   ./docker-build-push.sh --variant vulkan-wsl2 v0.3.0
+#                                                # Pushes local vulkan-wsl2 image 'v0.3.0' to
+#                                                # ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2
 #   TAG=dev ./docker-build-push.sh               # Pushes local image 'dev'
 #
-# Variants (Issue #83):
-#   default — modern GPUs (cu129 wheels, sm_70..sm_120)
-#   legacy  — Pascal/Maxwell support (cu126 wheels, sm_50..sm_90)
+# Variants (Issue #83, GH-101):
+#   default     — modern GPUs (cu129 wheels, sm_70..sm_120)
+#   legacy      — Pascal/Maxwell support (cu126 wheels, sm_50..sm_90)
+#   vulkan-wsl2 — Windows + WSL2 GPU paravirtualization (AMD/Intel); same cu129
+#                 server image, GGML transcription via native whisper-server.exe
 #
-# The legacy variant pushes to a SEPARATE GHCR repo (suffix `-legacy`) so the
-# dashboard's tag selector and version-sort logic stay untouched. Each variant
-# auto-tags `latest` only within its own repo.
+# Each non-default variant pushes to a SEPARATE GHCR repo (suffix `-legacy` /
+# `-vulkan-wsl2`) so the dashboard's tag selector and version-sort logic stay
+# untouched. Each variant auto-tags `latest` only within its own repo.
 
 set -euo pipefail
 
@@ -44,6 +49,7 @@ readonly NC='\033[0m' # No Color
 # Configuration — repo URL is selected by --variant / VARIANT env (set in main()).
 readonly DEFAULT_IMAGE_NAME="ghcr.io/homelab-00/transcriptionsuite-server"
 readonly LEGACY_IMAGE_NAME="ghcr.io/homelab-00/transcriptionsuite-server-legacy"
+readonly VULKAN_WSL2_IMAGE_NAME="ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2"
 
 # Functions
 log_info() {
@@ -160,13 +166,16 @@ build_image() {
 print_usage() {
     cat <<'EOF'
 Usage:
-  ./docker-build-push.sh [--variant default|legacy] [--build] [TAG]
+  ./docker-build-push.sh [--variant default|legacy|vulkan-wsl2] [--build] [TAG]
 
 Flags:
-  --variant {default|legacy}  Image variant (default: default; or set VARIANT env)
-                              default — modern GPUs (cu129)
-                              legacy  — Pascal/Maxwell support (cu126), pushes
-                                        to ghcr.io/homelab-00/transcriptionsuite-server-legacy
+  --variant {default|legacy|vulkan-wsl2}
+                              Image variant (default: default; or set VARIANT env)
+                              default     — modern GPUs (cu129)
+                              legacy      — Pascal/Maxwell support (cu126), pushes
+                                            to ghcr.io/homelab-00/transcriptionsuite-server-legacy
+                              vulkan-wsl2 — Windows + WSL2 GPU (AMD/Intel, cu129),
+                                            pushes to ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2
   --build                     Build the image locally before pushing (passes
                               --build-arg PYTORCH_VARIANT=<variant>). Without
                               this flag the image is expected to already exist.
@@ -186,7 +195,7 @@ main() {
         case "$1" in
             --variant)
                 if [[ $# -lt 2 ]]; then
-                    log_error "--variant requires a value (default|legacy)"
+                    log_error "--variant requires a value (default|legacy|vulkan-wsl2)"
                     exit 1
                 fi
                 variant="$2"
@@ -235,8 +244,17 @@ main() {
             pytorch_variant="cu126"
             variant_label="legacy (cu126, sm_50..sm_90 — Pascal/Maxwell)"
             ;;
+        vulkan-wsl2)
+            image_name="$VULKAN_WSL2_IMAGE_NAME"
+            # Same cu129 wheels as default — the Vulkan GGML transcription runs in
+            # the native whisper-server.exe sidecar, while the main server image
+            # still uses PyTorch (diarization, other ASR backends). The dashboard
+            # never sets PYTORCH_VARIANT for this profile, so it matches `default`.
+            pytorch_variant="cu129"
+            variant_label="vulkan-wsl2 (cu129, Windows + WSL2 GPU paravirtualization — AMD/Intel)"
+            ;;
         *)
-            log_error "Unknown variant: '$variant'. Expected 'default' or 'legacy'."
+            log_error "Unknown variant: '$variant'. Expected 'default', 'legacy', or 'vulkan-wsl2'."
             exit 1
             ;;
     esac
@@ -276,11 +294,11 @@ main() {
 
         if [[ -z "$recent_tag" ]]; then
             log_error "No local images found for ${IMAGE_NAME}"
-            if [[ "$variant" == "legacy" ]]; then
-                log_info "For the legacy variant, build it first with:"
-                log_info "  ./docker-build-push.sh --variant legacy --build vX.Y.Z"
+            if [[ "$variant" != "default" ]]; then
+                log_info "For the ${variant} variant, build it first with:"
+                log_info "  ./docker-build-push.sh --variant ${variant} --build vX.Y.Z"
                 log_info "or manually:"
-                log_info "  docker build --build-arg PYTORCH_VARIANT=cu126 -t ${LEGACY_IMAGE_NAME}:vX.Y.Z -f server/docker/Dockerfile ."
+                log_info "  docker build --build-arg PYTORCH_VARIANT=${pytorch_variant} -t ${IMAGE_NAME}:vX.Y.Z -f server/docker/Dockerfile ."
             fi
             exit 1
         fi
@@ -292,9 +310,9 @@ main() {
         if ! docker image inspect "${IMAGE_NAME}:$custom_tag" > /dev/null 2>&1; then
             log_error "Image not found locally: ${IMAGE_NAME}:$custom_tag"
             log_info "Please build it first with: docker compose build"
-            if [[ "$variant" == "legacy" ]]; then
-                log_info "or, for the legacy variant:"
-                log_info "  ./docker-build-push.sh --variant legacy --build $custom_tag"
+            if [[ "$variant" != "default" ]]; then
+                log_info "or, for the ${variant} variant:"
+                log_info "  ./docker-build-push.sh --variant ${variant} --build $custom_tag"
             fi
             exit 1
         fi
