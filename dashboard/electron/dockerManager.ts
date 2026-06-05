@@ -46,7 +46,7 @@ const __dirname = path.dirname(__filename);
 // stays self-contained (same reason as the inline semverDescending() below).
 export const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
 export const LEGACY_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-legacy';
-export const VULKAN_WSL2_IMAGE_REPO = 'ghcr.io/loukas-pap/transcriptionsuite-server-vulkan-wsl2';
+export const VULKAN_WSL2_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2';
 
 /**
  * Select the GHCR image repo for this session based on the persisted
