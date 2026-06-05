@@ -25,7 +25,7 @@ export const LEGACY_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-l
  * WSL2 backend). Gets its own dedicated repo so its tag list never mixes with
  * the standard or legacy-GPU variants. Kept in sync with `dockerManager.ts`.
  */
-export const VULKAN_WSL2_IMAGE_REPO = 'ghcr.io/loukas-pap/transcriptionsuite-server-vulkan-wsl2';
+export const VULKAN_WSL2_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2';
 
 /**
  * Return the GHCR repo URL the dashboard should use for this session, based on
