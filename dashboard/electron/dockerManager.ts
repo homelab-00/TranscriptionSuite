@@ -55,7 +55,10 @@ export const VULKAN_WSL2_IMAGE_REPO = 'ghcr.io/loukas-pap/transcriptionsuite-ser
  * its tag list never mixes with the standard or legacy-GPU variants.
  * The dashboard uses exactly one repo at a time — never mixes the two.
  */
-export function resolveImageRepo(useLegacyGpu: boolean, runtimeProfile?: RuntimeProfile): string {
+export function resolveImageRepo(
+  useLegacyGpu: boolean,
+  runtimeProfile?: RuntimeProfile | null,
+): string {
   if (runtimeProfile === 'vulkan-wsl2') return VULKAN_WSL2_IMAGE_REPO;
   return useLegacyGpu ? LEGACY_IMAGE_REPO : IMAGE_REPO;
 }
@@ -74,27 +77,6 @@ export function readUseLegacyGpuFromStore(): boolean {
   } catch {
     return false;
   }
-}
-
-export function readRuntimeProfileFromStore(): RuntimeProfile {
-  try {
-    const storePath = path.join(app.getPath('userData'), 'dashboard-config.json');
-    const raw = fs.readFileSync(storePath, 'utf8');
-    const data = JSON.parse(raw) as Record<string, unknown>;
-    const value = data['server.runtimeProfile'];
-    if (
-      value === 'gpu' ||
-      value === 'cpu' ||
-      value === 'vulkan' ||
-      value === 'vulkan-wsl2' ||
-      value === 'metal'
-    ) {
-      return value;
-    }
-  } catch {
-    // fall through
-  }
-  return 'gpu';
 }
 
 /**
@@ -3810,7 +3792,7 @@ async function downloadModelToCache(modelId: string): Promise<void> {
  * Thin wrapper over `buildGhcrUrlsForRepo` declared at the top of this module
  * alongside the repo constants.
  */
-function buildGhcrUrls(useLegacyGpu: boolean, runtimeProfile?: RuntimeProfile): GhcrUrls {
+function buildGhcrUrls(useLegacyGpu: boolean, runtimeProfile?: RuntimeProfile | null): GhcrUrls {
   return buildGhcrUrlsForRepo(resolveImageRepo(useLegacyGpu, runtimeProfile));
 }
 

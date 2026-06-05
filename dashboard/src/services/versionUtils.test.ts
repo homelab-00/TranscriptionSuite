@@ -7,6 +7,7 @@ import {
   formatDateDMY,
   IMAGE_REPO,
   LEGACY_IMAGE_REPO,
+  VULKAN_WSL2_IMAGE_REPO,
   resolveImageRepo,
 } from './versionUtils';
 
@@ -177,11 +178,28 @@ describe('resolveImageRepo', () => {
     expect(resolveImageRepo(true)).toBe(LEGACY_IMAGE_REPO);
   });
 
+  it('returns the vulkan-wsl2 repo when the runtime profile is vulkan-wsl2', () => {
+    expect(resolveImageRepo(false, 'vulkan-wsl2')).toBe(VULKAN_WSL2_IMAGE_REPO);
+  });
+
+  it('prefers the vulkan-wsl2 repo over the legacy flag', () => {
+    // vulkan-wsl2 has its own dedicated repo, so it wins even when the legacy
+    // flag is set — matching the resolveImageRepo twin in dockerManager.ts.
+    expect(resolveImageRepo(true, 'vulkan-wsl2')).toBe(VULKAN_WSL2_IMAGE_REPO);
+  });
+
+  it('ignores non-vulkan-wsl2 profiles and falls back to the legacy flag', () => {
+    expect(resolveImageRepo(false, 'gpu')).toBe(IMAGE_REPO);
+    expect(resolveImageRepo(true, 'cpu')).toBe(LEGACY_IMAGE_REPO);
+    expect(resolveImageRepo(false, null)).toBe(IMAGE_REPO);
+  });
+
   it('never mixes repos — exact equality with the canonical constants', () => {
     // Guards against future refactors that might introduce a suffix/prefix.
     const defaultResolved = resolveImageRepo(false);
     const legacyResolved = resolveImageRepo(true);
+    const vulkanResolved = resolveImageRepo(false, 'vulkan-wsl2');
     expect(defaultResolved).not.toEqual(legacyResolved);
-    expect(new Set([defaultResolved, legacyResolved]).size).toBe(2);
+    expect(new Set([defaultResolved, legacyResolved, vulkanResolved]).size).toBe(3);
   });
 });
