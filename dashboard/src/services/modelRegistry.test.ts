@@ -72,15 +72,15 @@ describe('MODEL_REGISTRY GGML entries', () => {
     }
   });
 
-  it('all GGML entries have roles: [main] only', () => {
+  it('all GGML entries are eligible for both main and live roles', () => {
     for (const m of ggmlModels) {
-      expect(m.roles).toEqual(['main']);
+      expect(m.roles).toEqual(['main', 'live']);
     }
   });
 
-  it('all GGML entries have liveMode: false', () => {
+  it('all GGML entries have liveMode: true', () => {
     for (const m of ggmlModels) {
-      expect(m.capabilities.liveMode).toBe(false);
+      expect(m.capabilities.liveMode).toBe(true);
     }
   });
 

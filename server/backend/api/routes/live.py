@@ -43,11 +43,17 @@ def is_live_mode_active() -> bool:
 
 
 def is_live_mode_model_supported(model_name: str) -> bool:
-    """Live Mode only supports faster-whisper (whisper backend) in v1."""
+    """Live Mode supports faster-whisper and whisper.cpp (GGML via Vulkan sidecar).
+
+    Both go through ``AudioToTextRecorder`` with VAD-driven chunking and call
+    the same ``STTBackend.transcribe(audio, ...)`` interface. The whispercpp
+    backend executes each VAD-detected utterance as an HTTP /inference round
+    trip to the whisper-server sidecar.
+    """
     name = (model_name or "").strip()
     if not name or name == "__none__":
         return False
-    return detect_backend_type(name) == "whisper"
+    return detect_backend_type(name) in ("whisper", "whispercpp")
 
 
 class LiveModeSession:
@@ -206,9 +212,8 @@ class LiveModeSession:
                     "error",
                     {
                         "message": (
-                            "Live Mode only supports faster-whisper models "
-                            "(RealtimeSTT path) in v1. "
-                            f"Selected backend '{backend_type}' is not supported."
+                            "Live Mode supports faster-whisper and whisper.cpp (GGML) "
+                            f"models. Selected backend '{backend_type}' is not supported."
                         )
                     },
                 )

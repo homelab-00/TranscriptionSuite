@@ -200,15 +200,16 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   // ── whisper.cpp (GGML / Vulkan) ──────────────────────────────────────────
   // Flat .bin files served by the whisper.cpp sidecar container.
   // Downloaded via direct HTTP from huggingface.co/ggerganov/whisper.cpp.
-  // No live mode, no diarization, no translation for turbo variants.
+  // Live mode supported via VAD chunking + HTTP /inference round trips.
+  // No diarization. No translation for .en or turbo variants.
   {
     id: 'ggml-large-v3.bin',
     displayName: 'GGML Large v3',
     family: 'whispercpp',
     description: 'Full-precision large-v3 GGML model. Best accuracy (~3.1 GB).',
     huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
-    roles: ['main'],
+    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
     requiresRuntime: 'vulkan',
   },
   {
@@ -217,8 +218,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     family: 'whispercpp',
     description: 'Q5_0 quantized large-v3. Good accuracy, lower VRAM (~2.1 GB).',
     huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
-    roles: ['main'],
+    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
     requiresRuntime: 'vulkan',
   },
   {
@@ -227,8 +228,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     family: 'whispercpp',
     description: 'Full-precision turbo variant. Fast inference, no translation (~1.6 GB).',
     huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 99 },
-    roles: ['main'],
+    capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
     requiresRuntime: 'vulkan',
   },
   {
@@ -237,8 +238,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     family: 'whispercpp',
     description: 'Q5_0 quantized turbo. Very fast, no translation (~1.1 GB).',
     huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 99 },
-    roles: ['main'],
+    capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
     requiresRuntime: 'vulkan',
   },
   {
@@ -248,8 +249,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     description:
       'Q8_0 quantized turbo. Recommended for Vulkan — best speed/quality balance (~1.4 GB).',
     huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 99 },
-    roles: ['main'],
+    capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
     requiresRuntime: 'vulkan',
   },
   {
@@ -258,8 +259,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     family: 'whispercpp',
     description: 'Full-precision medium GGML model. Good balance of accuracy and speed (~1.5 GB).',
     huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
-    roles: ['main'],
+    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
     requiresRuntime: 'vulkan',
   },
   {
@@ -268,8 +269,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     family: 'whispercpp',
     description: 'Q5_0 quantized medium. Lightweight multilingual option (~1.0 GB).',
     huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
-    roles: ['main'],
+    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
     requiresRuntime: 'vulkan',
   },
   {
@@ -278,8 +279,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     family: 'whispercpp',
     description: 'English-only medium GGML model (~1.5 GB).',
     huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 1 },
-    roles: ['main'],
+    capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 1 },
+    roles: ['main', 'live'],
     requiresRuntime: 'vulkan',
   },
   {
@@ -288,8 +289,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     family: 'whispercpp',
     description: 'Full-precision small GGML model. Fast and lightweight (~465 MB).',
     huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
-    roles: ['main'],
+    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
     requiresRuntime: 'vulkan',
   },
   {
@@ -298,8 +299,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     family: 'whispercpp',
     description: 'Q5_1 quantized small. Smallest multilingual option (~370 MB).',
     huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-    capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 99 },
-    roles: ['main'],
+    capabilities: { translation: true, liveMode: true, diarization: false, languageCount: 99 },
+    roles: ['main', 'live'],
     requiresRuntime: 'vulkan',
   },
   {
@@ -308,8 +309,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     family: 'whispercpp',
     description: 'English-only small GGML model. Smallest English option (~465 MB).',
     huggingfaceUrl: 'https://huggingface.co/ggerganov/whisper.cpp',
-    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 1 },
-    roles: ['main'],
+    capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 1 },
+    roles: ['main', 'live'],
     requiresRuntime: 'vulkan',
   },
 

@@ -218,6 +218,8 @@ export interface ElectronAPI {
     ) => Promise<Record<string, { exists: boolean; size?: string }>>;
     removeModelCache: (modelId: string) => Promise<void>;
     downloadModelToCache: (modelId: string) => Promise<void>;
+    isGgmlModelDownloadedOnHost: (fileName: string) => Promise<boolean>;
+    downloadGgmlModelToHost: (fileName: string) => Promise<void>;
     removeVolume: (name: string) => Promise<string>;
     readComposeEnvValue: (key: string) => Promise<string | null>;
     volumeExists: (name: string) => Promise<boolean>;
@@ -566,6 +568,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('docker:removeModelCache', modelId) as Promise<void>,
     downloadModelToCache: (modelId: string) =>
       ipcRenderer.invoke('docker:downloadModelToCache', modelId) as Promise<void>,
+    isGgmlModelDownloadedOnHost: (fileName: string) =>
+      ipcRenderer.invoke('docker:isGgmlModelDownloadedOnHost', fileName) as Promise<boolean>,
+    downloadGgmlModelToHost: (fileName: string) =>
+      ipcRenderer.invoke('docker:downloadGgmlModelToHost', fileName) as Promise<void>,
     removeVolume: (name: string) => ipcRenderer.invoke('docker:removeVolume', name),
     readComposeEnvValue: (key: string) =>
       ipcRenderer.invoke('docker:readComposeEnvValue', key) as Promise<string | null>,

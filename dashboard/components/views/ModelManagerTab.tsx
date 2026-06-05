@@ -19,7 +19,7 @@ import {
   type ModelFamily,
   type ModelRole,
 } from '../../src/services/modelRegistry';
-import { isWhisperModel } from '../../src/services/modelCapabilities';
+import { isWhisperModel, isWhisperCppModel } from '../../src/services/modelCapabilities';
 import {
   MAIN_MODEL_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
@@ -55,6 +55,8 @@ export interface ModelManagerTabProps {
   refreshCacheStatus: (extraIds?: string[]) => void;
   /** When true, hide families that require Docker (nemo, whisper, vibevoice). */
   isMetal?: boolean;
+  /** Current runtime profile — drives host-side GGML model management for vulkan-wsl2. */
+  runtimeProfile?: string;
 }
 
 // ─── Family section configuration ───────────────────────────────────────────
@@ -399,7 +401,9 @@ const CustomModelRow = React.memo(function CustomModelRow({
 
   const roleOptions: { role: ModelRole; label: string }[] = [
     { role: 'main', label: 'Main Transcriber' },
-    ...(isWhisperModel(modelId) ? [{ role: 'live' as ModelRole, label: 'Live Model' }] : []),
+    ...(isWhisperModel(modelId) || isWhisperCppModel(modelId)
+      ? [{ role: 'live' as ModelRole, label: 'Live Model' }]
+      : []),
     { role: 'diarization', label: 'Diarization Model' },
   ];
 
@@ -523,11 +527,15 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
   isRunning,
   refreshCacheStatus,
   isMetal = false,
+  runtimeProfile,
 }) => {
   // On Metal there is no Docker container — model download/remove are host-local
   // operations that work whether or not the server is running (GH-136).
   const canManage = isMetal || isRunning;
+  const isVulkanWsl2 = runtimeProfile === 'vulkan-wsl2';
   const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
+  // Host-side GGML cache status (vulkan-wsl2 only — models live on the Windows filesystem)
+  const [hostCacheStatus, setHostCacheStatus] = useState<Record<string, { exists: boolean }>>({});
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [customModelInput, setCustomModelInput] = useState('');
   const [customSectionExpanded, setCustomSectionExpanded] = useState(true);
@@ -582,20 +590,49 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
   const activeLive = resolveActiveLive();
   const activeDiarization = resolveActiveDiarization();
 
+  // Refresh host-side GGML cache status for vulkan-wsl2
+  const refreshHostCacheStatus = useCallback(async (ids?: string[]) => {
+    const api = (window as any).electronAPI;
+    if (!api?.docker?.isGgmlModelDownloadedOnHost) return;
+    const ggmlModels = getModelsByFamily('whispercpp');
+    const toCheck = ids ?? ggmlModels.map((m) => m.id);
+    const entries = await Promise.all(
+      toCheck.map(async (id) => {
+        const exists = await api.docker.isGgmlModelDownloadedOnHost(id).catch(() => false);
+        return [id, { exists }] as const;
+      }),
+    );
+    setHostCacheStatus((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+  }, []);
+
+  useEffect(() => {
+    if (!isVulkanWsl2) return;
+    void refreshHostCacheStatus();
+  }, [isVulkanWsl2, refreshHostCacheStatus]);
+
   // ── Actions ─────────────────────────────────────────────────────────────
 
   const handleDownload = useCallback(
     async (modelId: string) => {
       const api = (window as any).electronAPI;
+      const isWhisperCpp = !!getModelsByFamily('whispercpp').find((m) => m.id === modelId);
       // Metal has no container — use the native (host-local) cache path.
       const download = isMetal ? api?.mlx?.downloadModelToCache : api?.docker?.downloadModelToCache;
       if (!download) return;
 
       setDownloadingModels((prev) => new Set(prev).add(modelId));
       try {
-        await download(modelId);
-        showToast(`Downloaded ${modelId}`);
-        refreshCacheStatus([modelId]);
+        if (isVulkanWsl2 && isWhisperCpp) {
+          if (!api?.docker?.downloadGgmlModelToHost) return;
+          await api.docker.downloadGgmlModelToHost(modelId);
+          showToast(`Downloaded ${modelId}`);
+          await refreshHostCacheStatus([modelId]);
+        } else {
+          if (!api?.docker?.downloadModelToCache) return;
+          await download(modelId);
+          showToast(`Downloaded ${modelId}`);
+          refreshCacheStatus([modelId]);
+        }
       } catch (err: any) {
         showToast(`Download failed: ${err?.message || 'Unknown error'}`);
       } finally {
@@ -606,16 +643,22 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
         });
       }
     },
-    [refreshCacheStatus, showToast, isMetal],
+    [isVulkanWsl2, refreshCacheStatus, refreshHostCacheStatus, showToast, isMetal],
   );
 
   const handleRemove = useCallback(
     async (modelId: string) => {
       const api = (window as any).electronAPI;
-      const remove = isMetal ? api?.mlx?.removeModelCache : api?.docker?.removeModelCache;
-      if (!remove) return;
+      const isWhisperCpp = !!getModelsByFamily('whispercpp').find((m) => m.id === modelId);
 
       try {
+        if (isVulkanWsl2 && isWhisperCpp) {
+          // Host-side removal: not yet supported via IPC; show guidance instead
+          showToast(`Delete manually from %APPDATA%\\TranscriptionSuite\\whisper-models\\`);
+          return;
+        }
+        const remove = isMetal ? api?.mlx?.removeModelCache : api?.docker?.removeModelCache;
+        if (!remove) return;
         await remove(modelId);
         showToast(`Removed cache for ${modelId}`);
         refreshCacheStatus([modelId]);
@@ -623,7 +666,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
         showToast(`Remove failed: ${err?.message || 'Unknown error'}`);
       }
     },
-    [refreshCacheStatus, showToast, isMetal],
+    [isVulkanWsl2, refreshCacheStatus, showToast, isMetal],
   );
 
   const handleSelectAs = useCallback(
@@ -643,12 +686,15 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
           showToast(`Set ${modelId} as Main Transcriber`);
           break;
         case 'live':
-          if (!isWhisperModel(modelId)) {
-            showToast('Live Mode only supports faster-whisper models in v1.');
+          if (!isWhisperModel(modelId) && !isWhisperCppModel(modelId)) {
+            showToast('Live Mode supports faster-whisper and whisper.cpp (GGML) models.');
             break;
           }
-          if (isPreset && registryModel?.family === 'whisper') {
-            // Whisper models are in the live preset dropdown
+          if (
+            isPreset &&
+            (registryModel?.family === 'whisper' || registryModel?.family === 'whispercpp')
+          ) {
+            // Both whisper and whispercpp presets are in the live preset dropdown
             setLiveModelSelection(modelId);
             setLiveCustomModel('');
           } else {
@@ -775,23 +821,31 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
             }
           >
             <div className="space-y-2">
-              {models.map((model) => (
-                <ModelRow
-                  key={model.id}
-                  model={model}
-                  cached={modelCacheStatus[model.id]?.exists ?? false}
-                  cacheSize={modelCacheStatus[model.id]?.size}
-                  downloading={downloadingModels.has(model.id)}
-                  isRunning={isRunning}
-                  canManage={canManage}
-                  isActiveMain={activeMain.toLowerCase() === model.id.toLowerCase()}
-                  isActiveLive={activeLive.toLowerCase() === model.id.toLowerCase()}
-                  isActiveDiarization={activeDiarization.toLowerCase() === model.id.toLowerCase()}
-                  onDownload={handleDownload}
-                  onRemove={handleRemove}
-                  onSelectAs={handleSelectAs}
-                />
-              ))}
+              {models.map((model) => {
+                const useHostCache = isVulkanWsl2 && section.family === 'whispercpp';
+                const cached = useHostCache
+                  ? (hostCacheStatus[model.id]?.exists ?? false)
+                  : (modelCacheStatus[model.id]?.exists ?? false);
+                // Host-side downloads don't need the Docker container running
+                const canAct = useHostCache ? true : isRunning;
+                return (
+                  <ModelRow
+                    key={model.id}
+                    model={model}
+                    cached={cached}
+                    cacheSize={useHostCache ? undefined : modelCacheStatus[model.id]?.size}
+                    downloading={downloadingModels.has(model.id)}
+                    isRunning={canAct}
+                    canManage={canManage}
+                    isActiveMain={activeMain.toLowerCase() === model.id.toLowerCase()}
+                    isActiveLive={activeLive.toLowerCase() === model.id.toLowerCase()}
+                    isActiveDiarization={activeDiarization.toLowerCase() === model.id.toLowerCase()}
+                    onDownload={handleDownload}
+                    onRemove={handleRemove}
+                    onSelectAs={handleSelectAs}
+                  />
+                );
+              })}
             </div>
           </GlassCard>
         );

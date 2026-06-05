@@ -126,23 +126,26 @@ describe('[P1] composeFileArgs', () => {
 
   // ── GH-101 follow-up: Vulkan-WSL2 compose selection ─────────────────────
 
-  it('Win32 + Vulkan-WSL2: base + desktop-vm + vulkan-wsl2 sidecar', () => {
+  it('Win32 + Vulkan-WSL2: base + desktop-vm only — containerised Vulkan sidecar is retired', () => {
     setPlatform('win32');
     const args = composeFileArgs('vulkan-wsl2', 'docker', null);
     const files = extractFiles(args);
 
-    expect(files).toEqual([
-      'docker-compose.yml',
-      'docker-compose.desktop-vm.yml',
-      'docker-compose.vulkan-wsl2.yml',
-    ]);
+    // The vulkan-wsl2 container sidecar (docker-compose.vulkan-wsl2.yml) was
+    // retired in 49cd8ab: whisper-server.exe now runs natively on the Windows
+    // host (the containerised whisper-server cannot start without AVX2) and
+    // Docker reaches it via host.docker.internal:8080. Compose selection adds
+    // no Vulkan overlay — only the base service + desktop-vm networking.
+    expect(files).toEqual(['docker-compose.yml', 'docker-compose.desktop-vm.yml']);
   });
 
-  it('Vulkan-WSL2 selects the WSL2 overlay (NOT the Linux-DRI overlay)', () => {
+  it('Vulkan-WSL2 attaches no container Vulkan overlay (neither WSL2 nor Linux-DRI)', () => {
     setPlatform('win32');
     const files = extractFiles(composeFileArgs('vulkan-wsl2', 'docker', null));
 
-    expect(files).toContain('docker-compose.vulkan-wsl2.yml');
+    // Native whisper-server.exe path — no containerised Vulkan sidecar at all,
+    // and it must never pull in the Linux-DRI overlay either.
+    expect(files).not.toContain('docker-compose.vulkan-wsl2.yml');
     expect(files).not.toContain('docker-compose.vulkan.yml');
   });
 

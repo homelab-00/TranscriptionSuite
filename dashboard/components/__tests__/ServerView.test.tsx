@@ -104,10 +104,15 @@ vi.mock('../../src/config/store', () => ({
   DEFAULT_SERVER_PORT: 7239,
 }));
 
-// modelCapabilities
+// modelCapabilities — must export the full surface ServerView imports
+// (isWhisperModel, isWhisperCppModel, isMLXModel, isNemoModel); a missing
+// export throws "No <name> export is defined on the mock" the moment ServerView
+// accesses it during render. The test world treats every model as plain Whisper.
 vi.mock('../../src/services/modelCapabilities', () => ({
   isWhisperModel: () => true,
+  isWhisperCppModel: () => false,
   isMLXModel: () => false,
+  isNemoModel: () => false,
 }));
 
 // modelRegistry
