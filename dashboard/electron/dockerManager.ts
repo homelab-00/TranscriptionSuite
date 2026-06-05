@@ -3366,8 +3366,7 @@ async function downloadWhisperServerExe(): Promise<void> {
   const tmp = `${exePath}.tmp`;
   // TODO: change ref to `v${app.getVersion()}` once whisper-server.exe is
   // committed at each release tag (currently lives on fix-vulcan-on-windows).
-  const url = `https://github.com/homelab-00/TranscriptionSuite/raw/fix-vulcan-on-windows/whisper-server/whisper-server.exe`;
-
+  const url = `https://media.githubusercontent.com/media/homelab-00/TranscriptionSuite/feat/vulkan-on-windows/whisper-server/whisper-server.exe`;
   fs.mkdirSync(path.dirname(exePath), { recursive: true });
 
   const { net } = await import('electron');
@@ -3427,6 +3426,18 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, Mod
   // Split into GGML flat-file models and HuggingFace hub models
   const ggmlIds = modelIds.filter((id) => isGgmlFileName(id));
   const hubIds = modelIds.filter((id) => !isGgmlFileName(id));
+
+  // On vulkan-wsl2 the GGML models are consumed by the native whisper-server.exe
+  // and live on the Windows host (%APPDATA%\TranscriptionSuite\whisper-models),
+  // NOT in the Docker volume. Check the host dir there. The Linux `vulkan` path
+  // still keeps GGML files in the container `/models/` volume.
+  if (readRuntimeProfileFromStore() === 'vulkan-wsl2') {
+    for (const id of ggmlIds) {
+      const exists = await isGgmlModelDownloadedOnHost(id).catch(() => false);
+      result[id] = { exists };
+    }
+    ggmlIds.length = 0;
+  }
 
   // Check GGML models: flat files at /models/{fileName}
   for (const id of ggmlIds) {

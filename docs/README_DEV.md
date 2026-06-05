@@ -359,7 +359,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD
 - **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
 - **Multi-backend STT**: Pluggable backend architecture - Whisper, NeMo Parakeet/Canary, WhisperX, VibeVoice-ASR, whisper.cpp (Vulkan), MLX (Apple Silicon: Whisper, Parakeet, Canary, VibeVoice) - auto-detected from the model name
-- **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM; Whisper backends only in v1
+- **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM; Whisper and whisper.cpp/GGML backends supported
 - **AI Assistant (OpenAI-compatible)**: Supports any OpenAI-compatible endpoint - LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others. Configurable via Settings → AI tab with API key support, model selection, and endpoint URL. Per-conversation model overrides are available in the Notebook AI sidebar. Uses standard `/v1/chat/completions` with full conversation history
 
 ### 2.2 Platform Architectures
@@ -1430,29 +1430,15 @@ Key design decisions:
 
 #### Networking by Platform
 
-| Platform | Profile | Main container networking | whisper-server networking | URL used |
-|----------|---------|--------------------------|--------------------------|----------|
-| Linux | `vulkan` | `network_mode: host` | Bridge + port mapping | `http://localhost:8080` |
+| Platform | Profile | Main container networking | whisper-server | URL used |
+|----------|---------|--------------------------|----------------|----------|
+| Linux | `vulkan` | `network_mode: host` | Docker sidecar + port mapping | `http://localhost:8080` |
 | macOS | (n/a) | Bridge (Docker Desktop) | (Vulkan unsupported) | (n/a) |
-| Windows + WSL2 | `vulkan-wsl2` | Bridge (Docker Desktop) | Bridge (same network) | `http://whisper-server:8080` |
+| Windows (WSL2 backend) | `vulkan-wsl2` | Bridge (Docker Desktop) | Native `.exe` on Windows host | `http://host.docker.internal:8080` |
 | Windows + Hyper-V | (n/a) | Bridge (Docker Desktop) | (Vulkan unsupported) | (n/a) |
-| Native Linux WSL2 distro | `vulkan` | `network_mode: host` | Bridge + port mapping | `http://localhost:8080` |
+| Native Linux WSL2 distro | `vulkan` | `network_mode: host` | Docker sidecar + port mapping | `http://localhost:8080` |
 
-> **Vulkan profile selection (GH-101 follow-up).** Two compose overlays now exist: `docker-compose.vulkan.yml` (Linux-DRI path; mounts `/dev/dri`) and `docker-compose.vulkan-wsl2.yml` (experimental Windows + WSL2 path; mounts `/dev/dxg` + `/usr/lib/wsl` and uses a custom-built sidecar image with Mesa's `dzn` Vulkan-on-D3D12 ICD added — the upstream `whisper.cpp:main-vulkan` does not include dzn). `dockerManager.ts::checkVulkanSupport(platform, exists, wslSupport, profile)` gates each path. The `vulkan-wsl2` profile is opt-in: never auto-selected, only surfaced in Settings when `detectWslGpuPassthrough()` confirms Docker Desktop's WSL2 backend AND a probe container can reach `/dev/dxg`. The custom sidecar image is not published to GHCR — see README §2.5.2 for the local build path.
-
-The WSL2 dataflow inside the sidecar container is:
-
-```
-/dev/dxg (kernel device)
-   ↓
-libdxcore.so + libd3d12.so (mounted from /usr/lib/wsl/lib by Docker Desktop)
-   ↓
-dzn ICD (libvulkan_dzn.so, installed in the custom image only)
-   ↓
-Vulkan loader → whisper.cpp Vulkan compute kernels
-```
-
-If dzn cannot find a D3D12 device through `/dev/dxg`, the Vulkan loader silently falls back to `llvmpipe` (CPU rasterizer). The dashboard cannot detect this without inspecting `vulkaninfo --summary` from inside the sidecar — operators should verify GPU enumeration manually after first start.
+> **`vulkan-wsl2` profile (Windows native-exe path).** On Windows the `vulkan-wsl2` runtime profile does **not** start a `whisper-server` Docker container. Instead, `dockerManager.ts::startContainer()` calls `launchWhisperServerNative()` to spawn `whisper-server.exe` directly on the Windows host. The exe is auto-downloaded from GitHub on first use to `%APPDATA%\TranscriptionSuite\whisper-server\whisper-server.exe`. The Docker backend (`docker-compose.yml` + `docker-compose.desktop-vm.yml` only — no Vulkan overlay) reaches the native exe at `http://host.docker.internal:8080`. A dedicated GHCR image repo (`ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2`) is used for all image operations when this profile is active. The profile is always surfaced on `win32` — the old alpine-based WSL2 GPU-passthrough probe was removed because the native-exe path does not consume `/dev/dxg`.
 
 The dashboard's `dockerManager.ts` automatically sets `WHISPERCPP_SERVER_URL` based on `process.platform` when the vulkan runtime profile is selected. The backend resolves the server URL with this priority:
 
@@ -1478,7 +1464,7 @@ whisper.cpp models have different capabilities compared to the default faster-wh
 | Translation (→ English) | Yes (except turbo) | Yes (except turbo/.en) | Canary only |
 | Speaker diarization | No (no pyannote) | Yes | Yes |
 | Word timestamps | Yes (token-level) | Yes | Yes |
-| Live mode | Not yet supported | Yes | Yes |
+| Live mode | Yes | Yes | Yes |
 
 #### Files
 
@@ -1497,8 +1483,7 @@ whisper.cpp models have different capabilities compared to the default faster-wh
 
 - **Single-worker**: whisper-server processes one request at a time. Concurrent transcription requests will queue.
 - **No diarization**: whisper.cpp has no pyannote integration. Speaker diarization is unavailable for GGML models.
-- **No live mode**: The sidecar architecture is not yet integrated with the live transcription engine.
-- **AMD GPU requirement**: Vulkan acceleration requires an AMD GPU with RADV support (RDNA1+) or an Intel GPU with ANV support. RDNA1 GPUs (e.g. RX 5500 XT) may need the `iommu=soft` kernel parameter.
+- **AMD/Intel GPU requirement**: Vulkan acceleration requires an AMD GPU with RADV support (RDNA1+) or an Intel GPU with ANV support. RDNA1 GPUs (e.g. RX 5500 XT) may need the `iommu=soft` kernel parameter.
 
 ### 6.10 Legacy-GPU image variant (Issue #83)
 
@@ -2458,7 +2443,6 @@ The existing `downloadModelToCache()` entry point detects GGML files via `isGgml
 
 #### Limitations
 
-- **No live mode** - the sidecar processes complete audio files; real-time streaming is not supported.
 - **No speaker diarization** - `supportsDiarization()` returns `false` for GGML models; pyannote integration is unavailable.
 - **No translation** for turbo variants - large-v3 and medium GGML models support translation; turbo variants do not.
 - **One model at a time** - model switching requires a server restart (sidecar loads model at startup).

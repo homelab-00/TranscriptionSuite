@@ -95,13 +95,12 @@ const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 // (pyannote/pyannote-audio#1886, #1337, #1091 — all closed wontfix).
 const PYANNOTE_REPO_PATTERN = /^pyannote\//i;
 
-// GGML model options for Vulkan sidecar — computed once from registry.
+// GGML models for the Vulkan sidecar — computed once from registry. In Vulkan
+// mode these populate the Main Transcriber dropdown (Branch B: the main pick
+// drives the sidecar). GGML_DISPLAY_TO_ID is retained only to migrate the
+// legacy `server.whispercppModel` value (persisted as a display name).
 const GGML_MODELS = getModelsByFamily('whispercpp');
-const GGML_OPTIONS = GGML_MODELS.map((m) => m.displayName);
 const GGML_DISPLAY_TO_ID = new Map(GGML_MODELS.map((m) => [m.displayName, m.id]));
-const GGML_ID_TO_DISPLAY = new Map(GGML_MODELS.map((m) => [m.id, m.displayName]));
-const GGML_DEFAULT_DISPLAY =
-  GGML_ID_TO_DISPLAY.get('ggml-large-v3-turbo.bin') ?? 'GGML Large v3 Turbo';
 const ACTIVE_CARD_ACCENT_CLASS = 'border-accent-cyan/40! shadow-[0_0_15px_rgba(34,211,238,0.2)]!';
 const FALLBACK_LIVE_WHISPER_MODEL = WHISPER_MEDIUM;
 
@@ -247,7 +246,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   );
   const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
   const [diarizationHydrated, setDiarizationHydrated] = useState(false);
-  const [whispercppModelSelection, setWhispercppModelSelection] = useState(GGML_DEFAULT_DISPLAY);
   const [modelsLoading, setModelsLoading] = useState(false);
 
   // Model download cache state (checks Docker volume for HF model dirs)
@@ -299,12 +297,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Metal mode:     only MLX models (non-MLX need Docker/ctranslate2).
   // Non-Metal mode: only non-MLX models (MLX needs Apple Silicon Metal).
   const isMetal = runtimeProfile === 'metal';
+  const isVulkan = runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2';
   const mainModelOptions = useMemo(() => {
+    // Vulkan: the Main Transcriber owns the whisper.cpp sidecar's model, so the
+    // dropdown is restricted to GGML models. WHISPERCPP_MODEL is derived from
+    // this pick at start (no separate sidecar selector). Custom is omitted —
+    // only registry GGML files exist on disk for the sidecar to load.
+    if (isVulkan) {
+      return [...GGML_MODELS.map((m) => m.id), MODEL_DISABLED_OPTION];
+    }
     const presets = MAIN_MODEL_PRESETS.filter((id) =>
       isMetal ? MLX_MODEL_IDS.has(id) : !MLX_MODEL_IDS.has(id),
     );
     return [...presets, MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
-  }, [isMetal]);
+  }, [isMetal, isVulkan]);
   const liveModelOptions = useMemo(() => {
     return [
       LIVE_MODEL_SAME_AS_MAIN_OPTION,
@@ -425,6 +431,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       api.config.get('server.diarizationModelSelection'),
       api.config.get('server.diarizationCustomModel'),
       api.config.get('server.whispercppModel'),
+      api.config.get('server.runtimeProfile'),
     ])
       .then(
         ([
@@ -435,6 +442,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           storedDiarizationSelection,
           storedDiarizationCustom,
           storedWhispercppModel,
+          storedRuntimeProfile,
         ]: unknown[]) => {
           if (!active) return;
 
@@ -532,23 +540,31 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             nextDiarizationCustom = '';
           }
 
+          // Branch B migration: the dedicated "GGML Sidecar Model" selector is
+          // gone — the Main Transcriber now owns the sidecar model in Vulkan
+          // mode. If a user is upgrading from that era and their persisted main
+          // pick isn't a GGML model, seed it from the old `server.whispercppModel`
+          // value (stored as a display name) or the recommended GGML, so the
+          // sidecar always has a valid model to load.
+          const storedProfile = getString(storedRuntimeProfile);
+          const isVulkanProfile = storedProfile === 'vulkan' || storedProfile === 'vulkan-wsl2';
+          if (isVulkanProfile && !isWhisperCppModel(resolvedMainModel)) {
+            const storedGgml = getString(storedWhispercppModel);
+            const migratedId =
+              (storedGgml &&
+                (GGML_DISPLAY_TO_ID.get(storedGgml) ??
+                  (isWhisperCppModel(storedGgml) ? storedGgml : undefined))) ??
+              VULKAN_RECOMMENDED_MODEL;
+            nextMainSelection = migratedId;
+            nextMainCustom = '';
+          }
+
           setMainModelSelection(nextMainSelection);
           setMainCustomModel(nextMainCustom);
           setLiveModelSelection(nextLiveSelection);
           setLiveCustomModel(nextLiveCustom);
           setDiarizationModelSelection(nextDiarizationSelection);
           setDiarizationCustomModel(nextDiarizationCustom);
-          const storedGgml = getString(storedWhispercppModel);
-          if (storedGgml) {
-            if (GGML_DISPLAY_TO_ID.has(storedGgml)) {
-              // Stored as displayName — use directly
-              setWhispercppModelSelection(storedGgml);
-            } else {
-              // Stored as model ID — convert to displayName
-              const display = GGML_ID_TO_DISPLAY.get(storedGgml);
-              if (display) setWhispercppModelSelection(display);
-            }
-          }
         },
       )
       .catch(() => {})
@@ -844,6 +860,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     configuredLiveModel,
   );
   const normalizedLiveModel = normalizeLiveModelToWhisper(activeLiveModel);
+  // Vulkan sidecar boot/launch model, derived from the Main Transcriber pick
+  // (Branch B). The backend swaps to the live model at runtime via /load; this
+  // is only the model the sidecar pre-loads at startup. Guarded so a non-GGML
+  // value can never reach the sidecar.
+  const vulkanSidecarModelPath = `/models/${
+    isWhisperCppModel(activeTranscriber) ? activeTranscriber : VULKAN_RECOMMENDED_MODEL
+  }`;
   const liveModelWhisperOnlyCompatible =
     activeLiveModel === DISABLED_MODEL_SENTINEL || isLiveCompatibleModel(activeLiveModel);
   const liveModeModelConstraintMessage =
@@ -1065,13 +1088,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     void api.config.set('server.diarizationCustomModel', diarizationCustomModel).catch(() => {});
   }, [localSelectionsHydrated, diarizationCustomModel]);
 
-  useEffect(() => {
-    if (!localSelectionsHydrated) return;
-    const api = (window as any).electronAPI;
-    if (!api?.config) return;
-    void api.config.set('server.whispercppModel', whispercppModelSelection).catch(() => {});
-  }, [localSelectionsHydrated, whispercppModelSelection]);
-
   // Check model download cache whenever the active model names or container state change
   useEffect(() => {
     const api = (window as any).electronAPI;
@@ -1119,15 +1135,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     }
     return meta;
   }, [runtimeProfile]);
-
-  // Show a suggestion to use the recommended GGML model when the user switches to Vulkan
-  // mode and their current main model selection requires CUDA (not usable in Vulkan mode).
-  // Skips sentinels, custom options, and models that are already Vulkan-compatible.
-  const showVulkanModelSuggestion =
-    runtimeProfile === 'vulkan' &&
-    !isRunning &&
-    mainModelSelection !== VULKAN_RECOMMENDED_MODEL &&
-    mainModelOptionMeta[mainModelSelection]?.badge === 'Requires CUDA';
 
   // ─── Image tag selection (merged remote + local) ─────────────────────────
 
@@ -1954,11 +1961,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                             mainTranscriberModel: sanitizeModelName(activeTranscriber),
                             liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
                             diarizationModel: sanitizeModelName(activeDiarizationModel),
-                            ...((runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2')
-                              ? {
-                                  whispercppModel: `/models/${GGML_DISPLAY_TO_ID.get(whispercppModelSelection) ?? 'ggml-large-v3-turbo.bin'}`,
-                                }
-                              : {}),
+                            ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
                           })
                         }
                         disabled={
@@ -1983,11 +1986,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                             mainTranscriberModel: sanitizeModelName(activeTranscriber),
                             liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
                             diarizationModel: sanitizeModelName(activeDiarizationModel),
-                            ...((runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2')
-                              ? {
-                                  whispercppModel: `/models/${GGML_DISPLAY_TO_ID.get(whispercppModelSelection) ?? 'ggml-large-v3-turbo.bin'}`,
-                                }
-                              : {}),
+                            ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
                           })
                         }
                         disabled={
@@ -2108,7 +2107,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         <AmdIcon size={30} />
                         <IntelIcon size={30} />
                       </span>
-                      GPU (Vulkan)
+                      GPU (Vulkan Linux)
                     </button>
                     <button
                       onClick={() => handleRuntimeProfileChange('metal')}
@@ -2154,7 +2153,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           <AmdIcon size={30} />
                           <IntelIcon size={30} />
                         </span>
-                        GPU (Vulkan WSL2)
+                        GPU (Vulkan Windows)
                         <span className="bg-accent-orange/20 text-accent-orange ml-1 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
                           Exp
                         </span>
@@ -2412,35 +2411,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                       disabled={isRunning}
                     />
-                    {showVulkanModelSuggestion && (
-                      <p className="text-xs text-amber-400">
-                        Vulkan mode works best with GGML models.{' '}
-                        <button
-                          className="underline hover:text-amber-300"
-                          onClick={() => setMainModelSelection(VULKAN_RECOMMENDED_MODEL)}
-                        >
-                          Use {VULKAN_RECOMMENDED_MODEL}
-                        </button>
-                      </p>
-                    )}
-                    {(runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2') && (
+                    {isVulkan && (
                       <p className="text-xs text-slate-500 italic">
+                        This GGML model runs on the AMD/Intel GPU via the whisper.cpp sidecar.
                         Switching models requires a server restart.
                       </p>
-                    )}
-                    {(runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2') && (
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-purple-400">
-                          GGML Sidecar Model
-                        </label>
-                        <CustomSelect
-                          value={whispercppModelSelection}
-                          onChange={setWhispercppModelSelection}
-                          options={GGML_OPTIONS}
-                          className="h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1 focus:ring-purple-400"
-                          disabled={isRunning}
-                        />
-                      </div>
                     )}
                     {MLX_MODEL_IDS.has(mainModelSelection) && (
                       <p className="flex items-center gap-1 text-xs text-violet-400">

@@ -82,13 +82,13 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 ### 1.1 Features
 
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup*
-- **Multiple Models available**: On **Docker/Linux/Windows**: *WhisperX* ([`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU via Vulkan — Linux is the supported path; experimental WSL2 path on Windows requires a locally-built sidecar image, see §2.5). On **Apple Silicon (Metal)**: [*MLX Whisper*](https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16) (tiny → large-v3-turbo), [*MLX Parakeet v3*](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3), [*MLX Canary v2*](https://huggingface.co/mlx-community/canary-1b-v2), and [*MLX VibeVoice-ASR*](https://huggingface.co/mlx-community/VibeVoice-ASR-bf16) - all running natively without Docker
+- **Multiple Models available**: On **Docker/Linux/Windows**: *WhisperX* ([`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU via Vulkan — Linux via Docker sidecar; Windows via native `whisper-server.exe` auto-downloaded by the app, see §2.5). On **Apple Silicon (Metal)**: [*MLX Whisper*](https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16) (tiny → large-v3-turbo), [*MLX Parakeet v3*](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3), [*MLX Canary v2*](https://huggingface.co/mlx-community/canary-1b-v2), and [*MLX VibeVoice-ASR*](https://huggingface.co/mlx-community/VibeVoice-ASR-bf16) - all running natively without Docker
 - **Speaker Diarization**: Speaker identification & diarization (subtitling) for Whisper, NeMo, and VibeVoice models; Whisper and NeMo use PyAnnote for diarization while VibeVoice does it by itself (not available for whisper.cpp models). On Apple Silicon, [*Sortformer*](https://huggingface.co/mlx-community/diar_sortformer_4spk-v1-fp32) provides Metal-native diarization for up to 4 speakers - no HuggingFace token required
 - **Parallel Processing**: If your VRAM budget allows it, transcribe & diarize a recording at the same time - speeding up processing time significantly
 - **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [51 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds; either using your mic or the system audio
 - **Session File Import**: Import existing audio files from the Session tab; transcription results are saved directly as `.txt` or `.srt` to a folder of your choice - no Notebook entry created
-- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (available for Whisper models on all platforms; not available for NeMo, VibeVoice, or whisper.cpp models)
+- **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (available for Whisper and whisper.cpp/GGML models; not available for NeMo or VibeVoice models)
 - **Global Keyboard Shortcuts**: System-wide shortcuts & paste-at-cursor functionality
 - **Remote Access**: Securely access your desktop at home running the model from anywhere (utilizing Tailscale) or share it on your local network via LAN
 - **Audio Notebook**: An Audio Notebook mode, with a calendar-based view, full-text search, and AI assistant (chat with any OpenAI-compatible provider about your notes - LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others)
@@ -309,9 +309,9 @@ Notes:
 
 ### 2.5 AMD / Intel GPU Support (Vulkan)
 
-If you have an **AMD or Intel GPU** instead of NVIDIA, you can get GPU-accelerated transcription using [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with Vulkan. There are two paths: a stable **Linux** path that has shipped since v1.3.x, and an **experimental Windows + WSL2** path introduced in v1.3.5 (Issue #101 follow-up).
+If you have an **AMD or Intel GPU** instead of NVIDIA, you can get GPU-accelerated transcription using [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with Vulkan. Two paths are available: a **Linux** path (Docker sidecar) and a **Windows** path (native `whisper-server.exe` managed by the app).
 
-This works by running a second helper container (called whisper-server) alongside the main TranscriptionSuite container. The helper container uses your AMD or Intel GPU for the actual transcription work, while the main container handles everything else (the dashboard, file management, etc.).
+On Linux, this works by running a second helper container (called whisper-server) alongside the main TranscriptionSuite container. On Windows, the app instead launches `whisper-server.exe` natively on your host and the Docker backend reaches it via `host.docker.internal:8080`.
 
 #### 2.5.1 Linux (stable)
 
@@ -322,36 +322,30 @@ This works by running a second helper container (called whisper-server) alongsid
 - Docker installed (Podman is not yet supported for Vulkan mode)
 - A Linux host with `/dev/dri/renderD128` (a real DRI render node from the AMD/Intel kernel driver)
 
-#### 2.5.2 Windows + WSL2 (experimental, opt-in — GH-101 follow-up)
-
-> ⚠️ **Experimental.** This path uses Mesa's [`dzn` (Dozen)](https://docs.mesa3d.org/drivers/d3d12.html) Vulkan-on-D3D12 ICD inside the WSL2 distro to enumerate `/dev/dxg`. It is not validated against AMD hardware in our CI; we ship the plumbing so determined users can try it. The runtime may silently fall back to a CPU rasterizer (llvmpipe) if dzn cannot enumerate the GPU — verify with `vulkaninfo --summary` inside the running sidecar.
->
-> The custom sidecar image is **not** published to GHCR — every user builds it locally. We will promote to GHCR after a real-world AMD WSL2 validator confirms `/dev/dxg` enumeration via dzn.
+#### 2.5.2 Windows (GPU Vulkan Windows)
 
 **What you need:**
 
-- An AMD or Intel GPU with current Windows drivers (WDDM 3.0+ recommended)
+- An AMD or Intel GPU with current Windows drivers
 - Docker Desktop on Windows with the **WSL2 backend enabled** (Settings → General → "Use the WSL 2 based engine")
-- Bash (Git Bash, WSL, or any POSIX shell) to run the build script
-- Internet access to pull the upstream `whisper.cpp:main-vulkan` image and the [kisak/turtle PPA](https://launchpad.net/~kisak/+archive/ubuntu/turtle) which ships Mesa with `microsoft-experimental` (dzn) enabled
 
-**Build the local sidecar image** (one-time, ~3–5 min). Pick the helper that matches your shell:
+**How it works:**
 
-```powershell
-# PowerShell (Windows-native, no extra dependencies)
-powershell -ExecutionPolicy Bypass -File .\server\docker\build-vulkan-wsl2.ps1
-```
+The Windows path runs a native `whisper-server.exe` directly on your Windows host — not inside Docker. The app downloads it automatically on first use and manages its full lifecycle (start, stop, crash recovery). The Docker backend reaches it via `http://host.docker.internal:8080`. This avoids the AVX2 requirement that containerised Vulkan builds impose, meaning it works on a wider range of CPUs.
 
-```bash
-# Bash (Git Bash, WSL, or any POSIX shell on Linux/macOS)
-bash server/docker/build-vulkan-wsl2.sh
-```
+**How to set it up:**
 
-This produces `transcriptionsuite/whisper-cpp-vulkan-wsl2:latest` locally. The dashboard surfaces a "GPU (Vulkan WSL2 — experimental)" runtime profile button in Settings only when Docker Desktop is detected with the WSL2 backend AND a probe container can see `/dev/dxg`. If the button is missing, the probe failed; check Docker Desktop's backend setting and your Windows GPU driver version.
+1. In the **Server tab**, open **Instance Settings** and select **GPU (Vulkan Windows)** as the runtime profile.
+2. In the Server tab image selector, choose the latest image tag (e.g. `v1.3.5`) and click **Fetch Fresh Image**. Wait for the download to complete — the Vulkan Windows profile uses a dedicated Docker image.
+3. Click **Start Local**. The app automatically downloads `whisper-server.exe` if it is not already present, then starts the Docker backend.
+4. During the setup prompts: select a GGML model as your **Main Transcriber** and (optionally) a GGML model for **Live Mode**. Diarization is not supported on this path — skip it.
+5. Wait for the server status to turn green. You are ready to transcribe.
 
-If you click Start Server before building the image, the dashboard surfaces an actionable error pointing back at this section.
+> **`whisper-server.exe` location:** stored at `%APPDATA%\TranscriptionSuite\whisper-server\whisper-server.exe` and managed automatically by the app. You do not need to install or configure it manually.
 
-#### 2.5.3 Setup walk-through (Linux + experimental WSL2)
+#### 2.5.3 Setup walk-through (Linux)
+
+> Windows users: see the step-by-step in §2.5.2 — the setup is integrated into the dashboard and does not require the manual steps below.
 
 **How to set it up:**
 
@@ -388,7 +382,7 @@ If you click Start Server before building the image, the dashboard surfaces an a
 | Longform transcription | Yes | Yes |
 | Translation (to English) | Yes (except turbo models) | Yes |
 | Speaker diarization | No | Yes |
-| Live mode | No | Yes |
+| Live mode | Yes | Yes |
 | Multiple concurrent jobs | One at a time | One at a time |
 
 **Troubleshooting:**
@@ -399,7 +393,7 @@ If you click Start Server before building the image, the dashboard surfaces an a
 
 > **Note for older AMD GPUs (RDNA1):** If you experience Vulkan initialization errors with an RX 5500 XT or similar RDNA1 card, you may need to add `iommu=soft` to your kernel boot parameters.
 
-> **Note for Windows + WSL2 users (experimental):** if transcription is slow under the Vulkan-WSL2 profile, dzn may have fallen back to `llvmpipe` (CPU rasterizer) silently. Inspect the sidecar with `docker exec <container> vulkaninfo --summary` — if you only see `llvmpipe`, your Windows GPU driver may need updating, or your hardware may not be supported by dzn. Fall back to the CPU profile until the issue is resolved.
+> **Note for Windows users:** if transcription is unexpectedly slow, make sure Docker Desktop is running with the WSL2 backend (Settings → General → "Use the WSL 2 based engine"). CPU-only fallback cannot be detected automatically from the dashboard.
 
 ---
 
