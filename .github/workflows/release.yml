@@ -174,6 +174,12 @@ jobs:
   build-macos-metal:
     if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'macos-metal' }}
     runs-on: macos-14
+    env:
+      # GH #154: never let a Python invocation in this job write __pycache__/*.pyc
+      # into the app bundle. Bytecode added AFTER the bundle is code-signed
+      # invalidates the codesign seal, so the quarantined DMG fails Gatekeeper's
+      # strict validation on first launch as "damaged and can't be opened".
+      PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -251,39 +257,19 @@ jobs:
 
           echo "App bundle size after backend install: $(du -sh "$APP_BUNDLE" | cut -f1)"
 
-      - name: Re-sign app bundle after backend injection
-        # electron-builder builds with hardenedRuntime=true, signing the Electron
-        # binaries.  Adding the Python venv (with many unsigned .so files) breaks
-        # that signature, causing Gatekeeper to report "damaged and can't be opened".
-        # Re-sign everything with an ad-hoc identity (-) so the bundle signature is
-        # internally consistent.
-        # NOTE: Even with correct ad-hoc signing, macOS Gatekeeper will block
-        # quarantined downloads. After installing, users must run:
-        #   xattr -dr com.apple.quarantine /Applications/TranscriptionSuite.app
-        run: |
-          APP="$(pwd)/dashboard/release/mac-arm64/TranscriptionSuite.app"
-          # Clear any extended attributes on the bundle that could interfere.
-          xattr -cr "$APP"
-          # Sign all Mach-O files in Resources — covers both the Python venv
-          # extension modules (.so/.dylib) and the bundled CPython interpreter
-          # and its own dylibs.  --deep doesn't reach plain files in Resources,
-          # only nested .app/.framework bundles, so we sign them explicitly first.
-          # Pass -perm /111 to also catch the python3.13 executable itself.
-          find "$APP/Contents/Resources" -type f \( -name "*.so" -o -name "*.dylib" \) \
-            -print0 | xargs -0 -P4 codesign --force --sign - 2>/dev/null || true
-          find "$APP/Contents/Resources" -type f -perm /111 \
-            -print0 | xargs -0 -P4 codesign --force --sign - 2>/dev/null || true
-          # Deep-sign the whole bundle. --deep processes nested frameworks and apps
-          # bottom-up, so the Electron Framework (and its constituent dylibs that
-          # were modified by the individual signing above) gets a fresh consistent
-          # signature before the outer .app is sealed.
-          codesign --force --deep --sign - "$APP"
-
       - name: Verify bundled MLX venv
         # Fail the release if the injected venv is missing uvicorn, or if the bundled
         # Python (reached through the relocated RELATIVE symlink) cannot import it.
         # This converts a silently-broken Metal bundle into a hard build failure
         # instead of a "Cannot find uvicorn binary" popup on the user's Mac (GH #124).
+        #
+        # ORDERING (GH #154): this step RUNS the bundled Python, and importing a
+        # module makes CPython write __pycache__/*.pyc next to the source. It MUST
+        # run BEFORE the re-sign step below — otherwise that bytecode is added to an
+        # already-sealed bundle, invalidating the codesign seal and making Gatekeeper
+        # reject the quarantined download as "damaged and can't be opened".
+        # PYTHONDONTWRITEBYTECODE=1 (job env) already suppresses the writes; running
+        # before the seal is the structural belt-and-braces.
         run: |
           APP_BUNDLE="$(pwd)/dashboard/release/mac-arm64/TranscriptionSuite.app"
           VENV_DIR="$APP_BUNDLE/Contents/Resources/backend/.venv"
@@ -309,6 +295,60 @@ jobs:
             exit 1
           fi
           echo "✓ Bundled MLX venv verified (uvicorn + fastapi present and importable)"
+
+      - name: Re-sign app bundle after backend injection
+        # electron-builder builds with hardenedRuntime=true, signing the Electron
+        # binaries.  Adding the Python venv (with many unsigned .so files) breaks
+        # that signature, causing Gatekeeper to report "damaged and can't be opened".
+        # Re-sign everything with an ad-hoc identity (-) so the bundle signature is
+        # internally consistent.
+        # NOTE: Even with correct ad-hoc signing, macOS Gatekeeper will block
+        # quarantined downloads. After installing, users must run:
+        #   xattr -dr com.apple.quarantine /Applications/TranscriptionSuite.app
+        #
+        # GH #154: this MUST be the LAST step that mutates the app bundle. Anything
+        # written under Contents/ after the codesign below (a stray *.pyc, an xattr,
+        # an added file) breaks the seal -> Gatekeeper "damaged". The Verify-venv
+        # step deliberately runs before this one for exactly that reason.
+        run: |
+          APP="$(pwd)/dashboard/release/mac-arm64/TranscriptionSuite.app"
+          # Strip any bytecode and extended attributes that earlier steps may have
+          # left, so the seal is computed over exactly the bytes that ship (GH #154).
+          find "$APP/Contents/Resources" -type d -name "__pycache__" -prune -exec rm -rf {} +
+          xattr -cr "$APP"
+          # Sign all Mach-O files in Resources — covers both the Python venv
+          # extension modules (.so/.dylib) and the bundled CPython interpreter
+          # and its own dylibs.  --deep doesn't reach plain files in Resources,
+          # only nested .app/.framework bundles, so we sign them explicitly first.
+          # Pass -perm /111 to also catch the python3.13 executable itself.
+          find "$APP/Contents/Resources" -type f \( -name "*.so" -o -name "*.dylib" \) \
+            -print0 | xargs -0 -P4 codesign --force --sign - 2>/dev/null || true
+          find "$APP/Contents/Resources" -type f -perm /111 \
+            -print0 | xargs -0 -P4 codesign --force --sign - 2>/dev/null || true
+          # Deep-sign the whole bundle. --deep processes nested frameworks and apps
+          # bottom-up, so the Electron Framework (and its constituent dylibs that
+          # were modified by the individual signing above) gets a fresh consistent
+          # signature before the outer .app is sealed.
+          codesign --force --deep --sign - "$APP"
+
+          # --- Seal integrity gate (GH #154) ----------------------------------
+          # A quarantined download runs this exact strict validation on first
+          # launch; if it fails, macOS shows "damaged and can't be opened". Run it
+          # in CI so a broken seal fails the build instead of shipping silently.
+          # This is ad-hoc signing, so we assert signature INTEGRITY only — NOT
+          # notarization. `spctl --assess` would legitimately reject an
+          # un-notarized bundle and is intentionally not used here.
+          if ! codesign --verify --deep --strict --verbose=4 "$APP"; then
+            echo "::error::Code signature seal is invalid — the DMG would be rejected by Gatekeeper as 'damaged' (GH #154)"
+            exit 1
+          fi
+          # Regression guard for the specific GH #154 cause: no bytecode may remain
+          # in the sealed bundle (its presence means Python ran after signing).
+          if find "$APP/Contents" -type d -name "__pycache__" -print | grep -q .; then
+            echo "::error::__pycache__ present in signed bundle — Python ran post-sign, which breaks the codesign seal (GH #154)"
+            exit 1
+          fi
+          echo "✓ Code signature seal verified (codesign --verify --deep --strict passed; no stray bytecode)"
 
       - name: Create DMG from app bundle
         run: |
