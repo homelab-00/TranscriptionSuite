@@ -3496,7 +3496,7 @@ async function downloadWhisperServerExe(): Promise<void> {
   const tmp = `${exePath}.tmp`;
   // TODO: change ref to `v${app.getVersion()}` once whisper-server.exe is
   // committed at each release tag (currently lives on fix-vulcan-on-windows).
-  const url = `https://media.githubusercontent.com/media/homelab-00/TranscriptionSuite/feat/vulkan-on-windows/whisper-server/whisper-server.exe`;
+  const url = `https://github.com/homelab-00/TranscriptionSuite/raw/refs/heads/main/whisper-server/whisper-server.exe`;
   fs.mkdirSync(path.dirname(exePath), { recursive: true });
 
   const { net } = await import('electron');
