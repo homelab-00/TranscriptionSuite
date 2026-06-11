@@ -18,7 +18,7 @@ skinparam cloudBorderColor #89b4fa
 skinparam databaseBackgroundColor #313244
 skinparam databaseBorderColor #585b70
 
-title Transcription Data Flows
+title Transcription Data Flows (v1.3.6)
 
 actor User
 participant "Dashboard\n(Electron)" as UI
@@ -28,19 +28,17 @@ participant "FastAPI\nServer" as Server
 participant "Model\nManager" as MM
 participant "STT\nBackend" as STT
 participant "Diarization\nEngine" as Diar
+participant "Auto-Action\n+ Webhook" as Auto
 database "SQLite\n+ FTS5" as DB
+participant "External\nwebhook" as Hook
 
-== Longform Transcription (Record) ==
+== Longform Transcription (Record via /ws) ==
 
 User -> UI : Click "Record"
 UI -> Audio : Start capture (mic)
-Audio -> WS : Open /ws
-WS -> Server : Auth handshake (token)
-Server --> WS : Auth OK
-
-WS -> Server : {start: {language, device, translate}}
-Server -> MM : get_transcription_model()
-MM --> Server : STTBackend instance
+Audio -> WS : Open /ws + auth handshake
+WS -> Server : {start: {language, profile_id?}}
+Server -> DB : create_job() (status=processing)
 
 loop Audio streaming
   Audio -> WS : PCM Int16 binary chunks
@@ -48,83 +46,90 @@ loop Audio streaming
 end
 
 User -> UI : Click "Stop"
-UI -> Audio : Stop capture
 WS -> Server : {stop: true}
-
+Server -> Server : persist audio → /data/recordings/{job_id}.wav
 Server -> STT : transcribe(audio, language, task)
 STT --> Server : (segments[], info)
 
 opt Diarization enabled
   Server -> Diar : diarize(audio)
-  Diar --> Server : speaker segments
-  Server -> Server : merge transcription\n+ diarization
+  Diar --> Server : speaker segments → merge
 end
 
-Server -> DB : Save recording + segments + words
-Server --> WS : {result: {segments, words, language, ...}}
+note over Server, DB
+  Persist-Before-Deliver:
+  save_result() to DB BEFORE sending
+end note
+Server -> DB : save_result()
+alt result <= 1 MB
+  Server --> WS : {type: final, ...}
+  Server -> DB : mark_delivered()
+else result > 1 MB
+  Server --> WS : {type: result_ready, job_id}
+  WS -> Server : GET /api/transcribe/result/{job_id}
+  Server --> WS : result + mark_delivered()
+end
 WS --> UI : Display transcription
-WS -> WS : Close connection
 
-== Longform Transcription (File Upload) ==
+== Notebook Upload + Dedup ==
 
-User -> UI : Upload audio file
-UI -> Server : POST /api/transcribe/upload\n(multipart file)
-Server -> Server : FFmpeg decode to PCM
-Server -> STT : transcribe(audio)
+User -> UI : Upload audio file(s)
+UI -> Server : POST /api/transcribe/import/dedup-check\n(raw + normalized SHA-256)
+Server -> DB : find_duplicates_anywhere()
+Server --> UI : dedup_matches[]
+opt Duplicate found
+  UI -> User : DedupPromptModal (use existing / new)
+end
+UI -> Server : POST /api/notebook/transcribe/upload (202 + job_id)
+Server -> STT : transcribe() (background)
 STT --> Server : (segments[], info)
-Server -> DB : Save recording
-Server --> UI : {recording_id, segments}
+Server -> DB : save_longform_to_database()\n(recordings + segments + words + hashes)
+UI -> Server : poll GET /result/{job_id}
+
+== Auto-Actions + Webhook Delivery ==
+
+note over Server, Auto
+  Triggered when a profile-bound
+  recording completes
+end note
+Server -> Auto : trigger_auto_actions(recording_id, profile_snapshot)
+Auto -> Auto : auto-summary (LLM) + auto-export (file)
+Auto -> DB : webhook_deliveries (status=pending, frozen payload)
+Auto -> DB : mark_in_flight (committed BEFORE POST)
+Auto -> Hook : POST transcription.completed (HTTPS, SSRF-checked)
+alt 2xx
+  Hook --> Auto : success
+  Auto -> DB : mark_success
+else failure
+  Hook --> Auto : non-2xx / timeout
+  Auto -> DB : mark_failed → 30s retry → manual_intervention_required
+end
 
 == Live Mode (Real-time) ==
 
 User -> UI : Toggle "Live Mode"
-UI -> WS : Open /ws/live
-WS -> Server : Auth handshake (token)
-
+UI -> WS : Open /ws/live + auth
 note over Server, MM
-  Model Swap Sequence:
-  1. Unload main transcription model
-  2. Load live model (e.g. whisper-medium)
+  Model Swap: unload main → load live model
+  (Whisper / whisper.cpp only)
 end note
-
-Server -> MM : unload main model
-Server -> MM : load live model
-MM -> STT : load(live_model_name)
-
-WS -> Server : {start: {language, translate}}
+Server -> MM : unload main, load live model
 
 loop Continuous streaming
-  Audio -> WS : PCM Int16 chunks (continuous)
-  WS -> Server : forward audio
-
+  Audio -> WS : PCM Int16 chunks
   Server -> Server : VAD detects speech segment
-
-  alt #543a67 Speech segment complete
+  alt #543a67 Sentence complete
     Server -> STT : transcribe(segment)
-    STT --> Server : (text, timestamps)
-    Server --> WS : {type: "sentence", text: "..."}
-    WS --> UI : Append sentence
+    Server --> WS : {type: sentence, text}
+    Server -> Hook : live_sentence webhook (legacy, fire-and-forget)
   else Partial speech
-    Server --> WS : {type: "partial", text: "..."}
-    WS --> UI : Update partial text
+    Server --> WS : {type: partial, text}
   end
 end
 
 User -> UI : Toggle "Live Mode" off
 WS -> Server : {stop: true}
-
-note over Server, MM
-  Model Restore Sequence:
-  1. Unload live model
-  2. Reload main transcription model
-end note
-
-Server -> MM : unload live model
-Server -> MM : load main model
-MM -> STT : load(main_model_name)
-
-Server -> DB : Save live session
-Server --> WS : {result: final_transcript}
-WS -> WS : Close connection
+Server -> MM : unload live, reload main model
+Server --> WS : {state: STOPPED}
 
 @enduml

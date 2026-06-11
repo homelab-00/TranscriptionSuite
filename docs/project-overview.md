@@ -1,6 +1,6 @@
 # TranscriptionSuite — Project Overview
 
-> Generated: 2026-04-05 | Version: 1.3.0
+> Generated: 2026-06-11 | Version: 1.3.6
 
 ## What Is TranscriptionSuite?
 
@@ -10,13 +10,18 @@ TranscriptionSuite is a self-hosted, GPU-accelerated speech-to-text platform wit
 
 - **Multi-backend transcription** — 10 STT backends: Whisper (faster-whisper, WhisperX), NVIDIA Parakeet/Canary (NeMo), Microsoft VibeVoice-ASR, whisper.cpp (Vulkan), and MLX variants for Apple Silicon
 - **Live mode** — Real-time streaming transcription with VAD-based speech detection
-- **Speaker diarization** — PyAnnote-based speaker identification with parallel/sequential modes
-- **Audio notebook** — Calendar-based recording management with full-text search (FTS5), export (SRT/VTT/ASS), and playback
+- **Speaker diarization + review** — PyAnnote/Sortformer identification, per-turn confidence, and a keyboard-driven review lifecycle
+- **Speaker aliases** — Per-recording speaker rename applied at read time across transcript, exports, and LLM prompts
+- **Audio notebook** — Calendar-based recording management with full-text search (FTS5), export (TXT/plaintext/SRT/ASS), playback, and LLM chat
+- **Transcript editing** — Non-destructive in-place editing + find/replace across three surfaces
+- **Profiles** — Reusable transcription/recording profiles with auto-summary, auto-export, and webhook delivery
+- **Outgoing webhooks** — Durable, SSRF-guarded `transcription.completed` delivery with retry/escalation
 - **Translation** — Whisper and Canary backends support cross-language translation
-- **LLM summarization** — Local LM Studio integration for transcript summarization
-- **Cross-platform** — Linux (primary), Windows, macOS (with Apple Silicon Metal acceleration)
+- **LLM summarization** — Local OpenAI-compatible (LM Studio) integration for summarization and chat
+- **Cross-platform** — Linux (primary), Windows, macOS (Apple Silicon Metal); experimental AMD/Intel Vulkan + Vulkan-on-Windows (WSL2)
 - **Remote access** — Tailscale TLS support for secure remote transcription
-- **OpenAI-compatible API** — Drop-in replacement endpoint (`/v1/audio/transcriptions`)
+- **OpenAI-compatible API** — Drop-in endpoints (`/v1/audio/transcriptions`, `/translations`)
+- **Auto-update** — Hardened Dashboard installer pipeline (compat pre-flight, SHA-256 verify, rollback)
 - **Durability** — 3-wave system to prevent transcription data loss (persist before deliver)
 
 ## Architecture
@@ -25,31 +30,34 @@ TranscriptionSuite is a self-hosted, GPU-accelerated speech-to-text platform wit
 
 | Part | Technology | Deployment |
 |------|-----------|------------|
-| **Server** (`server/`) | Python 3.13, FastAPI, PyTorch, SQLAlchemy | Docker container (7 compose variants) |
+| **Server** (`server/`) | Python 3.13, FastAPI, PyTorch, SQLAlchemy | Docker container (8 compose variants) |
 | **Dashboard** (`dashboard/`) | TypeScript 5.9, React 19, Electron 40, Tailwind 4 | Desktop app (AppImage/NSIS/DMG) |
 | **Build** (`build/`) | Shell scripts, Python tooling | CI/CD (GitHub Actions) |
 
 ### Communication
 
 ```
-Dashboard ──REST/WebSocket──► Server ──CUDA/Vulkan──► GPU
+Dashboard ──REST/WebSocket──► Server ──CUDA/Vulkan/Metal──► GPU
     │                            │
     │──Docker Compose CLI───►    │──HuggingFace Hub──►
-    │                            │──LM Studio HTTP──►
+    │──GitHub Releases (update)► │──Local LLM HTTP──►
     │◄──fs.watch (events)────    │──whisper.cpp HTTP─►
+                                 │──Outgoing webhook (HTTPS)─►
 ```
 
 ## Quick Reference
 
 | Metric | Value |
 |--------|-------|
-| Source files | 212 (+ 49 test files) |
-| Backend test count | 868+ passing tests |
-| STT backends | 10 (5 CUDA + 1 Vulkan + 4 MLX) |
-| API endpoints | ~50 REST + 2 WebSocket |
-| Custom React hooks | 20+ |
-| Docker compose variants | 7 |
-| CI/CD workflows | 4 (CodeQL, dashboard quality, scripts lint, release) |
+| Source files | ~247 (backend ~96 + frontend 151) |
+| Test files | 130 backend (pytest) + 92 frontend (Vitest) |
+| STT backends | 10 active (CUDA/CPU + Vulkan sidecar + 4 MLX) |
+| API endpoints | 80+ REST + 3 WebSocket |
+| Database tables | 11 (+ FTS5) across 17 migrations |
+| Custom React hooks | 33+ |
+| Electron main modules | 24 |
+| Docker compose variants | 8 |
+| CI/CD workflows | 5 (CodeQL, dashboard quality, scripts lint, backend tests, release) |
 | Supported platforms | Linux, Windows, macOS (arm64) |
 | License | GPL-3.0-or-later |
 

@@ -13,7 +13,7 @@ skinparam stereotypeFontColor #a6adc8
 skinparam cloudBackgroundColor #45475a
 skinparam cloudBorderColor #89b4fa
 
-title STT Backend Subsystem (server/backend/core/stt/)
+title STT Backend Subsystem (server/backend/core/stt/) - 10 active backends
 
 ' ── Data Classes ──────────────────────────────────
 package "Data Types (base.py)" as dataTypes {
@@ -36,6 +36,11 @@ package "Data Types (base.py)" as dataTypes {
     + language: str | None
     + language_probability: float
   }
+
+  class BackendDependencyError <<RuntimeError>> {
+    + backend_type: str
+    + remedy: str
+  }
 }
 
 ' ── Abstract Base ─────────────────────────────────
@@ -44,9 +49,10 @@ abstract class STTBackend <<base.py>> {
   {abstract} + unload()
   {abstract} + is_loaded(): bool
   {abstract} + warmup()
-  {abstract} + transcribe(audio, language, task, ...): (list[BackendSegment], BackendTranscriptionInfo)
+  {abstract} + transcribe(audio, *, language, task, ...): (list[BackendSegment], BackendTranscriptionInfo)
   {abstract} + supports_translation(): bool
   {abstract} + backend_name: str
+  + configure_decode_options(options)
   + preferred_input_sample_rate_hz: int = 16000
   + transcribe_with_diarization(...): DiarizedTranscriptionResult | None
 }
@@ -54,94 +60,76 @@ abstract class STTBackend <<base.py>> {
 ' ── CUDA/Docker Backends ─────────────────────────
 package "CUDA / Docker Backends" as cudaBackends {
   class WhisperXBackend <<whisperx_backend.py>> {
-    + backend_name = "whisperx"
-    + supports_translation(): bool
-    + transcribe_with_diarization(...)
-    -- uses --
-    faster-whisper / WhisperX
-    Integrated diarization support
+    + backend_name = "whisperx"  (default)
+    + supports_translation() = True
+    + transcribe_with_diarization() [integrated single-pass]
   }
 
   class FasterWhisperBackend <<faster_whisper_backend.py>> {
-    + backend_name = "faster_whisper"
-    + supports_translation(): bool
-    -- uses --
-    faster-whisper (no WhisperX)
-    Live Mode on Metal bare-metal
+    + backend_name = "faster_whisper"  (default fallback)
+    + supports_translation() = True
   }
 
   class ParakeetBackend <<parakeet_backend.py>> {
     + backend_name = "parakeet"
     + supports_translation() = False
-    -- uses --
-    NVIDIA NeMo ASR
-    20min chunk splitting
-    CUDA graph workaround
+    -- NVIDIA NeMo ASR, 20min chunking, CUDA-graph workaround
   }
 
   class CanaryBackend <<canary_backend.py>> {
     + backend_name = "canary"
-    + supports_translation() = True
-    -- uses --
-    NVIDIA NeMo Canary
-    20min chunk splitting
-    24 EU target languages
+    + supports_translation() = True  (24 EU targets)
+    -- extends ParakeetBackend
   }
 
   class VibeVoiceASRBackend <<vibevoice_asr_backend.py>> {
     + backend_name = "vibevoice_asr"
     + supports_translation() = False
     + DEFAULT_MAX_CHUNK_DURATION_S = 60
-    -- uses --
-    VibeVoice-ASR
-    Semantic tokenizer
+    + transcribe_with_diarization() [integrated]
   }
 
   class WhisperCppBackend <<whispercpp_backend.py>> {
     + backend_name = "whispercpp"
-    + supports_translation(): bool
-    -- uses --
-    HTTP sidecar (Vulkan GPU)
-    Multipart POST, WAV encoding
-    No in-process model loading
+    + supports_translation() = True
+    -- HTTP sidecar (Vulkan GPU), WAV multipart
+  }
+
+  class WhisperBackend <<whisper_backend.py>> {
+    + backend_name = "whisper"
+    -- DEPRECATED / orphaned: not factory-wired
   }
 }
 
 ' ── MLX / Apple Silicon Backends ─────────────────
 package "MLX / Apple Silicon Backends" as mlxBackends {
+  class MLXThreadAffinityMixin <<mlx_thread_pin.py>> {
+    -- GH#134: pins GPU ops to one owning thread
+    + @mlx_pinned (load/unload/warmup/transcribe)
+    + shutdown_mlx_thread()
+  }
+
   class MLXWhisperBackend <<mlx_whisper_backend.py>> {
     + backend_name = "mlx_whisper"
-    + supports_translation(): bool
-    -- uses --
-    mlx-audio (Metal acceleration)
-    -asr- model naming required
-    alignment_heads monkey-patch
+    + supports_translation() = True
+    -- -asr- model naming required
   }
 
   class MLXParakeetBackend <<mlx_parakeet_backend.py>> {
     + backend_name = "mlx_parakeet"
     + supports_translation() = False
-    -- uses --
-    parakeet-mlx
-    Long-audio chunking
   }
 
   class MLXCanaryBackend <<mlx_canary_backend.py>> {
     + backend_name = "mlx_canary"
-    + supports_translation() = True
-    -- uses --
-    canary-mlx
-    Reuses Parakeet chunking
+    + supports_translation() = False [ASR-only port]
   }
 
   class MLXVibeVoiceBackend <<mlx_vibevoice_backend.py>> {
     + backend_name = "mlx_vibevoice"
     + supports_translation() = False
-    + transcribe_with_diarization(...)
-    -- uses --
-    mlx-audio (native diarization)
-    24 kHz input (resampled internally)
-    JSON segment parsing
+    + transcribe_with_diarization() [native diarization]
+    -- 24 kHz input (resampled internally)
   }
 }
 
@@ -149,86 +137,73 @@ package "MLX / Apple Silicon Backends" as mlxBackends {
 class "factory.py" as factory <<factory>> {
   + detect_backend_type(model_name): str
   + create_backend(model_name): STTBackend
-  + is_parakeet_model(model_name): bool
-  + is_canary_model(model_name): bool
-  + is_nemo_model(model_name): bool
-  + is_vibevoice_asr_model(model_name): bool
-  + is_whispercpp_model(model_name): bool
-  + is_mlx_model(model_name): bool
-  + is_mlx_parakeet_model(model_name): bool
+  + is_parakeet_model / is_canary_model / is_nemo_model
+  + is_vibevoice_asr_model / is_whispercpp_model
+  + is_mlx_model / is_mlx_parakeet_model
 }
 
 note right of factory
   Detection order (first match wins):
-  nvidia/parakeet*         -> "parakeet"
-  nvidia/nemotron-speech*  -> "parakeet"
+  nvidia/parakeet|nemotron-speech -> "parakeet"
   nvidia/canary*           -> "canary"
-  mlx-community/vibevoice* -> "mlx_vibevoice"
+  mlx-community/vibevoice-asr -> "mlx_vibevoice"
   */vibevoice-asr*         -> "vibevoice_asr"
   ggml-*.bin / *.gguf      -> "whispercpp"
   mlx-community/parakeet*  -> "mlx_parakeet"
   */canary*-mlx            -> "mlx_canary"
   mlx-community/*          -> "mlx_whisper"
-  else -> "whisperx" (or
-    "faster_whisper" fallback)
+  else -> "whisper"
+    => WhisperXBackend, or
+       FasterWhisperBackend (no whisperx)
 end note
 
 ' ── Model Manager ─────────────────────────────────
 class ModelManager <<model_manager.py>> {
   - _backend: STTBackend | None
-  - _config: dict
-  + gpu_available: bool
   + load_transcription_model()
   + load_live_model()
-  + unload_transcription_model()
   + get_transcription_model(): STTBackend
   + cleanup_models()
 }
 
-' ── Engine ────────────────────────────────────────
+class TranscriptionJobTracker <<model_manager.py>> {
+  + single-job concurrency / cancel / progress
+}
+
+' ── Engines ───────────────────────────────────────
 class AudioToTextRecorder <<engine.py>> {
   - _backend: STTBackend
   + transcribe_audio(audio, language, ...)
-  -- orchestrates --
-  Backend transcription
-  Progress callbacks
 }
 
 class LiveModeEngine <<live_engine.py>> {
   - _model_manager: ModelManager
-  + start(language, translate, ...)
-  + feed_audio(chunk)
-  + stop(): results
-  -- orchestrates --
-  VAD-based segmentation
-  Real-time partial results
+  + start / feed_audio / stop
 }
 
 ' ── Relationships ─────────────────────────────────
 STTBackend <|-- WhisperXBackend
 STTBackend <|-- FasterWhisperBackend
 STTBackend <|-- ParakeetBackend
-STTBackend <|-- CanaryBackend
+ParakeetBackend <|-- CanaryBackend
 STTBackend <|-- VibeVoiceASRBackend
 STTBackend <|-- WhisperCppBackend
+STTBackend <|.. WhisperBackend : (orphaned)
+
 STTBackend <|-- MLXWhisperBackend
 STTBackend <|-- MLXParakeetBackend
 STTBackend <|-- MLXCanaryBackend
 STTBackend <|-- MLXVibeVoiceBackend
+MLXThreadAffinityMixin <|-- MLXWhisperBackend
+MLXThreadAffinityMixin <|-- MLXParakeetBackend
+MLXThreadAffinityMixin <|-- MLXCanaryBackend
+MLXThreadAffinityMixin <|-- MLXVibeVoiceBackend
 
-factory ..> WhisperXBackend : creates
-factory ..> FasterWhisperBackend : creates
-factory ..> ParakeetBackend : creates
-factory ..> CanaryBackend : creates
-factory ..> VibeVoiceASRBackend : creates
-factory ..> WhisperCppBackend : creates
-factory ..> MLXWhisperBackend : creates
-factory ..> MLXParakeetBackend : creates
-factory ..> MLXCanaryBackend : creates
-factory ..> MLXVibeVoiceBackend : creates
+factory ..> STTBackend : creates (10 active)
 
 ModelManager --> factory : "create_backend()"
 ModelManager *-- STTBackend : "holds active backend"
+ModelManager *-- TranscriptionJobTracker
 
 AudioToTextRecorder --> STTBackend : "transcribe()"
 LiveModeEngine --> ModelManager : "load/unload live model"
