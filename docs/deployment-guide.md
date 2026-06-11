@@ -1,6 +1,6 @@
 # TranscriptionSuite — Deployment Guide
 
-> Generated: 2026-04-05
+> Generated: 2026-06-11 | v1.3.6
 
 ## Deployment Architecture
 
@@ -26,8 +26,14 @@ The server uses a **layered compose** strategy. The dashboard auto-selects the c
 |------|----------|-----------|
 | `docker-compose.gpu.yml` | NVIDIA (legacy) | `deploy.resources.reservations.devices` with nvidia driver |
 | `docker-compose.gpu-cdi.yml` | NVIDIA (CDI) | CDI device passthrough (`nvidia.com/gpu=all`) |
-| `docker-compose.vulkan.yml` | AMD / Intel | whisper.cpp sidecar with `/dev/dri` Vulkan access |
+| `docker-compose.vulkan.yml` | AMD / Intel (Linux) | whisper.cpp sidecar with `/dev/dri` Vulkan access |
+| `docker-compose.vulkan-wsl2.yml` | AMD / Intel (Windows + WSL2) | whisper.cpp sidecar via `/dev/dxg` GPU-PV (locally-built image) |
 | `podman-compose.gpu.yml` | NVIDIA (Podman) | Podman-specific GPU passthrough |
+
+> **8 compose files total** (base + 5 platform/GPU overlays + podman + vulkan-wsl2). The Vulkan-WSL2 path
+> is opt-in and never enters auto-selection — it requires the locally-built
+> `transcriptionsuite/whisper-cpp-vulkan-wsl2:latest` sidecar (`server/docker/build-vulkan-wsl2.{sh,ps1}`),
+> which is **not** published to GHCR.
 
 ### Common Combinations
 ```bash
@@ -229,8 +235,10 @@ hash-match-skip path. Users flipping to cu126 still rebuild — only the
 non-flipping cu129 path is zero-cost.
 
 ### AMD/Intel Vulkan
-- Vulkan-capable GPU with `/dev/dri` access
-- Uses whisper.cpp sidecar (`ghcr.io/ggml-org/whisper.cpp:main-vulkan`)
+- **Linux:** Vulkan-capable GPU with `/dev/dri` access; whisper.cpp sidecar (`ghcr.io/ggml-org/whisper.cpp:main-vulkan`)
+- **Windows + WSL2 (experimental, opt-in):** GPU paravirtualization via `/dev/dxg`; forces Mesa's `dzn` (Vulkan-on-D3D12)
+  ICD to avoid silent CPU fallback. Requires the locally-built `vulkan-wsl2` sidecar image and Docker Desktop's WSL2 backend.
+  The dashboard surfaces a separate "GPU (Vulkan WSL2 — experimental)" option only when WSL2 + `/dev/dxg` are both detected.
 - Quantized GGUF models only (lower VRAM requirement)
 
 ### Apple Silicon (Metal)
@@ -272,11 +280,13 @@ non-flipping cu129 path is zero-cost.
 
 ## CI/CD Release Pipeline
 
-Triggered by `v*` tag push:
+Triggered by `v*` tag push (manual `workflow_dispatch` adds a **platform selector**:
+`all`/`macos-metal`/`macos`/`linux`/`windows`):
 1. **build-linux** — AppImage + GPG signature
 2. **build-windows** — NSIS installer + GPG signature (3x retry)
 3. **build-macos** — DMG + ZIP + GPG signatures
-4. **create-release** — Draft GitHub Release with all artifacts
+4. **build-macos-metal** — Apple Silicon Metal bundle (sealed last to keep the codesign valid, GH #154)
+5. **create-release** — Draft GitHub Release with all artifacts (+ update manifest for the auto-updater)
 
 ## Keychain fallback (encrypted-file mode)
 

@@ -20,62 +20,72 @@ skinparam fileBackgroundColor #313244
 skinparam fileBorderColor #585b70
 skinparam linetype ortho
 
-title TranscriptionSuite - System Architecture
+title TranscriptionSuite - System Architecture (v1.3.6)
 
 ' ── Tier 1: Electron ──────────────────────────────
 package "Electron App" as electron #181825 {
   package "Main Process" as elMain {
     component "IPC Bridge" as ipc
     component "Docker Manager" as dockerMgr
+    component "Auto-Update Pipeline\n(installer, checksum,\nrollback)" as updatePipe
     component "System Tray /\nGlobal Shortcuts" as trayShortcuts
   }
 
   package "Renderer (React)" as renderer {
     component "Views\n(Session, Notebook,\nServer, Models, Logs)" as views
+    component "Profiles / Aliases /\nDiarization Review /\nFind-Replace" as featureUI
     component "Sidebar" as sidebar
   }
 
-  package "Services" as services {
+  package "Services + Stores" as services {
     component "API Client" as apiClient
     component "WebSocket Client" as wsClient
     component "Audio Capture" as audioCapture
+    component "Zustand Stores (5)" as stores
   }
 }
 
 ' ── Tier 2: Server ────────────────────────────────
 package "Docker Container" as docker #181825 {
   package "FastAPI (port 9786)" as fastapi {
-    component "REST Routes\n(/api/transcribe, /notebook,\n/search, /llm, /admin, /auth)" as restRoutes
+    component "REST Routes\n(/transcribe, /notebook,\n/profiles, /search, /llm,\n/admin, /auth, /v1/audio)" as restRoutes
     component "WebSocket\n/ws (longform)\n/ws/live (real-time)" as wsEndpoints
   }
 
   package "Core Engine" as core {
     component "Model Manager" as modelMgr
-    component "STT Backends\n(WhisperX, NeMo, VibeVoice,\nwhisper.cpp, MLX variants)" as sttBackends
+    component "STT Backends (10)\n(WhisperX, NeMo, VibeVoice,\nwhisper.cpp, MLX variants)" as sttBackends
     component "Live Engine" as liveEngine
-    component "Diarization\n(PyAnnote)" as diarEngine
+    component "Diarization\n(PyAnnote / Sortformer)" as diarEngine
+    component "Auto-Action Coordinator\n+ Webhook Worker" as autoActions
   }
 }
 
 ' ── Tier 3: Data ──────────────────────────────────
 package "Data Layer" as data #181825 {
-  database "SQLite + FTS5" as db
+  database "SQLite + FTS5\n(11 tables, 17 migrations)" as db
   storage "Model Cache" as modelCache
   file "config.yaml" as configFile
+  storage "Audio recordings\n(/data/recordings)" as audioStore
 }
 
 ' ── External ──────────────────────────────────────
 cloud "HuggingFace Hub" as hfHub
-cloud "GPU (CUDA)" as gpu
+cloud "GPU\n(CUDA/Vulkan/Metal)" as gpu
+cloud "Local LLM\n(LM Studio)" as llm
+cloud "External Webhook\nendpoint" as webhook
+cloud "GitHub Releases" as github
 
 ' ── Connections (minimized) ───────────────────────
 
 ' Electron internal
 views -down-> services
+featureUI -down-> services
 views <-left-> sidebar
 renderer <--> ipc
 trayShortcuts --> ipc
 ipc --> dockerMgr
+updatePipe --> github : "update check\n+ download"
 
 ' Services to Server
 apiClient -down-> restRoutes : "REST"
@@ -87,16 +97,20 @@ restRoutes -down-> core
 wsEndpoints -down-> core
 modelMgr -right-> sttBackends
 liveEngine --> modelMgr
+restRoutes --> autoActions
 
 ' Data access
 restRoutes -down-> db
 core -down-> db
 modelMgr -down-> modelCache
 fastapi -down-> configFile
+core -down-> audioStore
 
 ' External
 modelMgr -down-> hfHub : "download"
 sttBackends -down-> gpu : "inference"
 diarEngine -down-> gpu
+core -down-> llm : "summarize/chat"
+autoActions -down-> webhook : "transcription.completed\n(durable, SSRF-guarded)"
 
 @enduml

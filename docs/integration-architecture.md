@@ -1,6 +1,6 @@
 # TranscriptionSuite — Integration Architecture
 
-> Generated: 2026-04-05 | Multi-part: server (backend) + dashboard (desktop)
+> Generated: 2026-06-11 | v1.3.6 | Multi-part: server (backend) + dashboard (desktop)
 
 ## Part Communication Overview
 
@@ -35,11 +35,15 @@ TranscriptionSuite is a client-server application where the **dashboard** (Elect
 └─────────┼──────────────────┼─────────────────────────────┘
           │                  │
           ▼                  ▼
-    ┌───────────┐     ┌───────────┐     ┌───────────┐
-    │ HuggingFace│     │ GPU       │     │ LM Studio │
-    │ Hub        │     │ CUDA/MPS  │     │ (optional)│
-    └───────────┘     └───────────┘     └───────────┘
+    ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌────────────┐
+    │ HuggingFace│  │ GPU       │  │ LM Studio │  │ External   │
+    │ Hub        │  │CUDA/Vulkan│  │ (optional)│  │ webhook    │
+    │            │  │ /Metal    │  │           │  │ endpoint   │
+    └───────────┘  └───────────┘  └───────────┘  └────────────┘
 ```
+
+> The dashboard also reaches **GitHub Releases** (HTTPS) directly for its auto-update installer pipeline
+> (manifest + binary download + SHA-256 verification). See integration points #10 and #11.
 
 ## Integration Points
 
@@ -53,12 +57,13 @@ TranscriptionSuite is a client-server application where the **dashboard** (Elect
 |----------|-----------|---------|
 | Health | `GET /health`, `/ready`, `/api/status` | Server health, readiness, detailed status |
 | Auth | `POST /api/auth/login`, `GET/POST/DELETE /api/auth/tokens` | Token auth, token CRUD |
-| Transcription | `POST /api/transcribe/audio`, `/quick`, `/cancel` | File upload transcription |
-| Notebook | `GET/POST/PATCH/DELETE /api/notebook/recordings/*` | Recording CRUD, calendar, backup |
+| Transcription | `POST /api/transcribe/audio`, `/quick`, `/cancel`, `/import`, `/import/dedup-check`, `/retry/{id}`; `GET /result/{id}`, `/recent` | Upload transcription, dedup, durability result/retry |
+| Notebook | `GET/POST/PUT/PATCH/DELETE /api/notebook/recordings/*` (+ aliases, diarization-review, transcript, auto-actions/retry, reexport) | Recording CRUD, aliases, review, export, auto-actions |
+| Profiles | `GET/POST/PUT/DELETE /api/profiles` | Transcription/recording profile CRUD (Issue #104) |
 | Search | `GET /api/search`, `/search/words`, `/search/recordings` | Full-text search (FTS5) |
-| LLM | `POST /api/llm/process`, `/summarize/{id}` | LM Studio integration |
-| Admin | `GET/PATCH /api/admin/*`, `POST /api/admin/models/load` | Config, model management |
-| OpenAI | `POST /v1/audio/transcriptions` | OpenAI-compatible API |
+| LLM | `POST /api/llm/process`, `/summarize/{id}`, `/chat`; conversation CRUD | Local LLM summarization + chat |
+| Admin | `GET/PATCH /api/admin/*`, `POST /api/admin/models/load`, `/webhook/test` | Config, model management, webhook test |
+| OpenAI | `POST /v1/audio/transcriptions`, `/translations` | OpenAI-compatible API |
 
 ### 2. WebSocket — Longform Transcription (Dashboard → Server)
 
@@ -161,12 +166,36 @@ Client                          Server
 **Purpose:** Vulkan-accelerated Whisper inference for AMD/Intel GPUs
 **Backend:** `WhisperCppBackend` in `stt/backends/whispercpp_backend.py`
 
-### 9. Server → LM Studio (Optional)
+### 9. Server → Local LLM / LM Studio (Optional)
 
 **Protocol:** HTTP (OpenAI-compatible API)
-**Endpoint:** `http://127.0.0.1:1234` (default) or `LM_STUDIO_URL` env
-**Purpose:** Local LLM for transcription summarization and chat
-**Route:** `api/routes/llm.py`
+**Endpoint:** `config.yaml` → `local_llm.base_url` (default `http://127.0.0.1:1234`)
+**Purpose:** Local LLM for transcription summarization, auto-titles, and multi-turn chat
+**Routes:** `api/routes/llm.py` (summarize, process, `/chat`, conversation CRUD)
+
+### 10. Server → External Webhook Endpoint (Outgoing, NEW)
+
+**Protocol:** HTTPS POST (plus `http://localhost` for dev)
+**Producer:** `core/auto_action_coordinator.py` → durable `services/webhook_worker.py`
+**Event:** `transcription.completed` (per profile, when a recording completes)
+**Payload:** versioned (`payload_version="1.0"`, `webhook_version=1`); metadata-default body with
+`transcript_url`/`summary_url`; optional inline `transcript_text` (alias-substituted) when the profile opts in
+**Security (SSRF):** `core/webhook_url_validation.py` — HTTPS-only allowlist that resolves **all** DNS records
+(anti-rebinding) and blocks RFC1918/loopback/link-local/ULA/IPv4-mapped-IPv6; validated at profile-save AND
+pre-fire (TOCTOU re-check)
+**Delivery semantics:** Persist-Before-Deliver via `webhook_deliveries` table (`pending` → committed
+`in_flight` before POST → `success`/`failed`); 10 s timeout, redirects disabled; one 30 s auto-retry, then
+terminal `manual_intervention_required` (surfaced as a dashboard badge); crash recovery re-fires `in_flight`
+rows on boot. A separate **legacy** fire-and-forget webhook (`core/webhook.py`, `config.yaml` → `webhook:`)
+emits `live_sentence`/`longform_complete` with no persistence (tested via `POST /api/admin/webhook/test`).
+
+### 11. Dashboard → GitHub Releases (Auto-Update, NEW)
+
+**Protocol:** HTTPS
+**Client:** `electron/updateManager.ts` + `updateInstaller.ts` (electron-updater)
+**Purpose:** Check for new Dashboard releases, download the platform installer, verify SHA-256 against the
+release manifest, and install — with `compatGuard` server-compat pre-flight, `launchWatchdog` rollback, and a
+`releaseUrl` manual-download fallback. `platformGate`/`wslDetect` choose the strategy per OS/runtime.
 
 ## Shared Data
 
@@ -188,3 +217,5 @@ Client                          Server
 | GPU crash (CUDA error 999) | Server: `cuda_health_check()` at startup | Sets `_cuda_probe_failed` flag, server runs in degraded mode |
 | Docker container crash | Dashboard: crash-safe sentinel (Linux) | Sentinel process (setsid) stops container on Electron PID exit |
 | Large result (>1MB) | Server: payload size check | Sends `result_ready` reference, client fetches via HTTP |
+| Webhook delivery failure | Worker: non-2xx / timeout | One 30 s auto-retry, then `manual_intervention_required`; `in_flight` rows re-fired on boot |
+| Failed Dashboard update launch | Electron: `launchWatchdog` counter | After 3 failed launches, prompt rollback to cached prior installer |

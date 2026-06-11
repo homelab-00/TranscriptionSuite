@@ -1,6 +1,6 @@
 # TranscriptionSuite — Documentation Index
 
-> Generated: 2026-04-05 | Exhaustive scan | v1.3.0
+> Generated: 2026-06-11 | Full rescan (git-diff targeted) | v1.3.6
 
 ## Project Overview
 
@@ -20,6 +20,17 @@
 - **Tech Stack:** Electron 40, React 19, Vite 7, Tailwind 4, Zustand
 - **Root:** `dashboard/`
 
+## Quick Reference
+
+| Metric | Value |
+|--------|-------|
+| STT backends | 10 active (CUDA/CPU + Vulkan sidecar + 4 MLX) |
+| API endpoints | 80+ REST + 3 WebSocket |
+| Database tables | 11 (+ FTS5), 17 migrations |
+| React hooks / Electron modules | 33+ / 24 |
+| Docker compose variants | 8 |
+| CI/CD workflows | 5 |
+
 ## Generated Documentation
 
 - [Project Overview](./project-overview.md)
@@ -35,12 +46,20 @@
 ## Existing Documentation
 
 - [README.md](./README.md) — User-facing README with features, installation, screenshots
-- [README_DEV.md](./README_DEV.md) — Comprehensive developer guide (12 sections, canonical reference)
-- [project-context.md](./project-context.md) — AI agent context with 90 rules and patterns
+- [README_DEV.md](./README_DEV.md) — Comprehensive developer guide (canonical reference)
+- [project-context.md](./project-context.md) — AI agent context with 101 rules and patterns
 - [Architecture Diagrams](./architecture/) — 5 PlantUML diagrams (overview, server API, STT backends, dashboard components, data flows)
 - [Testing Guide](./testing/TESTING.md) — Canonical testing reference
 - [Testing Plan](./testing/TESTING_PLAN.md) — 5-phase testing roadmap
 - [Testing Plan Stage 2](./testing/TESTING_PLAN_STAGE-2.md) — Stage 2 implementation details
+
+## What's New Since v1.3.0
+
+The Audio Notebook QoL pack (Issue #104) and related work added: **profiles** (transcription/recording),
+**speaker aliases**, **diarization review** (per-turn confidence + lifecycle), **auto-actions**
+(auto-summary/auto-export), durable **outgoing webhooks**, in-place **transcript editing with find/replace**,
+experimental **AMD/Intel Vulkan** and **Vulkan-on-Windows (WSL2)** GPU support, and a hardened
+**auto-update installer pipeline**. Schema grew from 6 → 17 migrations (4 new tables).
 
 ## Getting Started
 
@@ -51,13 +70,13 @@
 
 ### For Developers
 1. Clone the repo and run `cd build && uv sync` for tooling
-2. Run `cd dashboard && npm ci` for frontend deps
+2. Run `cd dashboard && npm ci` for frontend deps (Node 22.22.3 — see `.nvmrc`)
 3. Start development: `cd dashboard && npm run dev:electron`
 4. Run backend tests: `cd server/backend && ../../build/.venv/bin/pytest tests/ -v`
 5. See the [Development Guide](./development-guide.md) for detailed instructions
 
 ### For AI Agents
-1. Read [project-context.md](./project-context.md) first — it contains 90 critical rules
+1. Read [project-context.md](./project-context.md) first — it contains 101 critical rules
 2. Read [CLAUDE.md](../CLAUDE.md) for project-specific instructions
 3. Reference architecture docs for the part you're modifying
 4. Run tests after changes: backend pytest, frontend `npm run check`

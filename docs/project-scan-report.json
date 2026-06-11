@@ -1,39 +1,51 @@
 {
   "workflow_version": "1.2.0",
   "timestamps": {
-    "started": "2026-04-05T13:45:00Z",
-    "last_updated": "2026-04-05T14:25:00Z",
-    "completed": "2026-04-05T14:25:00Z"
+    "started": "2026-06-11T17:20:00Z",
+    "last_updated": "2026-06-11T17:48:44Z",
+    "completed": "2026-06-11T17:48:44Z"
   },
-  "mode": "initial_scan",
-  "scan_level": "exhaustive",
+  "mode": "full_rescan",
+  "scan_level": "deep",
+  "scan_strategy": "git-diff targeted (309 commits since 2026-04-05) + 5 parallel reconnaissance agents",
   "project_root": "/home/Bill/Code_Projects/Python_Projects/TranscriptionSuite",
   "project_knowledge": "/home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/docs",
+  "previous_scan": {
+    "date": "2026-04-05",
+    "version": "1.3.0",
+    "archived": false,
+    "note": "Prior state file (>24h old) superseded in place by this full_rescan."
+  },
   "completed_steps": [
-    {"step": "step_1", "status": "completed", "timestamp": "2026-04-05T13:50:00Z", "summary": "Classified as multi-part with 2 parts (server=backend, dashboard=desktop) + build tooling"},
-    {"step": "step_2", "status": "completed", "timestamp": "2026-04-05T13:52:00Z", "summary": "Found 17 existing docs (README, README_DEV, project-context, 5 PlantUML diagrams, 3 testing docs, CI workflows)"},
-    {"step": "step_3", "status": "completed", "timestamp": "2026-04-05T13:55:00Z", "summary": "Tech stack: Python 3.13/FastAPI/PyTorch/SQLAlchemy (server) + TypeScript 5.9/React 19/Electron 40/Tailwind 4 (dashboard)"},
-    {"step": "step_4", "status": "completed", "timestamp": "2026-04-05T14:10:00Z", "summary": "Exhaustive scan of 261 files via 3 parallel agents (server: 25 tool calls, dashboard: in progress, build/infra: 41 tool calls)"},
-    {"step": "step_5", "status": "completed", "timestamp": "2026-04-05T14:03:00Z", "summary": "Source tree analysis written with 212 source files + 49 test files"},
-    {"step": "step_6", "status": "completed", "timestamp": "2026-04-05T14:05:00Z", "summary": "Dev/deployment info extracted from CI workflows, pre-commit config, Docker compose"},
-    {"step": "step_7", "status": "completed", "timestamp": "2026-04-05T14:12:00Z", "summary": "Integration architecture: 9 integration points (REST, 2x WS, Docker CLI, fs.watch, HF Hub, GPU, whisper.cpp, LM Studio)"},
-    {"step": "step_8", "status": "completed", "timestamp": "2026-04-05T14:18:00Z", "summary": "Architecture docs written for 2 parts (server + dashboard)"},
-    {"step": "step_9", "status": "completed", "timestamp": "2026-04-05T14:22:00Z", "summary": "6 supporting docs written: project-overview, development-guide, deployment-guide, api-contracts, data-models, integration-architecture"},
-    {"step": "step_10", "status": "completed", "timestamp": "2026-04-05T14:23:00Z", "summary": "Master index generated with links to all 10 generated docs + 7 existing docs"},
-    {"step": "step_11", "status": "completed", "timestamp": "2026-04-05T14:24:00Z", "summary": "Validation complete: 0 incomplete markers, all links verified"},
-    {"step": "step_12", "status": "completed", "timestamp": "2026-04-05T14:25:00Z", "summary": "Workflow complete"}
+    {"step": "router", "status": "completed", "timestamp": "2026-06-11T17:20:00Z", "summary": "State file >24h old + index.md present; user requested full doc update + all PlantUML diagrams → full_rescan, update-in-place"},
+    {"step": "recon", "status": "completed", "timestamp": "2026-06-11T17:32:00Z", "summary": "5 parallel agents enumerated current state: data layer, API surface, core/STT, dashboard, integration/infra"},
+    {"step": "docs", "status": "completed", "timestamp": "2026-06-11T17:44:00Z", "summary": "Updated 9 markdown docs (2 full rewrites, 7 surgical) to reflect v1.3.6"},
+    {"step": "diagrams", "status": "completed", "timestamp": "2026-06-11T17:47:00Z", "summary": "Rewrote all 5 PlantUML diagrams; validated with plantuml -checkonly (exit 0) + rendered 5/5 PNGs"},
+    {"step": "validation", "status": "completed", "timestamp": "2026-06-11T17:48:44Z", "summary": "No incomplete markers; all cross-doc links resolve; diagrams syntax-valid"}
   ],
   "current_step": "completed",
   "findings": {
     "project_classification": "multi-part, 2 parts, Python/FastAPI backend + Electron/React desktop",
-    "technology_stack": "Python 3.13/FastAPI + TypeScript 5.9/React 19/Electron 40",
-    "source_tree": "212 source files + 49 test files",
-    "existing_docs": "17 documentation files",
-    "api_endpoints": "~50 REST + 2 WebSocket endpoints",
-    "stt_backends": "10 (5 CUDA + 1 Vulkan + 4 MLX)",
-    "database_tables": "6 tables (recordings, segments, words, recordings_fts, transcription_jobs, chat_history)",
-    "integration_points": "9 (REST, 2x WS, Docker CLI, fs.watch, HuggingFace, GPU, whisper.cpp, LM Studio)"
+    "version": "1.3.6 (was 1.3.0)",
+    "technology_stack": "Python 3.13/FastAPI + TypeScript 5.9/React 19/Electron 40 (Node pinned 22.22.3)",
+    "source_tree": "~247 source files (backend ~96 + frontend 151), 222 test files (130 backend + 92 frontend)",
+    "api_endpoints": "80+ REST + 3 WebSocket (new: profiles family, dedup-check, retry/recent/dismiss, transcript, aliases, diarization-review, auto-actions/retry, llm chat/conversations)",
+    "stt_backends": "10 active (CUDA/CPU + Vulkan sidecar + 4 MLX); whisper_backend.py is orphaned dead code",
+    "database_tables": "11 tables (+ FTS5) across 17 migrations (was 6); new: profiles, recording_diarization_review, recording_speaker_aliases, webhook_deliveries",
+    "integration_points": "11 (added: outgoing webhook delivery, GitHub auto-update, admin model-load WS stream)",
+    "docker_compose_variants": "8 (added vulkan-wsl2)",
+    "ci_workflows": "5 (added backend-tests)",
+    "major_new_features": "Issue #104 Audio Notebook QoL (profiles, aliases, diarization review, auto-actions, durable webhooks), in-place transcript editing + find/replace, AMD/Vulkan + Vulkan-WSL2 GPU, auto-update installer pipeline"
   },
+  "corrections_applied": [
+    "FTS table is words_fts (not recordings_fts)",
+    "No chat_history table — LLM history is conversations + messages",
+    "whisper_backend.py (WhisperBackend) is orphaned/not factory-wired — backend count stays 10",
+    "CanaryBackend extends ParakeetBackend (not STTBackend)",
+    "MLXCanaryBackend supports_translation() = False (ASR-only port)",
+    "Config section is local_llm (not lm_studio); two webhook systems (legacy webhook + durable webhook_deliveries)",
+    "Node.js pinned to 22.22.3 (dev guide had stale 25.7.0)"
+  ],
   "project_types": [
     {"part_id": "server", "project_type_id": "backend", "display_name": "Python/FastAPI Backend"},
     {"part_id": "dashboard", "project_type_id": "desktop", "display_name": "Electron/React Desktop App"}
@@ -49,7 +61,12 @@
     "development-guide.md",
     "deployment-guide.md",
     "api-contracts-server.md",
-    "data-models-server.md"
+    "data-models-server.md",
+    "architecture/overview.puml",
+    "architecture/server-api.puml",
+    "architecture/stt-backends.puml",
+    "architecture/dashboard-components.puml",
+    "architecture/data-flow.puml"
   ],
-  "resume_instructions": "Workflow complete. All documentation generated."
+  "resume_instructions": "Workflow complete. All documentation and PlantUML diagrams updated to v1.3.6."
 }

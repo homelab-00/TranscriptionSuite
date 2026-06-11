@@ -15,7 +15,7 @@ skinparam linetype ortho
 
 left to right direction
 
-title Server API & Routing (api/main.py)
+title Server API & Routing (api/main.py) - v1.3.6
 
 ' ── Middleware ─────────────────────────────────────
 package "Middleware" as middleware {
@@ -28,40 +28,49 @@ package "Middleware" as middleware {
 component "Lifespan Handler" as lifespan
 
 note bottom of lifespan
-  Startup: logging, init_db(),
-  token store, ModelManager,
-  ML import pre-warm,
-  preload model (GPU)
+  Startup: logging, init_db() (17 migrations),
+  recover orphaned jobs, token store,
+  ModelManager + preload, CUDA probe,
+  sweepers (orphan / deferred-export /
+  webhook retention), WebhookWorker
   --
-  Shutdown: cleanup_models()
+  Shutdown: stop WebhookWorker,
+  drain WS, cleanup_models()
 end note
 
 ' ── Routes ────────────────────────────────────────
 package "REST Routes" as restRoutes {
-  component "/health" as healthRoute
+  component "/health, /api/status" as healthRoute
   component "/api/auth" as authRoute
-  component "/api/transcribe" as transcribeRoute
-  component "/api/notebook" as notebookRoute
+  component "/api/transcribe\n(+ result/retry/dedup)" as transcribeRoute
+  component "/api/notebook\n(+ aliases, review,\nauto-actions)" as notebookRoute
+  component "/api/profiles" as profilesRoute
   component "/api/search" as searchRoute
-  component "/api/llm" as llmRoute
-  component "/api/admin" as adminRoute
+  component "/api/llm\n(+ chat, conversations)" as llmRoute
+  component "/api/admin\n(+ webhook/test)" as adminRoute
+  component "/v1/audio\n(OpenAI-compatible)" as openaiRoute
 }
 
 package "WebSocket" as wsRoutes {
   component "/ws\n(longform)" as wsRoute
   component "/ws/live\n(real-time)" as liveRoute
+  component "/api/admin/models/\nload/stream" as modelStream
 }
 
 ' ── Core ──────────────────────────────────────────
 package "Core Modules" as core {
-  component "ModelManager" as mm
+  component "ModelManager\n(+ JobTracker)" as mm
   component "AudioToText\nRecorder" as engine
   component "LiveMode\nEngine" as liveEng
   component "Diarization\nEngine" as diarEng
-  component "Database" as database
+  component "Auto-Action\nCoordinator" as coord
+  component "Webhook Worker\n(services/)" as worker
+  component "Database +\nRepositories" as database
   component "TokenStore" as tokenStore
   component "Config" as config
 }
+
+cloud "External\nwebhook" as ext
 
 ' ── Wiring ────────────────────────────────────────
 
@@ -72,16 +81,20 @@ authMw -right-> tokenStore
 lifespan --> mm
 lifespan --> database
 lifespan --> config
+lifespan --> worker
 
 ' REST routes to core
 healthRoute --> mm
 authRoute --> tokenStore
 transcribeRoute --> engine
 notebookRoute --> database
+notebookRoute --> coord
+profilesRoute --> database
 searchRoute --> database
 llmRoute --> database
 adminRoute --> mm
 adminRoute --> database
+openaiRoute --> engine
 
 ' WebSocket routes to core
 wsRoute --> engine
@@ -89,5 +102,11 @@ wsRoute --> diarEng
 wsRoute --> mm
 liveRoute --> liveEng
 liveRoute --> mm
+modelStream --> mm
+
+' Auto-action + webhook flow
+coord --> database : "webhook_deliveries\n(pending)"
+worker --> database : "drain + status"
+worker --> ext : "POST (SSRF-guarded)"
 
 @enduml

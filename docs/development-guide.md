@@ -1,6 +1,6 @@
 # TranscriptionSuite — Development Guide
 
-> Generated: 2026-04-05 | See also: [README_DEV.md](./README_DEV.md) for the canonical comprehensive reference
+> Generated: 2026-06-11 | v1.3.6 | See also: [README_DEV.md](./README_DEV.md) for the canonical comprehensive reference
 
 ## Prerequisites
 
@@ -8,7 +8,7 @@
 |------|---------|---------|
 | Python | 3.13.x | Backend (strict: >=3.13,<3.14) |
 | uv | Latest | Python package manager (NEVER pip) |
-| Node.js | 25.7.0 | Dashboard |
+| Node.js | 22.22.3 | Dashboard (engines `>=22 <23`; pinned via `.nvmrc` — Electron/Vitest break on Node ≥23) |
 | npm | Bundled | Dashboard dependencies |
 | Docker | Latest | Server container runtime |
 | ffmpeg | Latest | Audio processing (system install) |
@@ -93,7 +93,7 @@ cd dashboard && npm run package:windows
 bash build/build-electron-mac.sh
 
 # Docker image
-bash build/docker-build-push.sh v1.3.0
+bash build/docker-build-push.sh v1.3.6
 ```
 
 ## Testing
@@ -130,11 +130,12 @@ Automatically run on `git commit`:
 3. **codespell** — Spell checking
 4. **UI contract check** — CSS class integrity validation
 
-### CI/CD Quality Gates
-- **Dashboard quality:** TypeScript type checking + UI contract validation
+### CI/CD Quality Gates (5 workflows)
+- **Dashboard quality:** ESLint banned-API + TypeScript/JS checks + UI contract validation + Lighthouse a11y (≥90)
+- **Backend tests:** pytest on `server/**` changes (Python 3.13, uv, FFmpeg, ruff banned-api gate)
 - **CodeQL:** Python + JavaScript/TypeScript security scanning
-- **Scripts lint:** ShellCheck for bash scripts
-- **Release:** Multi-platform build on tag push
+- **Scripts lint:** ShellCheck (bash) + PowerShell syntax/lint
+- **Release:** Multi-platform build on tag push (+ `workflow_dispatch` platform selector)
 
 ## Configuration
 

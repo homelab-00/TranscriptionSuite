@@ -1,6 +1,6 @@
 # TranscriptionSuite — Server Architecture
 
-> Generated: 2026-04-05 | Part: server | Type: backend | Python 3.13 / FastAPI
+> Generated: 2026-06-11 | v1.3.6 | Part: server | Type: backend | Python 3.13 / FastAPI
 
 ## Executive Summary
 
@@ -15,7 +15,7 @@ The server is a Python 3.13 FastAPI application that provides speech-to-text tra
 | Server | uvicorn | 0.41.0 | ASGI server |
 | Validation | Pydantic | 2.12.5 | Request/response schemas |
 | Database | SQLAlchemy + aiosqlite | 2.0.48 / 0.22.1 | Async SQLite with FTS5 |
-| Migrations | Alembic | 1.18.4 | Schema versioning (6 versions) |
+| Migrations | Alembic | 1.18.4 | Schema versioning (17 versions) |
 | ML Framework | PyTorch | 2.8.0 | GPU inference (CUDA 12.9) |
 | Diarization | pyannote.audio | 4.0.4 | Speaker identification |
 | Audio | soundfile, scipy, ffmpeg-python | Various | Audio I/O, resampling, conversion |
@@ -53,10 +53,11 @@ Routes are organized by domain, each defining an `APIRouter()` included in `main
 | `health.py` | `/health`, `/ready`, `/api/status` | Health probes, server status |
 | `auth.py` | `/api/auth` | Token-based authentication |
 | `transcription.py` | `/api/transcribe` | File upload transcription, cancel, languages |
-| `notebook.py` | `/api/notebook` | Audio notebook CRUD, calendar, backup, search |
+| `notebook.py` | `/api/notebook` | Audio notebook CRUD, calendar, backup, aliases, diarization-review, auto-actions |
+| `profiles.py` | `/api/profiles` | Transcription/recording profile CRUD (Issue #104) |
 | `search.py` | `/api/search` | Full-text search (FTS5) |
-| `llm.py` | `/api/llm` | LM Studio summarization and chat |
-| `admin.py` | `/api/admin` | Config management, model loading, logs |
+| `llm.py` | `/api/llm` | Local LLM summarization, chat, and conversation CRUD |
+| `admin.py` | `/api/admin` | Config management, model loading, logs, webhook test |
 | `openai_audio.py` | `/v1/audio` | OpenAI-compatible transcription endpoint |
 | `websocket.py` | `/ws` | Longform recording transcription (WebSocket) |
 | `live.py` | `/ws/live` | Real-time live transcription (WebSocket) |
@@ -103,7 +104,13 @@ Central hub for all ML model lifecycle management:
 | MLX Canary | `MLXCanaryBackend` | `*/canary*-mlx` | Yes | Apple Silicon |
 | MLX VibeVoice | `MLXVibeVoiceBackend` | `mlx-community/vibevoice*` | No | Apple Silicon |
 
-**Factory routing** (`factory.py`): `detect_backend_type(model_name)` matches patterns in priority order (first match wins).
+**Factory routing** (`factory.py`): `detect_backend_type(model_name)` matches patterns in priority order
+(first match wins). The `whisper` default resolves at runtime to `WhisperXBackend` (if `whisperx` is
+importable) or `FasterWhisperBackend` (fallback). Notes: `CanaryBackend` subclasses `ParakeetBackend`
+(not `STTBackend` directly); the four MLX backends mix in `MLXThreadAffinityMixin` (`mlx_thread_pin.py`,
+GH #134) to pin GPU ops to one owning thread; `MLXCanaryBackend.supports_translation()` is `False` (the
+`canary-mlx` port is ASR-only). `whisper_backend.py` (`WhisperBackend`) is **legacy/orphaned** — defined
+but not wired into the factory; `FasterWhisperBackend` superseded it.
 
 ### Live Engine (`core/live_engine.py`)
 
@@ -124,22 +131,42 @@ PyAnnote 4.x speaker diarization pipeline:
 - FFmpeg backend: SoX resampler, dynamic range normalization, format conversion
 - CUDA health check: Detect unrecoverable GPU state at startup
 - GPU memory management: `clear_gpu_cache()` after each job
+- Audio hashing: raw + normalized SHA-256 for dedup; multi-channel handling in `core/multitrack.py`
+
+### Issue #104 Subsystems (Audio Notebook QoL)
+
+A cluster of business-logic modules added for the Audio Notebook QoL pack:
+
+| Subsystem | Modules | Purpose |
+|-----------|---------|---------|
+| **Profiles** | `database/profile_repository.py` | Transcription/recording profiles; public/private field separation; snapshotted into jobs |
+| **Speaker aliases** | `core/alias_substitution.py`, `database/alias_repository.py` | Read-time speaker display-name substitution (never mutates stored segments) |
+| **Diarization review** | `core/diarization_confidence.py`, `diarization_review_filter.py`, `diarization_review_lifecycle.py`, `database/diarization_review_repository.py` | Per-turn confidence + ADR-009 `pending→in_review→completed→released` lifecycle |
+| **Auto-actions** | `core/auto_action_coordinator.py`, `auto_action_sweeper.py`, `auto_summary_engine.py`, `database/auto_action_repository.py` | Fire auto-summary/auto-export/webhook per profile; deferred-export sweeper; retry/escalation ladder |
+| **Webhooks (durable)** | `core/webhook_payload.py`, `webhook_url_validation.py`, `services/webhook_worker.py`, `database/webhook_deliveries_repository.py`, `webhook_cleanup.py` | Persist-Before-Deliver outgoing `transcription.completed` webhooks with SSRF allowlist + retry |
+| **Webhooks (legacy)** | `core/webhook.py` | Fire-and-forget `live_sentence`/`longform_complete` (no persistence) |
+| **Misc** | `core/filename_template.py`, `plaintext_export.py`, `hf_token_guard.py`, `multitrack.py` | Export filename templating, FR9 plaintext export, non-ASCII HF-token purge (GH #125), multi-channel transcription |
 
 ## Data Layer
 
 ### Database Schema
 
-**SQLite + FTS5** with 6 migration versions:
+**SQLite + FTS5** with 17 migration versions. Full column-level reference in
+[data-models-server.md](./data-models-server.md).
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
-| `recordings` | Audio notebook entries | id, filename, filepath, title, duration, recorded_at, has_diarization, summary, transcription_backend |
-| `segments` | Transcription segments | id, recording_id, text, start_time, end_time, speaker |
-| `words` | Word-level timestamps | id, segment_id, word, start_time, end_time, confidence |
-| `recordings_fts` | Full-text search index | FTS5 virtual table |
-| `transcription_jobs` | Durability layer | id, status, source, client_name, audio_path, result_text, result_json, delivered, audio_hash |
-| `recordings` | Notebook recordings | id, filename, filepath, title, duration_seconds, recorded_at, imported_at, audio_hash |
-| `chat_history` | LLM conversations | recording_id, messages, model |
+| `recordings` | Audio notebook entries | id, filename, filepath, title, duration_seconds, recorded_at, has_diarization, summary, transcription_backend, audio_hash, normalized_audio_hash, auto_*_status, transcript_corrected |
+| `segments` | Transcription segments | id, recording_id, segment_index, speaker, text, start_time, end_time |
+| `words` | Word-level timestamps | id, recording_id, segment_id, word, start_time, end_time, confidence |
+| `words_fts` | Full-text search index | FTS5 virtual table over `words.word` (synced by triggers) |
+| `conversations` | LLM chat sessions | id, recording_id, title, response_id, model |
+| `messages` | LLM chat history | id, conversation_id, role, content, model, tokens_used |
+| `transcription_jobs` | Durability ledger (TEXT UUID PK) | id, status, source, client_name, audio_path, result_text, result_json, delivered, audio_hash, normalized_audio_hash, job_profile_snapshot |
+| `profiles` | Transcription/recording profiles | id, name, schema_version, public_fields_json, private_field_refs_json |
+| `recording_diarization_review` | Review lifecycle (1:1) | recording_id, status, reviewed_turns_json |
+| `recording_speaker_aliases` | Speaker aliases (1:N) | id, recording_id, speaker_id, alias_name |
+| `webhook_deliveries` | Outgoing-webhook ledger (1:N) | id, recording_id, profile_id, status, attempt_count, payload_json |
 
 #### Audio dedup scope (FR4 / R-EL23)
 
@@ -183,7 +210,13 @@ no shared registry. Cross-user dedup is an explicit non-goal.
 
 **Environment overrides:** `MAIN_TRANSCRIBER_MODEL`, `LIVE_TRANSCRIBER_MODEL`, `DIARIZATION_MODEL`, `LOG_LEVEL`, `INSTALL_WHISPER`, `INSTALL_NEMO`, `INSTALL_VIBEVOICE_ASR`, `HF_TOKEN`, `WHISPERCPP_SERVER_URL`
 
-**Key config sections:** `main_transcriber`, `live_transcriber`, `diarization`, `audio_processing`, `storage`, `durability`, `backup`, `logging`, `webhook`, `remote_server` (TLS)
+**Key config sections:** `longform_recording`, `static_transcription`, `main_transcriber`, `parakeet`,
+`sortformer`, `mlx`, `vibevoice_asr`, `live_transcriber`, `diarization`, `audio_processing`, `storage`,
+`backup`, `local_llm` (OpenAI-compatible LLM — note: not `lm_studio`), `remote_server` (TLS), `logging`,
+`webhook` (legacy global), `stt`, `durability`, `auto_actions`, `webhook_deliveries` (durable per-profile)
+
+> Profiles themselves live in the DB (`profiles` table); per-profile auto-summary/auto-export/webhook
+> settings are profile columns, gated globally by the `auto_actions` and `webhook_deliveries` toggles.
 
 ## Startup Sequence
 
@@ -196,14 +229,16 @@ no shared registry. Cross-user dedup is an explicit non-goal.
 7. CUDA health probe (detect unrecoverable GPU state)
 8. Create ModelManager (lazy import torch)
 9. Preload main transcriber model
-10. Schedule periodic orphan sweep (every 30 min)
-11. Emit startup events to event stream
+10. Schedule periodic orphan sweep (every 30 min) + deferred-export sweeper + webhook retention cleanup
+11. Start the durable WebhookWorker singleton (re-fires `in_flight` deliveries from prior run)
+12. Emit startup events to event stream
 
-**Shutdown:** Cancel cleanup tasks → drain WebSocket sessions (120s timeout) → cleanup models → exit
+**Shutdown:** Cancel cleanup/sweeper tasks → stop WebhookWorker (revert `in_flight` → `pending`) →
+drain WebSocket sessions (120s timeout) → cleanup models → exit
 
 ## Deployment
 
-- **Docker**: Ubuntu 24.04 base, 7 compose variants (base, linux-host, desktop-vm, GPU, GPU-CDI, Vulkan, Podman)
+- **Docker**: Ubuntu 24.04 base, 8 compose variants (base, linux-host, desktop-vm, GPU, GPU-CDI, Vulkan, Vulkan-WSL2, Podman)
 - **Bootstrap**: Python deps installed at first container start into `/runtime/.venv` (not baked into image)
 - **Volumes**: `transcription-data` (database, audio), `huggingface-models` (model cache), `runtime-deps` (venv)
 - **Health check**: `GET /health` every 30s, 600s start period for model downloads

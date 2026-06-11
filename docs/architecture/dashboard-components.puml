@@ -14,7 +14,7 @@ skinparam cloudBackgroundColor #45475a
 skinparam cloudBorderColor #89b4fa
 skinparam linetype ortho
 
-title Dashboard Component Tree (Electron React App)
+title Dashboard Component Tree (Electron React App) - v1.3.6
 
 ' ── Root ──────────────────────────────────────────
 package "App.tsx" as root {
@@ -26,51 +26,61 @@ package "App.tsx" as root {
 note right of appInner
   Lifted state:
   currentView, useLiveMode(),
-  clientRunning, isUploading
+  clientRunning, serverIsBusy
+  Singleton bridges: ServerEventReactor,
+  AuthTokenSync, WatcherFilesBridge
 end note
 
 queryProvider -down-> dockerProvider
 dockerProvider -down-> appInner
 
 ' ── Layout ────────────────────────────────────────
-component "Sidebar" as sidebar
+package "Sidebar" as sidebarPkg {
+  component "Sidebar" as sidebar
+  component "ProfileSelector /\nModelProfileSelector" as profileSel
+  sidebar --> profileSel
+}
 
-appInner -down-> sidebar
+appInner -down-> sidebarPkg
 
 ' ── Views + their hooks (grouped) ─────────────────
 package "SessionView" as sessionPkg {
   component "SessionView" as sessionView
+  component "LiveTranscriptView" as liveView
   component "useTranscription" as hookTranscribe
   component "useLiveMode\n(from parent)" as hookLive
-  component "useRecording" as hookRecording
-  component "useUpload" as hookUpload
+  component "useRecording / useUpload" as hookRecording
   component "AudioVisualizer" as audioVis
 
+  sessionView --> liveView
   sessionView --> hookTranscribe
   sessionView --> hookLive
   sessionView --> hookRecording
-  sessionView --> hookUpload
   sessionView --> audioVis
 }
 
 package "NotebookView" as notebookPkg {
   component "NotebookView" as notebookView
-  component "useCalendar" as hookCalendar
-  component "useSearch" as hookSearch
+  component "AudioNoteModal" as audioNote
+  component "useCalendar / useSearch" as hookCalendar
   component "useImportQueue" as hookImport
 
+  notebookView --> audioNote
   notebookView --> hookCalendar
-  notebookView --> hookSearch
   notebookView --> hookImport
 }
 
 package "ServerView" as serverPkg {
   component "ServerView" as serverView
-  component "useDocker" as hookDocker
-  component "useServerStatus" as hookServer
+  component "GpuHealthCard" as gpuCard
+  component "GpuDiagnosticModal" as gpuDiag
+  component "ImageTagChips" as imgTags
+  component "useDocker / useServerStatus" as hookDocker
 
+  serverView --> gpuCard
+  gpuCard --> gpuDiag
+  serverView --> imgTags
   serverView --> hookDocker
-  serverView --> hookServer
 }
 
 package "ModelManagerView" as modelPkg {
@@ -80,7 +90,6 @@ package "ModelManagerView" as modelPkg {
 package "LogsView" as logsPkg {
   component "LogsView" as logsView
   component "LogTerminal" as logTerm
-
   logsView --> logTerm
 }
 
@@ -90,28 +99,50 @@ appInner -down-> serverPkg
 appInner -down-> modelPkg
 appInner -down-> logsPkg
 
-' ── Services (shared) ─────────────────────────────
+' ── Feature component groups (Issue #104) ─────────
+package "Feature Components" as featurePkg {
+  component "recording/\n(AutoActionStatusBadge,\nConfidenceChip,\nSpeakerRenameInput,\nDeleteRecordingDialog)" as recCmp
+  component "profiles/\n(ModelProfilesPanel,\nEmptyProfileForm,\nTemplatePreviewField)" as profCmp
+  component "editor/\n(FindReplaceTextEditor,\nFindReplaceToolbar)" as editCmp
+  component "import/\n(DedupChoiceContainer,\nDedupPromptModal)" as impCmp
+}
+
+audioNote --> recCmp
+liveView --> editCmp
+appInner --> impCmp
+
+' ── Services + Stores (shared) ────────────────────
 package "Services" as services {
   component "API Client\n(client.ts)" as apiClient
-  component "TranscriptionSocket\n(websocket.ts)" as wsService
-  component "AudioCapture\n(audioCapture.ts)" as audioCap
-  component "Model Capabilities /\nModel Selection" as modelSvc
+  component "WebSocket\n(websocket.ts)" as wsService
+  component "AudioCapture" as audioCap
+  component "findReplaceEngine /\nmodelProfileStore /\nversionUtils" as svcNew
+}
+
+package "Zustand Stores (5)" as stores {
+  component "activityStore" as st1
+  component "importQueueStore" as st2
+  component "activeProfileStore" as st3
+  component "ariaAnnouncerStore" as st4
+  component "dedupChoiceStore" as st5
 }
 
 ' Hook → Service wiring (grouped to reduce arrows)
 hookTranscribe -down-> wsService
 hookLive -down-> wsService
 hookRecording -down-> audioCap
-hookUpload -down-> apiClient
-hookSearch -down-> apiClient
+hookImport -down-> st2
 hookCalendar -down-> apiClient
-hookServer -down-> apiClient
+hookDocker -down-> apiClient
+impCmp -down-> st5
+profileSel -down-> st3
+editCmp -down-> svcNew
 
-' ── Modals (simple list) ──────────────────────────
+' ── Modals (App-hosted) ───────────────────────────
 package "Modals" as modals {
-  component "SettingsModal" as settingsModal
-  component "AboutModal" as aboutModal
-  component "AudioNoteModal" as audioNoteModal
+  component "SettingsModal\n(+ ModelProfilesPanel)" as settingsModal
+  component "AboutModal / BugReportModal" as miscModal
+  component "DedupChoiceContainer" as dedupRoot
 }
 
 appInner -down-> modals
