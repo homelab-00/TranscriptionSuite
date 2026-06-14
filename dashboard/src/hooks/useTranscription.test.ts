@@ -477,4 +477,112 @@ describe('[P1] useTranscription', () => {
       expect(lastSocket.handleConfigChanged).not.toHaveBeenCalled();
     });
   });
+
+  // ── Preview (ephemeral last-N-seconds reminder) ─────────────────────
+  describe('preview', () => {
+    it('sends a preview message with the requested duration while recording', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.sendJSON.mockClear();
+
+      act(() => {
+        result.current.preview(30);
+      });
+
+      expect(lastSocket.sendJSON).toHaveBeenCalledWith({
+        type: 'preview',
+        data: { duration_seconds: 30 },
+      });
+      expect(result.current.previewLoading).toBe(true);
+    });
+
+    it('is a no-op when not recording', () => {
+      const { result } = renderHook(() => useTranscription());
+
+      act(() => {
+        result.current.preview(20);
+      });
+
+      const previewCalls = (lastSocket?.sendJSON.mock.calls ?? []).filter(
+        (c) => (c[0] as { type: string }).type === 'preview',
+      );
+      expect(previewCalls).toHaveLength(0);
+      expect(result.current.previewLoading).toBe(false);
+    });
+
+    it('ignores an overlapping request while one is in flight', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.sendJSON.mockClear();
+
+      act(() => {
+        result.current.preview(20);
+        result.current.preview(20);
+      });
+
+      expect(lastSocket.sendJSON).toHaveBeenCalledTimes(1);
+    });
+
+    it('populates preview state on preview_result', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      act(() => {
+        result.current.preview(20);
+      });
+
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'preview_result',
+          data: { text: 'the last words I said', language: 'en', actual_seconds: 20 },
+        });
+      });
+
+      expect(result.current.previewText).toBe('the last words I said');
+      expect(result.current.previewSeconds).toBe(20);
+      expect(result.current.previewLanguage).toBe('en');
+      expect(result.current.previewLoading).toBe(false);
+      expect(result.current.previewError).toBeNull();
+    });
+
+    it('surfaces preview_error and clears loading', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      act(() => {
+        result.current.preview(20);
+      });
+
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'preview_error',
+          data: { message: 'No audio captured yet' },
+        });
+      });
+
+      expect(result.current.previewError).toBe('No audio captured yet');
+      expect(result.current.previewLoading).toBe(false);
+    });
+
+    it('clears preview state on a new start()', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      act(() => {
+        result.current.preview(20);
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'preview_result',
+          data: { text: 'something', actual_seconds: 20 },
+        });
+      });
+      expect(result.current.previewText).toBe('something');
+
+      act(() => {
+        result.current.start();
+      });
+
+      expect(result.current.previewText).toBeNull();
+      expect(result.current.previewError).toBeNull();
+      expect(result.current.previewLoading).toBe(false);
+    });
+  });
 });

@@ -27,6 +27,8 @@ export interface ClientConfig {
   /** Audio capture settings */
   audio: {
     gracePeriod: number;
+    /** Seconds of recent audio the Preview button transcribes (10–60) */
+    previewDurationSeconds: number;
   };
   /** Session view UI selections */
   session: {
@@ -108,6 +110,7 @@ const DEFAULT_CONFIG: ClientConfig = {
   },
   audio: {
     gracePeriod: 1.0,
+    previewDurationSeconds: 20,
   },
   session: {
     audioSource: 'mic',

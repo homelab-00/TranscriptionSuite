@@ -223,6 +223,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const [clientSettings, setClientSettings] = useState({
     gracePeriod: 1.0,
+    previewDurationSeconds: 20,
     constrainSpeakers: true,
     numSpeakers: 2,
     autoAddNotebook: false,
@@ -378,6 +379,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 port: (cfg['connection.port'] as number) ?? prev.port,
                 useHttps: useRemote ? true : useHttps,
                 gracePeriod: (cfg['audio.gracePeriod'] as number) ?? prev.gracePeriod,
+                previewDurationSeconds:
+                  (cfg['audio.previewDurationSeconds'] as number) ?? prev.previewDurationSeconds,
                 constrainSpeakers:
                   (cfg['diarization.constrainSpeakers'] as boolean) ?? prev.constrainSpeakers,
                 numSpeakers: (cfg['diarization.numSpeakers'] as number) ?? prev.numSpeakers,
@@ -527,6 +530,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['connection.port', clientSettings.port],
         ['connection.useHttps', normalizedUseHttps],
         ['audio.gracePeriod', clientSettings.gracePeriod],
+        ['audio.previewDurationSeconds', clientSettings.previewDurationSeconds],
         ['diarization.constrainSpeakers', clientSettings.constrainSpeakers],
         ['diarization.numSpeakers', clientSettings.numSpeakers],
         ['notebook.autoAdd', clientSettings.autoAddNotebook],
@@ -1237,6 +1241,57 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </button>
             </div>
             <p className="mt-1 text-xs text-slate-500">Buffer time before committing a segment.</p>
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-300">
+              Preview Duration (seconds)
+            </label>
+            <div className="flex items-center rounded-lg border border-white/10 bg-black/20">
+              <button
+                type="button"
+                onClick={() =>
+                  setClientSettings((prev) => ({
+                    ...prev,
+                    previewDurationSeconds: Math.max(10, prev.previewDurationSeconds - 5),
+                  }))
+                }
+                className="px-3 py-2 text-slate-400 transition-colors select-none hover:text-white"
+              >
+                −
+              </button>
+              <input
+                type="number"
+                min={10}
+                max={60}
+                step={5}
+                value={clientSettings.previewDurationSeconds}
+                onChange={(e) =>
+                  setClientSettings((prev) => ({
+                    ...prev,
+                    previewDurationSeconds: Math.min(
+                      60,
+                      Math.max(10, parseInt(e.target.value, 10) || 20),
+                    ),
+                  }))
+                }
+                className="min-w-0 flex-1 [appearance:textfield] bg-transparent py-2 text-center text-sm text-white focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setClientSettings((prev) => ({
+                    ...prev,
+                    previewDurationSeconds: Math.min(60, prev.previewDurationSeconds + 5),
+                  }))
+                }
+                className="px-3 py-2 text-slate-400 transition-colors select-none hover:text-white"
+              >
+                +
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              How many seconds of recent audio the Preview button transcribes (10–60).
+            </p>
           </div>
         </div>
       </Section>

@@ -464,6 +464,7 @@ const store = new Store({
     'session.mainLanguage': 'Auto Detect',
     'session.liveLanguage': 'Auto Detect',
     'audio.gracePeriod': 1.0,
+    'audio.previewDurationSeconds': 20,
     'diarization.constrainSpeakers': true,
     'diarization.numSpeakers': 2,
     'notebook.autoAdd': false,
