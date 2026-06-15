@@ -161,6 +161,7 @@
     "afterPack": "./scripts/afterPack.cjs",
     "linux": {
       "target": "AppImage",
+      "executableName": "com.transcriptionsuite.dashboard",
       "category": "Utility",
       "icon": "../docs/assets/logo.png",
       "desktop": {
