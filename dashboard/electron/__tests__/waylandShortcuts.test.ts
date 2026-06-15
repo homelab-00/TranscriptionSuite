@@ -10,12 +10,14 @@
  * and compositor portal, which jsdom/node cannot provide.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   electronToXdg,
   xdgToElectron,
   isPortalConnected,
   destroyWaylandShortcuts,
+  registerHostAppId,
+  PORTAL_APP_ID,
 } from '../waylandShortcuts.js';
 
 // ── electronToXdg ───────────────────────────────────────────────────────────
@@ -93,5 +95,62 @@ describe('[P2] destroyWaylandShortcuts', () => {
     // Should not throw even when there is no active session
     expect(() => destroyWaylandShortcuts()).not.toThrow();
     expect(isPortalConnected()).toBe(false);
+  });
+});
+
+// ── registerHostAppId ───────────────────────────────────────────────────────
+// Registers the app id with the XDG host portal Registry so GlobalShortcuts
+// CreateSession passes the "An app id is required" frontend gate added in
+// xdg-desktop-portal 1.21.0. Tested with a fake portal object — no live D-Bus.
+
+describe('[P2] registerHostAppId', () => {
+  it('uses a non-empty reverse-DNS app id', () => {
+    expect(PORTAL_APP_ID).toBeTruthy();
+    // Reverse-DNS: at least one dot, no leading dot (xdp_is_valid_app_id rules).
+    expect(PORTAL_APP_ID).toMatch(/^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/);
+  });
+
+  it('calls Registry.Register with the app id and an empty options dict', async () => {
+    const registerSpy = vi.fn().mockResolvedValue(undefined);
+    const fakePortalObj = {
+      getInterface: (name: string) => {
+        if (name === 'org.freedesktop.host.portal.Registry') {
+          return { Register: registerSpy };
+        }
+        throw new Error(`unexpected interface requested: ${name}`);
+      },
+    };
+
+    await registerHostAppId(fakePortalObj);
+
+    expect(registerSpy).toHaveBeenCalledTimes(1);
+    expect(registerSpy).toHaveBeenCalledWith(PORTAL_APP_ID, {});
+  });
+
+  it('does not throw when the Registry interface is absent (older portal < 1.19.4)', async () => {
+    // dbus-next getInterface() throws synchronously when the interface was not
+    // present in the introspection data.
+    const fakePortalObj = {
+      getInterface: () => {
+        throw new Error("Interface 'org.freedesktop.host.portal.Registry' not found");
+      },
+    };
+
+    await expect(registerHostAppId(fakePortalObj)).resolves.toBeUndefined();
+  });
+
+  it('swallows Register rejections (already registered / too late / unknown method)', async () => {
+    for (const message of [
+      'Connection already associated with an application ID',
+      'Registered too late',
+      'org.freedesktop.DBus.Error.UnknownMethod',
+    ]) {
+      const fakePortalObj = {
+        getInterface: () => ({
+          Register: vi.fn().mockRejectedValue(new Error(message)),
+        }),
+      };
+      await expect(registerHostAppId(fakePortalObj)).resolves.toBeUndefined();
+    }
   });
 });
