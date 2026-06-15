@@ -134,6 +134,22 @@ const SHORTCUT_DEFS: Array<{ id: string; description: string; action: string }> 
   { id: 'stop-transcribe', description: 'Stop & Transcribe', action: 'stop-recording' },
 ];
 
+/**
+ * App id announced to the XDG host portal Registry before opening a
+ * GlobalShortcuts session.
+ *
+ * Since xdg-desktop-portal 1.21.0 the GlobalShortcuts frontend rejects callers
+ * whose resolved app id is empty with `NotAllowed: "An app id is required"`.
+ * Sandboxed apps (Flatpak/snap) get an id from their sandbox metadata, but an
+ * unsandboxed host app (our AppImage) resolves to "" and is rejected — so we
+ * register an id explicitly via `org.freedesktop.host.portal.Registry.Register`.
+ *
+ * Matches electron-builder `build.appId`. For correct KDE shortcut labels and
+ * stable per-app permission persistence this should also match the installed
+ * `.desktop` basename (packaging follow-up: ship `com.transcriptionsuite.dashboard.desktop`).
+ */
+export const PORTAL_APP_ID = 'com.transcriptionsuite.dashboard';
+
 let bus: any = null;
 let portalProxy: any = null;
 let sessionPath: string | null = null;
@@ -155,6 +171,53 @@ function getRequestToken(): string {
  */
 function senderToPath(sender: string): string {
   return sender.replace(/^:/, '').replace(/\./g, '_');
+}
+
+/**
+ * Announce this D-Bus connection's app id to the XDG host portal Registry.
+ *
+ * Since xdg-desktop-portal 1.21.0 the GlobalShortcuts frontend gate in
+ * `handle_create_session()` rejects callers with an empty app id
+ * (`NotAllowed: "An app id is required"`). Unsandboxed host apps (AppImages)
+ * resolve to an empty id, so we Register an explicit one BEFORE CreateSession,
+ * on the SAME bus connection.
+ *
+ * The Registry interface (note the literal `host` segment) is exported on the
+ * same bus name and object path as GlobalShortcuts, so we read it off the
+ * portal object we already introspected. It must be the FIRST portal method
+ * call on this connection — this module owns a dedicated `bus`, and only
+ * `getProxyObject` (introspection, not a portal method) runs before this, so
+ * the ordering requirement holds.
+ *
+ * Fully defensive: on portals < 1.19.4 the interface is absent and
+ * `getInterface` throws synchronously; `Register` may also reject if the
+ * connection was already registered or registered too late. EVERY such failure
+ * is swallowed and non-fatal — older portals have no gate and work without
+ * registration, so the caller always proceeds to CreateSession regardless.
+ */
+export async function registerHostAppId(portalObj: any): Promise<void> {
+  let registryProxy: any;
+  try {
+    registryProxy = portalObj.getInterface('org.freedesktop.host.portal.Registry');
+  } catch {
+    // Interface not exported → portal older than 1.19.4, which also predates the
+    // "An app id is required" gate (1.21.0). Nothing to do; continue.
+    console.log(
+      '[WaylandShortcuts] host portal Registry unavailable (older portal) — skipping app-id registration',
+    );
+    return;
+  }
+
+  try {
+    // Register(s app_id, a{sv} options) → (). The options vardict is currently
+    // unused by the portal; pass an empty dict.
+    await registryProxy.Register(PORTAL_APP_ID, {});
+    console.log('[WaylandShortcuts] Registered host app id:', PORTAL_APP_ID);
+  } catch (err) {
+    // Treat every rejection the same (already registered / registered too late /
+    // UnknownMethod / NotAllowed): swallow and continue to CreateSession.
+    console.warn('[WaylandShortcuts] Registry.Register failed (continuing without it):', err);
+  }
 }
 
 /**
@@ -198,6 +261,12 @@ export async function initWaylandShortcuts(
       'org.freedesktop.portal.Desktop',
       '/org/freedesktop/portal/desktop',
     );
+
+    // Host apps must announce an app id before any GlobalShortcuts call, or
+    // CreateSession is rejected with "An app id is required" on portal ≥ 1.21.0.
+    // Must run before getInterface/CreateSession so it's the first portal method.
+    await registerHostAppId(portalObj);
+
     portalProxy = portalObj.getInterface('org.freedesktop.portal.GlobalShortcuts');
   } catch (err) {
     console.warn('[WaylandShortcuts] Failed to connect to D-Bus GlobalShortcuts portal:', err);
