@@ -6,6 +6,7 @@
   "author": "homelab-00",
   "type": "module",
   "main": "dist-electron/main.js",
+  "desktopName": "com.transcriptionsuite.dashboard.desktop",
   "engines": {
     "node": ">=22 <23"
   },
@@ -161,7 +162,12 @@
     "linux": {
       "target": "AppImage",
       "category": "Utility",
-      "icon": "../docs/assets/logo.png"
+      "icon": "../docs/assets/logo.png",
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "com.transcriptionsuite.dashboard"
+        }
+      }
     },
     "win": {
       "target": "nsis",
