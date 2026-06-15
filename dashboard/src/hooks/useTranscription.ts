@@ -59,6 +59,18 @@ export interface TranscriptionState {
   jobId: string | null;
   /** Load an externally-fetched result into the hook (e.g. recovered from DB) */
   loadResult: (result: TranscriptionResult) => void;
+  /** Ephemeral "last N seconds" preview text (null until a preview is requested) */
+  previewText: string | null;
+  /** Detected language of the most recent preview */
+  previewLanguage?: string;
+  /** Actual seconds of audio transcribed by the most recent preview */
+  previewSeconds: number | null;
+  /** Whether a preview request is currently in flight */
+  previewLoading: boolean;
+  /** Error message from the most recent preview attempt */
+  previewError: string | null;
+  /** Request an ephemeral preview of the last `durationSeconds` of audio */
+  preview: (durationSeconds: number) => void;
 }
 
 export function useTranscription(): TranscriptionState {
@@ -72,6 +84,14 @@ export function useTranscription(): TranscriptionState {
     current: number;
     total: number;
   } | null>(null);
+  const [previewText, setPreviewText] = useState<string | null>(null);
+  const [previewLanguage, setPreviewLanguage] = useState<string | undefined>(undefined);
+  const [previewSeconds, setPreviewSeconds] = useState<number | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  // Ref guard so the preview() callback can reject overlapping requests without
+  // a stale-closure read of previewLoading.
+  const previewLoadingRef = useRef(false);
 
   const socketRef = useRef<TranscriptionSocket | null>(null);
   const captureRef = useRef<AudioCapture | null>(null);
@@ -254,6 +274,21 @@ export function useTranscription(): TranscriptionState {
           break;
         }
 
+        case 'preview_result':
+          previewLoadingRef.current = false;
+          setPreviewLoading(false);
+          setPreviewText((msg.data?.text as string) ?? '');
+          setPreviewLanguage(msg.data?.language as string | undefined);
+          setPreviewSeconds((msg.data?.actual_seconds as number) ?? null);
+          setPreviewError(null);
+          break;
+
+        case 'preview_error':
+          previewLoadingRef.current = false;
+          setPreviewLoading(false);
+          setPreviewError((msg.data?.message as string) ?? 'Preview failed');
+          break;
+
         case 'vad_start':
         case 'vad_recording_start':
           setVadActive(true);
@@ -266,6 +301,8 @@ export function useTranscription(): TranscriptionState {
         case 'error':
           setError((msg.data?.message as string) ?? 'Transcription error');
           setStatusTracked('error');
+          previewLoadingRef.current = false;
+          setPreviewLoading(false);
           captureRef.current?.stop();
           setAnalyser(null);
           break;
@@ -290,6 +327,12 @@ export function useTranscription(): TranscriptionState {
       setMuted(false);
       jobIdRef.current = null;
       setJobId(null);
+      setPreviewText(null);
+      setPreviewLanguage(undefined);
+      setPreviewSeconds(null);
+      setPreviewError(null);
+      setPreviewLoading(false);
+      previewLoadingRef.current = false;
       startOptsRef.current = options ?? {};
 
       setStatusTracked('connecting');
@@ -300,6 +343,8 @@ export function useTranscription(): TranscriptionState {
         onError: (err) => {
           setError(err);
           setStatusTracked('error');
+          previewLoadingRef.current = false;
+          setPreviewLoading(false);
           captureRef.current?.stop();
           setAnalyser(null);
         },
@@ -395,7 +440,27 @@ export function useTranscription(): TranscriptionState {
     setProcessingProgress(null);
     jobIdRef.current = null;
     setJobId(null);
+    setPreviewText(null);
+    setPreviewLanguage(undefined);
+    setPreviewSeconds(null);
+    setPreviewError(null);
+    setPreviewLoading(false);
+    previewLoadingRef.current = false;
   }, [setStatusTracked]);
+
+  const preview = useCallback((durationSeconds: number) => {
+    // Preview only makes sense during an active recording; ignore otherwise.
+    if (statusRef.current !== 'recording') return;
+    // Reject overlapping requests (server also guards, this avoids spamming).
+    if (previewLoadingRef.current) return;
+    previewLoadingRef.current = true;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    socketRef.current?.sendJSON({
+      type: 'preview',
+      data: { duration_seconds: durationSeconds },
+    });
+  }, []);
 
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
@@ -436,5 +501,11 @@ export function useTranscription(): TranscriptionState {
     processingProgress,
     jobId,
     loadResult,
+    previewText,
+    previewLanguage,
+    previewSeconds,
+    previewLoading,
+    previewError,
+    preview,
   };
 }

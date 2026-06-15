@@ -60,6 +60,12 @@ router = APIRouter()
 _connected_sessions: dict[str, "TranscriptionSession"] = {}
 _sessions_lock = asyncio.Lock()
 
+# Preview transcription bounds (ephemeral "last N seconds" reminder feature).
+# Duration is a client setting; clamped server-side regardless of client value.
+_PREVIEW_MIN_SECONDS = 10
+_PREVIEW_MAX_SECONDS = 60
+_PREVIEW_DEFAULT_SECONDS = 20
+
 
 class TranscriptionSession:
     """
@@ -94,6 +100,10 @@ class TranscriptionSession:
         self._realtime_engine: Any | None = None
         self._use_realtime_engine = False
 
+        # Preview transcription (ephemeral "last N seconds" reminder — never persisted)
+        self._preview_in_progress = False
+        self._preview_task: asyncio.Task[None] | None = None
+
         # Job tracking for transcription
         self._current_job_id: str | None = None
 
@@ -126,6 +136,106 @@ class TranscriptionSession:
         # Also feed to realtime engine if using VAD
         if self._use_realtime_engine and self._realtime_engine:
             self._realtime_engine.feed_audio(pcm_data, self.sample_rate)
+
+    async def preview_transcription(self, duration_seconds: int) -> None:
+        """Transcribe the last N seconds of buffered audio as an ephemeral preview.
+
+        This is a throwaway UX aid so the user can recover their train of thought
+        mid-recording. Unlike ``process_transcription()`` it deliberately does NOT
+        persist a job, does NOT create an audio file, and does NOT touch recording
+        state — the live recording keeps streaming and its full result is persisted
+        normally at Stop. Slices only the tail of ``audio_chunks`` and transcribes a
+        copy in a worker thread. Invoked as a background task so the WS receive loop
+        keeps draining incoming audio while this runs.
+        """
+        if self._preview_in_progress:
+            await self.send_message("preview_error", {"message": "Preview already in progress"})
+            return
+        if not self.is_recording:
+            await self.send_message("preview_error", {"message": "Not recording"})
+            return
+        if not self.audio_chunks:
+            await self.send_message("preview_error", {"message": "No audio captured yet"})
+            return
+
+        # No await between the guard checks above and setting the flag here, so the
+        # single-threaded event loop guarantees no two preview tasks pass together.
+        self._preview_in_progress = True
+        try:
+            clamped = max(_PREVIEW_MIN_SECONDS, min(_PREVIEW_MAX_SECONDS, int(duration_seconds)))
+
+            # Slice only the tail of the buffer — avoid copying the whole recording
+            # (can be ~100 MB for long sessions). Int16 mono PCM => 2 bytes/sample.
+            bytes_needed = clamped * self.sample_rate * 2
+            collected: list[bytes] = []
+            total = 0
+            for chunk in reversed(self.audio_chunks):
+                collected.append(chunk)
+                total += len(chunk)
+                if total >= bytes_needed:
+                    break
+            tail = b"".join(reversed(collected))[-bytes_needed:]
+            if len(tail) % 2:  # drop dangling byte so the int16 view is valid
+                tail = tail[:-1]
+            if not tail:
+                await self.send_message("preview_error", {"message": "No audio captured yet"})
+                return
+
+            # Convert Int16 PCM -> float32 [-1.0, 1.0] (mirrors process_transcription)
+            audio_array = np.frombuffer(tail, dtype=np.int16)
+            audio_float = audio_array.astype(np.float32) / 32768.0
+            actual_seconds = round(len(audio_float) / self.sample_rate, 1)
+
+            # ensure_transcription_loaded() lazily (re)loads the model if needed.
+            from server.core.model_manager import get_model_manager
+
+            model_manager = get_model_manager()
+            engine = await asyncio.to_thread(model_manager.ensure_transcription_loaded)
+
+            # Reuse the session's language/translation so the preview reads like the
+            # eventual final result.
+            task = "translate" if getattr(self, "translation_enabled", False) else "transcribe"
+            translation_target = (
+                getattr(self, "translation_target_language", "en") if task == "translate" else None
+            )
+
+            # Run in a worker thread so the asyncio event loop stays responsive.
+            # NB: transcribe_audio() acquires the shared transcription_lock, so a
+            # preview started just before Stop serializes ahead of the final
+            # transcription — bounded and safe (the full result still persists).
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: engine.transcribe_audio(
+                    audio_float,
+                    sample_rate=self.sample_rate,
+                    language=self.language,
+                    task=task,
+                    translation_target_language=translation_target,
+                    word_timestamps=False,
+                ),
+            )
+
+            # Ephemeral by design — NOT persisted (no create_job/save_result). The
+            # data-loss invariant is unaffected: the live recording's full result is
+            # persisted at Stop, and a preview is trivially reproducible.
+            await self.send_message(
+                "preview_result",
+                {
+                    "text": result.text or "",
+                    "language": result.language,
+                    "requested_seconds": clamped,
+                    "actual_seconds": actual_seconds,
+                },
+            )
+        except asyncio.CancelledError:
+            logger.debug("Preview transcription cancelled for %s", self.client_name)
+            raise
+        except Exception as e:
+            logger.warning("Preview transcription failed for %s: %s", self.client_name, repr(e))
+            await self.send_message("preview_error", {"message": "Preview failed"})
+        finally:
+            self._preview_in_progress = False
 
     async def process_transcription(self) -> None:
         """Process accumulated audio and return transcription."""
@@ -486,7 +596,7 @@ class TranscriptionSession:
             "session_started",
             {
                 "vad_enabled": self._use_realtime_engine,
-                "preview_enabled": False,
+                "preview_enabled": True,
                 "capture_sample_rate_hz": self.sample_rate,
                 "job_id": self._current_job_id,
             },
@@ -560,6 +670,10 @@ class TranscriptionSession:
     async def cleanup(self) -> None:
         """Clean up session resources."""
         from server.core.model_manager import get_model_manager
+
+        # Cancel any in-flight preview task so it doesn't outlive the session
+        if self._preview_task and not self._preview_task.done():
+            self._preview_task.cancel()
 
         # Release any active job
         self._release_job()
@@ -643,6 +757,22 @@ async def handle_client_message(session: TranscriptionSession, message: dict[str
 
     elif msg_type == "get_capabilities":
         await session.send_message("capabilities", session.capabilities.to_dict())
+
+    elif msg_type == "preview":
+        # Ephemeral "last N seconds" reminder. Run as a background task so this
+        # message loop keeps draining incoming audio while the preview transcribes.
+        if session._preview_task is not None and not session._preview_task.done():
+            # A preview is already running. Do NOT overwrite the task handle —
+            # cleanup() must keep a reference to the live one to cancel it.
+            await session.send_message("preview_error", {"message": "Preview already in progress"})
+        else:
+            _data = message.get("data", {}) or {}
+            _raw = _data.get("duration_seconds", _PREVIEW_DEFAULT_SECONDS)
+            try:
+                _dur = int(_raw)
+            except (TypeError, ValueError):
+                _dur = _PREVIEW_DEFAULT_SECONDS
+            session._preview_task = asyncio.create_task(session.preview_transcription(_dur))
 
     else:
         logger.warning(f"Unknown message type: {msg_type}")
