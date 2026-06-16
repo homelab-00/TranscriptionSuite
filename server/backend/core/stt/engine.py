@@ -78,9 +78,10 @@ class TranscriptionResult:
     segments: list[dict[str, Any]] = field(default_factory=list)
     words: list[dict[str, Any]] = field(default_factory=list)
     num_speakers: int = 0
-    # Set when a chunking backend failed partway through long audio: this result
-    # holds only the chunks that completed (GH #168 follow-up). ``duration`` is
-    # the transcribed span, not the full audio length.
+    # Set when a chunking backend failed partway through long audio: ``segments``
+    # then hold only the chunks that completed, while ``duration`` remains the
+    # full audio length (the recording is that long; ``partial_reason`` conveys
+    # that the transcript is incomplete). GH #168 follow-up.
     partial: bool = False
     partial_reason: str | None = None
 
@@ -964,8 +965,11 @@ class AudioToTextRecorder:
                 full_text_parts = []
 
                 for segment in backend_segments:
-                    # Check for cancellation between segments
-                    if cancellation_check and cancellation_check():
+                    # Check for cancellation between segments. Skip this once we
+                    # already hold a partial result — discarding salvaged work to
+                    # honour a late cancel would violate the "avoid data loss"
+                    # invariant; a chunk failure is already terminal (GH #168).
+                    if not partial and cancellation_check and cancellation_check():
                         from server.core.model_manager import (
                             TranscriptionCancelledError,
                         )

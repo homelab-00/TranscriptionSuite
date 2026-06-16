@@ -352,6 +352,34 @@ class TestPartialResultHandling:
         assert result.partial is False
         assert result.partial_reason is None
 
+    def test_partial_result_survives_late_cancellation(self):
+        """A cancel racing the post-partial formatting loop must NOT discard the
+        salvaged partial transcript (avoid-data-loss invariant)."""
+        from server.core.stt.backends.base import (
+            BackendSegment,
+            BackendTranscriptionInfo,
+            PartialTranscriptionError,
+        )
+
+        backend = MagicMock()
+        backend.supports_cancellation.return_value = True
+        backend.transcribe.side_effect = PartialTranscriptionError(
+            "chunk 3 timed out",
+            segments=[BackendSegment(text="hello", start=0.0, end=1.0, words=[])],
+            info=BackendTranscriptionInfo(language="en", language_probability=0.9),
+            completed_seconds=120.0,
+        )
+        rec = self._make_recorder(backend)
+
+        result = rec.transcribe_audio(
+            np.ones(16000, dtype=np.float32) * 0.1,
+            sample_rate=16000,
+            cancellation_check=lambda: True,  # cancel is active during formatting
+        )
+
+        assert result.partial is True
+        assert result.text == "hello"  # partial kept despite the active cancel
+
 
 # ── TranscriptionResult ──────────────────────────────────────────────────
 
