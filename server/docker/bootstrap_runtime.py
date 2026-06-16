@@ -82,6 +82,17 @@ except (FileNotFoundError, ImportError):
         pass
 
 
+def _utc_now_iso() -> str:
+    """Current UTC time as an ISO-8601 string for marker/status files.
+
+    A bootstrap script legitimately needs real wall-clock time — these timestamps
+    are written to on-disk JSON and never asserted in tests — so the project's
+    frozen-clock test discipline does not apply. Centralized so the single
+    banned-API exemption is documented in one place.
+    """
+    return datetime.now(UTC).isoformat()  # noqa: TID251 - bootstrap wall-clock, not test code
+
+
 def log(message: str) -> None:
     print(f"[bootstrap] {message}", flush=True)
 
@@ -715,7 +726,7 @@ def ensure_runtime_dependencies(
                         "pytorch_variant": pytorch_variant,
                         "structural_fingerprint": structural_fp,
                         "lock_fingerprint": lock_fp,
-                        "updated_at": datetime.now(UTC).isoformat(),
+                        "updated_at": _utc_now_iso(),
                     }
                 )
                 write_marker(marker_file, upgraded_payload)
@@ -867,7 +878,7 @@ def ensure_runtime_dependencies(
                 "selection_reason": diagnostics["selection_reason"],
                 "package_delta": package_delta,
                 "escalated_to_rebuild": diagnostics.get("escalated_to_rebuild", False),
-                "updated_at": datetime.now(UTC).isoformat(),
+                "updated_at": _utc_now_iso(),
             },
         )
         log_timing("runtime bootstrap marker write complete", marker_write_start)
@@ -2115,7 +2126,7 @@ def main() -> int:
     write_status_file(
         status_file,
         {
-            "generated_at": datetime.now(UTC).isoformat(),
+            "generated_at": _utc_now_iso(),
             "bootstrap": {
                 "schema_version": BOOTSTRAP_SCHEMA_VERSION,
                 "sync_mode": sync_mode,
