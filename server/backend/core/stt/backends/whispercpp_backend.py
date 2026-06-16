@@ -89,16 +89,93 @@ _SIDECAR_INFERENCE_TIMEOUT_MSG = (
 )
 
 
-def _inference_timeout_for(num_samples: int, sample_rate: int) -> int:
+def _inference_timeout_for(
+    num_samples: int,
+    sample_rate: int,
+    floor: int = _INFERENCE_TIMEOUT,
+    factor: float = _TIMEOUT_SECONDS_PER_AUDIO_SECOND,
+) -> int:
     """Per-request httpx read-timeout (seconds), scaled to the chunk's duration.
 
-    Floored at ``_INFERENCE_TIMEOUT``. Because audio is chunked before it reaches
-    the sidecar (see ``WhisperCppBackend.transcribe``), every request is bounded,
-    so scaling the timeout to the chunk length lets a slow or heavily-loaded
-    Vulkan GPU finish without the client giving up prematurely (GH #168 / #153).
+    Floored at ``floor``. Because audio is chunked before it reaches the sidecar
+    (see ``WhisperCppBackend.transcribe``), every request is bounded, so scaling
+    the timeout to the chunk length lets a slow or heavily-loaded Vulkan GPU
+    finish without the client giving up prematurely (GH #168 / #153). ``floor``
+    and ``factor`` default to the module constants but are overridable via config
+    (``WHISPERCPP_INFERENCE_TIMEOUT_S`` / ``WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND``).
     """
     duration_s = num_samples / sample_rate if sample_rate > 0 else 0.0
-    return max(_INFERENCE_TIMEOUT, math.ceil(duration_s * _TIMEOUT_SECONDS_PER_AUDIO_SECOND))
+    return max(floor, math.ceil(duration_s * factor))
+
+
+def _read_whispercpp_setting(env_key: str, cfg_key: str) -> str | None:
+    """Return the raw whisper.cpp setting from env → config → None.
+
+    Mirrors ``_resolve_server_url`` precedence (env wins over config). The value
+    is returned as a stripped string for the caller to parse/validate; ``None``
+    means neither source provided it. Config-read failures are swallowed (the
+    caller falls back to its default).
+    """
+    env_val = os.environ.get(env_key, "").strip()
+    if env_val:
+        return env_val
+    try:
+        from server.config import get_config
+
+        cfg_val = get_config().get("whisper_cpp", cfg_key)
+    except Exception as exc:  # noqa: BLE001 — config must never break transcription
+        logger.debug("Could not read whisper_cpp.%s from config: %s", cfg_key, repr(exc))
+        return None
+    if cfg_val is None:
+        return None
+    text = str(cfg_val).strip()
+    return text or None
+
+
+def _resolve_chunk_duration_config() -> int:
+    """Max chunk duration (seconds) from env → config → default, floored at 60s."""
+    raw = _read_whispercpp_setting("WHISPERCPP_CHUNK_DURATION_S", "chunk_duration_s")
+    if raw is None:
+        return _MAX_CHUNK_DURATION_S
+    try:
+        return max(60, int(float(raw)))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Ignoring invalid whisper.cpp chunk duration %r (expected a number ≥ 60); using %ds",
+            raw,
+            _MAX_CHUNK_DURATION_S,
+        )
+        return _MAX_CHUNK_DURATION_S
+
+
+def _resolve_timeout_config() -> tuple[int, float]:
+    """``(inference_timeout_floor_s, seconds_per_audio_second)`` from env → config → default."""
+    raw_floor = _read_whispercpp_setting("WHISPERCPP_INFERENCE_TIMEOUT_S", "inference_timeout_s")
+    floor = _INFERENCE_TIMEOUT
+    if raw_floor is not None:
+        try:
+            floor = max(60, int(float(raw_floor)))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Ignoring invalid whisper.cpp inference timeout %r (expected a number ≥ 60); using %ds",
+                raw_floor,
+                _INFERENCE_TIMEOUT,
+            )
+
+    raw_factor = _read_whispercpp_setting(
+        "WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND", "timeout_seconds_per_audio_second"
+    )
+    factor = _TIMEOUT_SECONDS_PER_AUDIO_SECOND
+    if raw_factor is not None:
+        try:
+            factor = max(0.5, float(raw_factor))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Ignoring invalid whisper.cpp timeout factor %r (expected a number ≥ 0.5); using %.1f",
+                raw_factor,
+                _TIMEOUT_SECONDS_PER_AUDIO_SECOND,
+            )
+    return floor, factor
 
 
 def _resolve_server_url() -> str:
@@ -358,10 +435,14 @@ class WhisperCppBackend(STTBackend):
         self._model_name: str | None = None
         self._loaded: bool = False
         self._client: httpx.Client | None = None
-        # Audio longer than this (seconds) is split into chunks before being
-        # sent to the sidecar (GH #168). Instance attribute so tests can shrink
-        # it; mirrors ``ParakeetBackend._max_chunk_duration_s``.
+        # Chunking + timeout knobs. Default to the module constants; ``load()``
+        # overrides them from env/config (WHISPERCPP_*). Instance attributes so
+        # tests can shrink them; mirrors ``ParakeetBackend._max_chunk_duration_s``.
+        # Audio longer than ``_max_chunk_duration_s`` (seconds) is split into
+        # chunks before being sent to the sidecar (GH #168).
         self._max_chunk_duration_s: int = _MAX_CHUNK_DURATION_S
+        self._inference_timeout: int = _INFERENCE_TIMEOUT
+        self._timeout_seconds_per_audio_second: float = _TIMEOUT_SECONDS_PER_AUDIO_SECOND
 
     def _ensure_client(self) -> httpx.Client:
         """Return (or create) a persistent httpx.Client.
@@ -385,10 +466,18 @@ class WhisperCppBackend(STTBackend):
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         self._server_url = _resolve_server_url()
         self._model_name = model_name
+        # Resolve chunking / timeout knobs once at load time (env → config →
+        # default), mirroring how _resolve_server_url is consumed here.
+        self._max_chunk_duration_s = _resolve_chunk_duration_config()
+        self._inference_timeout, self._timeout_seconds_per_audio_second = _resolve_timeout_config()
         logger.info(
-            "WhisperCppBackend: loading model %s via %s",
+            "WhisperCppBackend: loading model %s via %s "
+            "(chunk=%ds, timeout_floor=%ds, timeout_factor=%.1fx)",
             model_name,
             self._server_url,
+            self._max_chunk_duration_s,
+            self._inference_timeout,
+            self._timeout_seconds_per_audio_second,
         )
 
         client = self._ensure_client()
@@ -569,7 +658,12 @@ class WhisperCppBackend(STTBackend):
         an otherwise-healthy request.
         """
         wav_bytes = _audio_to_wav_bytes(chunk, sample_rate)
-        timeout = _inference_timeout_for(len(chunk), sample_rate)
+        timeout = _inference_timeout_for(
+            len(chunk),
+            sample_rate,
+            self._inference_timeout,
+            self._timeout_seconds_per_audio_second,
+        )
 
         client = self._ensure_client()
         try:

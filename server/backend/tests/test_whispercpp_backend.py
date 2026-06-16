@@ -12,11 +12,14 @@ from server.core.stt.backends.whispercpp_backend import (
     _MAX_CHUNK_DURATION_S,
     _MAX_SEGMENTS,
     _MAX_WORDS_PER_SEGMENT,
+    _TIMEOUT_SECONDS_PER_AUDIO_SECOND,
     WhisperCppBackend,
     _audio_to_wav_bytes,
     _coerce_float,
     _inference_timeout_for,
+    _resolve_chunk_duration_config,
     _resolve_server_url,
+    _resolve_timeout_config,
     _sanitize_for_error_preview,
     _sanitize_language_code,
     _validate_server_url,
@@ -1437,6 +1440,95 @@ class TestTranscribeChunking:
         segments, _ = loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))
         assert [s.text for s in segments] == ["a", "c"]
         assert segments[1].start == 2.0  # offset by the two preceding 1s chunks
+
+
+# ---------------------------------------------------------------------------
+# whisper.cpp config knobs — chunk duration + timeout (GH #168 follow-up)
+# ---------------------------------------------------------------------------
+
+
+class TestWhisperCppConfigResolution:
+    def test_chunk_duration_env_wins_over_config(self):
+        cfg = MagicMock()
+        cfg.get.return_value = 90  # config says 90, env should win
+        with (
+            patch.dict("os.environ", {"WHISPERCPP_CHUNK_DURATION_S": "120"}),
+            patch("server.config.get_config", return_value=cfg),
+        ):
+            assert _resolve_chunk_duration_config() == 120
+
+    def test_chunk_duration_config_used_when_env_absent(self):
+        cfg = MagicMock()
+        cfg.get.return_value = 90
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("server.config.get_config", return_value=cfg),
+        ):
+            assert _resolve_chunk_duration_config() == 90
+
+    def test_chunk_duration_invalid_env_falls_back_to_default(self):
+        with patch.dict("os.environ", {"WHISPERCPP_CHUNK_DURATION_S": "not-a-number"}):
+            assert _resolve_chunk_duration_config() == _MAX_CHUNK_DURATION_S
+
+    def test_chunk_duration_floor_enforced(self):
+        with patch.dict("os.environ", {"WHISPERCPP_CHUNK_DURATION_S": "10"}):
+            assert _resolve_chunk_duration_config() == 60
+
+    def test_chunk_duration_defaults_when_no_source(self):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("server.config.get_config", side_effect=RuntimeError("no config")),
+        ):
+            assert _resolve_chunk_duration_config() == _MAX_CHUNK_DURATION_S
+
+    def test_timeout_config_env_wins(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "WHISPERCPP_INFERENCE_TIMEOUT_S": "500",
+                "WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND": "3.0",
+            },
+        ):
+            assert _resolve_timeout_config() == (500, 3.0)
+
+    def test_timeout_config_floors_enforced(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "WHISPERCPP_INFERENCE_TIMEOUT_S": "10",  # below 60 floor
+                "WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND": "0.1",  # below 0.5 floor
+            },
+        ):
+            assert _resolve_timeout_config() == (60, 0.5)
+
+    def test_timeout_config_defaults_when_no_source(self):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("server.config.get_config", side_effect=RuntimeError("no config")),
+        ):
+            assert _resolve_timeout_config() == (
+                _INFERENCE_TIMEOUT,
+                _TIMEOUT_SECONDS_PER_AUDIO_SECOND,
+            )
+
+    def test_load_resolves_config_into_instance_vars(
+        self, backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """load() must populate the chunk/timeout instance vars from env/config."""
+        mock_httpx.post.return_value = MagicMock(status_code=200)
+        with patch.dict(
+            "os.environ",
+            {
+                "WHISPERCPP_SERVER_URL": "http://test:8080",
+                "WHISPERCPP_CHUNK_DURATION_S": "300",
+                "WHISPERCPP_INFERENCE_TIMEOUT_S": "450",
+                "WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND": "1.5",
+            },
+        ):
+            backend.load("ggml-large-v3.bin", "cpu")
+        assert backend._max_chunk_duration_s == 300
+        assert backend._inference_timeout == 450
+        assert backend._timeout_seconds_per_audio_second == 1.5
 
 
 # ---------------------------------------------------------------------------
