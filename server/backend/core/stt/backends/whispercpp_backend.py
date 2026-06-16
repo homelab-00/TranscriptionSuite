@@ -25,10 +25,14 @@ from server.core.stt.backends.base import (
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SERVER_URL = "http://whisper-server:8080"
-_INFERENCE_TIMEOUT = 300  # seconds — long audio can take a while
-# TODO(GH-62-followup): scale _INFERENCE_TIMEOUT with audio duration. At
-# 300s a ~2h file on a slow Vulkan GPU can legitimately exceed the ceiling
-# and get mis-reported as a sidecar timeout. Provisional: max(300, dur*10).
+# Floor for the per-request httpx timeout. The actual budget scales with chunk
+# duration via ``_inference_timeout_for`` (GH #168 / #153): long audio is split
+# into ``_MAX_CHUNK_DURATION_S`` chunks in ``transcribe``, so each /inference POST
+# is bounded in size and time — replacing the old single un-chunked request whose
+# fixed 300s ceiling a 5h+ file could never satisfy.
+_INFERENCE_TIMEOUT = 300  # seconds — minimum per-request budget
+_MAX_CHUNK_DURATION_S = 10 * 60  # 10 min per /inference POST (mirrors the NeMo backends)
+_TIMEOUT_SECONDS_PER_AUDIO_SECOND = 2.0  # tolerate inference up to ~2× real-time
 _LOAD_TIMEOUT = 60
 
 # whisper-server's own default for beam_size (see
@@ -83,6 +87,18 @@ _SIDECAR_INFERENCE_TIMEOUT_MSG = (
     "the current timeout, or the Vulkan device is under heavy load. Try "
     "shorter audio or check the sidecar container logs."
 )
+
+
+def _inference_timeout_for(num_samples: int, sample_rate: int) -> int:
+    """Per-request httpx read-timeout (seconds), scaled to the chunk's duration.
+
+    Floored at ``_INFERENCE_TIMEOUT``. Because audio is chunked before it reaches
+    the sidecar (see ``WhisperCppBackend.transcribe``), every request is bounded,
+    so scaling the timeout to the chunk length lets a slow or heavily-loaded
+    Vulkan GPU finish without the client giving up prematurely (GH #168 / #153).
+    """
+    duration_s = num_samples / sample_rate if sample_rate > 0 else 0.0
+    return max(_INFERENCE_TIMEOUT, math.ceil(duration_s * _TIMEOUT_SECONDS_PER_AUDIO_SECOND))
 
 
 def _resolve_server_url() -> str:
@@ -342,6 +358,10 @@ class WhisperCppBackend(STTBackend):
         self._model_name: str | None = None
         self._loaded: bool = False
         self._client: httpx.Client | None = None
+        # Audio longer than this (seconds) is split into chunks before being
+        # sent to the sidecar (GH #168). Instance attribute so tests can shrink
+        # it; mirrors ``ParakeetBackend._max_chunk_duration_s``.
+        self._max_chunk_duration_s: int = _MAX_CHUNK_DURATION_S
 
     def _ensure_client(self) -> httpx.Client:
         """Return (or create) a persistent httpx.Client.
@@ -443,7 +463,7 @@ class WhisperCppBackend(STTBackend):
         vad_filter: bool = True,  # noqa: ARG002
         word_timestamps: bool = True,
         translation_target_language: str | None = None,  # noqa: ARG002
-        progress_callback: Callable[[int, int], None] | None = None,  # noqa: ARG002
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         # NOTE: the following parameters are part of the STTBackend contract
         # but have no equivalent on whisper.cpp's /inference HTTP form API
@@ -459,9 +479,9 @@ class WhisperCppBackend(STTBackend):
         #   * translation_target_language — whisper always translates to
         #     English; non-English targets are rejected upstream in
         #     capabilities.py::validate_translation_request.
-        #   * progress_callback — /inference is synchronous, so we cannot
-        #     emit incremental ticks. Caller will only see a single
-        #     final result after the whole file finishes.
+        # ``progress_callback`` IS honoured for chunked (long) audio — one tick
+        # per chunk (GH #168). Short audio goes out in a single synchronous POST
+        # and so still cannot report sub-call progress.
 
         if not self._loaded:
             raise RuntimeError("WhisperCppBackend: model is not loaded")
@@ -473,8 +493,6 @@ class WhisperCppBackend(STTBackend):
             # Nothing to transcribe — return an empty result instead of sending
             # a zero-sample WAV that some sidecar versions error on.
             return [], BackendTranscriptionInfo(language=None, language_probability=0.0)
-
-        wav_bytes = _audio_to_wav_bytes(audio, audio_sample_rate)
 
         data: dict[str, Any] = {
             "response_format": "verbose_json",
@@ -498,22 +516,75 @@ class WhisperCppBackend(STTBackend):
             # form value to that literal (see server.cpp ``req.has_file``).
             data["split_on_word"] = "true"
 
+        # Short audio: one synchronous POST (the original fast path).
+        total_samples = len(audio)
+        chunk_samples = int(self._max_chunk_duration_s * audio_sample_rate)
+        if chunk_samples <= 0 or total_samples <= chunk_samples:
+            return self._transcribe_chunk(audio, audio_sample_rate, data)
+
+        # Long audio: split into bounded chunks and stitch with time offsets so
+        # no single request must cover the whole file (GH #168). Mirrors
+        # ``ParakeetBackend._transcribe_long``.
+        num_chunks = math.ceil(total_samples / chunk_samples)
+        all_segments: list[BackendSegment] = []
+        offset = 0.0
+        first_info: BackendTranscriptionInfo | None = None
+        chunk_data = data
+        for i in range(num_chunks):
+            start = i * chunk_samples
+            chunk = audio[start : min(start + chunk_samples, total_samples)]
+            segments, info = self._transcribe_chunk(chunk, audio_sample_rate, chunk_data)
+
+            if first_info is None:
+                first_info = info
+                # When auto-detecting, lock onto chunk 0's language so a quiet or
+                # ambiguous later chunk can't flip mid-file. A user-pinned
+                # ``language`` is already in ``data`` and is left untouched.
+                if info.language and "language" not in data:
+                    chunk_data = {**data, "language": info.language}
+
+            for seg in segments:
+                seg.start += offset
+                seg.end += offset
+                for word in seg.words:
+                    word["start"] += offset
+                    word["end"] += offset
+
+            all_segments.extend(segments)
+            offset += len(chunk) / audio_sample_rate
+            if progress_callback is not None:
+                progress_callback(i + 1, num_chunks)
+
+        return all_segments, (
+            first_info or BackendTranscriptionInfo(language=None, language_probability=0.0)
+        )
+
+    def _transcribe_chunk(
+        self, chunk: np.ndarray, sample_rate: int, data: dict[str, Any]
+    ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
+        """POST a single (already-bounded) audio chunk to /inference and parse it.
+
+        The read-timeout scales with the chunk's duration (floored at
+        ``_INFERENCE_TIMEOUT``) so a slow Vulkan GPU does not false-time-out on
+        an otherwise-healthy request.
+        """
+        wav_bytes = _audio_to_wav_bytes(chunk, sample_rate)
+        timeout = _inference_timeout_for(len(chunk), sample_rate)
+
         client = self._ensure_client()
         try:
             resp = client.post(
                 f"{self._server_url}/inference",
                 files={"file": ("audio.wav", wav_bytes, "audio/wav")},
                 data=data,
-                timeout=_INFERENCE_TIMEOUT,
+                timeout=timeout,
             )
             resp.raise_for_status()
         except (httpx.NetworkError, OSError) as exc:
             raise RuntimeError(_SIDECAR_UNREACHABLE_MSG.format(url=self._server_url)) from exc
         except httpx.TimeoutException as exc:
             raise RuntimeError(
-                _SIDECAR_INFERENCE_TIMEOUT_MSG.format(
-                    url=self._server_url, timeout=_INFERENCE_TIMEOUT
-                )
+                _SIDECAR_INFERENCE_TIMEOUT_MSG.format(url=self._server_url, timeout=timeout)
             ) from exc
         except HttpxHTTPStatusError as exc:
             raise RuntimeError(

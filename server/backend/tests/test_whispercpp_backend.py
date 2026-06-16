@@ -8,11 +8,14 @@ import httpx
 import numpy as np
 import pytest
 from server.core.stt.backends.whispercpp_backend import (
+    _INFERENCE_TIMEOUT,
+    _MAX_CHUNK_DURATION_S,
     _MAX_SEGMENTS,
     _MAX_WORDS_PER_SEGMENT,
     WhisperCppBackend,
     _audio_to_wav_bytes,
     _coerce_float,
+    _inference_timeout_for,
     _resolve_server_url,
     _sanitize_for_error_preview,
     _sanitize_language_code,
@@ -1253,6 +1256,187 @@ class TestTranscribe:
         audio = np.zeros(16000, dtype=np.float32)
         with pytest.raises(RuntimeError, match="non-JSON"):
             loaded_backend.transcribe(audio)
+
+
+# ---------------------------------------------------------------------------
+# _inference_timeout_for — duration-scaled per-request timeout (GH #168)
+# ---------------------------------------------------------------------------
+
+
+class TestInferenceTimeoutFor:
+    def test_floors_at_inference_timeout(self):
+        # 10s of audio → 20s scaled, floored up to the 300s minimum.
+        assert _inference_timeout_for(10 * 16000, 16000) == _INFERENCE_TIMEOUT
+
+    def test_scales_above_floor(self):
+        # A 10-min chunk → 600 * 2.0 = 1200s, comfortably above the floor.
+        assert _inference_timeout_for(600 * 16000, 16000) == 1200
+
+    def test_zero_samples_is_floor(self):
+        assert _inference_timeout_for(0, 16000) == _INFERENCE_TIMEOUT
+
+    def test_zero_sample_rate_is_guarded(self):
+        # Must not divide by zero — fall back to the floor.
+        assert _inference_timeout_for(16000, 0) == _INFERENCE_TIMEOUT
+
+    def test_default_chunk_duration_is_ten_minutes(self):
+        assert _MAX_CHUNK_DURATION_S == 10 * 60
+
+
+# ---------------------------------------------------------------------------
+# WhisperCppBackend — long-audio client-side chunking (GH #168)
+# ---------------------------------------------------------------------------
+
+
+class TestTranscribeChunking:
+    """Audio longer than ``_max_chunk_duration_s`` is split into fixed-size
+    chunks, each POSTed to /inference separately, with per-chunk timestamps
+    offset back onto the global timeline. Ports the NeMo ``_transcribe_long``
+    pattern so each request is bounded in size and read-timeout (fixing the
+    300s ceiling on 5h+ files) and the backend can emit progress, which a
+    single synchronous /inference cannot.
+    """
+
+    @staticmethod
+    def _resp(payload: dict) -> MagicMock:
+        return MagicMock(status_code=200, json=MagicMock(return_value=payload))
+
+    def test_short_audio_uses_single_post(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """Audio at/below the chunk threshold keeps the original single-POST path."""
+        loaded_backend._max_chunk_duration_s = 600  # 1s of audio is well under
+        mock_httpx.post.return_value = self._resp({"segments": [], "language": "en"})
+        loaded_backend.transcribe(np.zeros(16000, dtype=np.float32))
+        assert mock_httpx.post.call_count == 1
+
+    def test_long_audio_splits_into_chunks(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """Audio longer than the threshold is split into ceil(total/chunk) POSTs."""
+        loaded_backend._max_chunk_duration_s = 1  # 1s chunks
+        mock_httpx.post.side_effect = [
+            self._resp({"segments": [], "language": "en"}) for _ in range(3)
+        ]
+        loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))
+        assert mock_httpx.post.call_count == 3
+
+    def test_chunk_timestamps_offset_to_global_timeline(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """Each chunk reports local times 0..x; the stitched output is offset by
+        the cumulative chunk duration (segment AND word level)."""
+        loaded_backend._max_chunk_duration_s = 1
+
+        def payload(i: int) -> dict:
+            return {
+                "language": "en",
+                "segments": [
+                    {
+                        "text": f" seg{i}",
+                        "start": 0.0,
+                        "end": 0.5,
+                        "words": [{"word": f" w{i}", "start": 0.0, "end": 0.5, "probability": 0.9}],
+                    }
+                ],
+            }
+
+        mock_httpx.post.side_effect = [self._resp(payload(i)) for i in range(3)]
+        segments, _ = loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))
+        assert [s.start for s in segments] == [0.0, 1.0, 2.0]
+        assert [s.end for s in segments] == [0.5, 1.5, 2.5]
+        assert segments[1].words[0]["start"] == 1.0
+        assert segments[1].words[0]["end"] == 1.5
+        assert segments[2].words[0]["start"] == 2.0
+
+    def test_progress_callback_fires_per_chunk(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [
+            self._resp({"segments": [], "language": "en"}) for _ in range(3)
+        ]
+        calls: list[tuple[int, int]] = []
+        loaded_backend.transcribe(
+            np.zeros(3 * 16000, dtype=np.float32),
+            progress_callback=lambda cur, total: calls.append((cur, total)),
+        )
+        assert calls == [(1, 3), (2, 3), (3, 3)]
+
+    def test_info_comes_from_first_chunk(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """Result language/probability is taken from the first chunk's detection."""
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [
+            self._resp({"language": "el", "detected_language_probability": 0.83, "segments": []}),
+            self._resp({"language": "en", "detected_language_probability": 0.10, "segments": []}),
+        ]
+        _, info = loaded_backend.transcribe(np.zeros(2 * 16000, dtype=np.float32), language=None)
+        assert info.language == "el"
+        assert info.language_probability == pytest.approx(0.83)
+
+    def test_detected_language_pins_later_chunks(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """When auto-detecting, chunk 0's language is forwarded to later chunks so a
+        quiet/ambiguous later chunk can't flip the language mid-file."""
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [
+            self._resp({"language": "el", "segments": []}) for _ in range(3)
+        ]
+        loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32), language=None)
+        calls = mock_httpx.post.call_args_list
+        assert "language" not in (calls[0].kwargs.get("data") or {})  # chunk 0 auto-detects
+        assert calls[1].kwargs["data"].get("language") == "el"  # pinned thereafter
+        assert calls[2].kwargs["data"].get("language") == "el"
+
+    def test_explicit_language_sent_to_every_chunk(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A user-pinned language is sent to every chunk and never overridden."""
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [
+            self._resp({"language": "en", "segments": []}) for _ in range(2)
+        ]
+        loaded_backend.transcribe(np.zeros(2 * 16000, dtype=np.float32), language="fr")
+        for call in mock_httpx.post.call_args_list:
+            assert call.kwargs["data"].get("language") == "fr"
+
+    def test_each_chunk_post_uses_scaled_timeout(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """Every chunk POST carries the duration-scaled timeout (floored at 300)."""
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [self._resp({"segments": []}) for _ in range(2)]
+        loaded_backend.transcribe(np.zeros(2 * 16000, dtype=np.float32))
+        expected = _inference_timeout_for(16000, 16000)  # 1s chunk → floored at 300
+        for call in mock_httpx.post.call_args_list:
+            assert call.kwargs.get("timeout") == expected
+
+    def test_single_post_timeout_scales_for_long_subthreshold_audio(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A 200s file (< 600s threshold) stays single-POST but its timeout scales past 300."""
+        mock_httpx.post.return_value = self._resp({"segments": []})
+        loaded_backend.transcribe(np.zeros(200 * 16000, dtype=np.float32))
+        assert mock_httpx.post.call_count == 1
+        assert mock_httpx.post.call_args.kwargs.get("timeout") == 400  # max(300, 200 * 2)
+
+    def test_empty_middle_chunk_still_advances_offset(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A silent middle chunk (no segments) still advances the offset clock so the
+        third chunk's segments land at the correct global time."""
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [
+            self._resp({"language": "en", "segments": [{"text": "a", "start": 0.0, "end": 0.5}]}),
+            self._resp({"language": "en", "segments": []}),  # silence
+            self._resp({"language": "en", "segments": [{"text": "c", "start": 0.0, "end": 0.5}]}),
+        ]
+        segments, _ = loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))
+        assert [s.text for s in segments] == ["a", "c"]
+        assert segments[1].start == 2.0  # offset by the two preceding 1s chunks
 
 
 # ---------------------------------------------------------------------------
