@@ -553,6 +553,7 @@ class WhisperCppBackend(STTBackend):
         word_timestamps: bool = True,
         translation_target_language: str | None = None,  # noqa: ARG002
         progress_callback: Callable[[int, int], None] | None = None,
+        cancellation_check: Callable[[], bool] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         # NOTE: the following parameters are part of the STTBackend contract
         # but have no equivalent on whisper.cpp's /inference HTTP form API
@@ -571,6 +572,10 @@ class WhisperCppBackend(STTBackend):
         # ``progress_callback`` IS honoured for chunked (long) audio — one tick
         # per chunk (GH #168). Short audio goes out in a single synchronous POST
         # and so still cannot report sub-call progress.
+        # ``cancellation_check`` IS honoured for chunked audio: it is polled
+        # between chunks (the engine forwards it because supports_cancellation()
+        # is True) so a long job stops within one chunk instead of after the
+        # whole file. A single /inference POST cannot be interrupted mid-flight.
 
         if not self._loaded:
             raise RuntimeError("WhisperCppBackend: model is not loaded")
@@ -620,6 +625,16 @@ class WhisperCppBackend(STTBackend):
         first_info: BackendTranscriptionInfo | None = None
         chunk_data = data
         for i in range(num_chunks):
+            if cancellation_check is not None and cancellation_check():
+                # Lazy import avoids a circular dependency (model_manager imports
+                # backend factories at module load).
+                from server.core.model_manager import TranscriptionCancelledError
+
+                logger.info(
+                    "WhisperCppBackend: transcription cancelled at chunk %d/%d", i + 1, num_chunks
+                )
+                raise TranscriptionCancelledError("Transcription cancelled by user")
+
             start = i * chunk_samples
             chunk = audio[start : min(start + chunk_samples, total_samples)]
             segments, info = self._transcribe_chunk(chunk, audio_sample_rate, chunk_data)
@@ -708,6 +723,10 @@ class WhisperCppBackend(STTBackend):
         return self._parse_response(result)
 
     def supports_translation(self) -> bool:
+        return True
+
+    def supports_cancellation(self) -> bool:
+        # transcribe() polls cancellation_check between chunks (GH #168 follow-up).
         return True
 
     @property

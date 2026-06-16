@@ -134,6 +134,17 @@ class STTBackend(abc.ABC):
     def supports_translation(self) -> bool:
         """Return True if this backend supports the ``translate`` task."""
 
+    def supports_cancellation(self) -> bool:
+        """Return True if ``transcribe`` accepts a ``cancellation_check`` and
+        honours it *mid-call* (e.g. between chunks of long audio).
+
+        Default ``False``: the engine then relies on its post-call cancellation
+        check (after ``transcribe`` returns). Backends that chunk long audio can
+        override this so the engine forwards ``cancellation_check`` and the job
+        can stop within a chunk instead of after the whole file.
+        """
+        return False
+
     @property
     def preferred_input_sample_rate_hz(self) -> int:
         """Preferred audio sample rate for this backend's input pipeline."""

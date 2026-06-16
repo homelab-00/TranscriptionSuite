@@ -223,6 +223,68 @@ class TestTranscribeGuardsRaiseActionableError:
         assert "Settings" in msg, "must tell the user where"
 
 
+# ── Cancellation forwarding (GH #168 follow-up) ──────────────────────────
+
+
+class TestCancellationForwarding:
+    """transcribe_audio forwards cancellation_check to backend.transcribe() ONLY
+    when the backend advertises supports_cancellation(); otherwise it relies on
+    the post-call segment-loop check."""
+
+    @staticmethod
+    def _make_recorder(backend):
+        import threading
+
+        rec = object.__new__(AudioToTextRecorder)
+        rec.transcription_lock = threading.Lock()
+        rec.model_name = "tiny.en"
+        rec.language = "en"
+        rec.task = "transcribe"
+        rec.translation_target_language = None
+        rec.initial_prompt = None
+        rec.beam_size = 5
+        rec.suppress_tokens = None
+        rec.faster_whisper_vad_filter = True
+        rec.normalize_audio = False
+        rec.ensure_sentence_starting_uppercase = False
+        rec.ensure_sentence_ends_with_period = False
+        rec.state = "transcribing"
+        rec._backend = backend
+        return rec
+
+    @staticmethod
+    def _backend(*, supports: bool):
+        b = MagicMock()
+        b.supports_cancellation.return_value = supports
+        b.transcribe.return_value = (
+            [],
+            types.SimpleNamespace(language="en", language_probability=0.9),
+        )
+        return b
+
+    def test_forwards_cancellation_when_backend_supports_it(self):
+        backend = self._backend(supports=True)
+        rec = self._make_recorder(backend)
+
+        def cb() -> bool:
+            return False
+
+        rec.transcribe_audio(
+            np.ones(16000, dtype=np.float32) * 0.1, sample_rate=16000, cancellation_check=cb
+        )
+        assert backend.transcribe.call_args.kwargs.get("cancellation_check") is cb
+
+    def test_omits_cancellation_when_backend_does_not_support_it(self):
+        backend = self._backend(supports=False)
+        rec = self._make_recorder(backend)
+        rec.transcribe_audio(
+            np.ones(16000, dtype=np.float32) * 0.1,
+            sample_rate=16000,
+            cancellation_check=lambda: False,
+        )
+        assert "cancellation_check" not in backend.transcribe.call_args.kwargs
+
+
 # ── TranscriptionResult ──────────────────────────────────────────────────
 
 

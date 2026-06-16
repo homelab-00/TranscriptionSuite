@@ -1532,6 +1532,79 @@ class TestWhisperCppConfigResolution:
 
 
 # ---------------------------------------------------------------------------
+# WhisperCppBackend — chunk-boundary cancellation (GH #168 follow-up)
+# ---------------------------------------------------------------------------
+
+
+class TestTranscribeCancellation:
+    @staticmethod
+    def _resp(payload: dict) -> MagicMock:
+        return MagicMock(status_code=200, json=MagicMock(return_value=payload))
+
+    def test_supports_cancellation_is_true(self, backend: WhisperCppBackend):
+        assert backend.supports_cancellation() is True
+
+    def test_cancellation_between_chunks_raises_and_stops(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A cancel that flips True before chunk 1 stops after chunk 0's POST."""
+        from server.core.model_manager import TranscriptionCancelledError
+
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [
+            self._resp({"segments": [], "language": "en"}) for _ in range(3)
+        ]
+        polls = {"n": 0}
+
+        def cancel() -> bool:
+            polls["n"] += 1
+            return polls["n"] > 1  # False before chunk 0, True before chunk 1
+
+        with pytest.raises(TranscriptionCancelledError):
+            loaded_backend.transcribe(
+                np.zeros(3 * 16000, dtype=np.float32), cancellation_check=cancel
+            )
+        assert mock_httpx.post.call_count == 1  # only chunk 0 was sent before the cancel
+
+    def test_cancellation_before_first_chunk_sends_nothing(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        from server.core.model_manager import TranscriptionCancelledError
+
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [
+            self._resp({"segments": [], "language": "en"}) for _ in range(3)
+        ]
+        with pytest.raises(TranscriptionCancelledError):
+            loaded_backend.transcribe(
+                np.zeros(3 * 16000, dtype=np.float32), cancellation_check=lambda: True
+            )
+        assert mock_httpx.post.call_count == 0
+
+    def test_none_cancellation_check_completes_all_chunks(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [
+            self._resp({"segments": [], "language": "en"}) for _ in range(3)
+        ]
+        loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))  # no cancellation_check
+        assert mock_httpx.post.call_count == 3
+
+    def test_cancellation_never_true_completes(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [
+            self._resp({"segments": [], "language": "en"}) for _ in range(3)
+        ]
+        loaded_backend.transcribe(
+            np.zeros(3 * 16000, dtype=np.float32), cancellation_check=lambda: False
+        )
+        assert mock_httpx.post.call_count == 3
+
+
+# ---------------------------------------------------------------------------
 # WhisperCppBackend — warmup
 # ---------------------------------------------------------------------------
 

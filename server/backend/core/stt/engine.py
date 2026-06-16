@@ -909,6 +909,13 @@ class AudioToTextRecorder:
                     else self.translation_target_language
                 )
 
+                # Forward cancellation to backends that honour it mid-call (e.g.
+                # chunked long-audio backends, which poll it between chunks).
+                # Other backends keep the post-call segment-loop check below.
+                cancel_kwargs = {}
+                if cancellation_check is not None and self._backend.supports_cancellation():
+                    cancel_kwargs["cancellation_check"] = cancellation_check
+
                 # Transcribe via backend
                 backend_segments, backend_info = self._backend.transcribe(
                     audio_data,
@@ -922,6 +929,7 @@ class AudioToTextRecorder:
                     word_timestamps=word_timestamps,
                     translation_target_language=effective_target,
                     progress_callback=progress_callback,
+                    **cancel_kwargs,
                 )
 
                 # Collect results
