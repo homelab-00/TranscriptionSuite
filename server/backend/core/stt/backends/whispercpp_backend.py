@@ -19,6 +19,7 @@ from httpx import HTTPStatusError as HttpxHTTPStatusError
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
+    PartialTranscriptionError,
     STTBackend,
 )
 
@@ -637,7 +638,29 @@ class WhisperCppBackend(STTBackend):
 
             start = i * chunk_samples
             chunk = audio[start : min(start + chunk_samples, total_samples)]
-            segments, info = self._transcribe_chunk(chunk, audio_sample_rate, chunk_data)
+            try:
+                segments, info = self._transcribe_chunk(chunk, audio_sample_rate, chunk_data)
+            except Exception as exc:
+                if first_info is None:
+                    # Failed on the very first chunk — nothing to salvage, so the
+                    # original error (timeout/unreachable/etc.) propagates unchanged.
+                    raise
+                # ≥1 chunk already succeeded: surface the completed transcript so
+                # the engine can persist it instead of losing the whole job
+                # (GH #168 follow-up; "avoid data loss at all costs").
+                logger.warning(
+                    "WhisperCppBackend: chunk %d/%d failed (%s); returning %.0fs partial transcript",
+                    i + 1,
+                    num_chunks,
+                    exc,
+                    offset,
+                )
+                raise PartialTranscriptionError(
+                    str(exc),
+                    segments=all_segments,
+                    info=first_info,
+                    completed_seconds=offset,
+                ) from exc
 
             if first_info is None:
                 first_info = info

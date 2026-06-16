@@ -1605,6 +1605,62 @@ class TestTranscribeCancellation:
 
 
 # ---------------------------------------------------------------------------
+# WhisperCppBackend — partial persistence on mid-chunk failure (GH #168 follow-up)
+# ---------------------------------------------------------------------------
+
+
+class TestTranscribePartialPersistence:
+    @staticmethod
+    def _resp(payload: dict) -> MagicMock:
+        return MagicMock(status_code=200, json=MagicMock(return_value=payload))
+
+    def test_mid_chunk_failure_raises_partial_with_completed_work(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """Chunks 0-1 succeed, chunk 2 times out → PartialTranscriptionError that
+        carries the completed (offset) transcript and the transcribed span."""
+        from server.core.stt.backends.base import PartialTranscriptionError
+
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [
+            self._resp({"language": "en", "segments": [{"text": "a", "start": 0.0, "end": 0.5}]}),
+            self._resp({"language": "en", "segments": [{"text": "b", "start": 0.0, "end": 0.5}]}),
+            httpx.ReadTimeout("sidecar died"),  # chunk 2 fails
+        ]
+        with pytest.raises(PartialTranscriptionError) as excinfo:
+            loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))
+        err = excinfo.value
+        assert [s.text for s in err.segments] == ["a", "b"]
+        assert err.segments[1].start == 1.0  # second chunk offset onto global timeline
+        assert err.completed_seconds == 2.0  # two 1s chunks finished
+        assert err.info.language == "en"
+
+    def test_first_chunk_failure_propagates_original_error(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A failure on the very first chunk is a total failure, not a partial."""
+        from server.core.stt.backends.base import PartialTranscriptionError
+
+        loaded_backend._max_chunk_duration_s = 1
+        mock_httpx.post.side_effect = [httpx.ReadTimeout("sidecar died")]  # chunk 0 fails
+        with pytest.raises(RuntimeError) as excinfo:
+            loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))
+        assert not isinstance(excinfo.value, PartialTranscriptionError)
+        assert "transcription timed out" in str(excinfo.value)
+
+    def test_short_audio_failure_is_not_partial(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """Single-POST (sub-threshold) failures keep the original error."""
+        from server.core.stt.backends.base import PartialTranscriptionError
+
+        mock_httpx.post.side_effect = httpx.ReadTimeout("boom")
+        with pytest.raises(RuntimeError) as excinfo:
+            loaded_backend.transcribe(np.zeros(16000, dtype=np.float32))  # 1s, single POST
+        assert not isinstance(excinfo.value, PartialTranscriptionError)
+
+
+# ---------------------------------------------------------------------------
 # WhisperCppBackend — warmup
 # ---------------------------------------------------------------------------
 

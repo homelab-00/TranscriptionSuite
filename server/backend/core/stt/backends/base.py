@@ -24,6 +24,35 @@ class BackendDependencyError(RuntimeError):
         self.remedy = remedy
 
 
+class PartialTranscriptionError(RuntimeError):
+    """Raised by a chunking backend when a chunk fails *after* ≥1 chunk succeeded.
+
+    Carries the transcript completed so far so the engine can persist it instead
+    of discarding the whole job (the project's "avoid data loss at all costs"
+    invariant). A failure on the very first chunk raises the original error
+    instead — there is nothing partial to salvage.
+
+    Attributes:
+        segments: BackendSegment list for the chunks that completed (timestamps
+            already offset onto the global timeline).
+        info: BackendTranscriptionInfo from the first completed chunk.
+        completed_seconds: Seconds of audio successfully transcribed.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        segments: list[BackendSegment],
+        info: BackendTranscriptionInfo,
+        completed_seconds: float,
+    ) -> None:
+        super().__init__(message)
+        self.segments = segments
+        self.info = info
+        self.completed_seconds = completed_seconds
+
+
 @dataclass
 class BackendSegment:
     """Normalized transcription segment returned by any backend."""
