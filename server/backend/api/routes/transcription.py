@@ -177,6 +177,14 @@ async def transcribe_audio(
         sacrificed for DB consistency. See project invariant in CLAUDE.md.
         """
         nonlocal _persisted
+        if result_dict.get("partial"):
+            # A chunking backend failed partway through; we still persist the
+            # completed transcript rather than lose it (GH #168 follow-up).
+            logger.warning(
+                "Persisting a PARTIAL transcript for job %s: %s",
+                sanitize_log_value(db_job_id),
+                sanitize_log_value(result_dict.get("partial_reason")),
+            )
         if db_job_id is None:
             return
         try:

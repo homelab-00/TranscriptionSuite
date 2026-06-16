@@ -34,6 +34,7 @@ import numpy as np
 import torch
 from scipy.signal import resample
 from server.config import get_config, resolve_main_transcriber_model
+from server.core.stt.backends.base import PartialTranscriptionError
 from server.core.stt.backends.factory import create_backend, detect_backend_type
 from server.core.stt.capabilities import validate_translation_request
 from server.core.stt.vad import VoiceActivityDetector
@@ -77,6 +78,12 @@ class TranscriptionResult:
     segments: list[dict[str, Any]] = field(default_factory=list)
     words: list[dict[str, Any]] = field(default_factory=list)
     num_speakers: int = 0
+    # Set when a chunking backend failed partway through long audio: ``segments``
+    # then hold only the chunks that completed, while ``duration`` remains the
+    # full audio length (the recording is that long; ``partial_reason`` conveys
+    # that the transcript is incomplete). GH #168 follow-up.
+    partial: bool = False
+    partial_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses."""
@@ -89,6 +96,8 @@ class TranscriptionResult:
             "duration": round(self.duration, 3),
             "num_speakers": self.num_speakers,
             "total_words": len(self.words),
+            "partial": self.partial,
+            "partial_reason": self.partial_reason,
             "metadata": {"num_segments": len(self.segments)},
         }
 
@@ -909,20 +918,46 @@ class AudioToTextRecorder:
                     else self.translation_target_language
                 )
 
+                # Forward cancellation to backends that honour it mid-call (e.g.
+                # chunked long-audio backends, which poll it between chunks).
+                # Other backends keep the post-call segment-loop check below.
+                cancel_kwargs = {}
+                if cancellation_check is not None and self._backend.supports_cancellation():
+                    cancel_kwargs["cancellation_check"] = cancellation_check
+
                 # Transcribe via backend
-                backend_segments, backend_info = self._backend.transcribe(
-                    audio_data,
-                    audio_sample_rate=sample_rate,
-                    language=lang,
-                    task=effective_task,
-                    beam_size=self.beam_size,
-                    initial_prompt=prompt,
-                    suppress_tokens=self.suppress_tokens,
-                    vad_filter=self.faster_whisper_vad_filter,
-                    word_timestamps=word_timestamps,
-                    translation_target_language=effective_target,
-                    progress_callback=progress_callback,
-                )
+                partial = False
+                partial_reason: str | None = None
+                try:
+                    backend_segments, backend_info = self._backend.transcribe(
+                        audio_data,
+                        audio_sample_rate=sample_rate,
+                        language=lang,
+                        task=effective_task,
+                        beam_size=self.beam_size,
+                        initial_prompt=prompt,
+                        suppress_tokens=self.suppress_tokens,
+                        vad_filter=self.faster_whisper_vad_filter,
+                        word_timestamps=word_timestamps,
+                        translation_target_language=effective_target,
+                        progress_callback=progress_callback,
+                        **cancel_kwargs,
+                    )
+                except PartialTranscriptionError as partial_exc:
+                    # A chunking backend failed partway through long audio. Keep
+                    # the completed chunks and fall through to formatting so the
+                    # partial transcript is persisted downstream rather than the
+                    # whole job being lost (GH #168 follow-up).
+                    partial = True
+                    partial_reason = str(partial_exc)
+                    backend_segments = partial_exc.segments
+                    backend_info = partial_exc.info
+                    logger.warning(
+                        "Transcription returned a partial result "
+                        "(%.0fs transcribed before failure): %s",
+                        partial_exc.completed_seconds,
+                        partial_reason,
+                    )
 
                 # Collect results
                 all_segments = []
@@ -930,8 +965,11 @@ class AudioToTextRecorder:
                 full_text_parts = []
 
                 for segment in backend_segments:
-                    # Check for cancellation between segments
-                    if cancellation_check and cancellation_check():
+                    # Check for cancellation between segments. Skip this once we
+                    # already hold a partial result — discarding salvaged work to
+                    # honour a late cancel would violate the "avoid data loss"
+                    # invariant; a chunk failure is already terminal (GH #168).
+                    if not partial and cancellation_check and cancellation_check():
                         from server.core.model_manager import (
                             TranscriptionCancelledError,
                         )
@@ -977,6 +1015,8 @@ class AudioToTextRecorder:
                     language=backend_info.language,
                     language_probability=backend_info.language_probability,
                     duration=len(audio_data) / sample_rate,
+                    partial=partial,
+                    partial_reason=partial_reason,
                 )
 
             except Exception as e:

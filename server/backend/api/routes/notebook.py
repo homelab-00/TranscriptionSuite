@@ -1085,6 +1085,13 @@ def _run_transcription(
 
         # Save to database
         # Use provided title if given, otherwise database falls back to filename stem
+        if getattr(result, "partial", False):
+            # A chunking backend failed partway through long audio; persist the
+            # completed transcript rather than lose it (GH #168 follow-up).
+            logger.warning(
+                "Saving a PARTIAL transcript for notebook recording: %s",
+                getattr(result, "partial_reason", None),
+            )
         clean_title = title.strip() if title else None
         transcription_backend = detect_backend_type(getattr(engine, "model_name", "") or "")
         recording_id = save_longform_to_database(

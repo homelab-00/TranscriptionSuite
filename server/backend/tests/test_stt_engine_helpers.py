@@ -223,6 +223,164 @@ class TestTranscribeGuardsRaiseActionableError:
         assert "Settings" in msg, "must tell the user where"
 
 
+# ── Cancellation forwarding (GH #168 follow-up) ──────────────────────────
+
+
+class TestCancellationForwarding:
+    """transcribe_audio forwards cancellation_check to backend.transcribe() ONLY
+    when the backend advertises supports_cancellation(); otherwise it relies on
+    the post-call segment-loop check."""
+
+    @staticmethod
+    def _make_recorder(backend):
+        import threading
+
+        rec = object.__new__(AudioToTextRecorder)
+        rec.transcription_lock = threading.Lock()
+        rec.model_name = "tiny.en"
+        rec.language = "en"
+        rec.task = "transcribe"
+        rec.translation_target_language = None
+        rec.initial_prompt = None
+        rec.beam_size = 5
+        rec.suppress_tokens = None
+        rec.faster_whisper_vad_filter = True
+        rec.normalize_audio = False
+        rec.ensure_sentence_starting_uppercase = False
+        rec.ensure_sentence_ends_with_period = False
+        rec.state = "transcribing"
+        rec._backend = backend
+        return rec
+
+    @staticmethod
+    def _backend(*, supports: bool):
+        b = MagicMock()
+        b.supports_cancellation.return_value = supports
+        b.transcribe.return_value = (
+            [],
+            types.SimpleNamespace(language="en", language_probability=0.9),
+        )
+        return b
+
+    def test_forwards_cancellation_when_backend_supports_it(self):
+        backend = self._backend(supports=True)
+        rec = self._make_recorder(backend)
+
+        def cb() -> bool:
+            return False
+
+        rec.transcribe_audio(
+            np.ones(16000, dtype=np.float32) * 0.1, sample_rate=16000, cancellation_check=cb
+        )
+        assert backend.transcribe.call_args.kwargs.get("cancellation_check") is cb
+
+    def test_omits_cancellation_when_backend_does_not_support_it(self):
+        backend = self._backend(supports=False)
+        rec = self._make_recorder(backend)
+        rec.transcribe_audio(
+            np.ones(16000, dtype=np.float32) * 0.1,
+            sample_rate=16000,
+            cancellation_check=lambda: False,
+        )
+        assert "cancellation_check" not in backend.transcribe.call_args.kwargs
+
+
+# ── Partial result handling (GH #168 follow-up) ──────────────────────────
+
+
+class TestPartialResultHandling:
+    """A PartialTranscriptionError from the backend becomes a flagged, *returned*
+    TranscriptionResult (not re-raised) so the route persists the partial."""
+
+    @staticmethod
+    def _make_recorder(backend):
+        import threading
+
+        rec = object.__new__(AudioToTextRecorder)
+        rec.transcription_lock = threading.Lock()
+        rec.model_name = "tiny.en"
+        rec.language = "en"
+        rec.task = "transcribe"
+        rec.translation_target_language = None
+        rec.initial_prompt = None
+        rec.beam_size = 5
+        rec.suppress_tokens = None
+        rec.faster_whisper_vad_filter = True
+        rec.normalize_audio = False
+        rec.ensure_sentence_starting_uppercase = False
+        rec.ensure_sentence_ends_with_period = False
+        rec.state = "transcribing"
+        rec._backend = backend
+        return rec
+
+    def test_partial_error_becomes_flagged_result(self):
+        from server.core.stt.backends.base import (
+            BackendSegment,
+            BackendTranscriptionInfo,
+            PartialTranscriptionError,
+        )
+
+        backend = MagicMock()
+        backend.supports_cancellation.return_value = False
+        backend.transcribe.side_effect = PartialTranscriptionError(
+            "chunk 3 timed out",
+            segments=[BackendSegment(text="hello", start=0.0, end=1.0, words=[])],
+            info=BackendTranscriptionInfo(language="en", language_probability=0.9),
+            completed_seconds=120.0,
+        )
+        rec = self._make_recorder(backend)
+
+        result = rec.transcribe_audio(np.ones(16000, dtype=np.float32) * 0.1, sample_rate=16000)
+
+        assert result.partial is True
+        assert "chunk 3 timed out" in result.partial_reason
+        assert result.text == "hello"
+        assert [s["text"] for s in result.segments] == ["hello"]
+        assert result.language == "en"
+
+    def test_successful_transcription_is_not_partial(self):
+        backend = MagicMock()
+        backend.supports_cancellation.return_value = False
+        backend.transcribe.return_value = (
+            [],
+            types.SimpleNamespace(language="en", language_probability=0.9),
+        )
+        rec = self._make_recorder(backend)
+
+        result = rec.transcribe_audio(np.ones(16000, dtype=np.float32) * 0.1, sample_rate=16000)
+
+        assert result.partial is False
+        assert result.partial_reason is None
+
+    def test_partial_result_survives_late_cancellation(self):
+        """A cancel racing the post-partial formatting loop must NOT discard the
+        salvaged partial transcript (avoid-data-loss invariant)."""
+        from server.core.stt.backends.base import (
+            BackendSegment,
+            BackendTranscriptionInfo,
+            PartialTranscriptionError,
+        )
+
+        backend = MagicMock()
+        backend.supports_cancellation.return_value = True
+        backend.transcribe.side_effect = PartialTranscriptionError(
+            "chunk 3 timed out",
+            segments=[BackendSegment(text="hello", start=0.0, end=1.0, words=[])],
+            info=BackendTranscriptionInfo(language="en", language_probability=0.9),
+            completed_seconds=120.0,
+        )
+        rec = self._make_recorder(backend)
+
+        result = rec.transcribe_audio(
+            np.ones(16000, dtype=np.float32) * 0.1,
+            sample_rate=16000,
+            cancellation_check=lambda: True,  # cancel is active during formatting
+        )
+
+        assert result.partial is True
+        assert result.text == "hello"  # partial kept despite the active cancel
+
+
 # ── TranscriptionResult ──────────────────────────────────────────────────
 
 
@@ -252,9 +410,21 @@ class TestTranscriptionResult:
             "duration",
             "num_speakers",
             "total_words",
+            "partial",
+            "partial_reason",
             "metadata",
         }
         assert set(d.keys()) == expected_keys
+
+    def test_partial_fields_default_off(self):
+        d = TranscriptionResult(text="x").to_dict()
+        assert d["partial"] is False
+        assert d["partial_reason"] is None
+
+    def test_partial_fields_carried_through_to_dict(self):
+        d = TranscriptionResult(text="x", partial=True, partial_reason="chunk 3 failed").to_dict()
+        assert d["partial"] is True
+        assert d["partial_reason"] == "chunk 3 failed"
 
     def test_to_dict_text(self):
         r = TranscriptionResult(text="Hello world")

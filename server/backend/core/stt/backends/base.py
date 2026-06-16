@@ -24,6 +24,35 @@ class BackendDependencyError(RuntimeError):
         self.remedy = remedy
 
 
+class PartialTranscriptionError(RuntimeError):
+    """Raised by a chunking backend when a chunk fails *after* ≥1 chunk succeeded.
+
+    Carries the transcript completed so far so the engine can persist it instead
+    of discarding the whole job (the project's "avoid data loss at all costs"
+    invariant). A failure on the very first chunk raises the original error
+    instead — there is nothing partial to salvage.
+
+    Attributes:
+        segments: BackendSegment list for the chunks that completed (timestamps
+            already offset onto the global timeline).
+        info: BackendTranscriptionInfo from the first completed chunk.
+        completed_seconds: Seconds of audio successfully transcribed.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        segments: list[BackendSegment],
+        info: BackendTranscriptionInfo,
+        completed_seconds: float,
+    ) -> None:
+        super().__init__(message)
+        self.segments = segments
+        self.info = info
+        self.completed_seconds = completed_seconds
+
+
 @dataclass
 class BackendSegment:
     """Normalized transcription segment returned by any backend."""
@@ -133,6 +162,17 @@ class STTBackend(abc.ABC):
     @abc.abstractmethod
     def supports_translation(self) -> bool:
         """Return True if this backend supports the ``translate`` task."""
+
+    def supports_cancellation(self) -> bool:
+        """Return True if ``transcribe`` accepts a ``cancellation_check`` and
+        honours it *mid-call* (e.g. between chunks of long audio).
+
+        Default ``False``: the engine then relies on its post-call cancellation
+        check (after ``transcribe`` returns). Backends that chunk long audio can
+        override this so the engine forwards ``cancellation_check`` and the job
+        can stop within a chunk instead of after the whole file.
+        """
+        return False
 
     @property
     def preferred_input_sample_rate_hz(self) -> int:
