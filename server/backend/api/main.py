@@ -74,6 +74,7 @@ from server.logging import get_logger, setup_logging  # noqa: E402
 
 _log_time("logging imported")
 
+from server.core.ca_trust import propagate_ca_trust  # noqa: E402
 from server.core.hf_token_guard import purge_non_ascii_hf_tokens  # noqa: E402
 from server.core.startup_events import emit_event  # noqa: E402
 
@@ -402,6 +403,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # load (huggingface_hub copies it verbatim into a latin-1 HTTP header).
     # Purge any invalid token now, before any model is loaded.
     purge_non_ascii_hf_tokens()
+
+    # GH #125: on a TLS-intercepting network, the HuggingFace model download uses
+    # `requests` (certifi), which ignores SSL_CERT_FILE/UV_NATIVE_TLS. When the
+    # operator opted in, mirror their CA bundle into REQUESTS_CA_BUNDLE et al. so
+    # the runtime model fetch trusts it too — before any model is loaded.
+    propagate_ca_trust()
 
     # Initialize database
     init_db()

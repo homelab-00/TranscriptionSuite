@@ -355,6 +355,42 @@ print(json.dumps(packages, sort_keys=True))
     return {}
 
 
+# Combined CA bundle that Debian/Ubuntu `update-ca-certificates` (re)writes; it
+# contains the system roots plus any corporate root CA dropped into
+# /usr/local/share/ca-certificates. Used to point git/requests/curl at a mounted
+# corporate CA on TLS-intercepting networks (GH #125).
+_SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+
+
+def _propagate_ca_bundle(env: dict[str, str]) -> None:
+    """Point git, requests and curl at a corporate CA bundle (GH #125).
+
+    uv honors ``UV_NATIVE_TLS`` / ``SSL_CERT_FILE``, but two other clients in the
+    install path do NOT:
+
+      * the ``git`` subprocess uv shells out to for git sources (e.g. VibeVoice)
+        reads ``GIT_SSL_CAINFO`` (libcurl);
+      * the ``requests`` client huggingface_hub uses at model-download time reads
+        ``REQUESTS_CA_BUNDLE`` / ``CURL_CA_BUNDLE`` (not ``SSL_CERT_FILE``).
+
+    So a user who followed the docs (``UV_NATIVE_TLS=true`` + mounted CA) would
+    still hit cert failures on git clones and model downloads. Mirror the CA into
+    those vars — only when the user has opted in via ``UV_NATIVE_TLS`` (trust the
+    container store) or an explicit ``SSL_CERT_FILE`` — without overriding any
+    value the user already set. Certificate verification stays ON; this only
+    changes WHICH trust anchor is consulted.
+    """
+    explicit = env.get("SSL_CERT_FILE")
+    if explicit:
+        ca = explicit
+    elif parse_bool_env("UV_NATIVE_TLS", False) and os.path.isfile(_SYSTEM_CA_BUNDLE):
+        ca = _SYSTEM_CA_BUNDLE
+    else:
+        return
+    for var in ("SSL_CERT_FILE", "GIT_SSL_CAINFO", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        env.setdefault(var, ca)
+
+
 def build_uv_sync_env(venv_dir: Path, cache_dir: Path) -> dict[str, str]:
     """Build environment variables used by runtime uv commands."""
     env = os.environ.copy()
@@ -369,6 +405,9 @@ def build_uv_sync_env(venv_dir: Path, cache_dir: Path) -> dict[str, str]:
     # verification stays ON — this never disables TLS checking.
     if parse_bool_env("UV_NATIVE_TLS", False):
         env["UV_NATIVE_TLS"] = "true"
+    # Extend that trust to the git + requests clients uv/huggingface_hub use,
+    # which ignore UV_NATIVE_TLS (GH #125).
+    _propagate_ca_bundle(env)
     return env
 
 
@@ -422,6 +461,14 @@ def run_dependency_sync(
     # multi-GB CUDA wheels). --frozen is dropped because uv.lock pins cu129 wheel
     # hashes; --index-strategy unsafe-best-match lets non-torch packages fall
     # back to PyPI (Issue #115).
+    #
+    # GH #125 (reopen): dropping --frozen makes uv re-resolve the *universal* lock,
+    # which includes the vibevoice_asr extra's git source — so uv would `git clone`
+    # VibeVoice for metadata even though vibevoice_asr is never a selected extra
+    # here. That clone breaks installs on TLS-intercepting networks. It is
+    # prevented declaratively by [tool.uv.dependency-metadata] for vibevoice in
+    # server/backend/pyproject.toml (uv uses the declared metadata instead of
+    # cloning). Keep that entry in sync with the pinned VibeVoice ref.
     variant_index_urls = {
         "cu126": "https://download.pytorch.org/whl/cu126",
         "cpu": "https://download.pytorch.org/whl/cpu",
@@ -458,14 +505,20 @@ _TLS_INTERCEPTION_MARKERS: tuple[str, ...] = (
     "self signed certificate",
     "certificate verify failed",
     "unable to get local issuer",
+    # git/libcurl signature (e.g. the VibeVoice git clone on a re-resolve) —
+    # different wording than uv's rustls error, same root cause (GH #125).
+    "server certificate verification failed",
+    "cafile:",
 )
 
 _TLS_INTERCEPTION_HINT = (
     "TLS certificate verification failed while downloading dependencies. Your "
     "network appears to intercept HTTPS (corporate proxy or antivirus HTTPS "
-    "scanning), so the package-index certificate is not trusted inside the "
-    "container. Fix: set UV_NATIVE_TLS=true to trust the system CA store, and/or "
-    "mount your organization's root CA into the container. See "
+    "scanning), so the certificate is not trusted inside the container. Fix: "
+    "(1) set UV_NATIVE_TLS=true so uv trusts the container CA store, and "
+    "(2) mount your organization's root CA into the container and run "
+    "update-ca-certificates so git (git-sourced deps) and HuggingFace model "
+    "downloads trust it too — UV_NATIVE_TLS alone does not cover them. See "
     "docs/deployment-guide.md (TLS interception / corporate network)."
 )
 

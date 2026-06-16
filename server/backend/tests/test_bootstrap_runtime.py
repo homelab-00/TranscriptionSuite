@@ -1881,3 +1881,133 @@ def test_main_still_trusts_baked_for_non_cpu_mismatch(
         module, monkeypatch, tmp_path, baked_variant="cu126", env_variant="cu129"
     )
     assert resolved == "cu126"
+
+
+# ---------------------------------------------------------------------------
+# GH #125 (reopen) — VibeVoice git-clone regression + git/CA TLS propagation
+# ---------------------------------------------------------------------------
+
+
+def test_detect_tls_interception_matches_git_libcurl_signature() -> None:
+    """The git clone of a git-sourced dep (e.g. VibeVoice) fails with a libcurl
+    signature distinct from uv's rustls error — both must be recognized (GH #125)."""
+    module = _load_bootstrap_module()
+    git_errors = [
+        # Explicit `+` (not adjacent-literal implicit concatenation) so this reads
+        # as one intentional git error message, not a missing-comma typo.
+        "fatal: unable to access '...': server certificate verification failed. "
+        + "CAfile: none CRLfile: none",
+        "SSL certificate problem: unable to get local issuer certificate",
+    ]
+    for text in git_errors:
+        assert module.detect_tls_interception(text) is True
+
+
+def test_build_uv_sync_env_propagates_explicit_ssl_cert_file_to_git_and_requests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit SSL_CERT_FILE must reach git (GIT_SSL_CAINFO) and requests
+    (REQUESTS_CA_BUNDLE/CURL_CA_BUNDLE), which ignore UV_NATIVE_TLS (GH #125)."""
+    module = _load_bootstrap_module()
+    ca = tmp_path / "corp-root-ca.pem"
+    ca.write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+    monkeypatch.setenv("SSL_CERT_FILE", str(ca))
+    for var in ("GIT_SSL_CAINFO", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        monkeypatch.delenv(var, raising=False)
+
+    env = module.build_uv_sync_env(venv_dir=tmp_path / "venv", cache_dir=tmp_path / "cache")
+
+    assert env["GIT_SSL_CAINFO"] == str(ca)
+    assert env["REQUESTS_CA_BUNDLE"] == str(ca)
+    assert env["CURL_CA_BUNDLE"] == str(ca)
+    assert env["SSL_CERT_FILE"] == str(ca)
+
+
+def test_build_uv_sync_env_uses_system_bundle_when_native_tls_opted_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With UV_NATIVE_TLS=true and the container's combined bundle present, point
+    git/requests/curl at it so a mounted corporate CA (update-ca-certificates) is
+    trusted by every install client, not just uv."""
+    module = _load_bootstrap_module()
+    monkeypatch.setenv("UV_NATIVE_TLS", "true")
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    for var in ("GIT_SSL_CAINFO", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(
+        module.os.path,
+        "isfile",
+        lambda p: p == module._SYSTEM_CA_BUNDLE,
+    )
+
+    env = module.build_uv_sync_env(venv_dir=tmp_path / "venv", cache_dir=tmp_path / "cache")
+
+    assert env["UV_NATIVE_TLS"] == "true"
+    assert env["GIT_SSL_CAINFO"] == module._SYSTEM_CA_BUNDLE
+    assert env["REQUESTS_CA_BUNDLE"] == module._SYSTEM_CA_BUNDLE
+    assert env["CURL_CA_BUNDLE"] == module._SYSTEM_CA_BUNDLE
+
+
+def test_build_uv_sync_env_no_ca_propagation_without_opt_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On a normal network (no UV_NATIVE_TLS, no SSL_CERT_FILE) the CA vars stay
+    untouched so requests keeps using certifi and behaviour is unchanged."""
+    module = _load_bootstrap_module()
+    for var in (
+        "UV_NATIVE_TLS",
+        "SSL_CERT_FILE",
+        "GIT_SSL_CAINFO",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+    env = module.build_uv_sync_env(venv_dir=tmp_path / "venv", cache_dir=tmp_path / "cache")
+
+    assert "GIT_SSL_CAINFO" not in env
+    assert "REQUESTS_CA_BUNDLE" not in env
+    assert "CURL_CA_BUNDLE" not in env
+
+
+def test_build_uv_sync_env_does_not_override_user_ca_vars(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A user who already set GIT_SSL_CAINFO must keep their value."""
+    module = _load_bootstrap_module()
+    ca = tmp_path / "corp.pem"
+    ca.write_text("x", encoding="utf-8")
+    user_git_ca = "/custom/git-ca.pem"
+    monkeypatch.setenv("SSL_CERT_FILE", str(ca))
+    monkeypatch.setenv("GIT_SSL_CAINFO", user_git_ca)
+    for var in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        monkeypatch.delenv(var, raising=False)
+
+    env = module.build_uv_sync_env(venv_dir=tmp_path / "venv", cache_dir=tmp_path / "cache")
+
+    assert env["GIT_SSL_CAINFO"] == user_git_ca  # not overridden
+    assert env["REQUESTS_CA_BUNDLE"] == str(ca)  # filled in from SSL_CERT_FILE
+
+
+def test_pyproject_declares_vibevoice_dependency_metadata() -> None:
+    """P0 regression guard for the reopen: the [tool.uv.dependency-metadata] entry
+    for vibevoice must exist so a whisper/nemo-only CPU re-resolve never git-clones
+    the VibeVoice source (GH #125). Removing it reintroduces the clone failure."""
+    import tomllib
+
+    repo_root = Path(__file__).resolve().parents[3]
+    pyproject = repo_root / "server/backend/pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    entries = data.get("tool", {}).get("uv", {}).get("dependency-metadata", [])
+    vibevoice = [e for e in entries if e.get("name") == "vibevoice"]
+    assert vibevoice, "missing [[tool.uv.dependency-metadata]] for vibevoice (GH #125)"
+    requires = vibevoice[0].get("requires-dist", [])
+    # torch is the dependency that links VibeVoice into the cu129->cpu re-resolve;
+    # it must be declared so uv resolves the node without cloning.
+    assert any(r == "torch" or r.startswith("torch") for r in requires), (
+        "vibevoice dependency-metadata must declare its torch dependency"
+    )
