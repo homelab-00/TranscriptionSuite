@@ -1,13 +1,5 @@
 {
   "mcpServers": {
-    "deepwiki": {
-      "type": "http",
-      "url": "https://mcp.deepwiki.com/mcp"
-    },
-    "exa": {
-      "type": "http",
-      "url": "https://mcp.exa.ai/mcp"
-    },
     "fetch": {
       "args": ["mcp-server-fetch"],
       "command": "uvx"
