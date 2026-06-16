@@ -1893,8 +1893,10 @@ def test_detect_tls_interception_matches_git_libcurl_signature() -> None:
     signature distinct from uv's rustls error — both must be recognized (GH #125)."""
     module = _load_bootstrap_module()
     git_errors = [
+        # Explicit `+` (not adjacent-literal implicit concatenation) so this reads
+        # as one intentional git error message, not a missing-comma typo.
         "fatal: unable to access '...': server certificate verification failed. "
-        "CAfile: none CRLfile: none",
+        + "CAfile: none CRLfile: none",
         "SSL certificate problem: unable to get local issuer certificate",
     ]
     for text in git_errors:
