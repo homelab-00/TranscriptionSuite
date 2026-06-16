@@ -87,13 +87,14 @@ On first container start, the server installs Python dependencies into `/runtime
 
 ### TLS interception / corporate network (`UnknownIssuer`)
 
-If first-run `uv sync` fails with `invalid peer certificate: UnknownIssuer` (or
-`certificate verify failed`), your network is intercepting HTTPS — a corporate
+If first-run `uv sync` fails with `invalid peer certificate: UnknownIssuer`,
+`certificate verify failed`, or `server certificate verification failed.
+CAfile: none` (a git clone), your network is intercepting HTTPS — a corporate
 proxy or antivirus "HTTPS scanning" feature presents a re-signed certificate
-whose root CA is trusted on your host but **not** inside the container. uv ships
-its own CA roots and ignores the system store by default, so it rejects the
-re-signed cert. The bootstrap now detects this and prints an actionable hint
-instead of a bare traceback.
+whose root CA is trusted on your host but **not** inside the container. Each
+client ships/uses its own trust store and rejects the re-signed cert. The
+bootstrap detects all of these signatures and prints an actionable hint instead
+of a bare traceback.
 
 Fix (certificate verification stays ON — never disable it):
 
@@ -111,9 +112,19 @@ Fix (certificate verification stays ON — never disable it):
    `UV_NATIVE_TLS=true`. Alternatively, mount the CA and set
    `SSL_CERT_FILE=/path/to/corp-root-ca.pem` in your own compose override.
 
+> **Why both steps matter.** `UV_NATIVE_TLS` only covers uv's own HTTPS client.
+> The `git` subprocess uv uses for git-sourced dependencies, and the `requests`
+> client HuggingFace uses to download models, ignore it — they read
+> `GIT_SSL_CAINFO` and `REQUESTS_CA_BUNDLE`/`CURL_CA_BUNDLE`. When you set
+> `UV_NATIVE_TLS=true` (or `SSL_CERT_FILE`), the bootstrap now propagates the CA
+> bundle to those clients automatically, so once your root CA is in the container
+> store (step 2) **git clones and model downloads trust it too**.
+
 CPU-only hosts hit this most often because the default install pulls multi-GB
 CUDA wheels. Selecting the **CPU profile** in the dashboard (or
 `PYTORCH_VARIANT=cpu`) skips those wheels and shrinks the download surface.
+A whisper/nemo-only CPU install no longer needs any git access — the VibeVoice
+git dependency is resolved from declared metadata, not cloned (GH #125).
 
 ## TLS / Remote Access
 

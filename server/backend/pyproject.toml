@@ -192,3 +192,45 @@ conflicts = [
         { extra = "whisper" },
     ],
 ]
+
+# GH #125 (reopen): pre-declare VibeVoice's package metadata so uv never has to
+# clone/build its git source to read dependencies during resolution.
+#
+# A whisper/nemo-only CPU (or legacy cu126) install drops `--frozen` and swaps the
+# pytorch index URL (see server/docker/bootstrap_runtime.py::run_dependency_sync).
+# Dropping --frozen forces uv to re-resolve the *universal* lock, which includes the
+# `vibevoice_asr` extra's git source — so uv shells out to `git` to fetch VibeVoice
+# for metadata even though vibevoice_asr is NOT a selected extra. On a TLS-intercepting
+# network (corporate proxy / antivirus) that git fetch fails with "server certificate
+# verification failed", breaking the install (uv #16110).
+#
+# Declaring the metadata here lets uv resolve the git node without fetching the source,
+# eliminating the unnecessary git dependency for the common case. The metadata is stable
+# because the git ref is SHA-pinned in [project.optional-dependencies].vibevoice_asr;
+# it mirrors VibeVoice's own pyproject [project.dependencies] at that commit. If the
+# pinned VibeVoice ref is ever bumped, refresh requires-dist to match.
+[[tool.uv.dependency-metadata]]
+name = "vibevoice"
+version = "1.0.0"
+requires-python = ">=3.9"
+requires-dist = [
+    "torch",
+    "transformers>=4.51.3,<5.0.0",
+    "accelerate",
+    "llvmlite>=0.40.0",
+    "numba>=0.57.0",
+    "diffusers",
+    "tqdm",
+    "numpy",
+    "scipy",
+    "librosa",
+    "ml-collections",
+    "absl-py",
+    "gradio",
+    "av",
+    "aiortc",
+    "uvicorn[standard]",
+    "fastapi",
+    "pydub",
+    "requests",
+]

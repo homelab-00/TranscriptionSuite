@@ -110,6 +110,15 @@ def is_mlx_parakeet_model(model_name: str) -> bool:
 
 def create_backend(model_name: str) -> STTBackend:
     """Instantiate the appropriate STTBackend for *model_name*."""
+    # GH #125 (failure B): neutralize any non-ASCII HF token before the backend
+    # makes its first HuggingFace request. The lifespan guard runs once at
+    # startup, but this is the single chokepoint every backend load passes
+    # through (preload AND lazy/hot-reload model switches), and the call is
+    # cheap + idempotent — so it closes the post-startup latin-1 crash window.
+    from server.core.hf_token_guard import purge_non_ascii_hf_tokens
+
+    purge_non_ascii_hf_tokens()
+
     backend_type = detect_backend_type(model_name)
     if backend_type == "parakeet":
         from server.core.stt.backends.parakeet_backend import ParakeetBackend
