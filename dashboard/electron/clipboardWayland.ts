@@ -1,10 +1,20 @@
 /**
  * Reliable clipboard write for Wayland.
  *
- * Electron's clipboard.writeText() silently drops writes when Chromium's
- * Ozone Wayland backend lacks a valid input event serial (the focused-window
- * requirement of wl_data_device.set_selection). This module adds a
- * write-verify-retry loop and falls back to wl-copy when Electron fails.
+ * Electron's clipboard.writeText() performs wl_data_device.set_selection, which
+ * the compositor only honors when the window holds a valid input-event serial —
+ * i.e. when it is focused. When the dashboard is UNFOCUSED (e.g. the user copied
+ * something in another app mid-recording and stopped via a global hotkey without
+ * refocusing the window), Chromium's Ozone Wayland backend has no serial and the
+ * write is SILENTLY DROPPED. Critically, clipboard.readText() still returns the
+ * just-written text from Chromium's in-process cache, so a write→readback
+ * self-check cannot detect the failure (verified on KDE Plasma 6 / Ozone Wayland).
+ *
+ * Therefore, on Wayland we prefer `wl-copy`, which sets the selection
+ * focus-independently via the ext-data-control protocol, and we confirm the
+ * result against the REAL clipboard via `wl-paste` — an independent channel that
+ * does not share Chromium's cache. Electron's native write is kept only as a
+ * fallback for systems without wl-clipboard installed.
  *
  * On non-Wayland platforms the native clipboard.writeText() is used directly.
  *
@@ -33,21 +43,84 @@ let wlCopyNegativeProbeAt = 0;
 /** Re-probe interval for negative results (60 seconds). */
 const WL_COPY_NEGATIVE_TTL_MS = 60_000;
 
+/** Whether the "wl-clipboard not installed" degraded-mode warning was emitted. */
+let degradedWaylandWarningEmitted = false;
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 const VERIFY_RETRY_DELAY_MS = 60;
+
+/** Poll interval while confirming the real clipboard via wl-paste. */
+const WL_PASTE_POLL_INTERVAL_MS = 30;
+
+/**
+ * Time budget for confirming a write landed on the real clipboard. wl-copy
+ * acquires the selection slightly after the child is spawned, so we poll rather
+ * than read once.
+ */
+const CLIPBOARD_CONFIRM_BUDGET_MS = 400;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Read clipboard text safely.
  * clipboard.readText() is synchronous in Electron's main process, so it
  * cannot be meaningfully wrapped in a Promise.race timeout. We wrap it in
  * a try/catch to gracefully handle any exceptions from the Ozone backend.
+ *
+ * NOTE: this reads through Chromium and shares its in-process cache, so it
+ * must NOT be used to verify a write succeeded on Wayland — use wl-paste.
  */
 function readClipboardSafe(): string | null {
   try {
     return clipboard.readText();
   } catch {
     return null;
+  }
+}
+
+/**
+ * Read the REAL system clipboard via wl-paste — an independent channel that
+ * does not share Chromium's clipboard cache. Returns the clipboard text, or
+ * null when wl-paste is unavailable / cannot read (so we cannot verify).
+ */
+async function readViaWlPaste(): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('wl-paste', ['--no-newline'], { timeout: 2000 });
+    return stdout;
+  } catch (err: unknown) {
+    // wl-paste exits non-zero on an empty clipboard ("Nothing is copied") but
+    // still yields stdout=''. Treat a present stdout as the value; ENOENT /
+    // timeout (no stdout) means we cannot read independently.
+    const e = err as { stdout?: unknown };
+    if (typeof e.stdout === 'string') return e.stdout;
+    return null;
+  }
+}
+
+/**
+ * Confirm the real system clipboard holds `text`, polling wl-paste until it
+ * matches or the budget elapses. Returns:
+ *   true  — confirmed on the real clipboard
+ *   false — wl-paste worked but never showed `text` within the budget
+ *   null  — wl-paste is unavailable (cannot verify independently)
+ */
+async function confirmClipboard(
+  text: string,
+  budgetMs = CLIPBOARD_CONFIRM_BUDGET_MS,
+): Promise<boolean | null> {
+  const deadline = Date.now() + budgetMs;
+  let everRead = false;
+  for (;;) {
+    const real = await readViaWlPaste();
+    if (real !== null) {
+      everRead = true;
+      if (real === text) return true;
+    }
+    if (Date.now() >= deadline) return everRead ? false : null;
+    await sleep(WL_PASTE_POLL_INTERVAL_MS);
   }
 }
 
@@ -124,7 +197,8 @@ function writeViaWlCopy(text: string): void {
 /**
  * Write text to the clipboard reliably.
  *
- * On Wayland: write → verify → retry once → fall back to wl-copy.
+ * On Wayland: wl-copy (focus-independent) → confirm via wl-paste → Electron
+ * fallback only when wl-clipboard is absent.
  * On other platforms: direct clipboard.writeText() (no overhead).
  */
 export async function reliableWriteText(text: string): Promise<void> {
@@ -133,34 +207,32 @@ export async function reliableWriteText(text: string): Promise<void> {
     return;
   }
 
-  // ── Attempt 1: Electron native write ──────────────────────────────────
-  clipboard.writeText(text);
-
-  const readback1 = readClipboardSafe();
-  if (readback1 === text) return;
-
-  // ── Attempt 2: Retry after short delay ────────────────────────────────
-  await new Promise((resolve) => setTimeout(resolve, VERIFY_RETRY_DELAY_MS));
-  clipboard.writeText(text);
-
-  const readback2 = readClipboardSafe();
-  if (readback2 === text) {
-    console.info('[Clipboard] Wayland: retry succeeded');
-    return;
-  }
-
-  // ── Attempt 3: wl-copy fallback ───────────────────────────────────────
+  // ── Primary path: wl-copy (works whether or not the window is focused) ──
   if (await hasWlCopy()) {
-    console.info('[Clipboard] Wayland: falling back to wl-copy');
     writeViaWlCopy(text);
-    return;
+    const confirmed = await confirmClipboard(text);
+    // true = verified on the real clipboard; null = wl-paste unavailable, so we
+    // cannot verify but trust wl-copy. Only fall through on an explicit false.
+    if (confirmed !== false) return;
+    console.warn(
+      '[Clipboard] Wayland: wl-copy write could not be confirmed on the real ' +
+        'clipboard; falling back to Electron native write.',
+    );
+  } else if (!degradedWaylandWarningEmitted) {
+    degradedWaylandWarningEmitted = true;
+    console.warn(
+      '[Clipboard] Wayland: wl-clipboard is not installed. Clipboard writes may ' +
+        'silently fail when the window is unfocused. Install wl-clipboard for ' +
+        'reliable clipboard support (e.g. sudo pacman -S wl-clipboard / ' +
+        'sudo apt install wl-clipboard).',
+    );
   }
 
-  console.warn(
-    '[Clipboard] Wayland: clipboard write could not be verified and wl-copy is not installed. ' +
-      'Install the wl-clipboard package for reliable clipboard support ' +
-      '(e.g. sudo pacman -S wl-clipboard / sudo apt install wl-clipboard).',
-  );
+  // ── Fallback: Electron native write (reliable only when window is focused) ──
+  clipboard.writeText(text);
+  if (readClipboardSafe() === text) return;
+  await sleep(VERIFY_RETRY_DELAY_MS);
+  clipboard.writeText(text);
 }
 
 /**
@@ -175,4 +247,5 @@ export function _resetClipboardState(): void {
   killPreviousWlCopy();
   wlCopyAvailable = null;
   wlCopyNegativeProbeAt = 0;
+  degradedWaylandWarningEmitted = false;
 }

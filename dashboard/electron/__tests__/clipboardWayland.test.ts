@@ -3,90 +3,108 @@
 /**
  * Tests for clipboardWayland.ts — reliable clipboard write on Wayland.
  *
- * Mocks Electron's clipboard, child_process (spawn/execFile), and the
- * isWayland() helper to test the verify-retry-fallback logic without
- * requiring a running Wayland session.
+ * These tests model the REAL Wayland failure mode proven on KDE/Plasma:
+ * when the Electron window is unfocused, clipboard.writeText() is silently
+ * dropped at the wl_data_device.set_selection layer (no input-event serial),
+ * yet clipboard.readText() still returns the just-written text from Chromium's
+ * in-process cache. A readback self-check therefore CANNOT detect the failure.
+ *
+ * To capture this faithfully the mocks separate two pieces of state:
+ *   - `realClipboard`  — the authoritative system clipboard (what wl-paste sees)
+ *   - `chromiumCache`  — what Electron's clipboard.readText() returns
+ * Electron's writeText updates the real clipboard ONLY when the (test) window
+ * is "focused"; wl-copy updates it unconditionally (focus-independent).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// ── Hoisted mocks ──────────────────────────────────────────────────────────
+// ── Mutable system model (driven per-test) ──────────────────────────────────
 
-const { mockClipboard, mockIsWayland, mockSpawn, mockExecFile } = vi.hoisted(() => {
-  const stdinWrite = vi.fn();
-  const stdinEnd = vi.fn();
-  const stdinOn = vi.fn();
-  const onHandler = vi.fn();
-  const killFn = vi.fn();
+const state = vi.hoisted(() => ({
+  realClipboard: '', // authoritative — returned by wl-paste
+  chromiumCache: '', // returned by clipboard.readText()
+  electronWriteReachesSystem: true, // false = window unfocused (masked write)
+  wlCopyAvailable: true,
+  wlPasteAvailable: true,
+}));
 
-  return {
-    mockClipboard: {
-      readText: vi.fn().mockReturnValue(''),
-      writeText: vi.fn(),
-    },
-    mockIsWayland: vi.fn().mockReturnValue(true),
-    mockSpawn: vi.fn().mockReturnValue({
-      stdin: { write: stdinWrite, end: stdinEnd, on: stdinOn },
-      on: onHandler,
-      kill: killFn,
+const { mockClipboard, mockIsWayland, mockSpawn, mockExecFile } = vi.hoisted(() => ({
+  mockClipboard: {
+    readText: vi.fn(() => state.chromiumCache),
+    writeText: vi.fn((t: string) => {
+      state.chromiumCache = t;
+      if (state.electronWriteReachesSystem) state.realClipboard = t;
     }),
-    mockExecFile: vi.fn(),
-  };
-});
-
-vi.mock('electron', () => ({
-  clipboard: mockClipboard,
+  },
+  mockIsWayland: vi.fn().mockReturnValue(true),
+  // wl-copy: spawn a child that takes ownership of the real clipboard when
+  // its stdin is closed (focus-independent, like ext-data-control).
+  mockSpawn: vi.fn((_cmd: string) => {
+    let buf = '';
+    return {
+      stdin: {
+        write: vi.fn((t: string) => {
+          buf = t;
+        }),
+        end: vi.fn(() => {
+          state.realClipboard = buf;
+        }),
+        on: vi.fn(),
+      },
+      on: vi.fn(),
+      kill: vi.fn(),
+    };
+  }),
+  mockExecFile: vi.fn(),
 }));
 
-vi.mock('child_process', () => ({
-  spawn: mockSpawn,
-  execFile: mockExecFile,
-}));
-
-vi.mock('../shortcutManager.js', () => ({
-  isWayland: mockIsWayland,
-}));
+vi.mock('electron', () => ({ clipboard: mockClipboard }));
+vi.mock('child_process', () => ({ spawn: mockSpawn, execFile: mockExecFile }));
+vi.mock('../shortcutManager.js', () => ({ isWayland: mockIsWayland }));
 
 import { reliableWriteText, _resetClipboardState } from '../clipboardWayland.js';
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── execFile mock: routes wl-copy --version (probe) and wl-paste (verify) ────
 
-/** Make `wl-copy --version` probe succeed. */
-function setWlCopyAvailable() {
+function enoent(): NodeJS.ErrnoException {
+  const e = new Error('spawn ENOENT') as NodeJS.ErrnoException;
+  e.code = 'ENOENT';
+  return e;
+}
+
+function installExecFileRouter() {
   mockExecFile.mockImplementation(
-    (_cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
-      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
-      if (typeof cb === 'function') {
-        (cb as (err: Error | null, result?: { stdout: string }) => void)(null, {
-          stdout: 'wl-copy 1.0',
-        });
+    (cmd: string, args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
+      const cb = (typeof optsOrCb === 'function' ? optsOrCb : maybeCb) as
+        | ((err: Error | null, result?: { stdout: string }) => void)
+        | undefined;
+      if (!cb) return;
+      if (cmd === 'wl-copy') {
+        return state.wlCopyAvailable ? cb(null, { stdout: 'wl-copy 1.0' }) : cb(enoent());
       }
+      if (cmd === 'wl-paste') {
+        return state.wlPasteAvailable
+          ? cb(null, { stdout: state.realClipboard })
+          : cb(enoent());
+      }
+      return cb(null, { stdout: '' });
     },
   );
 }
 
-/** Make `wl-copy --version` probe fail with ENOENT (binary not found). */
-function setWlCopyMissing() {
-  mockExecFile.mockImplementation(
-    (_cmd: string, _args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
-      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
-      if (typeof cb === 'function') {
-        const err = new Error('spawn wl-copy ENOENT') as NodeJS.ErrnoException;
-        err.code = 'ENOENT';
-        (cb as (err: Error | null) => void)(err);
-      }
-    },
-  );
-}
-
-// ── Tests ──────────────────────────────────────────────────────────────────
+// ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('reliableWriteText', () => {
   beforeEach(() => {
     _resetClipboardState();
     vi.clearAllMocks();
-    // Default: Wayland, Linux
+    state.realClipboard = 'OLD-CLIPBOARD';
+    state.chromiumCache = 'OLD-CLIPBOARD';
+    state.electronWriteReachesSystem = true;
+    state.wlCopyAvailable = true;
+    state.wlPasteAvailable = true;
     mockIsWayland.mockReturnValue(true);
+    installExecFileRouter();
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
   });
 
@@ -97,83 +115,78 @@ describe('reliableWriteText', () => {
 
   it('uses clipboard.writeText directly on non-Wayland (passthrough)', async () => {
     mockIsWayland.mockReturnValue(false);
-
     await reliableWriteText('hello');
-
     expect(mockClipboard.writeText).toHaveBeenCalledWith('hello');
-    expect(mockClipboard.writeText).toHaveBeenCalledTimes(1);
     expect(mockSpawn).not.toHaveBeenCalled();
+    expect(state.realClipboard).toBe('hello');
   });
 
   it('uses clipboard.writeText directly on non-Linux platform', async () => {
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-
     await reliableWriteText('hello');
-
     expect(mockClipboard.writeText).toHaveBeenCalledWith('hello');
-    expect(mockClipboard.writeText).toHaveBeenCalledTimes(1);
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
-  it('returns immediately when first write verifies (happy path)', async () => {
-    mockClipboard.readText.mockReturnValue('transcription result');
-
+  it('on Wayland, writes via wl-copy as the PRIMARY path (not Electron)', async () => {
     await reliableWriteText('transcription result');
-
-    expect(mockClipboard.writeText).toHaveBeenCalledTimes(1);
-    expect(mockClipboard.writeText).toHaveBeenCalledWith('transcription result');
-    expect(mockSpawn).not.toHaveBeenCalled();
-  });
-
-  it('retries once when first verification fails, succeeds on retry', async () => {
-    // First readText returns wrong value (write was dropped), second returns correct
-    mockClipboard.readText.mockReturnValueOnce('stale clipboard').mockReturnValueOnce('my text');
-
-    await reliableWriteText('my text');
-
-    expect(mockClipboard.writeText).toHaveBeenCalledTimes(2);
-    expect(mockSpawn).not.toHaveBeenCalled();
-  });
-
-  it('falls back to wl-copy when both Electron writes fail verification', async () => {
-    mockClipboard.readText.mockReturnValue('stale');
-    setWlCopyAvailable();
-
-    await reliableWriteText('important text');
-
-    expect(mockClipboard.writeText).toHaveBeenCalledTimes(2);
     expect(mockSpawn).toHaveBeenCalledWith('wl-copy', [], {
       stdio: ['pipe', 'ignore', 'ignore'],
     });
-    const spawnResult = mockSpawn.mock.results[0].value;
-    expect(spawnResult.stdin.write).toHaveBeenCalledWith('important text');
-    expect(spawnResult.stdin.end).toHaveBeenCalled();
+    const child = mockSpawn.mock.results[0].value;
+    expect(child.stdin.write).toHaveBeenCalledWith('transcription result');
+    expect(state.realClipboard).toBe('transcription result');
   });
 
-  it('logs warning when wl-copy is not installed and verification fails', async () => {
-    mockClipboard.readText.mockReturnValue('stale');
-    setWlCopyMissing();
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  // THE REGRESSION TEST for the reported bug.
+  it('succeeds even when the window is UNFOCUSED and Electron readback lies (masked write)', async () => {
+    // Window unfocused: Electron writeText is dropped at the system layer, but
+    // clipboard.readText() would still echo the text (the lie that defeated the
+    // old readback verify). wl-copy must be used and the REAL clipboard updated.
+    state.electronWriteReachesSystem = false;
 
-    await reliableWriteText('text');
+    await reliableWriteText('important transcription');
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('wl-copy is not installed'));
-    expect(mockSpawn).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
+    expect(mockSpawn).toHaveBeenCalledTimes(1); // wl-copy used
+    expect(state.realClipboard).toBe('important transcription'); // really landed
   });
 
-  it('kills previous wl-copy child before spawning new one', async () => {
-    mockClipboard.readText.mockReturnValue('stale');
-    setWlCopyAvailable();
+  it('does not rely on clipboard.readText() to decide success when wl-copy exists', async () => {
+    // Even if readText echoes (would have passed the old verify), wl-copy is used.
+    state.chromiumCache = 'echoed-by-chromium';
+    await reliableWriteText('echoed-by-chromium');
+    expect(mockSpawn).toHaveBeenCalled();
+  });
 
-    // First write — spawns wl-copy
+  it('kills the previous wl-copy child before spawning a new one', async () => {
     await reliableWriteText('first');
     const firstChild = mockSpawn.mock.results[0].value;
-
-    // Second write — should kill first child
     await reliableWriteText('second');
-
     expect(firstChild.kill).toHaveBeenCalled();
     expect(mockSpawn).toHaveBeenCalledTimes(2);
+    expect(state.realClipboard).toBe('second');
+  });
+
+  describe('when wl-clipboard is NOT installed', () => {
+    beforeEach(() => {
+      state.wlCopyAvailable = false;
+      state.wlPasteAvailable = false;
+    });
+
+    it('falls back to Electron clipboard.writeText and succeeds when focused', async () => {
+      state.electronWriteReachesSystem = true;
+      await reliableWriteText('via electron');
+      expect(mockClipboard.writeText).toHaveBeenCalledWith('via electron');
+      expect(mockSpawn).not.toHaveBeenCalled();
+      expect(state.realClipboard).toBe('via electron');
+    });
+
+    it('warns that wl-clipboard should be installed when the write cannot be verified', async () => {
+      state.electronWriteReachesSystem = false; // unfocused, no wl-copy → unrecoverable
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await reliableWriteText('cannot land');
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('wl-clipboard'));
+      warnSpy.mockRestore();
+    });
   });
 });
