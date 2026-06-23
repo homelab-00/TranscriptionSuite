@@ -62,7 +62,7 @@ vi.mock('electron', () => ({ clipboard: mockClipboard }));
 vi.mock('child_process', () => ({ spawn: mockSpawn, execFile: mockExecFile }));
 vi.mock('../shortcutManager.js', () => ({ isWayland: mockIsWayland }));
 
-import { reliableWriteText, _resetClipboardState } from '../clipboardWayland.js';
+import { reliableWriteText, reliableReadText, _resetClipboardState } from '../clipboardWayland.js';
 
 // ── execFile mock: routes wl-copy --version (probe) and wl-paste (verify) ────
 
@@ -188,5 +188,37 @@ describe('reliableWriteText', () => {
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('wl-clipboard'));
       warnSpy.mockRestore();
     });
+  });
+});
+
+describe('reliableReadText', () => {
+  beforeEach(() => {
+    _resetClipboardState();
+    vi.clearAllMocks();
+    state.realClipboard = 'REAL-VALUE';
+    state.chromiumCache = 'STALE-CHROMIUM-CACHE';
+    state.wlPasteAvailable = true;
+    mockIsWayland.mockReturnValue(true);
+    installExecFileRouter();
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+  });
+
+  it('reads the REAL clipboard via wl-paste on Wayland, not Chromium’s cache', async () => {
+    // The whole point: Chromium readText() can be stale/lie when unfocused.
+    expect(await reliableReadText()).toBe('REAL-VALUE');
+  });
+
+  it('falls back to clipboard.readText() when wl-paste is unavailable on Wayland', async () => {
+    state.wlPasteAvailable = false;
+    expect(await reliableReadText()).toBe('STALE-CHROMIUM-CACHE');
+  });
+
+  it('uses clipboard.readText() directly on non-Wayland', async () => {
+    mockIsWayland.mockReturnValue(false);
+    expect(await reliableReadText()).toBe('STALE-CHROMIUM-CACHE');
   });
 });
