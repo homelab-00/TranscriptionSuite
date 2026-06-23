@@ -49,6 +49,7 @@ import {
   isWaylandPortalActive,
 } from './shortcutManager.js';
 import { pasteAtCursor } from './pasteAtCursor.js';
+import { ensureDesktopFileInstalled } from './desktopIntegration.js';
 import { reliableWriteText, cleanupClipboard } from './clipboardWayland.js';
 import { WatcherManager } from './watcherManager.js';
 
@@ -72,6 +73,15 @@ const __dirname = path.dirname(__filename);
 // or if the wrapper is bypassed.
 if (process.platform === 'linux' && process.env.APPIMAGE) {
   app.commandLine.appendSwitch('no-sandbox');
+
+  // Install an XDG desktop file named after our portal app id into
+  // ~/.local/share/applications so the Wayland GlobalShortcuts host portal can
+  // resolve the app id. Registry.Register looks up "<app_id>.desktop" on the XDG
+  // applications path, but the AppImage's own copy lives off-path under
+  // /tmp/.mount_*. Done here at module load — as early as possible — so the
+  // portal's file monitor has the largest window to see the new file before the
+  // much-later shortcut registration calls Register. Non-fatal best-effort.
+  ensureDesktopFileInstalled({ version: app.getVersion() });
 }
 
 // GlobalShortcutsPortal Chromium feature flag removed — our D-Bus module
