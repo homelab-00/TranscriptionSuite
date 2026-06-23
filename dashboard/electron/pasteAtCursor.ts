@@ -7,11 +7,10 @@
  * Copyright 2025 CJ Pais — MIT License.
  */
 
-import { clipboard } from 'electron';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { isWayland } from './shortcutManager.js';
-import { reliableWriteText } from './clipboardWayland.js';
+import { reliableWriteText, reliableReadText } from './clipboardWayland.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -330,7 +329,9 @@ function sleep(ms: number): Promise<void> {
  */
 export async function pasteAtCursor(text: string, options?: PasteOptions): Promise<void> {
   const preserve = options?.preserveClipboard ?? true;
-  const originalClipboard = preserve ? clipboard.readText() : null;
+  // Snapshot via reliableReadText so we capture the REAL clipboard on Wayland
+  // (Electron's clipboard.readText() can be stale when the window is unfocused).
+  const originalClipboard = preserve ? await reliableReadText() : null;
   await reliableWriteText(text);
   try {
     await sleep(50);
@@ -338,10 +339,13 @@ export async function pasteAtCursor(text: string, options?: PasteOptions): Promi
     await sleep(100);
   } finally {
     if (preserve && originalClipboard !== null) {
-      // Restore uses direct clipboard.writeText — the paste has already been
-      // served, so reliability guarantees are not needed. Using reliableWriteText
-      // here would kill the wl-copy child that may still be serving the paste.
-      clipboard.writeText(originalClipboard);
+      // Restore the user's original clipboard via reliableWriteText so it also
+      // lands when the window is unfocused — a bare clipboard.writeText() is
+      // silently dropped on Wayland without an input-event serial (the same
+      // masked write that breaks auto-copy). The paste has already been served
+      // by the post-paste delay above, so it is safe to hand clipboard
+      // ownership to the restored content here.
+      await reliableWriteText(originalClipboard);
     }
   }
 }

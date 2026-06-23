@@ -20,14 +20,26 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Hoisted mocks ──────────────────────────────────────────────────────────
 
-const { mockExecFile, mockClipboard, mockIsWayland } = vi.hoisted(() => ({
-  mockExecFile: vi.fn(),
-  mockClipboard: {
-    readText: vi.fn().mockReturnValue('original-clipboard'),
-    writeText: vi.fn(),
-  },
-  mockIsWayland: vi.fn().mockReturnValue(false),
-}));
+const { mockExecFile, mockClipboard, mockIsWayland, mockReliableWriteText, mockReliableReadText } =
+  vi.hoisted(() => {
+    const mockClipboard = {
+      readText: vi.fn().mockReturnValue('original-clipboard'),
+      writeText: vi.fn(),
+    };
+    return {
+      mockExecFile: vi.fn(),
+      mockClipboard,
+      mockIsWayland: vi.fn().mockReturnValue(false),
+      // The clipboard module's reliable helpers are mocked but DELEGATE to the
+      // electron clipboard mock, so existing clipboard.{read,write}Text
+      // assertions keep working while we can also assert routing went through
+      // the focus-independent helpers (the fix).
+      mockReliableWriteText: vi.fn(async (text: string) => {
+        mockClipboard.writeText(text);
+      }),
+      mockReliableReadText: vi.fn(async () => mockClipboard.readText()),
+    };
+  });
 
 vi.mock('electron', () => ({
   clipboard: mockClipboard,
@@ -42,7 +54,8 @@ vi.mock('../shortcutManager.js', () => ({
 }));
 
 vi.mock('../clipboardWayland.js', () => ({
-  reliableWriteText: async (text: string) => mockClipboard.writeText(text),
+  reliableWriteText: mockReliableWriteText,
+  reliableReadText: mockReliableReadText,
 }));
 
 // ── Default mock: all commands succeed ─────────────────────────────────────
@@ -119,6 +132,31 @@ describe('[P2] pasteAtCursor', () => {
     const writeCalls = mockClipboard.writeText.mock.calls;
     expect(writeCalls).toHaveLength(1);
     expect(writeCalls[0][0]).toBe('paste me');
+  });
+
+  // Regression: on Wayland the preserve path must snapshot via the
+  // wl-paste-capable reader and restore via the focus-independent writer.
+  // A bare clipboard.readText()/writeText() is unreliable when the window is
+  // unfocused (the masked-write root cause). On the old code the snapshot used
+  // clipboard.readText() directly and the restore used clipboard.writeText()
+  // directly, so neither went through these helpers.
+  it('preserve path snapshots via reliableReadText and restores via reliableWriteText (Wayland)', async () => {
+    mockIsWayland.mockReturnValue(true);
+    mockClipboard.readText.mockReturnValue('user-original');
+    setAllCommandsSucceed();
+
+    vi.useFakeTimers();
+    const promise = pasteAtCursor('pasted text'); // preserveClipboard defaults to true
+    await vi.advanceTimersByTimeAsync(300);
+    await promise;
+    vi.useRealTimers();
+
+    // Snapshot read goes through the independent reader, not a bare clipboard.readText.
+    expect(mockReliableReadText).toHaveBeenCalledTimes(1);
+    // Both the text write AND the restore go through the focus-independent writer.
+    expect(mockReliableWriteText).toHaveBeenCalledTimes(2);
+    expect(mockReliableWriteText).toHaveBeenNthCalledWith(1, 'pasted text');
+    expect(mockReliableWriteText).toHaveBeenLastCalledWith('user-original');
   });
 
   it('throws descriptive error when no paste tools are available (Wayland)', async () => {

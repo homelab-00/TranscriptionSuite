@@ -236,6 +236,24 @@ export async function reliableWriteText(text: string): Promise<void> {
 }
 
 /**
+ * Read text from the clipboard reliably.
+ *
+ * On Wayland: read the REAL clipboard via wl-paste — an independent channel
+ * that does not share Chromium's cache, which can be stale or echo a previously
+ * dropped write when the window is unfocused (the read-side counterpart of the
+ * masked-write problem). Falls back to Electron's clipboard.readText() when
+ * wl-paste is unavailable. On other platforms: direct clipboard.readText().
+ */
+export async function reliableReadText(): Promise<string> {
+  if (process.platform !== 'linux' || !isWayland()) {
+    return clipboard.readText();
+  }
+  const viaWlPaste = await readViaWlPaste();
+  if (viaWlPaste !== null) return viaWlPaste;
+  return readClipboardSafe() ?? '';
+}
+
+/**
  * Clean up module state. Call on app quit to kill any lingering wl-copy child.
  */
 export function cleanupClipboard(): void {
