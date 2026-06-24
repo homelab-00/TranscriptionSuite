@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 from server import config
 
 # ── _deep_merge (pure) ───────────────────────────────────────────────────────
@@ -94,3 +96,31 @@ def test_overlay_path_points_at_user_file(tmp_path: Path):
     cfg = config.ServerConfig()
     assert cfg.overlay_path == tmp_path / "config.yaml"
     assert cfg.loaded_from == tmp_path / "config.yaml"
+
+
+# ── set() persists a sparse overlay ─────────────────────────────────────────
+
+
+def test_set_creates_sparse_overlay(tmp_path: Path):
+    cfg = config.ServerConfig()  # no overlay file yet
+    cfg.set("diarization", "parallel", value=False)
+    assert cfg.get("diarization", "parallel") is False
+    written = yaml.safe_load((tmp_path / "config.yaml").read_text())
+    assert written == {"diarization": {"parallel": False}}  # SPARSE, not full
+
+
+def test_set_merges_into_existing_sparse_overlay(tmp_path: Path):
+    (tmp_path / "config.yaml").write_text("diarization:\n  parallel: false\n", encoding="utf-8")
+    cfg = config.ServerConfig()
+    cfg.set("diarization", "embedding_batch_size", value=1)
+    written = yaml.safe_load((tmp_path / "config.yaml").read_text())
+    assert written == {"diarization": {"parallel": False, "embedding_batch_size": 1}}
+    # defaults still resolved for untouched keys
+    assert cfg.get("stt", "buffer_size") == 512
+
+
+def test_set_does_not_materialize_full_defaults(tmp_path: Path):
+    cfg = config.ServerConfig()
+    cfg.set("diarization", "parallel", value=True)
+    written = yaml.safe_load((tmp_path / "config.yaml").read_text())
+    assert "stt" not in written and "main_transcriber" not in written

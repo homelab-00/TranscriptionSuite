@@ -271,17 +271,17 @@ class ServerConfig:
         return self._overlay_path
 
     def set(self, *keys: str, value: Any) -> None:
-        """
-        Set a configuration value by nested key path and persist to disk.
+        """Set a nested config value and persist it as a sparse user overlay.
 
         Usage:
             config.set("diarization", "parallel", value=False)
 
-        Updates the in-memory config dict, then writes the full config
-        back to the YAML file it was loaded from.
+        Updates the in-memory effective config, then writes ONLY the changed
+        key into the overlay file (creating it if needed). Defaults files are
+        never modified.
 
         Raises:
-            RuntimeError: If no config file was loaded (nothing to write to).
+            RuntimeError: If no overlay path is known (nothing to write to).
             TypeError: If any key argument is not a string.
         """
         if not keys:
@@ -294,56 +294,68 @@ class ServerConfig:
                     f"for keys[{i}]: {repr(key)}."
                 )
 
-        if self._loaded_from is None:
-            raise RuntimeError("Cannot persist config: no config file was loaded")
+        if self._overlay_path is None:
+            raise RuntimeError("Cannot persist config: no overlay path")
 
-        # Update in-memory config
-        section = self.config
+        # 1. Update the in-memory effective config.
+        self._set_nested(self.config, keys, value)
+
+        # 2. Persist as a sparse overlay (load-or-create, set one key, dump).
+        overlay: dict[str, Any] = {}
+        if self._overlay_path.exists():
+            try:
+                overlay = self._read_yaml(self._overlay_path)
+            except (yaml.YAMLError, OSError):
+                overlay = {}
+        self._set_nested(overlay, keys, value)
+        self._dump_overlay(overlay)
+
+    @staticmethod
+    def _set_nested(target: dict[str, Any], keys: tuple[str, ...], value: Any) -> None:
+        """Set ``target[keys[0]][...][keys[-1]] = value``, creating dicts."""
+        section = target
         for key in keys[:-1]:
-            section = section.setdefault(key, {})
+            nxt = section.get(key)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                section[key] = nxt
+            section = nxt
         section[keys[-1]] = value
 
-        # Write back to disk
-        try:
-            with self._loaded_from.open("w", encoding="utf-8") as f:
-                yaml.dump(
-                    self.config,
-                    f,
-                    default_flow_style=False,
-                    allow_unicode=True,
-                    sort_keys=False,
-                )
-        except PermissionError:
-            fallback_candidates = [
-                Path("/user-config/config.yaml"),
-                Path("/data/config/config.yaml"),
-            ]
-            written = False
-            for fallback in fallback_candidates:
-                try:
-                    fallback.parent.mkdir(parents=True, exist_ok=True)
-                    with fallback.open("w", encoding="utf-8") as f:
-                        yaml.dump(
-                            self.config,
-                            f,
-                            default_flow_style=False,
-                            allow_unicode=True,
-                            sort_keys=False,
-                        )
-                    logger.warning(
-                        "Config file %s is read-only; persisted to fallback %s",
-                        self._loaded_from,
-                        fallback,
+    def _dump_overlay(self, overlay: dict[str, Any]) -> None:
+        """Dump *overlay* to the overlay path, with a read-only fallback chain."""
+        fallbacks = [
+            p
+            for p in (Path("/user-config/config.yaml"), Path("/data/config/config.yaml"))
+            if p != self._overlay_path
+        ]
+        last_error: Exception | None = None
+        for target in [self._overlay_path, *fallbacks]:
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open("w", encoding="utf-8") as f:
+                    yaml.dump(
+                        overlay,
+                        f,
+                        default_flow_style=False,
+                        allow_unicode=True,
+                        sort_keys=False,
                     )
-                    self._loaded_from = fallback
-                    written = True
-                    break
-                except Exception:
-                    continue
-            if not written:
-                raise PermissionError(
-                    f"Cannot write config to {self._loaded_from} or any fallback path"
-                ) from None
+                if target != self._overlay_path:
+                    logger.warning(
+                        "Config overlay %s is not writable; persisted to %s",
+                        self._overlay_path,
+                        target,
+                    )
+                    self._overlay_path = target
+                    self._loaded_from = target
+                return
+            except (PermissionError, OSError) as e:
+                last_error = e
+                continue
+        raise PermissionError(
+            f"Cannot write config overlay to {self._overlay_path} or any fallback path"
+        ) from last_error
 
     def get(self, *keys: str, default: Any = None) -> Any:
         """
