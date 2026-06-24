@@ -939,38 +939,21 @@ ipcMain.handle('app:ensureServerConfig', async () => {
 
   fs.mkdirSync(configDir, { recursive: true });
 
-  // Try to copy the default config from the server directory.
-  const candidates = [
-    // Dev mode: repo server/config.yaml
-    path.resolve(__dirname, '../../server/config.yaml'),
-    // Packaged: bundled extra resource
-    path.join(process.resourcesPath ?? '', 'config.yaml'),
-  ];
-
-  for (const src of candidates) {
-    try {
-      fs.copyFileSync(src, configPath, fs.constants.COPYFILE_EXCL);
-      return configPath;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        return configPath;
-      }
-      // Try next candidate.
-    }
-  }
-
-  // No template found — create a minimal stub so the file exists.
+  // Seed a SPARSE overlay stub. The backend deep-merges this onto the
+  // baked-in defaults, so the file should contain ONLY user overrides — not
+  // a full copy of the defaults (which would pin stale values over time).
   try {
     fs.writeFileSync(
       configPath,
       [
         '# ============================================================================',
-        '# TranscriptionSuite — User Configuration',
+        '# TranscriptionSuite — User Configuration (sparse overrides)',
         '# ============================================================================',
-        '# This file overrides the container defaults.',
-        '# See the full reference at: server/config.yaml in the project repository.',
+        '# Only the keys you set here override the server defaults; everything else',
+        '# is inherited from the bundled config.yaml. See the full reference at',
+        '# server/config.yaml in the project repository.',
         '#',
-        '# Uncomment and edit any section you want to customise.',
+        '# Uncomment and edit only what you want to change.',
         '',
         '# main_transcriber:',
         '#   model: "nvidia/parakeet-tdt-0.6b-v3"',
