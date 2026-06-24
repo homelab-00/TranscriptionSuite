@@ -118,8 +118,6 @@
 |--------|------|------|---------|
 | GET | `/api/admin/status` | admin | Detailed model/transcriber/diarization status |
 | PATCH | `/api/admin/diarization` | admin | Update diarization `parallel` setting |
-| GET | `/api/admin/config/full` | admin | Full `config.yaml` as a tree (comments/types) |
-| PATCH | `/api/admin/config` | admin | In-place config updates `{updates:{section.key:value}}` |
 | POST | `/api/admin/webhook/test` | admin | Send a test webhook (legacy config or supplied url/secret) |
 | POST | `/api/admin/models/load` | admin | Load a model (503 on missing backend dep) |
 | WS | `/api/admin/models/load/stream` | admin | Stream model-load progress |
