@@ -27,6 +27,26 @@ FALLBACK_MAIN_TRANSCRIBER_MODEL = "Systran/faster-whisper-large-v3"
 DISABLED_MODEL_SENTINEL = "__none__"
 
 
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge *overlay* onto *base*, returning a NEW dict.
+
+    - When a key holds a dict on BOTH sides, merge recursively.
+    - Otherwise the overlay value replaces the base value. Scalars, lists,
+      ``None`` and type mismatches all replace wholesale; lists are never
+      concatenated (every list in config.yaml is an atomic value-list).
+
+    Neither input is mutated.
+    """
+    merged: dict[str, Any] = dict(base)
+    for key, overlay_value in overlay.items():
+        base_value = merged.get(key)
+        if isinstance(base_value, dict) and isinstance(overlay_value, dict):
+            merged[key] = _deep_merge(base_value, overlay_value)
+        else:
+            merged[key] = overlay_value
+    return merged
+
+
 def get_user_config_dir() -> Path:
     """
     Get the user configuration directory based on platform.
