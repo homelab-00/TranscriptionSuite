@@ -97,115 +97,118 @@ class ServerConfig:
         self.config: dict[str, Any] = {}
         self._config_path = config_path
         self._loaded_from: Path | None = None
+        self._defaults_path: Path | None = None
+        self._overlay_path: Path | None = None
         self._load_config()
 
-    def _find_config_file(self) -> Path | None:
-        """
-        Find the configuration file in priority order.
+    @staticmethod
+    def _is_readable(path: Path) -> bool:
+        """Return True when *path* is an existing, readable file."""
+        if not (path.exists() and path.is_file()):
+            return False
+        try:
+            with path.open("r", encoding="utf-8"):
+                return True
+        except (PermissionError, OSError):
+            return False
 
-        Priority:
-            1. Explicitly provided path
-            2. User config directory (platform-specific or Docker mount)
-            3. /app/config.yaml (Docker container default)
-            4. server/config.yaml (development)
-            5. ./config.yaml (current directory fallback)
-        """
-        if self._config_path and self._config_path.exists():
-            return self._config_path
+    @staticmethod
+    def _read_yaml(path: Path) -> dict[str, Any]:
+        """Parse *path* as a YAML mapping. Empty file -> {}."""
+        with path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            raise yaml.YAMLError(
+                f"Config root must be a mapping, got {type(data).__name__}: {path}"
+            )
+        return data
 
-        # Build search paths in priority order
-        user_config_dir = get_user_config_dir()
+    def _defaults_candidates(self) -> list[Path]:
+        """Readable baked-in default config files (NON-user), priority order."""
         candidates = [
-            user_config_dir / "config.yaml",  # User custom config
-            Path("/app/config.yaml"),  # Docker container default
-            Path(__file__).parent.parent / "config.yaml",  # server/config.yaml
-            Path.cwd() / "config.yaml",  # Current directory fallback
+            Path("/app/config.yaml"),  # Docker image default
+            Path(__file__).parent.parent / "config.yaml",  # server/config.yaml (dev)
+            Path.cwd() / "config.yaml",  # current-directory fallback
         ]
+        return [p for p in candidates if self._is_readable(p)]
 
-        for path in candidates:
-            if path.exists() and path.is_file():
-                # Check if file is readable by attempting to open it
-                try:
-                    with path.open("r", encoding="utf-8"):
-                        pass
-                    return path
-                except (PermissionError, OSError):
-                    # Skip unreadable config files and try next candidate
-                    continue
-
-        return None
-
-    def _find_config_candidates(self) -> list[Path]:
-        """Return readable config file candidates in priority order."""
-        if self._config_path:
-            if self._config_path.exists():
-                try:
-                    with self._config_path.open("r", encoding="utf-8"):
-                        pass
-                    return [self._config_path]
-                except (PermissionError, OSError):
-                    return []
-            return []
-
-        user_config_dir = get_user_config_dir()
-        candidates = [
-            user_config_dir / "config.yaml",
-            Path("/app/config.yaml"),
-            Path(__file__).parent.parent / "config.yaml",
-            Path.cwd() / "config.yaml",
-        ]
-
-        readable: list[Path] = []
-        for path in candidates:
-            if not (path.exists() and path.is_file()):
-                continue
+    def _load_defaults(
+        self,
+    ) -> tuple[dict[str, Any], Path | None, list[tuple[Path, Exception]]]:
+        """Load the highest-priority readable, parseable defaults file."""
+        errors: list[tuple[Path, Exception]] = []
+        for path in self._defaults_candidates():
             try:
-                with path.open("r", encoding="utf-8"):
-                    pass
-                readable.append(path)
-            except (PermissionError, OSError):
-                continue
+                return self._read_yaml(path), path, errors
+            except (yaml.YAMLError, OSError) as e:
+                print(f"ERROR: Could not load defaults config {path}: {e}")
+                errors.append((path, e))
+        return {}, None, errors
 
-        return readable
+    def _load_overlay(self) -> tuple[dict[str, Any], Path | None]:
+        """Load the sparse user overlay file if present and valid."""
+        path = get_user_config_dir() / "config.yaml"
+        if not self._is_readable(path):
+            return {}, None
+        try:
+            return self._read_yaml(path), path
+        except (yaml.YAMLError, OSError) as e:
+            print(f"WARNING: Ignoring invalid user config overlay {path}: {e}")
+            return {}, None
 
     def _load_config(self) -> None:
-        """Load configuration from file."""
-        candidates = self._find_config_candidates()
+        """Load configuration.
 
-        if not candidates:
+        Normal mode: deep-merge a sparse user overlay onto the baked-in
+        defaults (defaults < overlay < environment variables). Explicit
+        ``config_path`` mode: load that single file as-is (no merge).
+        """
+        if self._config_path is not None:
+            if not self._is_readable(self._config_path):
+                raise RuntimeError(
+                    f"Configuration file not found or unreadable: {self._config_path}"
+                )
+            try:
+                self.config = self._read_yaml(self._config_path)
+            except (yaml.YAMLError, OSError) as e:
+                raise RuntimeError(
+                    f"Failed to load configuration from {self._config_path}: {e}"
+                ) from e
+            self._defaults_path = self._config_path
+            self._overlay_path = self._config_path
+            self._loaded_from = self._config_path
+            self._apply_env_overrides()
+            print(f"Loaded configuration from: {self._config_path}")
+            return
+
+        base_dict, base_path, base_errors = self._load_defaults()
+        overlay_dict, overlay_path = self._load_overlay()
+
+        if base_path is None and overlay_path is None:
+            details = "\n".join(f"  - {p}: {e}" for p, e in base_errors)
             raise RuntimeError(
-                "No configuration file found. "
-                "Expected one of:\n"
-                f"  - {get_user_config_dir() / 'config.yaml'} (user config)\n"
-                "  - /app/config.yaml (Docker default)\n"
-                "  - server/config.yaml (development)\n"
-                "  - ./config.yaml (current directory)"
+                "No configuration file found. Expected baked-in defaults at "
+                "/app/config.yaml or server/config.yaml, or a user overlay at "
+                f"{get_user_config_dir() / 'config.yaml'}." + ("\n" + details if details else "")
             )
 
-        errors: list[tuple[Path, Exception]] = []
-        for config_file in candidates:
-            try:
-                with config_file.open("r", encoding="utf-8") as f:
-                    self.config = yaml.safe_load(f) or {}
-                self._loaded_from = config_file
-                if errors:
-                    print(
-                        "WARNING: Skipped invalid config file(s): "
-                        + ", ".join(str(path) for path, _ in errors)
-                    )
-                self._apply_env_overrides()
-                print(f"Loaded configuration from: {config_file}")
-                return
-            except (yaml.YAMLError, OSError) as e:
-                print(f"ERROR: Could not load config file {config_file}: {e}")
-                errors.append((config_file, e))
-                if self._config_path:
-                    break
+        if base_path is None:
+            print(
+                "WARNING: No valid defaults config found; using user overlay "
+                f"only ({overlay_path})."
+            )
 
-        if errors:
-            details = "\n".join(f"  - {path}: {err}" for path, err in errors)
-            raise RuntimeError("Failed to load configuration. Tried:\n" + details)
-        raise RuntimeError("Failed to load configuration for unknown reasons.")
+        self.config = _deep_merge(base_dict, overlay_dict)
+        self._defaults_path = base_path
+        self._overlay_path = overlay_path or (get_user_config_dir() / "config.yaml")
+        self._loaded_from = self._overlay_path
+        self._apply_env_overrides()
+        print(
+            f"Loaded configuration: defaults={base_path}, "
+            f"overlay={overlay_path if overlay_path else '(none)'}"
+        )
 
     _ENV_MODEL_OVERRIDES = (
         ("MAIN_TRANSCRIBER_MODEL", ("main_transcriber", "model")),
@@ -256,6 +259,16 @@ class ServerConfig:
     def loaded_from(self) -> Path | None:
         """Return the path of the loaded configuration file."""
         return self._loaded_from
+
+    @property
+    def defaults_path(self) -> Path | None:
+        """Path of the baked-in defaults file used as the merge base."""
+        return self._defaults_path
+
+    @property
+    def overlay_path(self) -> Path | None:
+        """Path of the writable user overlay file (where set() persists)."""
+        return self._overlay_path
 
     def set(self, *keys: str, value: Any) -> None:
         """
