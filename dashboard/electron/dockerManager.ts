@@ -2389,6 +2389,13 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   composeEnv['STARTUP_EVENTS_DIR'] = eventsDir;
   _startupEventsFilePath = eventsFile;
 
+  // Mount the user's config.yaml into the container so dashboard-edited
+  // settings (beyond the env-bridged model keys) actually reach the server.
+  // The backend deep-merges this sparse overlay onto its baked-in defaults;
+  // env bridges (MAIN_TRANSCRIBER_MODEL, etc.) still win on top. The compose
+  // volume `${USER_CONFIG_DIR:-./.empty}:/user-config` resolves to this path.
+  composeEnv['USER_CONFIG_DIR'] = app.getPath('userData');
+
   // Rotate the persistent server log — adds a session marker and trims old sessions.
   rotateServerLog();
 
