@@ -222,8 +222,9 @@ def test_whisperx_diarization_path_uses_compat_transcribe(monkeypatch) -> None:
     diarize_mod = types.ModuleType("whisperx.diarize")
 
     class FakeDiarizationPipeline:
-        def __init__(self, use_auth_token, device) -> None:
-            assert use_auth_token == "hf_test"
+        # Mirror the real whisperx>=3.8 signature so future kwarg drift fails loudly (GH #152).
+        def __init__(self, model_name=None, token=None, device="cpu", cache_dir=None) -> None:
+            assert token == "hf_test"
             assert device == "cpu"
 
         def __call__(self, audio, **kwargs):
@@ -464,7 +465,8 @@ def test_whisperx_diarization_forwards_initial_prompt_and_suppress_tokens(monkey
     diarize_mod = types.ModuleType("whisperx.diarize")
 
     class FakeDiarizationPipeline:
-        def __init__(self, use_auth_token, device) -> None:
+        # Mirror the real whisperx>=3.8 signature so future kwarg drift fails loudly (GH #152).
+        def __init__(self, model_name=None, token=None, device="cpu", cache_dir=None) -> None:
             pass
 
         def __call__(self, audio, **kwargs):
@@ -533,7 +535,8 @@ def test_whisperx_diarization_progress_callback_failure_does_not_discard_result(
     diarize_mod = types.ModuleType("whisperx.diarize")
 
     class FakeDiarizationPipeline:
-        def __init__(self, use_auth_token, device) -> None:
+        # Mirror the real whisperx>=3.8 signature so future kwarg drift fails loudly (GH #152).
+        def __init__(self, model_name=None, token=None, device="cpu", cache_dir=None) -> None:
             pass
 
         def __call__(self, audio, **kwargs):
@@ -572,3 +575,36 @@ def test_configure_decode_options_creates_instance_copy() -> None:
     # backend2 should still have the empty class default
     assert backend2._decode_options == {}
     assert backend1._decode_options == {"no_speech_threshold": 0.1}
+
+
+def test_real_diarization_pipeline_accepts_token_kwarg() -> None:
+    """Guard against whisperx renaming the HF-token kwarg again (GH #152).
+
+    The production call site constructs ``DiarizationPipeline(token=..., device=...)``.
+    whisperx >= 3.8 renamed this kwarg from ``use_auth_token`` to ``token``; passing the
+    old name raised TypeError, which the route silently swallowed and degraded to the
+    fragile sequential pyannote path. This test introspects the *real* signature so a
+    future rename fails loudly wherever whisperx is actually installed (the Docker image /
+    integration CI), rather than silently disabling single-pass diarization again.
+
+    Skipped automatically in the lightweight unit env where whisperx is not installed.
+    """
+    import inspect
+
+    diarize = pytest.importorskip("whisperx.diarize")
+
+    sig = inspect.signature(diarize.DiarizationPipeline.__init__)
+
+    # The exact kwargs the production code passes must bind without error.
+    try:
+        sig.bind_partial(token="hf_test", device="cpu")
+    except TypeError as exc:  # pragma: no cover - only hit on a real upstream rename
+        pytest.fail(
+            "whisperx.diarize.DiarizationPipeline no longer accepts (token=, device=); "
+            f"update whisperx_backend.py to the new signature (GH #152): {exc}"
+        )
+
+    # And the old name must not silently come back without us noticing.
+    assert "use_auth_token" not in sig.parameters, (
+        "whisperx reverted to 'use_auth_token'; update the call site accordingly (GH #152)."
+    )

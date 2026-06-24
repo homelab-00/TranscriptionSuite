@@ -343,7 +343,10 @@ class WhisperXBackend(STTBackend):
 
         # 3. Diarize
         logger.info("WhisperX: running diarization")
-        diarize_model = DiarizationPipeline(use_auth_token=token, device=self._device)
+        # whisperx >= 3.8 renamed the HuggingFace-token kwarg from ``use_auth_token``
+        # to ``token`` (GH #152). Passing the old name raises TypeError, which the
+        # route silently swallows and degrades to the fragile sequential pyannote path.
+        diarize_model = DiarizationPipeline(token=token, device=self._device)
 
         diarize_kwargs: dict[str, Any] = {}
         if num_speakers is not None:
