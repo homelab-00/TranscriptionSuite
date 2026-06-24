@@ -22,12 +22,21 @@ dependencies = [
     # Web / API
     "fastapi>=0.135.1",
     "uvicorn[standard]>=0.41.0",
-    "python-multipart>=0.0.27",
+    "python-multipart>=0.0.31",
     "pydantic>=2.12.5",
-    "aiohttp>=3.14.0",
+    "aiohttp>=3.14.1",
     "httpx>=0.28.1",
     "websockets>=16.0",
     # Core ML / Transcription
+    # NOTE (Dependabot): torch is held at 2.8.x by whisperx (the `whisper`
+    # extra), which hard-pins torch>=2.8.0,<2.9. This blocks the patched
+    # 2.9.1 / 2.10.0 for the torch alerts GHSA-vgrw-7cvw-pwgx (unpack_sequence)
+    # and GHSA-qfhq-4f3w-5fph (lstm_cell); GHSA-rrmf-rvhw-rf47 (jit.script) has
+    # no upstream fix at all. All three are local-only memory-corruption CVEs in
+    # torch APIs this server never calls with attacker-controlled arguments
+    # (uploaded audio enters only as float32 sample values), so they are
+    # unreachable / not_used. Revisit raising this floor when whisperx supports
+    # torch>=2.9.
     "torch>=2.8.0",          # Required by PyAnnote 4.0.4
     "torchaudio>=2.8.0",     # Required by PyAnnote 4.0.4
     "pyannote.audio>=4.0.4", # Diarization (still needed for NeMo backends)
