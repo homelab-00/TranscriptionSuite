@@ -60,4 +60,8 @@ describe('serverConfigPaths', () => {
     ensureServerConfigSeed();
     expect(fs.readFileSync(getServerConfigPath(), 'utf-8')).toContain('buffer_size: 256');
   });
+
+  // Note: the rename-failure copy-fallback path is not unit-tested — ESM forbids
+  // spying on fs.renameSync (non-configurable module namespace), and mocking the
+  // whole fs module would defeat the real-FS assertions in the tests above.
 });

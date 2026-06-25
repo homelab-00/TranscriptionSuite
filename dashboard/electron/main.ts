@@ -938,6 +938,13 @@ ipcMain.handle('app:getConfigDir', () => {
   return app.getPath('userData');
 });
 
+// Dedicated dir that actually holds the server's config.yaml (a subdir of
+// userData). Distinct from app:getConfigDir, which returns the userData root
+// used for native data/model storage labels.
+ipcMain.handle('app:getServerConfigDir', () => {
+  return getServerConfigDir();
+});
+
 ipcMain.handle('app:ensureServerConfig', async () => {
   // Seed (or migrate) the sparse overlay in the dedicated server-config subdir.
   return ensureServerConfigSeed();

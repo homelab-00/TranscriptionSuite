@@ -115,7 +115,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   } = useBackups();
   const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
 
-  const [configDir, setConfigDir] = useState<string>('~/.config/TranscriptionSuite');
+  const [configDir, setConfigDir] = useState<string>('~/.config/TranscriptionSuite/server-config');
   const [platform, setPlatform] = useState('');
   const [sessionType, setSessionType] = useState('');
   // GPU/WSL2 detection result — used to gate the experimental Vulkan-WSL2
@@ -354,9 +354,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             setGpuInfo(undefined);
           });
 
-        // Load config directory path
+        // Load the server config directory path (dedicated server-config subdir
+        // that actually holds config.yaml — not the userData root).
         api.app
-          ?.getConfigDir?.()
+          ?.getServerConfigDir?.()
           .then((dir: string) => {
             if (dir) setConfigDir(dir);
           })

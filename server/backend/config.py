@@ -1,16 +1,19 @@
 """
 Server configuration management for TranscriptionSuite.
 
-Handles loading configuration from YAML files.
-Provides typed configuration access for all server components.
+Provides typed configuration access for all server components. Configuration is
+built by deep-merging a sparse user overlay onto the baked-in defaults, then
+applying environment-variable overrides (lowest -> highest precedence):
 
-Configuration Priority (highest to lowest):
-    1. User config: ~/.config/TranscriptionSuite/config.yaml (Linux)
-                    or Documents/TranscriptionSuite/config.yaml (Windows)
-                    or /user-config/config.yaml (Docker with mounted volume)
-    2. Default config: /app/config.yaml (Docker container)
-    3. Dev config: server/config.yaml (development)
-    4. Fallback: ./config.yaml (current directory)
+    1. Defaults (base): first readable of /app/config.yaml (Docker image),
+       <repo>/server/config.yaml (development), ./config.yaml.
+    2. User overlay (sparse): get_user_config_dir()/config.yaml. Only the keys
+       present here override the defaults; everything else is inherited.
+    3. Environment variables (e.g. MAIN_TRANSCRIBER_MODEL, LOG_LEVEL).
+
+get_user_config_dir() resolves the overlay dir as: /user-config (Docker bind
+mount) -> the USER_CONFIG_DIR env var -> the platform default. An explicit
+config_path passed to ServerConfig loads that single file as-is (no merge).
 """
 
 import logging

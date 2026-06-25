@@ -67,8 +67,24 @@ export function ensureServerConfigSeed(): string {
     try {
       fs.renameSync(legacy, target);
       return target;
-    } catch {
-      // Fall through to stub seeding if the move fails for any reason.
+    } catch (renameErr) {
+      // Same-volume rename is atomic; if it still fails (permissions, a
+      // cross-device link), COPY so the user's overrides are never silently
+      // orphaned at the old path, and surface the error.
+      try {
+        fs.copyFileSync(legacy, target);
+        console.error(
+          `[serverConfig] Could not move legacy config (${String(renameErr)}); ` +
+            `copied ${legacy} -> ${target}. The old file is left as a backup.`,
+        );
+        return target;
+      } catch (copyErr) {
+        console.error(
+          `[serverConfig] Failed to migrate legacy config ${legacy} -> ${target}: ` +
+            `${String(copyErr)}. Seeding a fresh stub instead.`,
+        );
+        // Fall through to stub seeding.
+      }
     }
   }
 
