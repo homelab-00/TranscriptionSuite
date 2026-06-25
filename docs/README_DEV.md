@@ -3431,6 +3431,17 @@ node -e "console.log(require('electron'))"          # -> path to dist/electron
 > **One-time, fully hands-off:** `nvm alias default 22.22.3` makes every new shell
 > default to the correct Node so you never have to think about it.
 
+> **If `nvm use` (or `nvm alias default`) refuses with a `prefix`/`globalconfig`
+> incompatibility error:** your `~/.npmrc` sets a custom npm `prefix` — a common setup
+> for sudo-free global installs, e.g. `prefix=~/.local`. nvm can't coexist with a fixed
+> prefix, so it won't switch. Run any pinned-Node command as a one-off instead:
+> `nvm exec 22.22.3 npm install` / `nvm exec 22.22.3 npx vitest run` — `nvm exec` still
+> prints the warning but runs the command on Node 22.22.3 and leaves `~/.npmrc`
+> untouched. **Do NOT** accept nvm's suggested `nvm use --delete-prefix`: it permanently
+> deletes the prefix from your shared `~/.npmrc`, breaking sudo-free global installs in
+> every shell. (To switch a whole shell instead of a one-off: `npm config delete prefix
+> && nvm use 22`, then restore with `npm config set prefix <your-prefix>` when done.)
+
 > **Note:** only the **install** step is Node-sensitive (it unpacks the binary). Running
 > an already-installed Electron works under any Node, so `dev:electron` itself is fine
 > once `node_modules/electron` is correctly populated.
