@@ -221,6 +221,31 @@ class TestProgressTqdm:
         with pytest.raises(AttributeError):
             bar.__delattr__("nonexistent_attr")
 
+    def test_get_lock_survives_class_attr_deletion(self, mock_emit):
+        """get_lock() must recreate the lock after the class attribute is removed.
+
+        ``tqdm.contrib.concurrent.ensure_lock`` ends with ``del tqdm_class._lock``
+        when it created the lock — deleting the attribute entirely, not setting it
+        to None. A bare ``cls._lock`` read in get_lock() then raises
+        ``AttributeError: type object '_ProgressTqdm' has no attribute '_lock'``,
+        which surfaced as intermittent HTTP 500s on the parallel-diarization path
+        (a model-load tqdm-patch window interleaved with concurrent
+        huggingface_hub.snapshot_download → thread_map → ensure_lock → get_lock).
+        """
+        from server.core.download_progress import _ProgressTqdm
+
+        # Simulate tqdm's ensure_lock cleanup: attribute gone, not just None.
+        if hasattr(_ProgressTqdm, "_lock"):
+            del _ProgressTqdm._lock
+        assert not hasattr(_ProgressTqdm, "_lock")
+
+        lock = _ProgressTqdm.get_lock()  # must NOT raise AttributeError
+        assert isinstance(lock, type(threading.RLock()))
+        # Idempotent: a second call returns the same lock.
+        assert _ProgressTqdm.get_lock() is lock
+        # Cleanup: reset so sibling tests start from a deterministic state.
+        _ProgressTqdm._lock = None
+
     def test_set_postfix_accepts_positional_args(self, mock_emit):
         """Real tqdm.set_postfix has ordered_dict as first positional arg."""
         from server.core.download_progress import _ProgressTqdm
