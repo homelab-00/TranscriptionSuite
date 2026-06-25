@@ -219,6 +219,36 @@ def check_cuda_available() -> bool:
     return torch.cuda.is_available()
 
 
+def check_metal_available() -> bool:
+    """Check if Apple Metal (MPS) GPU acceleration is available.
+
+    The Apple-Silicon counterpart to ``check_cuda_available``. Without this the
+    GPU-availability signal is CUDA-only and reports ``False`` on Apple Silicon
+    even though the MLX/Metal backend runs on the GPU (FINDING #3).
+    """
+    import platform
+    import sys
+
+    if sys.platform != "darwin" or platform.machine() != "arm64":
+        return False
+    if not HAS_TORCH or torch is None:
+        return False
+    try:
+        return bool(torch.backends.mps.is_available())
+    except Exception:
+        return False
+
+
+def check_gpu_available() -> bool:
+    """True when any GPU backend (NVIDIA CUDA or Apple Metal) is usable.
+
+    CUDA is checked first and short-circuits, so the Linux/Windows/Docker CUDA
+    path is unchanged; the Metal check returns ``False`` immediately off Apple
+    Silicon.
+    """
+    return check_cuda_available() or check_metal_available()
+
+
 # Per-device cache for get_cuda_compute_capability.
 # Key: device index; value: (major, minor) or None (query failed / no CUDA).
 _cuda_compute_capability_cache: dict[int, tuple[int, int] | None] = {}
@@ -492,6 +522,21 @@ def convert_to_mp3(
         raise RuntimeError(f"MP3 conversion failed: {e.stderr}") from e
 
 
+AUDIO_DECODE_ERROR_MESSAGE = (
+    "Could not decode audio: the file is empty, corrupt, or in an unsupported format."
+)
+
+
+class AudioDecodeError(ValueError):
+    """Raised when an uploaded audio file cannot be decoded.
+
+    Subclasses ``ValueError`` so the existing route handlers map it to HTTP 400.
+    The message is intentionally generic and NEVER contains the server-side temp
+    path; the raw decoder error (whose message may embed that path) is logged
+    server-side only. See FINDING #1 (Apple-Silicon stress test).
+    """
+
+
 def load_audio_legacy(
     file_path: str,
     target_sample_rate: int = 16000,
@@ -577,19 +622,36 @@ def load_audio(
         logger.warning(f"Could not load config, falling back to legacy backend: {e}")
         backend = "legacy"
 
-    if backend == "ffmpeg":
-        try:
-            from server.core.ffmpeg_utils import load_audio_ffmpeg
+    try:
+        if backend == "ffmpeg":
+            try:
+                from server.core.ffmpeg_utils import load_audio_ffmpeg
 
-            return load_audio_ffmpeg(file_path, target_sample_rate)
-        except ImportError as e:
-            logger.warning(f"ffmpeg-python not available, falling back to legacy: {e}")
+                return load_audio_ffmpeg(file_path, target_sample_rate)
+            except ImportError as e:
+                logger.warning(f"ffmpeg-python not available, falling back to legacy: {e}")
+                return load_audio_legacy(file_path, target_sample_rate)
+            except Exception as e:
+                logger.warning(f"FFmpeg loading failed, falling back to legacy: {e}")
+                return load_audio_legacy(file_path, target_sample_rate)
+        else:
             return load_audio_legacy(file_path, target_sample_rate)
-        except Exception as e:
-            logger.warning(f"FFmpeg loading failed, falling back to legacy: {e}")
-            return load_audio_legacy(file_path, target_sample_rate)
-    else:
-        return load_audio_legacy(file_path, target_sample_rate)
+    except AudioDecodeError:
+        # Already the clean, path-free error — never re-wrap it.
+        raise
+    except ImportError:
+        # Genuine server misconfiguration (e.g. soundfile not installed). Re-raise
+        # so it surfaces as a 500 — its message carries no temp path, nothing leaks.
+        raise
+    except (RuntimeError, OSError, ValueError) as e:
+        # A decode failure: empty/corrupt/unsupported file, or ffmpeg missing. The
+        # raw message (e.g. soundfile.LibsndfileError, which can embed the server-
+        # side temp path) is logged server-side only; we raise a clean, generic
+        # error that route handlers map to HTTP 400 instead of a path-leaking 500
+        # (FINDING #1). ValueError is included so a resampler/decoder ValueError
+        # cannot leak a path either.
+        logger.warning("Audio decode failed (empty, corrupt, or unsupported file): %s", e)
+        raise AudioDecodeError(AUDIO_DECODE_ERROR_MESSAGE) from e
 
 
 def normalize_audio_legacy(audio: np.ndarray, target_db: float = -3.0) -> np.ndarray:

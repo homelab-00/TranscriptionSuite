@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import re
+import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -860,7 +861,7 @@ def _run_transcription(
     in model_manager.job_tracker so that clients can poll for completion.
     """
     # Lazy import to avoid loading torch at module import time
-    from server.core.audio_utils import convert_to_mp3, load_audio
+    from server.core.audio_utils import AudioDecodeError, convert_to_mp3, load_audio
 
     try:
         # Progress callback to update job tracker with chunk progress
@@ -939,6 +940,10 @@ def _run_transcription(
                     diar_result.num_speakers,
                 )
 
+            except AudioDecodeError:
+                # A corrupt/undecodable file is not a diarization-token problem —
+                # re-raise the clean error rather than mislabeling it (FINDING #1).
+                raise
             except ValueError as e:
                 logger.error(f"Diarization requires HuggingFace token: {e}")
                 logger.error("Set HUGGINGFACE_TOKEN env var when starting docker compose")
@@ -1059,8 +1064,28 @@ def _run_transcription(
             dest_path = audio_dir / dest_filename
             counter += 1
 
-        # Convert to MP3 for storage efficiency
-        convert_to_mp3(str(tmp_path), str(dest_path))
+        # Convert to MP3 for storage efficiency. If conversion fails (e.g. ffmpeg
+        # is not installed — a stock macOS install has none), fall back to storing
+        # the original audio verbatim so a COMPLETED transcript is never discarded
+        # (persist-before-deliver: the transcript is saved below regardless).
+        # See FINDING #2 (Apple-Silicon stress test).
+        try:
+            convert_to_mp3(str(tmp_path), str(dest_path))
+        except Exception as mp3_err:
+            logger.warning(
+                "MP3 conversion failed (%s); storing the original audio so the "
+                "completed transcript is preserved.",
+                mp3_err,
+            )
+            fallback_suffix = Path(filename or "audio").suffix.lower() or ".wav"
+            dest_filename = f"{original_stem}{fallback_suffix}"
+            dest_path = audio_dir / dest_filename
+            counter = 2
+            while dest_path.exists():
+                dest_filename = f"{original_stem}-{counter}{fallback_suffix}"
+                dest_path = audio_dir / dest_filename
+                counter += 1
+            shutil.copyfile(str(tmp_path), str(dest_path))
 
         # Extract word timestamps from segments
         # Diarization automatically enables word timestamps (they're needed for alignment anyway)

@@ -894,7 +894,7 @@ def _run_file_import(
         if use_integrated_diarization:
             # --- Integrated backend single-pass path (e.g. WhisperX, VibeVoice) ---
             try:
-                from server.core.audio_utils import load_audio
+                from server.core.audio_utils import AudioDecodeError, load_audio
 
                 backend_label = getattr(backend, "backend_name", "integrated")
                 logger.info(
@@ -946,6 +946,10 @@ def _run_file_import(
                 # User cancellation must propagate — otherwise we'd silently fall
                 # through to the standard path and waste GPU time re-transcribing
                 # a file the user already cancelled.
+                raise
+            except AudioDecodeError:
+                # A corrupt/undecodable file is not a diarization-token problem —
+                # re-raise the clean error rather than mislabeling it (FINDING #1).
                 raise
             except ValueError as e:
                 logger.error("File import: diarization requires HuggingFace token: %s", e)

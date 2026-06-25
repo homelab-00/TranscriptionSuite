@@ -204,7 +204,7 @@ class ModelManager:
             config: Full application configuration dict
         """
         # Lazy imports
-        from server.core.audio_utils import check_cuda_available, get_gpu_memory_info
+        from server.core.audio_utils import check_gpu_available, get_gpu_memory_info
 
         self.config = config
         self._transcription_engine: AudioToTextRecorder | None = None
@@ -230,10 +230,15 @@ class ModelManager:
 
         # Check GPU availability
         self._gpu_device_index: int = config.get("transcription", {}).get("gpu_device_index", 0)
-        self.gpu_available = check_cuda_available()
+        self.gpu_available = check_gpu_available()
         if self.gpu_available:
             gpu_info = get_gpu_memory_info(self._gpu_device_index)
-            logger.info(f"GPU available with {gpu_info.get('total_gb', 'unknown')} GB memory")
+            total_gb = gpu_info.get("total_gb")
+            if total_gb:
+                logger.info(f"GPU available with {total_gb} GB memory")
+            else:
+                # Apple Metal / unified memory exposes no dedicated-VRAM figure.
+                logger.info("GPU available (Apple Metal / unified memory)")
         else:
             logger.warning("No GPU available, using CPU for transcription")
 
@@ -939,12 +944,14 @@ class ModelManager:
 
     def get_status(self) -> dict[str, Any]:
         """Get status information about loaded models."""
-        from server.core.audio_utils import get_gpu_memory_info
+        from server.core.audio_utils import check_cuda_available, get_gpu_memory_info
 
         status = {
             "gpu_available": self.gpu_available,
+            # gpu_memory reflects CUDA VRAM; Apple unified memory has no
+            # dedicated-VRAM figure, so it stays null on Metal (FINDING #3).
             "gpu_memory": get_gpu_memory_info(self._gpu_device_index)
-            if self.gpu_available
+            if check_cuda_available()
             else None,
             "transcription": {
                 "selected_model": self.main_model_name,

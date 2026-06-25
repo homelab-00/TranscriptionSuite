@@ -185,6 +185,121 @@ class TestNotebookRunTranscription:
         assert "INSTALL_NEMO" in result["remedy"]
         assert result["backend_type"] == "nemo"
 
+    def test_mp3_conversion_failure_preserves_transcript(self, tmp_path: Path, monkeypatch):
+        """FINDING #2: if MP3 conversion fails (e.g. ffmpeg is absent on a stock
+        macOS install), the COMPLETED transcript must still be saved by falling
+        back to storing the original audio — never discarded (persist-before-deliver).
+        """
+        import server.core.audio_utils as au
+        from server.api.routes import notebook as nb_route
+
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+        saved: dict = {}
+
+        def _save(**kw):
+            saved.update(kw)
+            return 99
+
+        monkeypatch.setattr(nb_route, "save_longform_to_database", _save)
+        monkeypatch.setattr(nb_route, "check_time_slot_overlap", lambda *_a, **_kw: None)
+
+        # MP3 conversion fails exactly as it does when ffmpeg is not installed.
+        def _boom(*_a, **_kw):
+            raise RuntimeError("ffmpeg is not installed or not in PATH")
+
+        monkeypatch.setattr(au, "convert_to_mp3", _boom)
+
+        engine = _make_engine()
+        mgr = _ModelManager(engine)
+
+        tmp_file = tmp_path / "input.wav"
+        tmp_file.write_bytes(b"\x00" * 2048)
+
+        nb_route._run_transcription(
+            model_manager=mgr,
+            tmp_path=tmp_file,
+            filename="input.wav",
+            language=None,
+            translation_enabled=False,
+            translation_target_language=None,
+            enable_diarization=False,
+            enable_word_timestamps=True,
+            file_created_at=None,
+            expected_speakers=None,
+            parallel_diarization=None,
+            use_parallel_default=False,
+            title=None,
+            job_id="job-mp3-fallback",
+            event_loop=None,
+        )
+
+        result = mgr.job_tracker.results["job-mp3-fallback"]
+        assert "error" not in result, f"transcript lost on MP3 failure: {result}"
+        assert result["recording_id"] == 99
+        # The fallback stored the ORIGINAL audio so the transcript could be saved.
+        stored = Path(saved["audio_path"])
+        assert stored.exists()
+        assert stored.suffix == ".wav"
+        # Original audio bytes were copied verbatim (durability goal, not a no-op
+        # touch). tmp_file is cleaned up by _run_transcription, so compare to the
+        # known content rather than re-reading the (now-deleted) source.
+        assert stored.read_bytes() == b"\x00" * 2048
+
+    def test_mp3_fallback_dedups_colliding_filename(self, tmp_path: Path, monkeypatch):
+        """The fallback's de-collision loop must not overwrite an existing stored
+        original-audio file (data-loss-adjacent)."""
+        import server.core.audio_utils as au
+        from server.api.routes import notebook as nb_route
+
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        # Pre-create a colliding original so the fallback must pick input-2.wav.
+        audio_dir = tmp_path / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        (audio_dir / "input.wav").write_bytes(b"pre-existing")
+
+        saved: dict = {}
+
+        def _save(**kw):
+            saved.update(kw)
+            return 7
+
+        monkeypatch.setattr(nb_route, "save_longform_to_database", _save)
+        monkeypatch.setattr(nb_route, "check_time_slot_overlap", lambda *_a, **_kw: None)
+
+        def _boom(*_a, **_kw):
+            raise RuntimeError("ffmpeg is not installed or not in PATH")
+
+        monkeypatch.setattr(au, "convert_to_mp3", _boom)
+
+        mgr = _ModelManager(_make_engine())
+        tmp_file = tmp_path / "input.wav"
+        tmp_file.write_bytes(b"\x01" * 1024)
+
+        nb_route._run_transcription(
+            model_manager=mgr,
+            tmp_path=tmp_file,
+            filename="input.wav",
+            language=None,
+            translation_enabled=False,
+            translation_target_language=None,
+            enable_diarization=False,
+            enable_word_timestamps=True,
+            file_created_at=None,
+            expected_speakers=None,
+            parallel_diarization=None,
+            use_parallel_default=False,
+            title=None,
+            job_id="job-mp3-collide",
+            event_loop=None,
+        )
+
+        stored = Path(saved["audio_path"])
+        assert stored.name == "input-2.wav"
+        # The pre-existing file was NOT clobbered.
+        assert (audio_dir / "input.wav").read_bytes() == b"pre-existing"
+        assert stored.read_bytes() == b"\x01" * 1024
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # File import (_run_file_import)

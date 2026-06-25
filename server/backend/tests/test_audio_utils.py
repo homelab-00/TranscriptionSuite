@@ -868,3 +868,185 @@ class TestApplySileroVad:
             result = au.apply_silero_vad(audio)
 
         np.testing.assert_array_equal(result, audio)
+
+
+# ── load_audio() decode-error hardening (FINDING #1) ──────────────────────
+
+
+def _raiser(exc):
+    """Return a function that raises ``exc`` when called (test helper)."""
+
+    def _f(*_a, **_kw):
+        raise exc
+
+    return _f
+
+
+class TestLoadAudioDecodeErrors:
+    """load_audio() must convert raw decoder failures — whose messages can embed
+    the server-side temp path — into a clean, path-free AudioDecodeError so the
+    routes return HTTP 400 instead of a 500 leaking internals (FINDING #1)."""
+
+    def _force_legacy(self, monkeypatch):
+        # Make get_config raise so load_audio() selects the legacy backend leg.
+        monkeypatch.setattr("server.config.get_config", _raiser(RuntimeError("no config")))
+
+    def test_libsndfile_error_becomes_clean_audiodecodeerror(self, monkeypatch):
+        import soundfile as sf
+
+        self._force_legacy(monkeypatch)
+        monkeypatch.setattr(
+            au,
+            "load_audio_legacy",
+            _raiser(
+                sf.LibsndfileError(0, prefix="Error opening '/var/folders/zz/tmpSECRET.wav': ")
+            ),
+        )
+        with pytest.raises(au.AudioDecodeError) as exc:
+            au.load_audio("/var/folders/zz/tmpSECRET.wav")
+        assert str(exc.value) == au.AUDIO_DECODE_ERROR_MESSAGE
+        assert "/var/folders" not in str(exc.value)
+        assert "tmpSECRET" not in str(exc.value)
+        # Subclasses ValueError so existing route handlers map it to HTTP 400.
+        assert isinstance(exc.value, ValueError)
+
+    def test_ffmpeg_and_legacy_both_fail_converted(self, monkeypatch):
+        monkeypatch.setattr(
+            "server.core.ffmpeg_utils.load_audio_ffmpeg",
+            _raiser(RuntimeError("Audio loading failed: /tmp/tmpX.wav")),
+        )
+        monkeypatch.setattr(
+            au, "load_audio_legacy", _raiser(RuntimeError("No 'data' chunk marker"))
+        )
+        with pytest.raises(au.AudioDecodeError) as exc:
+            au.load_audio("/tmp/tmpX.wav")
+        assert str(exc.value) == au.AUDIO_DECODE_ERROR_MESSAGE
+        assert "/tmp" not in str(exc.value)
+
+    def test_ffmpeg_not_installed_runtimeerror_converted(self, monkeypatch):
+        self._force_legacy(monkeypatch)
+        monkeypatch.setattr(
+            au,
+            "load_audio_legacy",
+            _raiser(RuntimeError("ffmpeg is not installed or not in PATH")),
+        )
+        with pytest.raises(au.AudioDecodeError):
+            au.load_audio("/tmp/whatever.wav")
+
+    def test_happy_path_passthrough_unchanged(self, monkeypatch):
+        self._force_legacy(monkeypatch)
+        arr = np.zeros(16, dtype=np.float32)
+        monkeypatch.setattr(au, "load_audio_legacy", lambda *_a, **_kw: (arr, 16000))
+        out, sr = au.load_audio("/tmp/ok.wav")
+        assert sr == 16000
+        np.testing.assert_array_equal(out, arr)
+
+    def test_import_error_still_propagates(self, monkeypatch):
+        # A genuine server misconfiguration (soundfile missing) must NOT be
+        # masked as a 400 — and its message carries no temp path anyway.
+        self._force_legacy(monkeypatch)
+        monkeypatch.setattr(
+            au,
+            "load_audio_legacy",
+            _raiser(ImportError("soundfile library is required for audio loading")),
+        )
+        with pytest.raises(ImportError):
+            au.load_audio("/tmp/ok.wav")
+
+    def test_real_empty_file_raises_clean_error(self, tmp_path, monkeypatch):
+        # No loader mocks: exercise the REAL soundfile decode path so the
+        # (RuntimeError, OSError, ValueError) catch tuple is pinned against the
+        # actual library, not a hand-built exception (FINDING #1).
+        self._force_legacy(monkeypatch)
+        p = tmp_path / "tmpEMPTY.wav"
+        p.write_bytes(b"")
+        with pytest.raises(au.AudioDecodeError) as exc:
+            au.load_audio(str(p))
+        assert str(exc.value) == au.AUDIO_DECODE_ERROR_MESSAGE
+        assert "tmpEMPTY" not in str(exc.value)
+        assert str(p) not in str(exc.value)
+
+    def test_real_corrupt_file_raises_clean_error(self, tmp_path, monkeypatch):
+        self._force_legacy(monkeypatch)
+        p = tmp_path / "tmpGARBAGE.wav"
+        p.write_bytes(b"RIFFxxxxWAVEnot actually audio data")
+        with pytest.raises(au.AudioDecodeError) as exc:
+            au.load_audio(str(p))
+        assert str(exc.value) == au.AUDIO_DECODE_ERROR_MESSAGE
+        assert "tmpGARBAGE" not in str(exc.value)
+
+
+# ── Metal / unified-memory GPU detection (FINDING #3) ─────────────────────
+
+
+class TestCheckMetalAvailable:
+    """check_metal_available() reports Apple Metal (MPS) so /api/status no longer
+    claims gpu_available=false on Apple Silicon (FINDING #3)."""
+
+    def test_true_on_apple_silicon_with_mps(self, monkeypatch):
+        import platform as _pf
+        import sys as _sys
+
+        mock_torch = MagicMock()
+        mock_torch.backends.mps.is_available.return_value = True
+        monkeypatch.setattr(_sys, "platform", "darwin")
+        monkeypatch.setattr(_pf, "machine", lambda: "arm64")
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            assert au.check_metal_available() is True
+        # Pin that MPS specifically is probed (not just MagicMock truthiness).
+        mock_torch.backends.mps.is_available.assert_called_once()
+
+    def test_false_on_non_darwin(self, monkeypatch):
+        import sys as _sys
+
+        monkeypatch.setattr(_sys, "platform", "linux")
+        with patch.object(au, "HAS_TORCH", True):
+            assert au.check_metal_available() is False
+
+    def test_false_on_darwin_intel(self, monkeypatch):
+        import platform as _pf
+        import sys as _sys
+
+        monkeypatch.setattr(_sys, "platform", "darwin")
+        monkeypatch.setattr(_pf, "machine", lambda: "x86_64")
+        with patch.object(au, "HAS_TORCH", True):
+            assert au.check_metal_available() is False
+
+    def test_false_without_torch(self, monkeypatch):
+        import platform as _pf
+        import sys as _sys
+
+        monkeypatch.setattr(_sys, "platform", "darwin")
+        monkeypatch.setattr(_pf, "machine", lambda: "arm64")
+        with patch.object(au, "HAS_TORCH", False):
+            assert au.check_metal_available() is False
+
+    def test_false_when_mps_raises(self, monkeypatch):
+        import platform as _pf
+        import sys as _sys
+
+        mock_torch = MagicMock()
+        mock_torch.backends.mps.is_available.side_effect = RuntimeError("boom")
+        monkeypatch.setattr(_sys, "platform", "darwin")
+        monkeypatch.setattr(_pf, "machine", lambda: "arm64")
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            assert au.check_metal_available() is False
+
+
+class TestCheckGpuAvailable:
+    """check_gpu_available() is true when EITHER CUDA or Metal is usable."""
+
+    def test_true_if_cuda(self, monkeypatch):
+        monkeypatch.setattr(au, "check_cuda_available", lambda: True)
+        monkeypatch.setattr(au, "check_metal_available", lambda: False)
+        assert au.check_gpu_available() is True
+
+    def test_true_if_metal(self, monkeypatch):
+        monkeypatch.setattr(au, "check_cuda_available", lambda: False)
+        monkeypatch.setattr(au, "check_metal_available", lambda: True)
+        assert au.check_gpu_available() is True
+
+    def test_false_if_neither(self, monkeypatch):
+        monkeypatch.setattr(au, "check_cuda_available", lambda: False)
+        monkeypatch.setattr(au, "check_metal_available", lambda: False)
+        assert au.check_gpu_available() is False
