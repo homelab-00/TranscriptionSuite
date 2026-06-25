@@ -146,7 +146,17 @@ class _ProgressTqdm:
     @classmethod
     def get_lock(cls) -> threading.RLock:
         """Return class-level lock (used by ``tqdm.contrib.concurrent.thread_map``)."""
-        if cls._lock is None:
+        # Read defensively with getattr, NOT ``cls._lock``: tqdm's
+        # ``ensure_lock`` (tqdm.contrib.concurrent, used by thread_map inside
+        # huggingface_hub.snapshot_download) ends with ``del tqdm_class._lock``
+        # when it created the lock — removing the class attribute entirely, not
+        # setting it to None. A bare ``cls._lock`` read then raises
+        # ``AttributeError: ... has no attribute '_lock'``. This mirrors real
+        # tqdm's own ``if not hasattr(cls, '_lock')`` guard. The crash surfaced
+        # as intermittent HTTP 500s on the parallel-diarization path, which
+        # interleaves a model-load tqdm-patch window with concurrent HF
+        # snapshot_download calls.
+        if getattr(cls, "_lock", None) is None:
             cls._lock = threading.RLock()
         return cls._lock
 
