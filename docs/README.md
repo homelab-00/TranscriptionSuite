@@ -55,13 +55,15 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
   - [1.2 Screenshots](#12-screenshots)
   - [1.3 Short Tour](#13-short-tour)
 - [2. Installation](#2-installation)
-  - [2.1 macOS (Apple Silicon or Intel)](#21-macos-apple-silicon-or-intel)
-  - [2.2 Linux and Windows](#22-linux-and-windows)
-  - [2.3 Download the Dashboard app](#23-download-the-dashboard-app)
-    - [2.3.1 Linux AppImage Prerequisites](#231-linux-appimage-prerequisites)
-    - [2.3.2 Verify Download with Kleopatra (optional)](#232-verify-download-with-kleopatra-optional)
-  - [2.4 Setting Up the Server](#24-setting-up-the-server)
-  - [2.5 AMD / Intel GPU Support (Vulkan)](#25-amd--intel-gpu-support-vulkan)
+  - [2.1 macOS Apple Silicon](#21-macos-apple-silicon)
+  - [2.2 macOS Intel](#22-macos-intel)
+  - [2.3 Windows](#23-windows)
+  - [2.4 Linux](#24-linux)
+  - [2.5 Download the Dashboard app](#25-download-the-dashboard-app)
+    - [2.5.1 Linux AppImage Prerequisites](#251-linux-appimage-prerequisites)
+    - [2.5.2 Verify Download with Kleopatra (optional)](#252-verify-download-with-kleopatra-optional)
+  - [2.6 Setting Up the Server](#26-setting-up-the-server)
+  - [2.7 AMD / Intel GPU Support (Vulkan)](#27-amd--intel-gpu-support-vulkan)
 - [3. Remote Connection](#3-remote-connection)
   - [3.1 Option A: Tailscale (recommended)](#31-option-a-tailscale-recommended)
     - [Server Machine Setup](#server-machine-setup)
@@ -82,7 +84,7 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 ### 1.1 Features
 
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup*
-- **Multiple Models available**: On **Docker/Linux/Windows**: *WhisperX* ([`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU via Vulkan — Linux via Docker sidecar; Windows via native `whisper-server.exe` auto-downloaded by the app, see §2.5). On **Apple Silicon (Metal)**: [*MLX Whisper*](https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16) (tiny → large-v3-turbo), [*MLX Parakeet v3*](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3), [*MLX Canary v2*](https://huggingface.co/mlx-community/canary-1b-v2), and [*MLX VibeVoice-ASR*](https://huggingface.co/mlx-community/VibeVoice-ASR-bf16) - all running natively without Docker
+- **Multiple Models available**: On **Docker/Linux/Windows**: *WhisperX* ([`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU via Vulkan — Linux via Docker sidecar; Windows via native `whisper-server.exe` auto-downloaded by the app, see §2.7). On **Apple Silicon (Metal)**: [*MLX Whisper*](https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16) (tiny → large-v3-turbo), [*MLX Parakeet v3*](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3), [*MLX Canary v2*](https://huggingface.co/mlx-community/canary-1b-v2), and [*MLX VibeVoice-ASR*](https://huggingface.co/mlx-community/VibeVoice-ASR-bf16) - all running natively without Docker
 - **Speaker Diarization**: Speaker identification & diarization (subtitling) for Whisper, NeMo, and VibeVoice models; Whisper and NeMo use PyAnnote for diarization while VibeVoice does it by itself (not available for whisper.cpp models). On Apple Silicon, [*Sortformer*](https://huggingface.co/mlx-community/diar_sortformer_4spk-v1-fp32) provides Metal-native diarization for up to 4 speakers - no HuggingFace token required
 - **Parallel Processing**: If your VRAM budget allows it, transcribe & diarize a recording at the same time - speeding up processing time significantly
 - **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [51 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
@@ -124,124 +126,131 @@ https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
 
 ## 2. Installation
 
-To begin with, let me explain simply how this setup works. The app is comprised of **two** parts - a lightweight frontend (**Dashboard**) plus the server backend (**Docker image**). Both are obviously required *(with some exceptions)*. The [*Releases*](https://github.com/homelab-00/TranscriptionSuite/releases) page contains the Dashboard only; the server can be downloaded from inside the Dashboard app.
+The app is comprised of two parts:
+* The **UI frontend** (Dashboard)
+* The **server backend** (Docker image / bare metal depending on deployment)
+
+The [*Releases*](https://github.com/homelab-00/TranscriptionSuite/releases) page contains the Dashboard only; the server is downloaded from inside the Dashboard app.
+
 
 Pick the section for your platform:
 
-| Platform | Path |
-|---|---|
-| **Apple Silicon Mac (M1+)** | → [§ 2.1](#21-macos-apple-silicon-or-intel) |
-| **Intel Mac (pre-M1)** | → [§ 2.1](#21-macos-apple-silicon-or-intel) |
-| **Linux / Windows** | → [§§ 2.2–2.5](#22-linux-and-windows) - Docker/Podman-based |
+| Your computer | Section | How the server runs |
+|---|---|---|
+| **Apple Silicon Mac (M1+)** | [§ 2.1](#21-macos-apple-silicon) | Natively on the Mac — no Docker |
+| **Intel Mac (pre-M1)** | [§ 2.2](#22-macos-intel) | Docker / Podman (CPU only) |
+| **Windows** | [§ 2.3](#23-windows) | Docker / Podman |
+| **Linux** | [§ 2.4](#24-linux) | Docker / Podman |
 
 ---
 
-### 2.1 macOS (Apple Silicon or Intel)
+### 2.1 macOS Apple Silicon
 
-#### What hardware acceleration you get
+*For Macs with an Apple chip (M1 and later). This is the easiest setup: the server runs **natively on your Mac's GPU** — no Docker, no Python, no separate server install.*
 
-- **Apple Silicon Macs (M1 and later):** full GPU acceleration via Apple's **Metal + MLX** stack. Metal is Apple's GPU API; MLX is Apple's machine-learning framework that runs on top of Metal and is specifically built for Apple Silicon's unified-memory architecture. This is what the app calls the "Metal server" — it's really MLX running on Metal.
-- **Intel Macs (pre-M1):** **CPU only**. MLX does not exist on Intel Macs — it's Apple-Silicon-only. Metal the GPU API does exist on Intel Macs, but this project does not use it outside of MLX. Intel Macs run the transcription backend in a Docker container, on CPU. It works, but it's slow.
+Apple Silicon transcription runs on Apple's **Metal + MLX** GPU stack, bundled right inside the app. You download one file, drag it to Applications, and click **Start Metal Server**.
 
-> *Naming note: anywhere in the app's UI you see "Metal server", "Start Metal Server", or "Metal runtime", what's actually running is **MLX** — Apple's machine-learning framework, which uses Metal as its GPU API. The two terms are used loosely as synonyms in the UI, but only MLX is Apple-Silicon-only; plain Metal works on many Intel Macs too. If you have an Intel Mac with a Metal-capable GPU, the "Metal" label still does not apply to you — this project's Metal path requires MLX, which requires Apple Silicon.*
+> *Naming note: wherever the app says "Metal server" or "Start Metal Server", what actually runs is **MLX** — Apple's machine-learning framework, which uses Metal as its GPU layer. MLX only exists on Apple Silicon, which is why Intel Macs ([§2.2](#22-macos-intel)) can't use this path.*
 
-#### The two macOS install artifacts
+**Which file to download** (from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page):
 
-Every release ships two DMGs on the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page. Pick the one that matches your plan:
+- **`TranscriptionSuite-<version>-arm64-mac-metal.dmg`** (~3–5 GB) — the **bundled** build. It contains the dashboard **and** the Python/MLX server pre-installed, so there's nothing else to set up.
 
-| Artifact | For | Size | Contents |
-|---|---|---|---|
-| `TranscriptionSuite-<ver>-arm64-mac-metal.dmg` | **Bundled MLX/Metal server on this Mac** (Apple Silicon only) | ~3-5 GB | Dashboard + Python 3.13 + MLX backend pre-installed inside the `.app`. No Docker, no Python setup. Launch the app, click **Start Metal Server**. |
-| `TranscriptionSuite-<ver>-arm64-mac.dmg` or `TranscriptionSuite-<ver>-x64-mac.dmg` | **Thin client** — dashboard only, you bring the server | ~200 MB | The dashboard UI by itself. Use this when the transcription work will happen **somewhere else**: either a remote server (Linux/Windows box with a GPU over Tailscale/LAN) or a Docker/Podman container running locally on this Mac. Pick `arm64` for Apple Silicon, `x64` for Intel. |
+**Install steps:**
 
-Three use cases, mapped to artifacts:
-
-| Your use case | DMG to download |
-|---|---|
-| Apple Silicon Mac, run server locally on Metal/MLX | `arm64-mac-metal.dmg` (bundled) |
-| Apple Silicon Mac, connect to a remote server | `arm64-mac.dmg` (thin) |
-| Apple Silicon Mac, run server locally in Docker/Podman | `arm64-mac.dmg` (thin) |
-| Intel Mac, connect to a remote server | `x64-mac.dmg` (thin) |
-| Intel Mac, run server locally in Docker/Podman (CPU only) | `x64-mac.dmg` (thin) |
-
-> Apple Silicon users running a local Metal server can ignore the thin DMG entirely — the bundled DMG covers everything. Intel Macs never get the bundled DMG (no MLX).
-
-#### Install steps
-
-1. Download the DMG for your case from the Releases page.
-2. Open it and drag `TranscriptionSuite.app` to `/Applications`.
-3. Open Terminal and run this once to clear the macOS Gatekeeper quarantine on the
-   ad-hoc-signed bundle (see `Installation Instructions.txt` on the DMG for details):
-
+1. Download the `arm64-mac-metal.dmg` from the Releases page.
+2. Open it and drag **TranscriptionSuite.app** into your **Applications** folder.
+3. Open **Terminal** and run this once to clear the macOS "unverified app" quarantine (details are in `Installation Instructions.txt` on the DMG):
    ```bash
    xattr -dr com.apple.quarantine /Applications/TranscriptionSuite.app
    ```
+4. Launch the app, open **Settings → Runtime Profile**, choose **Metal (Apple Silicon)**, and click **Start Metal Server**. That's it — you're ready to transcribe.
 
-4. Launch the app, then:
-   - **Bundled DMG (Apple Silicon, local Metal):** open **Settings → Runtime Profile**, choose **Metal (Apple Silicon)**, click **Start Metal Server**. You're done.
-   - **Thin DMG, connecting to a remote server:** skip Docker setup. Follow the remote-server configuration in [§ 2.5](#25-remote-access).
-   - **Thin DMG, running the server locally in Docker/Podman:** install Docker or Podman per §§ 2.2–2.4 first (Intel Macs and Apple Silicon users follow the same Docker install steps), then continue with [§ 2.3](#23-download-the-dashboard-app).
+> **Want to run the server somewhere else instead?** If you'd rather use this Mac only as a remote control for a server on another machine (e.g. a Windows/Linux PC with an NVIDIA GPU), or run the server locally in Docker, download the **thin** `arm64-mac.dmg` (~200 MB, dashboard only) instead. Then set up a local Docker server via [§2.5](#25-download-the-dashboard-app)–[§2.6](#26-setting-up-the-server), or connect to another machine via [§3 Remote Connection](#3-remote-connection).
 
 ---
 
-### 2.2 Linux and Windows
+### 2.2 macOS Intel
 
-Install Docker (or Podman) before proceeding with §§ 2.3–2.5.
+*For older Intel-based Macs (pre-M1). The server runs in **Docker on the CPU** — it works, but expect it to be slow. Intel Macs get no GPU acceleration here, because Apple's MLX is Apple-Silicon-only.*
 
-> *Both are supported; the dashboard and shell scripts auto-detect which runtime is available (Docker is checked first, then Podman).*
+1. **Install Docker.** Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/) (or [Podman Desktop](https://podman-desktop.io/)). The server will run in **CPU mode** — GPU acceleration isn't available through Docker on macOS.
+2. **Download the thin dashboard and set up the server**, following the two shared sections below:
+   - [§2.5 Download the Dashboard app](#25-download-the-dashboard-app) — use the `x64-mac.dmg` build
+   - [§2.6 Set Up the Server](#26-setting-up-the-server)
 
-**Linux (Docker):**
+---
 
-1. Install Docker Engine
-    * For Arch run `sudo pacman -S --needed docker`
-    * For other distros refer to the [Docker documentation](https://docs.docker.com/engine/install/)
-2. Add your user to the `docker` group so the app can talk to Docker without `sudo`:
-    ```bash
-    sudo usermod -aG docker $USER
-    ```
-    Then **log out and back in** (or reboot) for the change to take effect.
-3. Install NVIDIA Container Toolkit (for GPU mode)
-    * Refer to the [NVIDIA documentation](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-    * Not required if using CPU mode
+### 2.3 Windows
 
-**Linux (Podman):**
+*Windows 11 runs the server in Docker (or Podman). With an **NVIDIA** GPU you get full acceleration; with an **AMD or Intel** GPU you can use the Vulkan path ([§2.7](#27-amd--intel-gpu-support-vulkan)), which works well on Windows; otherwise the server runs on **CPU**.*
 
-1. Install Podman (4.7+ required for `podman compose` support)
-    * For Arch run `sudo pacman -S --needed podman`
-    * For Fedora/RHEL: Podman is pre-installed
-    * For other distros refer to the [Podman documentation](https://podman.io/docs/installation)
-2. Enable the Podman API socket (required for compose operations):
-    ```bash
-    systemctl --user enable --now podman.socket
-    ```
-    * `podman compose` delegates to an external compose provider (e.g. `docker-compose`) that connects via this socket. Without it, compose commands will fail with "Cannot connect to the Docker daemon" even though `podman` itself works.
-3. For GPU mode, configure CDI (Container Device Interface):
-    ```bash
-    sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
-    ```
-    * Requires nvidia-container-toolkit 1.14+
-    * Not required if using CPU mode
+1. **Install Docker Desktop** with the **WSL 2** backend. During installation, if you're given the choice, tick **"Use WSL 2 instead of Hyper-V"**. Once it's installed, you can confirm WSL 2 is active by running `wsl --list --verbose` in a terminal — the version column should read **2**.
+2. **NVIDIA GPU:** install the NVIDIA GPU driver with WSL support (the standard NVIDIA gaming drivers work fine). Skip this if you'll run on CPU.
+3. **AMD or Intel GPU:** see [§2.7 AMD / Intel GPU Support (Vulkan)](#27-amd--intel-gpu-support-vulkan) — the Windows Vulkan path is the recommended route for these cards.
+4. **Then continue with the shared steps:** [§2.5 Download the Dashboard app](#25-download-the-dashboard-app) and [§2.6 Set Up the Server](#26-setting-up-the-server).
 
-**Windows:**
-1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend (during installation, if presented with the option, make sure the *'Use WSL 2 instead of Hyper-V'* checkbox is enabled).
-After installation to make sure it's enabled, run `wsl --list --verbose` - if the number is 2, Docker is using the WSL 2 backend.
-2. Install NVIDIA GPU driver with WSL support (standard NVIDIA gaming drivers work fine)
-    * Not required if using CPU mode
+---
 
-**macOS (running the server locally in Docker/Podman):** Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
-or [Podman Desktop](https://podman-desktop.io/). This path applies to both Intel Macs (which have no other option for a local server — MLX is Apple-Silicon-only) and Apple Silicon users who prefer Docker over the bundled Metal DMG. GPU acceleration is not available through Docker on macOS; the server runs in CPU mode.
+### 2.4 Linux
 
-### 2.3 Download the Dashboard app
+*Linux runs the server in Docker (or Podman). With an **NVIDIA** GPU you get full acceleration; otherwise the server runs on **CPU**. AMD/Intel GPU acceleration (Vulkan) exists but is **experimental and not working correctly yet** — see [§2.7](#27-amd--intel-gpu-support-vulkan).*
 
-Before doing anything else, you need to download **and install** the Dashboard app for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page.
-This is just the frontend - no models or packages are downloaded yet, but it must be installed before setting up the server in the next step.
+Pick **Docker** or **Podman** — the app auto-detects whichever is installed (Docker is checked first).
 
->* *Linux and Windows builds are x64; macOS ships both arm64 and x64 DMGs — see [§ 2.1](#21-macos-apple-silicon-or-intel) for which to pick*
->* *Each release artifact includes an gpg signature by my key (`.asc`)*
+**Docker:**
 
-##### 2.3.1 Linux AppImage Prerequisites
+1. Install Docker Engine.
+    - Arch: `sudo pacman -S --needed docker`
+    - Other distros: see the [Docker documentation](https://docs.docker.com/engine/install/).
+2. Add your user to the `docker` group so the app can use Docker without `sudo`:
+   ```bash
+   sudo usermod -aG docker $USER
+   ```
+   Then **log out and back in** (or reboot) for it to take effect.
+3. **NVIDIA GPU:** install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html). Skip this for CPU mode.
 
-AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default on distros that ship with GNOME (both Fedora & Arch KDE worked fine out of the box). If you see `dlopen(): error loading libfuse.so.2`, install the appropriate package:
+**Podman** (4.7+ required for `podman compose`):
+
+1. Install Podman.
+    - Arch: `sudo pacman -S --needed podman`
+    - Fedora/RHEL: pre-installed.
+    - Other distros: see the [Podman documentation](https://podman.io/docs/installation).
+2. Enable the Podman API socket (needed for compose operations):
+   ```bash
+   systemctl --user enable --now podman.socket
+   ```
+   Without it, compose commands fail with "Cannot connect to the Docker daemon" even though `podman` itself works.
+3. **NVIDIA GPU:** configure CDI (needs nvidia-container-toolkit 1.14+):
+   ```bash
+   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+   ```
+   Skip this for CPU mode.
+
+Then continue with the shared steps: [§2.5 Download the Dashboard app](#25-download-the-dashboard-app) and [§2.6 Set Up the Server](#26-setting-up-the-server).
+
+---
+
+### 2.5 Download the Dashboard app
+
+Download **and install** the Dashboard for your platform from the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page. This is just the frontend — no models or packages are downloaded yet — but it must be installed before you set up the server in [§2.6](#26-setting-up-the-server).
+
+**Which file to download:**
+
+- **Linux:** the `.AppImage` (x64)
+- **Windows:** the `.exe` installer (x64)
+- **macOS:** the `.dmg` — `arm64-mac` for Apple Silicon ([§2.1](#21-macos-apple-silicon)), `x64-mac` for Intel ([§2.2](#22-macos-intel))
+
+> *Each release file is signed with my GPG key (the matching `.asc` file). Verifying is optional — see [§2.5.2](#252-verify-download-with-kleopatra-optional).*
+
+> **macOS only:** after dragging the app into Applications, clear the "unverified app" quarantine once in Terminal:
+> ```bash
+> xattr -dr com.apple.quarantine /Applications/TranscriptionSuite.app
+> ```
+
+#### 2.5.1 Linux AppImage Prerequisites
+
+AppImages need **FUSE 2** (`libfuse.so.2`), which isn't installed by default on some distros (Fedora and Arch KDE worked out of the box). If you see `dlopen(): error loading libfuse.so.2`, install the right package:
 
 | Distribution | Package | Install Command |
 |---|---|---|
@@ -250,116 +259,117 @@ AppImages require **FUSE 2** (`libfuse.so.2`), which is not installed by default
 | Fedora | `fuse-libs` | `sudo dnf install fuse-libs` |
 | Arch Linux | `fuse2` | `sudo pacman -S fuse2` |
 
-> **Sandbox note:** The AppImage automatically disables Chromium's SUID sandbox
-> (`--no-sandbox`) since the AppImage squashfs mount cannot satisfy its permission
-> requirements. This is the standard approach for Electron-based AppImages and does
-> not affect application security.
+> **Sandbox note:** The AppImage automatically disables Chromium's SUID sandbox (`--no-sandbox`), because the AppImage's squashfs mount can't satisfy its permission requirements. This is standard for Electron AppImages and doesn't affect security.
 
-##### 2.3.2 Verify Download with Kleopatra (optional)
+#### 2.5.2 Verify Download with Kleopatra (optional)
 
 1. Download both files from the same release:
-   - installer/app (`.AppImage`, `.exe` or `.dmg`)
-   - matching signature file (`.asc`)
+   - the installer/app (`.AppImage`, `.exe`, or `.dmg`)
+   - the matching signature file (`.asc`)
 2. Install Kleopatra: https://apps.kde.org/kleopatra/
-3. Import the public key in Kleopatra from this repository:
+3. Import my public key from this repository:
    - [`docs/assets/homelab-00_0xBFE4CC5D72020691_public.asc`](assets/homelab-00_0xBFE4CC5D72020691_public.asc)
-4. In Kleopatra, use `File` -> `Decrypt/Verify Files...` and select the downloaded `.asc` signature.
-5. If prompted, select the corresponding downloaded app file. Verification should report a valid signature.
+4. In Kleopatra, use `File` → `Decrypt/Verify Files...` and select the downloaded `.asc` signature.
+5. If prompted, select the matching app file. Verification should report a valid signature.
 
-### 2.4 Setting Up the Server
+---
 
-We're now ready to start the server. This process includes two parts: downloading the Docker image and starting a Docker container based off of that image.
+### 2.6 Setting Up the Server
 
-> **Windows:** Make sure Docker Desktop is already running before proceeding. The server setup will fail if Docker Desktop is not started first.
+*This section covers the Docker/Podman platforms — **Intel Mac, Windows, and Linux**. (Apple Silicon Macs already have the server bundled in the app — see [§2.1](#21-macos-apple-silicon).)*
 
-1. *Download the image*: Using the Sidebar on the left, head over to the Server tab and click the button 'Fetch Fresh Image'
-2. *Starting the container*: Scroll down a bit and click the 'Start Local' button in the #2 box
-3. *Initial setup - models, diarization*: A series of prompts will ask you for which models you want to download to begin with, and if you want to enable diarization. Specifically for diarization, you need to enter your HuggingFace token and accept the [terms of the model](https://huggingface.co/pyannote/speaker-diarization-community-1). To create a token, go to your [HuggingFace token settings](https://huggingface.co/settings/tokens), click *Create new token*, and select **Read** as the access type (Write or Fine-grained are not needed).
-4. **Wait** - Initial startup can take a long time, even on newer hardware and fast internet speeds; we're talking 10-20 minutes with reasonable specs though, not hours; you'll know it's done when the server status light turns green
-5. **Start the client**: Head to the Session tab and click on the 'Start Local' button inside the Client Link box - if it turns green you're ready to roll!
+Setting up the server has two parts: downloading the Docker image, then starting a container from it.
+
+> **Windows:** make sure Docker Desktop is **already running** before you start — server setup fails if it isn't started first.
+
+1. **Download the image.** In the left sidebar, open the **Server** tab and click **Fetch Fresh Image**.
+2. **Start the container.** Scroll down and click **Start Local** in the **#2** box.
+3. **Pick models & diarization.** Prompts ask which models to download to begin with, and whether to enable diarization. For diarization you'll need a free HuggingFace token and to accept the [model's terms](https://huggingface.co/pyannote/speaker-diarization-community-1). To create a token, go to your [HuggingFace token settings](https://huggingface.co/settings/tokens), click *Create new token*, and choose **Read** as the access type (Write / Fine-grained aren't needed).
+4. **Wait.** The first startup can take a while, even on newer hardware and fast internet — think **10–20 minutes** with reasonable specs, not hours. You'll know it's done when the server status light turns **green**.
+5. **Start the client.** Go to the **Session** tab and click **Start Local** in the **Client Link** box — when it turns green, you're ready to roll!
 
 <br>
 
-Notes:
+**Notes:**
+
 * *Settings are saved to:*
-  * *- Linux: `~/.config/TranscriptionSuite/`*
-  * *- Windows: `%APPDATA%\TranscriptionSuite\`*
-  * *- macOS: `~/Library/Application Support/TranscriptionSuite/`*
+  * *Linux: `~/.config/TranscriptionSuite/`*
+  * *Windows: `%APPDATA%\TranscriptionSuite\`*
+  * *macOS: `~/Library/Application Support/TranscriptionSuite/`*
+* *GNOME: the [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/) extension is required for system-tray support.*
+* *Docker vs Podman: both are supported and auto-detected (Docker first). For GPU mode with Podman, make sure CDI is configured (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`). Podman 4.7+ is required for `podman compose`.*
 
-* *GNOME note: The [AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/) extension is required for system tray support.*
+#### Older NVIDIA GPUs (GTX 10-series and earlier — Pascal / Maxwell)
 
-* *Docker vs Podman:*
-*TranscriptionSuite supports both Docker and Podman. The dashboard and CLI scripts auto-detect which runtime is available. For GPU mode with Podman, ensure CDI is configured (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`).*
-*Podman 4.7+ is required for `podman compose` support.*
+The default Docker image ships PyTorch built for **Volta and newer** GPUs (RTX 20-series and up). If your card is Pascal- or Maxwell-generation, PyTorch rejects it and the container crash-loops with an error like *"NVIDIA GeForce GTX 1070 with CUDA capability sm_61 is not compatible with the current PyTorch installation"*. Affected cards include:
 
-* *Older NVIDIA GPUs (GTX 1000-series and earlier — Pascal / Maxwell):*
-  *The default Docker image ships PyTorch built for Volta and newer GPUs (RTX 20-series and up). If your card is Pascal- or Maxwell-generation it will be rejected by PyTorch and the container will crash-loop with an error like "NVIDIA GeForce GTX 1070 with CUDA capability sm_61 is not compatible with the current PyTorch installation". Affected cards include:*
-  * *GeForce GTX 10-series — 1050 / 1060 / 1070 / 1080 (and Ti variants)*
-  * *GeForce GTX 900-series and GTX 750 / 750 Ti*
-  * *Tesla P4 / P40 / P100 / M40*
-  * *Quadro P-series and M-series*
+- GeForce GTX 10-series — 1050 / 1060 / 1070 / 1080 (and Ti variants)
+- GeForce GTX 900-series and GTX 750 / 750 Ti
+- Tesla P4 / P40 / P100 / M40
+- Quadro P-series and M-series
 
-  *Fix: switch to the **legacy-GPU image** — a separate image we build from the same Dockerfile but pinned to the cu126 PyTorch wheels (which still cover sm_50..sm_90). Steps:*
-  1. *In the Server tab, set the runtime to **GPU (CUDA)** (the legacy-GPU toggle only appears under this runtime).*
-  2. *If the container already exists, stop the server and remove it via the cleanup controls.*
-  3. *Flip the **Use legacy-GPU image (GTX 10-series / 900-series and older)** toggle. Confirm the dialog and leave "Wipe runtime volume now (recommended)" checked so the next bootstrap re-syncs the cu126 wheels cleanly.*
-  4. *Click **Fetch Fresh Image** to pull the legacy image, then **Start Local**. The first start re-downloads PyTorch and dependencies (10-20 minutes on reasonable hardware); subsequent starts are normal speed.*
+**Fix — switch to the legacy-GPU image** (a separate image built from the same Dockerfile but pinned to the cu126 PyTorch wheels, which still cover sm_50..sm_90):
 
-  *Once running, the legacy image behaves identically to the default. If you later move to a Volta-or-newer card, flip the toggle back off — leaving it on a modern GPU just gives you older PyTorch wheels for no benefit.*
+1. In the Server tab, set the runtime to **GPU (CUDA)** (the legacy-GPU toggle only appears under this runtime).
+2. If the container already exists, stop the server and remove it via the cleanup controls.
+3. Flip the **Use legacy-GPU image (GTX 10-series / 900-series and older)** toggle. Confirm the dialog and leave **"Wipe runtime volume now (recommended)"** checked, so the next bootstrap re-syncs the cu126 wheels cleanly.
+4. Click **Fetch Fresh Image** to pull the legacy image, then **Start Local**. The first start re-downloads PyTorch and dependencies (10–20 minutes on reasonable hardware); later starts are normal speed.
 
-### 2.5 AMD / Intel GPU Support (Vulkan)
+Once running, the legacy image behaves identically to the default. If you later move to a Volta-or-newer card, flip the toggle back off — leaving it on a modern GPU just gives you older PyTorch wheels for no benefit.
 
-If you have an **AMD or Intel GPU** instead of NVIDIA, you can get GPU-accelerated transcription using [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with Vulkan. Two paths are available: a **Linux** path (Docker sidecar) and a **Windows** path (native `whisper-server.exe` managed by the app).
+---
 
-On Linux, this works by running a second helper container (called whisper-server) alongside the main TranscriptionSuite container. On Windows, the app instead launches `whisper-server.exe` natively on your host and the Docker backend reaches it via `host.docker.internal:8080`.
+### 2.7 AMD / Intel GPU Support (Vulkan)
 
-#### 2.5.1 Linux (stable)
+If you have an **AMD or Intel GPU** (instead of NVIDIA), you can get GPU-accelerated transcription with [whisper.cpp](https://github.com/ggerganov/whisper.cpp) and Vulkan. There are two separate paths, and they're in very different shape right now:
 
-**What you need:**
+- ✅ **Windows — works well.** The app runs a native `whisper-server.exe` on your PC and manages it for you. See [§2.7.1](#271-windows-working).
+- ⚠️ **Linux — experimental, not working correctly yet.** A helper Docker container (sidecar) runs alongside the main one. See the warning in [§2.7.2](#272-linux-experimental-not-working-yet).
 
-- An AMD GPU with Vulkan support (RDNA1 or newer, e.g. RX 5500 XT, RX 6600, RX 7800 XT)
-- Or an Intel GPU with Vulkan support (Arc A-series or integrated Xe graphics)
-- Docker installed (Podman is not yet supported for Vulkan mode)
-- A Linux host with `/dev/dri/renderD128` (a real DRI render node from the AMD/Intel kernel driver)
+Either way, you use **GGML models** (not the CUDA models) — see the [model table below](#available-ggml-models).
 
-#### 2.5.2 Windows (GPU Vulkan Windows)
+#### 2.7.1 Windows (working)
 
 **What you need:**
 
 - An AMD or Intel GPU with current Windows drivers
-- Docker Desktop on Windows with the **WSL2 backend enabled** (Settings → General → "Use the WSL 2 based engine")
+- Docker Desktop with the **WSL 2 backend** enabled (Settings → General → "Use the WSL 2 based engine")
 
-**How it works:**
-
-The Windows path runs a native `whisper-server.exe` directly on your Windows host — not inside Docker. The app downloads it automatically on first use and manages its full lifecycle (start, stop, crash recovery). The Docker backend reaches it via `http://host.docker.internal:8080`. This avoids the AVX2 requirement that containerised Vulkan builds impose, meaning it works on a wider range of CPUs.
+**How it works:** the app downloads a native `whisper-server.exe`, runs it directly on Windows (not inside Docker), and the Docker backend talks to it at `http://host.docker.internal:8080`. Running it natively avoids the AVX2 CPU requirement that the containerised Vulkan build has, so it works on a wider range of CPUs.
 
 **How to set it up:**
 
 1. In the **Server tab**, open **Instance Settings** and select **GPU (Vulkan Windows)** as the runtime profile.
-2. In the Server tab image selector, choose the latest image tag (e.g. `v1.3.5`) and click **Fetch Fresh Image**. Wait for the download to complete — the Vulkan Windows profile uses a dedicated Docker image.
-3. Click **Start Local**. The app automatically downloads `whisper-server.exe` if it is not already present, then starts the Docker backend.
-4. During the setup prompts: select a GGML model as your **Main Transcriber** and (optionally) a GGML model for **Live Mode**. Diarization is not supported on this path — skip it.
-5. Wait for the server status to turn green. You are ready to transcribe.
+2. In the image selector, choose the latest image tag (e.g. `v1.3.5`) and click **Fetch Fresh Image**. The Vulkan Windows profile uses its own dedicated image, so wait for the download to finish.
+3. Click **Start Local**. The app automatically downloads `whisper-server.exe` (if it isn't already present), then starts the Docker backend.
+4. In the setup prompts, pick a **GGML model** as your **Main Transcriber** and (optionally) one for **Live Mode**. Diarization isn't supported on this path — skip it.
+5. Wait for the server status to turn green. You're ready to transcribe.
 
-> **`whisper-server.exe` location:** stored at `%APPDATA%\TranscriptionSuite\whisper-server\whisper-server.exe` and managed automatically by the app. You do not need to install or configure it manually.
+> **Where the file lives:** `whisper-server.exe` is stored at `%APPDATA%\TranscriptionSuite\whisper-server\whisper-server.exe` and managed automatically by the app. You don't need to install or configure it yourself.
 
-#### 2.5.3 Setup walk-through (Linux)
+#### 2.7.2 Linux (experimental, not working yet)
 
-> Windows users: see the step-by-step in §2.5.2 — the setup is integrated into the dashboard and does not require the manual steps below.
+> ⚠️ **Heads-up:** the Linux Vulkan path is **not working correctly yet**. The steps below are kept for reference and for anyone who wants to experiment, but expect problems. If you're on Linux with an AMD/Intel GPU and just want reliable transcription, use **CPU mode** for now (or an NVIDIA GPU if you have one). The Windows Vulkan path does work — see [§2.7.1](#271-windows-working).
+
+**What you need:**
+
+- An AMD GPU with Vulkan support (RDNA1 or newer — e.g. RX 5500 XT, RX 6600, RX 7800 XT), **or** an Intel GPU with Vulkan support (Arc A-series or integrated Xe graphics)
+- Docker installed (Podman isn't supported for Vulkan mode yet)
+- A Linux host with `/dev/dri/renderD128` (a real DRI render node from the AMD/Intel kernel driver)
 
 **How to set it up:**
 
 1. In the dashboard, select **Vulkan** as the runtime profile (instead of GPU or CPU) when starting the server.
-2. The dashboard will automatically start the whisper-server helper container alongside the main container.
-3. Select a GGML model as your transcription model - the dashboard will suggest **`ggml-large-v3-turbo-q8_0.bin`** as a starting point.
-4. Download the model using the **Model Manager** tab (the download button streams the file directly from HuggingFace into the models volume - no Python or CLI tools needed).
-5. Click **Start Server** - the whisper-server sidecar will load the model and the main container will route requests to it.
+2. The dashboard automatically starts the whisper-server helper container alongside the main one.
+3. Pick a **GGML model** — the dashboard suggests **`ggml-large-v3-turbo-q8_0.bin`** as a starting point.
+4. Download the model from the **Model Manager** tab (it streams straight from HuggingFace into the models volume — no Python or CLI tools needed).
+5. Click **Start Server** — the sidecar loads the model and the main container routes requests to it.
 
-> **Model switching:** The whisper.cpp sidecar loads its model once at startup. To switch models, stop the server, select the new model, then start again.
+> **Switching models:** the sidecar loads its model once at startup. To switch, stop the server, pick the new model, then start again.
 
-**Recommended model:** `ggml-large-v3-turbo-q8_0.bin` (~1.4 GB) - best balance of speed, quality, and VRAM usage for most AMD/Intel GPUs.
+#### Available GGML models
 
-**Available GGML models:**
+**Recommended:** `ggml-large-v3-turbo-q8_0.bin` (~1.4 GB) — best balance of speed, quality, and VRAM use for most AMD/Intel GPUs.
 
 | Model | Size | Languages | Translation | Notes |
 |-------|------|-----------|-------------|-------|
@@ -375,7 +385,7 @@ The Windows path runs a native `whisper-server.exe` directly on your Windows hos
 | `ggml-small-q5_1.bin` | ~370 MB | 99 | Yes | Smallest multilingual |
 | `ggml-small.en.bin` | ~465 MB | English | No | Smallest English-only |
 
-**What works and what doesn't:**
+#### What works on Vulkan
 
 | Feature | Vulkan (AMD/Intel) | NVIDIA (CUDA) |
 |---------|-------------------|---------------|
@@ -385,15 +395,15 @@ The Windows path runs a native `whisper-server.exe` directly on your Windows hos
 | Live mode | Yes | Yes |
 | Multiple concurrent jobs | One at a time | One at a time |
 
-**Troubleshooting:**
+#### Vulkan troubleshooting
 
-- _"Requires CUDA" badge on model_ - You are in Vulkan mode. Use a GGML model instead (the CUDA models won't work with the Vulkan sidecar).
-- _Download fails_ - Make sure the server container is running before downloading models. The download runs inside the container.
-- _Sidecar health check timeout_ - The model is still loading. Large GGML files can take 30–60 seconds to initialize on first start.
+- **_"Requires CUDA" badge on a model_** — you're in Vulkan mode; use a GGML model instead (the CUDA models won't work with the Vulkan sidecar).
+- **_Download fails_** — make sure the server container is running before downloading models (the download runs inside the container).
+- **_Sidecar health-check timeout_** — the model is still loading; large GGML files can take 30–60 seconds to initialise on first start.
 
-> **Note for older AMD GPUs (RDNA1):** If you experience Vulkan initialization errors with an RX 5500 XT or similar RDNA1 card, you may need to add `iommu=soft` to your kernel boot parameters.
+> **Older AMD GPUs (RDNA1):** if you hit Vulkan initialization errors on an RX 5500 XT or similar RDNA1 card, try adding `iommu=soft` to your kernel boot parameters.
 
-> **Note for Windows users:** if transcription is unexpectedly slow, make sure Docker Desktop is running with the WSL2 backend (Settings → General → "Use the WSL 2 based engine"). CPU-only fallback cannot be detected automatically from the dashboard.
+> **Windows feels slow?** Make sure Docker Desktop is using the WSL 2 backend (Settings → General → "Use the WSL 2 based engine"). A CPU-only fallback can't be detected automatically from the dashboard.
 
 ---
 
