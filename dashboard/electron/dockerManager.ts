@@ -36,6 +36,7 @@ import {
   resetDetection,
   resolveRootlessSocket,
   getSocketPaths,
+  getRuntimePathAdditions,
 } from './containerRuntime.js';
 import { type WslSupport, resetWslSupportCache } from './wslDetect.js';
 
@@ -1356,12 +1357,12 @@ function buildProcessEnv(
 ): NodeJS.ProcessEnv {
   const delimiter = path.delimiter;
   const currentPath = process.env.PATH ?? '';
-  const defaultPathEntries =
-    process.platform === 'win32'
-      ? ['C:\\Program Files\\Docker\\Docker\\resources\\bin']
-      : ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+  // Use the SAME augmentation as runtime detection (containerRuntime.ts) so the
+  // PATH that found `<runtime> compose` during detection is also handed to the
+  // actual compose-up/exec commands — including the Windows compose-provider
+  // directories that make `podman compose` resolvable (GH #158).
   const mergedPath = Array.from(
-    new Set([...currentPath.split(delimiter).filter(Boolean), ...defaultPathEntries]),
+    new Set([...currentPath.split(delimiter).filter(Boolean), ...getRuntimePathAdditions()]),
   ).join(delimiter);
 
   const socketEnv: Record<string, string> = {};
@@ -1476,9 +1477,19 @@ function getDetectionGuidance(): string | null {
   return _detectionGuidance;
 }
 
-function getComposeAvailable(): boolean {
-  // null = not yet detected → assume available (avoid false-negative flicker).
-  // Only return false when compose was explicitly confirmed as missing.
+async function getComposeAvailable(): Promise<boolean> {
+  // Ensure runtime detection has completed so `_composeAvailable` reflects the
+  // real probe result rather than its initial `null`. `dockerAvailable()` is
+  // backed by a cached detection (getDetectionResult), so repeat calls are cheap.
+  //
+  // This closes a race (GH #158): the renderer's useDocker hook called
+  // available() (which *sets* _composeAvailable asynchronously) and
+  // getComposeAvailable() (which *read* it) in the same Promise.all. The
+  // synchronous read landed first and saw `null` — treated as "available" —
+  // so the setup checklist showed "Compose available ✓" while startContainer
+  // simultaneously threw its `_composeAvailable === false` guard.
+  await dockerAvailable();
+  // Only report unavailable when compose was explicitly confirmed missing.
   return _composeAvailable !== false;
 }
 
@@ -2153,12 +2164,15 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   }
 
   // Guard: bail early with a human-readable message if compose is not available.
+  // Prefer the runtime/platform-specific guidance captured during detection
+  // (Podman-on-Windows gets provider/PATH advice, not Docker/apt advice — GH #158).
+  // `_composeAvailable === false` is only ever set by dockerAvailable(), which
+  // also sets `_detectionGuidance`, so the guidance is reliably populated here.
   if (_composeAvailable === false) {
     throw new Error(
-      'Docker Compose plugin is not installed. ' +
-        'Install it with: sudo apt install docker-compose-v2 (Debian/Ubuntu) ' +
-        'or install Docker Desktop which bundles Compose. ' +
-        'Then click "Retry Detection".',
+      _detectionGuidance ??
+        'The container runtime is running but its Compose plugin/provider was not found. ' +
+          'Install Compose for your runtime, then click "Retry Detection".',
     );
   }
 

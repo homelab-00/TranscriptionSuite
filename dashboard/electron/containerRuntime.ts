@@ -76,15 +76,58 @@ export function getSocketPaths(kind: ContainerRuntimeKind): SocketPaths {
 
 let cachedResult: DetectionResult | null = null;
 
+/**
+ * Directories appended to PATH when resolving container-runtime commands.
+ *
+ * On Windows, Podman's `compose` subcommand is only a thin wrapper that shells
+ * out to an EXTERNAL provider binary (docker-compose.exe / podman-compose.exe),
+ * which podman locates by searching PATH. The provider's directory must
+ * therefore be present in the environment we hand to `podman` — otherwise
+ * `podman compose` fails with exit 125 even though `podman` itself works fine
+ * (GH #158). A GUI Electron process launched from a pre-existing Explorer
+ * session does not always inherit the post-install user PATH a fresh terminal
+ * sees, so we add the well-known provider locations defensively. Every entry is
+ * additive and de-duplicated by the caller; non-existent dirs are harmless.
+ *
+ * Exported (and parameterised on platform/env) so it can be unit-tested without
+ * mutating global process state.
+ */
+export function getRuntimePathAdditions(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  if (platform !== 'win32') {
+    return ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+  }
+
+  const programFiles = env.ProgramFiles ?? 'C:\\Program Files';
+  const userProfile = env.USERPROFILE ?? null;
+  const localAppData = env.LOCALAPPDATA ?? (userProfile ? `${userProfile}\\AppData\\Local` : null);
+
+  const entries: string[] = [
+    // Docker Desktop bundles the compose plugin here.
+    `${programFiles}\\Docker\\Docker\\resources\\bin`,
+    // Machine-wide Podman install.
+    `${programFiles}\\RedHat\\Podman`,
+  ];
+  if (localAppData) {
+    // App-execution-alias providers (docker-compose.exe) live under WindowsApps.
+    entries.push(`${localAppData}\\Microsoft\\WindowsApps`);
+    // Per-user Podman install (Podman Desktop default location).
+    entries.push(`${localAppData}\\Programs\\Podman`);
+  }
+  if (userProfile) {
+    // `pip install --user podman-compose` drops the shim here.
+    entries.push(`${userProfile}\\.local\\bin`);
+  }
+  return entries;
+}
+
 function buildDetectionEnv(): NodeJS.ProcessEnv {
   const delimiter = path.delimiter;
   const currentPath = process.env.PATH ?? '';
-  const defaultPathEntries =
-    process.platform === 'win32'
-      ? ['C:\\Program Files\\Docker\\Docker\\resources\\bin']
-      : ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
   const mergedPath = Array.from(
-    new Set([...currentPath.split(delimiter).filter(Boolean), ...defaultPathEntries]),
+    new Set([...currentPath.split(delimiter).filter(Boolean), ...getRuntimePathAdditions()]),
   ).join(delimiter);
   return { ...process.env, PATH: mergedPath };
 }
@@ -181,10 +224,28 @@ const DOCKER_COMPOSE_MISSING_GUIDANCE =
   'or install Docker Desktop which bundles Compose — ' +
   'then click "Retry Detection" in the app.';
 
-const PODMAN_COMPOSE_MISSING_GUIDANCE =
-  'Podman is running but the compose plugin was not found. ' +
-  'Fix: install podman-compose (pip install podman-compose) or ' +
-  'docker-compose-v2 — then click "Retry Detection" in the app.';
+/**
+ * Guidance shown when Podman is running but its external compose provider was
+ * not found. Platform-aware (GH #158): on Windows the provider is usually
+ * present but unreachable because the app's PATH lacks its directory, so the
+ * advice differs from the Linux "install the package" case.
+ */
+function podmanComposeMissingGuidance(platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32') {
+    return (
+      'Podman is running but its Compose provider (docker-compose.exe) was not found. ' +
+      'Install Docker Compose — e.g. via Podman Desktop’s Compose setup, or ' +
+      '`winget install Docker.DockerCompose` — then RESTART Transcription Suite ' +
+      '(launch it from the Start Menu / a fresh terminal so it inherits the updated ' +
+      'PATH) and click "Retry Detection".'
+    );
+  }
+  return (
+    'Podman is running but the compose plugin was not found. ' +
+    'Fix: install podman-compose (pip install podman-compose) or ' +
+    'docker-compose-v2 — then click "Retry Detection" in the app.'
+  );
+}
 
 const PODMAN_SOCKET_GUIDANCE =
   'Podman was detected but its API socket is not active. ' +
@@ -242,7 +303,7 @@ export async function detectRuntime(): Promise<DetectionResult> {
       guidance:
         running && !hasCompose
           ? override === 'podman'
-            ? PODMAN_COMPOSE_MISSING_GUIDANCE
+            ? podmanComposeMissingGuidance()
             : DOCKER_COMPOSE_MISSING_GUIDANCE
           : undefined,
     };
@@ -292,7 +353,7 @@ export async function detectRuntime(): Promise<DetectionResult> {
       binaryFoundButNotRunning: false,
       binaryFound: 'podman',
       composeAvailable: hasCompose,
-      guidance: hasCompose ? undefined : PODMAN_COMPOSE_MISSING_GUIDANCE,
+      guidance: hasCompose ? undefined : podmanComposeMissingGuidance(),
     };
   }
 
@@ -310,14 +371,32 @@ export async function detectRuntime(): Promise<DetectionResult> {
   return { runtime: null, binaryFoundButNotRunning: false, binaryFound: null };
 }
 
+/** In-flight detection promise, memoized so concurrent callers share one probe. */
+let inflightDetection: Promise<DetectionResult> | null = null;
+
 /**
  * Get the cached detection result, running detection if needed.
+ *
+ * Memoizes the in-flight detection promise (not just the resolved value) so that
+ * concurrent cold-cache callers share a single probe pass. Without this, the
+ * renderer's mount-time `Promise.all([available(), …, getComposeAvailable()])`
+ * — both of which route here — would each observe `cachedResult === null`
+ * (it is only assigned after the first `await` resolves) and spawn their own
+ * `<runtime> version` / `<runtime> compose version` subprocesses (GH #158).
  */
 export async function getDetectionResult(): Promise<DetectionResult> {
-  if (!cachedResult) {
-    cachedResult = await detectRuntime();
+  if (cachedResult) return cachedResult;
+  if (!inflightDetection) {
+    inflightDetection = (async () => {
+      try {
+        cachedResult = await detectRuntime();
+        return cachedResult;
+      } finally {
+        inflightDetection = null;
+      }
+    })();
   }
-  return cachedResult;
+  return inflightDetection;
 }
 
 /**
@@ -342,6 +421,7 @@ export async function getRuntimeBin(): Promise<string> {
  */
 export function resetDetection(): void {
   cachedResult = null;
+  inflightDetection = null;
 }
 
 /**
