@@ -61,41 +61,38 @@ export function ensureServerConfigSeed(): string {
   const target = getServerConfigPath();
   fs.mkdirSync(dir, { recursive: true });
 
-  // One-time migration from the legacy userData/config.yaml location.
-  const legacy = path.join(app.getPath('userData'), 'config.yaml');
-  if (!fs.existsSync(target) && fs.existsSync(legacy)) {
-    try {
-      fs.renameSync(legacy, target);
-      return target;
-    } catch (renameErr) {
-      // Same-volume rename is atomic; if it still fails (permissions, a
-      // cross-device link), COPY so the user's overrides are never silently
-      // orphaned at the old path, and surface the error.
-      try {
-        fs.copyFileSync(legacy, target);
-        console.error(
-          `[serverConfig] Could not move legacy config (${String(renameErr)}); ` +
-            `copied ${legacy} -> ${target}. The old file is left as a backup.`,
-        );
-        return target;
-      } catch (copyErr) {
-        console.error(
-          `[serverConfig] Failed to migrate legacy config ${legacy} -> ${target}: ` +
-            `${String(copyErr)}. Seeding a fresh stub instead.`,
-        );
-        // Fall through to stub seeding.
-      }
-    }
-  }
-
-  // Seed a sparse stub if nothing exists. 'wx' makes the existence check and the
-  // write a single atomic syscall, avoiding a TOCTOU race with a parallel start.
+  // Atomically claim config.yaml with a sparse stub. 'wx' is create-exclusive —
+  // it creates the file only if it does not already exist, in a single syscall,
+  // so there is no check-then-use (TOCTOU) race. EEXIST means a real config is
+  // already present: leave it untouched.
+  let created = false;
   try {
     fs.writeFileSync(target, SPARSE_STUB, { encoding: 'utf-8', flag: 'wx' });
+    created = true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
       throw error;
     }
   }
+
+  // Only when WE just created the stub (target did not pre-exist) do we migrate a
+  // legacy userData/config.yaml over it — so an existing real config is never
+  // clobbered. Copy-then-remove (not rename) handles a cross-device userData and
+  // never deletes the legacy file until its contents are safely at the new path.
+  if (created) {
+    const legacy = path.join(app.getPath('userData'), 'config.yaml');
+    try {
+      const legacyText = fs.readFileSync(legacy, 'utf-8');
+      fs.writeFileSync(target, legacyText, 'utf-8');
+      fs.rmSync(legacy, { force: true });
+    } catch (err) {
+      // ENOENT simply means there is no legacy file to migrate.
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code && code !== 'ENOENT') {
+        console.error(`[serverConfig] Legacy config migration failed: ${String(err)}`);
+      }
+    }
+  }
+
   return target;
 }
