@@ -6,6 +6,11 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 import { fileURLToPath } from 'url';
+import {
+  ensureServerConfigSeed,
+  getServerConfigDir,
+  getServerConfigPath,
+} from './serverConfigPaths.js';
 import { execFile, execFileSync, spawn } from 'child_process';
 import { promisify } from 'util';
 import {
@@ -933,62 +938,16 @@ ipcMain.handle('app:getConfigDir', () => {
   return app.getPath('userData');
 });
 
+// Dedicated dir that actually holds the server's config.yaml (a subdir of
+// userData). Distinct from app:getConfigDir, which returns the userData root
+// used for native data/model storage labels.
+ipcMain.handle('app:getServerConfigDir', () => {
+  return getServerConfigDir();
+});
+
 ipcMain.handle('app:ensureServerConfig', async () => {
-  const configDir = app.getPath('userData');
-  const configPath = path.join(configDir, 'config.yaml');
-
-  fs.mkdirSync(configDir, { recursive: true });
-
-  // Try to copy the default config from the server directory.
-  const candidates = [
-    // Dev mode: repo server/config.yaml
-    path.resolve(__dirname, '../../server/config.yaml'),
-    // Packaged: bundled extra resource
-    path.join(process.resourcesPath ?? '', 'config.yaml'),
-  ];
-
-  for (const src of candidates) {
-    try {
-      fs.copyFileSync(src, configPath, fs.constants.COPYFILE_EXCL);
-      return configPath;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        return configPath;
-      }
-      // Try next candidate.
-    }
-  }
-
-  // No template found — create a minimal stub so the file exists.
-  try {
-    fs.writeFileSync(
-      configPath,
-      [
-        '# ============================================================================',
-        '# TranscriptionSuite — User Configuration',
-        '# ============================================================================',
-        '# This file overrides the container defaults.',
-        '# See the full reference at: server/config.yaml in the project repository.',
-        '#',
-        '# Uncomment and edit any section you want to customise.',
-        '',
-        '# main_transcriber:',
-        '#   model: "nvidia/parakeet-tdt-0.6b-v3"',
-        '#   compute_type: "default"',
-        '#   device: "cuda"',
-        '',
-        '# diarization:',
-        '#   parallel: false',
-        '',
-      ].join('\n'),
-      { encoding: 'utf-8', flag: 'wx' },
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-      throw error;
-    }
-  }
-  return configPath;
+  // Seed (or migrate) the sparse overlay in the dedicated server-config subdir.
+  return ensureServerConfigSeed();
 });
 
 // ---------------------------------------------------------------------------
@@ -1023,8 +982,7 @@ ipcMain.handle('serverConfig:readTemplate', async () => {
 
 /** Read the user's local config.yaml (sparse overrides). Returns null if missing. */
 ipcMain.handle('serverConfig:readLocal', async () => {
-  const configDir = app.getPath('userData');
-  const configPath = path.join(configDir, 'config.yaml');
+  const configPath = getServerConfigPath();
   try {
     return fs.readFileSync(configPath, 'utf-8');
   } catch (error) {
@@ -1035,9 +993,8 @@ ipcMain.handle('serverConfig:readLocal', async () => {
 
 /** Write text to the user's local config.yaml. Creates parent dirs if needed. */
 ipcMain.handle('serverConfig:writeLocal', async (_event, yamlText: string) => {
-  const configDir = app.getPath('userData');
-  const configPath = path.join(configDir, 'config.yaml');
-  fs.mkdirSync(configDir, { recursive: true });
+  const configPath = getServerConfigPath();
+  fs.mkdirSync(getServerConfigDir(), { recursive: true });
   fs.writeFileSync(configPath, yamlText, 'utf-8');
 });
 
@@ -1707,7 +1664,7 @@ ipcMain.handle('updates:openReleasePage', async (_event, url: string) => {
  * can look up arbitrary configuration keys.
  */
 function readTlsConfig() {
-  const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
+  const userConfigPath = getServerConfigPath();
   const templateCandidates = [
     path.resolve(__dirname, '../../server/config.yaml'),
     path.join(process.resourcesPath ?? '', 'config.yaml'),

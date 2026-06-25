@@ -115,7 +115,7 @@ Vitest runs in parallel by default. Configuration lives in `dashboard/vitest.con
 | `test_audio_utils.py` | 53 | GPU cache, CUDA check, convert WAV/MP3, legacy normalise, format timestamp, duration, WebRTC/Silero VAD |
 | `test_ffmpeg_utils.py` | 20 | Audio processing (resample, normalise) |
 | `test_config.py` | 12 | `ServerConfig` class |
-| `test_config_tree.py` | 44 | Type detection, key humanisation, comment extraction, parse/edit round-trip |
+| `test_config_merge.py` | 16 | Deep-merge, sparse-overlay load, env precedence, sparse `set()` |
 | `test_subtitle_export.py` | 9 | SRT/ASS subtitle rendering |
 | `test_formatters.py` | 15 | OpenAI-compatible response formatters |
 | `test_webhook.py` | 17 | Outgoing webhook dispatcher |
@@ -469,7 +469,7 @@ with similar testing characteristics.
 | Phase | Focus | ~New Tests | Key Modules |
 |-------|-------|-----------|-------------|
 | **0** | Infrastructure (done) | 0 | `conftest.py`, vitest setup, this doc |
-| **1** | Pure logic (done) | 131 | `token_store`, `speaker_merge`, `config_tree`, route utils |
+| **1** | Pure logic (done) | 131 | `token_store`, `speaker_merge`, route utils |
 | **2** | State machines (done) | 107 | `TranscriptionJobTracker`, model manager init, diarisation data, live engine config |
 | **3** | Audio / engine (done) | 68 | `audio_utils`, STT engine helpers |
 | **4** | Database (done) | 56 | `database.py` CRUD, FTS, cascading deletes |

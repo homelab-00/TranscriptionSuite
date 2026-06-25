@@ -122,8 +122,6 @@ Technical documentation for developing and building TranscriptionSuite.
         - [LM Studio-specific endpoints](#lm-studio-specific-endpoints)
       - [Admin](#admin)
         - [`GET /api/admin/status`](#get-apiadminstatus)
-        - [`GET /api/admin/config/full`](#get-apiadminconfigfull)
-        - [`PATCH /api/admin/config`](#patch-apiadminconfig)
         - [`PATCH /api/admin/diarization`](#patch-apiadmindiarization)
         - [`POST /api/admin/models/load`](#post-apiadminmodelsload)
         - [`WebSocket /api/admin/models/load/stream`](#websocket-apiadminmodelsloadstream)
@@ -1109,9 +1107,14 @@ Then restart the container. The app also warns in the log if a cert expires with
 | `/runtime/bootstrap-status.json` | Bootstrap feature status (diarization availability, etc.) |
 | `/runtime/cache/` | uv package cache used for delta dependency updates |
 
-**Optional user config** (bind mount to `/user-config`):
+**User config** (bind mount to `/user-config`):
 
-When `USER_CONFIG_DIR` is set, mounts custom config and logs.
+The dashboard sets `USER_CONFIG_DIR` to a dedicated `server-config/` subdir of its
+Electron `userData` dir automatically, mounting that subdir's `config.yaml` to
+`/user-config/config.yaml` so dashboard-edited settings reach the server (deep-merged over
+the image defaults). Only the subdir is mounted — not the whole Electron profile. Manual
+`docker compose` launches can set `USER_CONFIG_DIR` themselves; when unset it falls back to
+`./.empty`.
 
 ### 6.6 Docker Image Selection
 
@@ -1656,8 +1659,6 @@ GitHub Issues #83 (Pascal/Maxwell support) and #60 (compute_type downgrade).
 | `/api/llm/model/load` | POST | User | Load a model in LM Studio |
 | `/api/llm/model/unload` | POST | User | Unload the active LM Studio model |
 | `/api/admin/status` | GET | Admin | Detailed server + model + config status |
-| `/api/admin/config/full` | GET | Admin | Full parsed config tree for the settings editor |
-| `/api/admin/config` | PATCH | Admin | Update config.yaml values in-place |
 | `/api/admin/diarization` | PATCH | Admin | Toggle parallel diarization |
 | `/api/admin/models/load` | POST | Admin | Load transcription models |
 | `/api/admin/models/load/stream` | WS | Admin | Load models with streaming progress |
@@ -1994,16 +1995,6 @@ These endpoints use LM Studio's proprietary APIs and are only relevant for local
 
 ##### `GET /api/admin/status`
 Full server state: model manager status, active config values (main and live transcriber model, device, diarization settings), and current job tracker state.
-
-##### `GET /api/admin/config/full`
-Return the full parsed `config.yaml` as a structured tree with sections, fields, types, and inline YAML comments. Used by the dashboard settings editor to dynamically render fields.
-
-##### `PATCH /api/admin/config`
-Update one or more config values in-place, preserving YAML comments and formatting.
-
-**Request body (JSON):** `{"updates": {"section.key": value, ...}}`
-
-**Response:** `{"results": {"section.key": "updated"}, ...full config tree...}`
 
 ##### `PATCH /api/admin/diarization`
 Toggle parallel diarization. **JSON body:** `{"parallel": true}`
@@ -2367,12 +2358,35 @@ uv run uvicorn server.api.main:app --reload --host 0.0.0.0 --port 9786
 
 ### 8.3 Configuration System
 
-All modules use `get_config()` from `server.config`. Configuration is loaded with priority:
+All modules use `get_config()` from `server.config`. Configuration is built by
+**deep-merging a sparse user overlay onto the baked-in defaults**, then applying
+environment-variable overrides. Precedence (lowest → highest):
 
-1. `/user-config/config.yaml` (Docker with mounted user config)
-2. `~/.config/TranscriptionSuite/config.yaml` (Linux user config)
-3. `/app/config.yaml` (Docker default)
-4. `server/config.yaml` (native development)
+1. **Defaults (base)** — first readable of `/app/config.yaml` (Docker image),
+   `server/config.yaml` (native development), `./config.yaml`.
+2. **User overlay (sparse)** — `get_user_config_dir()/config.yaml`. Only the keys
+   present here override the defaults; everything else is inherited. Lists replace
+   (never concatenate); a key present with value `null` still overrides.
+3. **Environment variables** — e.g. `MAIN_TRANSCRIBER_MODEL`, `LIVE_TRANSCRIBER_MODEL`,
+   `DIARIZATION_MODEL`, `WHISPERCPP_*`, `LOG_LEVEL`/`LOG_DIR` — applied last, so they win.
+
+`get_user_config_dir()` resolves the overlay directory in this order: `/user-config`
+(the Docker bind mount) → the `USER_CONFIG_DIR` env var (set by the dashboard for the
+native macOS server, or by advanced users) → the platform default
+(`~/.config/TranscriptionSuite` on Linux, `~/Library/Application Support/TranscriptionSuite`
+on macOS).
+
+The dashboard keeps the overlay in a **dedicated `server-config/` subdirectory** of its
+Electron `userData` dir (e.g. `…/TranscriptionSuite/server-config/config.yaml`) — and mounts
+**only that subdir** to `/user-config`, so the container never sees the rest of the Electron
+profile (Chromium caches, `Local State`, `dashboard-config.json`). A one-time migration moves
+any legacy `userData/config.yaml` into the subdir. The settings editor is local-first
+(Electron IPC: `serverConfig:readTemplate/readLocal/writeLocal`) and writes the sparse overlay
+there; `ensureServerConfigSeed()` creates/migrates it before the server starts.
+
+`config.set()` (e.g. the `/api/admin/diarization` toggle) persists changes back to the
+**user overlay** as sparse keys; the defaults file is never modified. Passing an explicit
+`config_path` to `ServerConfig` loads that single file as-is (no merge).
 
 ### 8.4 Testing
 

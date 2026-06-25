@@ -125,6 +125,7 @@ export interface ElectronAPI {
     openExternal: (url: string) => Promise<void>;
     openPath: (filePath: string) => Promise<string>;
     getConfigDir: () => Promise<string>;
+    getServerConfigDir: () => Promise<string>;
     ensureServerConfig: () => Promise<string>;
     removeConfigAndCache: () => Promise<void>;
     getClientLogPath: () => Promise<string>;
@@ -499,6 +500,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
     openPath: (filePath: string) => ipcRenderer.invoke('app:openPath', filePath),
     getConfigDir: () => ipcRenderer.invoke('app:getConfigDir'),
+    getServerConfigDir: () => ipcRenderer.invoke('app:getServerConfigDir') as Promise<string>,
     ensureServerConfig: () => ipcRenderer.invoke('app:ensureServerConfig') as Promise<string>,
     removeConfigAndCache: () => ipcRenderer.invoke('app:removeConfigAndCache'),
     getClientLogPath: () => ipcRenderer.invoke('app:getClientLogPath'),

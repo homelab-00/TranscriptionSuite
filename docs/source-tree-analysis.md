@@ -27,8 +27,7 @@ TranscriptionSuite/
 │   │   │       ├── transcription.py #   File upload, cancel, languages, job result/retry/dedup-check
 │   │   │       ├── utils.py         #   Shared route helpers (client detection, auth, WS auth)
 │   │   │       └── websocket.py     #   WebSocket /ws — longform recording transcription
-│   │   ├── config.py                # ServerConfig: YAML + env var + runtime config
-│   │   ├── config_tree.py           # Nested config tree for admin PATCH operations
+│   │   ├── config.py                # ServerConfig: defaults+sparse-overlay merge + env var config
 │   │   ├── core/                    # Business logic layer
 │   │   │   ├── audio_utils.py       #   Audio loading, resampling, CUDA health check, hashing
 │   │   │   ├── client_detector.py   #   Client type detection (dashboard vs CLI vs API)
