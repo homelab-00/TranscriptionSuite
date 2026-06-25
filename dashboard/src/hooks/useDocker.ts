@@ -186,9 +186,11 @@ export function useDocker(): UseDockerReturn {
         ]);
         setAvailable(ok);
         setDetectionGuidance(guidance);
-        // When Docker is completely absent, compose is also unavailable.
-        // getComposeAvailable() returns true for the ambiguous null state, so
-        // we must explicitly set false here to keep the Start buttons disabled.
+        // getComposeAvailable() now awaits detection (GH #158), so `compose`
+        // reflects the real probe result regardless of call ordering — no more
+        // stale `null → true` race against available(). We still force false
+        // when the runtime is completely absent, to keep the Start buttons
+        // disabled even if the compose probe was inconclusive.
         setComposeAvailable(ok ? compose : false);
         if (ok) {
           docker

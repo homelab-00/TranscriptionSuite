@@ -41,7 +41,12 @@ vi.mock('fs', async (importOriginal) => {
 
 // ─── Import after mocks ────────────────────────────────────────────────────
 
-import { detectRuntime, resetDetection } from '../containerRuntime.js';
+import {
+  detectRuntime,
+  resetDetection,
+  getRuntimePathAdditions,
+  getDetectionResult,
+} from '../containerRuntime.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -230,5 +235,111 @@ describe('[P1] detectRuntime', () => {
     setExecResponses({});
     const second = await detectRuntime();
     expect(second.runtime).toBeNull();
+  });
+});
+
+// ─── GH #158: Windows compose-provider PATH augmentation ────────────────────
+//
+// On Windows, `podman compose` is a thin wrapper that shells out to an external
+// provider binary (docker-compose.exe), located by searching PATH. If the
+// provider's directory is not on the PATH we hand to `podman`, `podman compose`
+// fails with exit 125 even though `podman` itself works. A GUI Electron process
+// does not always inherit the post-install user PATH, so getRuntimePathAdditions
+// must defensively include the well-known provider locations.
+
+describe('[GH158] getRuntimePathAdditions', () => {
+  const WIN_ENV = {
+    LOCALAPPDATA: 'C:\\Users\\bob\\AppData\\Local',
+    USERPROFILE: 'C:\\Users\\bob',
+    ProgramFiles: 'C:\\Program Files',
+  };
+
+  it('Windows: includes the WindowsApps app-alias provider directory', () => {
+    const dirs = getRuntimePathAdditions('win32', WIN_ENV);
+    expect(dirs).toContain('C:\\Users\\bob\\AppData\\Local\\Microsoft\\WindowsApps');
+  });
+
+  it('Windows: includes both per-user and machine-wide Podman install dirs', () => {
+    const dirs = getRuntimePathAdditions('win32', WIN_ENV);
+    expect(dirs).toContain('C:\\Users\\bob\\AppData\\Local\\Programs\\Podman'); // Podman Desktop
+    expect(dirs).toContain('C:\\Program Files\\RedHat\\Podman'); // machine-wide
+  });
+
+  it('Windows: still includes the Docker Desktop bin dir (compose plugin)', () => {
+    const dirs = getRuntimePathAdditions('win32', WIN_ENV);
+    expect(dirs).toContain('C:\\Program Files\\Docker\\Docker\\resources\\bin');
+  });
+
+  it('Windows: includes the pip --user bin dir for podman-compose', () => {
+    const dirs = getRuntimePathAdditions('win32', WIN_ENV);
+    expect(dirs).toContain('C:\\Users\\bob\\.local\\bin');
+  });
+
+  it('Windows: derives LOCALAPPDATA from USERPROFILE when unset (no crash)', () => {
+    const dirs = getRuntimePathAdditions('win32', { USERPROFILE: 'C:\\Users\\bob' });
+    expect(dirs).toContain('C:\\Users\\bob\\AppData\\Local\\Microsoft\\WindowsApps');
+  });
+
+  it('Windows: tolerates a completely empty environment', () => {
+    expect(() => getRuntimePathAdditions('win32', {})).not.toThrow();
+    // The static ProgramFiles fallbacks are still present.
+    const dirs = getRuntimePathAdditions('win32', {});
+    expect(dirs.some((d) => d.includes('RedHat\\Podman'))).toBe(true);
+  });
+
+  it('Linux: returns the standard unix bin dirs and no Windows paths', () => {
+    const dirs = getRuntimePathAdditions('linux', {});
+    expect(dirs).toEqual(['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin']);
+    expect(dirs.some((d) => /windowsapps|podman/i.test(d))).toBe(false);
+  });
+
+  it('macOS: returns the standard unix bin dirs (no Windows provider dirs)', () => {
+    const dirs = getRuntimePathAdditions('darwin', {});
+    expect(dirs).toContain('/usr/local/bin');
+    expect(dirs.some((d) => /windowsapps/i.test(d))).toBe(false);
+  });
+});
+
+// ─── GH #158 (review follow-up): in-flight detection de-duplication ─────────
+//
+// getComposeAvailable() became async and now routes through getDetectionResult()
+// in the same renderer Promise.all as available(). getDetectionResult() must
+// memoize the in-flight detection so concurrent cold-start callers share ONE
+// probe pass instead of each spawning their own `<runtime> version` /
+// `<runtime> compose version` subprocesses.
+
+describe('[GH158] getDetectionResult in-flight de-duplication', () => {
+  function countProbe(cmd: string, firstArg: string): number {
+    return mockExecFile.mock.calls.filter(
+      (call) => call[0] === cmd && Array.isArray(call[1]) && call[1][0] === firstArg,
+    ).length;
+  }
+
+  it('concurrent cold-cache calls run detectRuntime() only once', async () => {
+    setExecResponses({
+      'docker version': '24.0.7',
+      'docker compose version': 'Docker Compose v2.24.0',
+    });
+
+    const [a, b] = await Promise.all([getDetectionResult(), getDetectionResult()]);
+
+    // Same resolved result, and the `docker version` probe ran exactly once.
+    expect(a).toBe(b);
+    expect(a.runtime!.kind).toBe('docker');
+    expect(countProbe('docker', 'version')).toBe(1);
+  });
+
+  it('resetDetection() clears the in-flight memo so the next call re-probes', async () => {
+    setExecResponses({
+      'docker version': '24.0.7',
+      'docker compose version': 'Docker Compose v2.24.0',
+    });
+
+    await getDetectionResult();
+    expect(countProbe('docker', 'version')).toBe(1);
+
+    resetDetection();
+    await getDetectionResult();
+    expect(countProbe('docker', 'version')).toBe(2);
   });
 });

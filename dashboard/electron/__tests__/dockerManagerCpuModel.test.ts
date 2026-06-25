@@ -42,6 +42,7 @@ vi.mock('../containerRuntime.js', () => ({
   resetDetection: vi.fn(),
   resolveRootlessSocket: vi.fn(() => null),
   getSocketPaths: vi.fn(() => ({ docker: '/var/run/docker.sock', podman: null })),
+  getRuntimePathAdditions: vi.fn(() => []),
 }));
 
 import { isNemoModelName, applyCpuModelDefaults } from '../dockerManager.js';
