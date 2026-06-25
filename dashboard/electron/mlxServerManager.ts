@@ -16,6 +16,7 @@ import { promisify } from 'util';
 import { app, BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import { ensureServerConfigSeed, getServerConfigDir } from './serverConfigPaths.js';
 import type { MlxLogSink } from './mlxLogSink.js';
 
 const execFileAsync = promisify(execFile);
@@ -104,6 +105,9 @@ export class MLXServerManager {
       ...(process.env as Record<string, string>),
       DATA_DIR: dataDir,
       HF_HOME: hfHome,
+      // Point the native server at the dedicated server-config dir (the same
+      // dir the dashboard writes config.yaml to); get_user_config_dir() honours it.
+      USER_CONFIG_DIR: getServerConfigDir(),
       LOG_DIR: path.join(dataDir, 'logs'),
       LOG_LEVEL: 'INFO',
       // Force line-buffered stdout so the Electron parent sees output
@@ -143,49 +147,15 @@ export class MLXServerManager {
       }
     }
 
-    // Ensure a config.yaml exists at the user data path before starting the
-    // server.  The Python backend's config.py searches for the file at startup
-    // and raises RuntimeError if none is found.  The Electron IPC handler
-    // `app:ensureServerConfig` normally creates this file, but it is only
-    // invoked from the renderer — which loads *after* this auto-start fires.
-    // We replicate the same logic here so the server always has a config file.
-    //
-    // Writes use O_EXCL semantics (COPYFILE_EXCL / flag 'wx') so the
-    // existence check and the write are a single atomic syscall — avoids a
-    // TOCTOU race if another process creates the file mid-call.
-    const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
-    // Template search: one level above serverBackendDir works for both
-    // dev (server/backend/ → server/config.yaml) and packaged
-    // (<resourcesPath>/backend/ → <resourcesPath>/config.yaml) layouts.
-    const templatePath = path.resolve(serverBackendDir, '../config.yaml');
-    fs.mkdirSync(path.dirname(userConfigPath), { recursive: true });
+    // Ensure the sparse config overlay exists in the dedicated server-config
+    // dir before the server starts. The Python backend reads it via the
+    // USER_CONFIG_DIR env var (set on the spawn env above) and deep-merges it
+    // onto the bundled defaults. Idempotent; migrates any legacy file.
     try {
-      fs.copyFileSync(templatePath, userConfigPath, fs.constants.COPYFILE_EXCL);
-      this._appendLog(`[MLX] Copied config from ${templatePath} → ${userConfigPath}`);
+      const cfgPath = ensureServerConfigSeed();
+      this._appendLog(`[MLX] Server config ready at ${cfgPath}`);
     } catch (err) {
-      const code = (err as NodeJS.ErrnoException)?.code;
-      if (code === 'EEXIST') {
-        // File already exists — another process beat us, or prior run created it.
-        // Either way, the precondition ("config file present") is satisfied.
-        this._appendLog(`[MLX] Config already present at ${userConfigPath}`);
-      } else {
-        // Template not found (should not happen in a properly built package).
-        // Write a minimal stub so the server can at least start.
-        try {
-          fs.writeFileSync(userConfigPath, '# TranscriptionSuite configuration\n', {
-            encoding: 'utf-8',
-            flag: 'wx',
-          });
-          this._appendLog('[MLX] Warning: no config template found; wrote minimal config stub.');
-        } catch (stubErr) {
-          const stubCode = (stubErr as NodeJS.ErrnoException)?.code;
-          if (stubCode === 'EEXIST') {
-            this._appendLog(`[MLX] Config already present at ${userConfigPath}`);
-          } else {
-            throw stubErr;
-          }
-        }
-      }
+      this._appendLog(`[MLX] Warning: could not seed server config: ${err}`);
     }
 
     this._setStatus('starting');

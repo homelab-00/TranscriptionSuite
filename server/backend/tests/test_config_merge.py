@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from server import config
+
+# Capture the REAL get_user_config_dir at import time (before the autouse
+# _isolate_user_config_dir fixture monkeypatches the module attribute), so the
+# env-var test below can exercise the genuine implementation.
+_REAL_GET_USER_CONFIG_DIR = config.get_user_config_dir
+
 
 # ── _deep_merge (pure) ───────────────────────────────────────────────────────
 
@@ -124,3 +131,23 @@ def test_set_does_not_materialize_full_defaults(tmp_path: Path):
     cfg.set("diarization", "parallel", value=True)
     written = yaml.safe_load((tmp_path / "config.yaml").read_text())
     assert "stt" not in written and "main_transcriber" not in written
+
+
+# ── USER_CONFIG_DIR env override (native macOS server / advanced users) ─────
+
+
+def test_get_user_config_dir_honors_env(tmp_path: Path, monkeypatch):
+    # Skip if a real /user-config exists (Docker), which takes precedence.
+    if Path("/user-config").is_dir():
+        pytest.skip("/user-config present; Docker branch wins")
+    target = tmp_path / "server-config"
+    monkeypatch.setenv("USER_CONFIG_DIR", str(target))
+    assert _REAL_GET_USER_CONFIG_DIR() == target
+
+
+def test_get_user_config_dir_ignores_empty_env(tmp_path: Path, monkeypatch):
+    if Path("/user-config").is_dir():
+        pytest.skip("/user-config present; Docker branch wins")
+    monkeypatch.setenv("USER_CONFIG_DIR", "   ")
+    # Falls through to a platform default (never returns an empty path).
+    assert str(_REAL_GET_USER_CONFIG_DIR()) not in ("", "   ")

@@ -1109,10 +1109,12 @@ Then restart the container. The app also warns in the log if a cert expires with
 
 **User config** (bind mount to `/user-config`):
 
-The dashboard sets `USER_CONFIG_DIR` to its Electron `userData` dir automatically,
-mounting the user's `config.yaml` to `/user-config/config.yaml` so dashboard-edited
-settings reach the server (deep-merged over the image defaults). Manual `docker compose`
-launches can set `USER_CONFIG_DIR` themselves; when unset it falls back to `./.empty`.
+The dashboard sets `USER_CONFIG_DIR` to a dedicated `server-config/` subdir of its
+Electron `userData` dir automatically, mounting that subdir's `config.yaml` to
+`/user-config/config.yaml` so dashboard-edited settings reach the server (deep-merged over
+the image defaults). Only the subdir is mounted — not the whole Electron profile. Manual
+`docker compose` launches can set `USER_CONFIG_DIR` themselves; when unset it falls back to
+`./.empty`.
 
 ### 6.6 Docker Image Selection
 
@@ -2362,20 +2364,29 @@ environment-variable overrides. Precedence (lowest → highest):
 
 1. **Defaults (base)** — first readable of `/app/config.yaml` (Docker image),
    `server/config.yaml` (native development), `./config.yaml`.
-2. **User overlay (sparse)** — `get_user_config_dir()/config.yaml`
-   (`/user-config/config.yaml` in Docker; `~/.config/TranscriptionSuite/config.yaml`
-   on Linux). Only the keys present here override the defaults; everything else is
-   inherited. Lists replace (never concatenate); a key present with value `null`
-   still overrides.
+2. **User overlay (sparse)** — `get_user_config_dir()/config.yaml`. Only the keys
+   present here override the defaults; everything else is inherited. Lists replace
+   (never concatenate); a key present with value `null` still overrides.
 3. **Environment variables** — e.g. `MAIN_TRANSCRIBER_MODEL`, `LIVE_TRANSCRIBER_MODEL`,
    `DIARIZATION_MODEL`, `WHISPERCPP_*`, `LOG_LEVEL`/`LOG_DIR` — applied last, so they win.
 
+`get_user_config_dir()` resolves the overlay directory in this order: `/user-config`
+(the Docker bind mount) → the `USER_CONFIG_DIR` env var (set by the dashboard for the
+native macOS server, or by advanced users) → the platform default
+(`~/.config/TranscriptionSuite` on Linux, `~/Library/Application Support/TranscriptionSuite`
+on macOS).
+
+The dashboard keeps the overlay in a **dedicated `server-config/` subdirectory** of its
+Electron `userData` dir (e.g. `…/TranscriptionSuite/server-config/config.yaml`) — and mounts
+**only that subdir** to `/user-config`, so the container never sees the rest of the Electron
+profile (Chromium caches, `Local State`, `dashboard-config.json`). A one-time migration moves
+any legacy `userData/config.yaml` into the subdir. The settings editor is local-first
+(Electron IPC: `serverConfig:readTemplate/readLocal/writeLocal`) and writes the sparse overlay
+there; `ensureServerConfigSeed()` creates/migrates it before the server starts.
+
 `config.set()` (e.g. the `/api/admin/diarization` toggle) persists changes back to the
 **user overlay** as sparse keys; the defaults file is never modified. Passing an explicit
-`config_path` to `ServerConfig` loads that single file as-is (no merge). The dashboard's
-settings editor is local-first (Electron IPC: `serverConfig:readTemplate/readLocal/writeLocal`)
-and writes the same sparse overlay; the dashboard mounts it into the container via
-`USER_CONFIG_DIR`.
+`config_path` to `ServerConfig` loads that single file as-is (no merge).
 
 ### 8.4 Testing
 

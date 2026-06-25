@@ -6,6 +6,11 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 import { fileURLToPath } from 'url';
+import {
+  ensureServerConfigSeed,
+  getServerConfigDir,
+  getServerConfigPath,
+} from './serverConfigPaths.js';
 import { execFile, execFileSync, spawn } from 'child_process';
 import { promisify } from 'util';
 import {
@@ -934,44 +939,8 @@ ipcMain.handle('app:getConfigDir', () => {
 });
 
 ipcMain.handle('app:ensureServerConfig', async () => {
-  const configDir = app.getPath('userData');
-  const configPath = path.join(configDir, 'config.yaml');
-
-  fs.mkdirSync(configDir, { recursive: true });
-
-  // Seed a SPARSE overlay stub. The backend deep-merges this onto the
-  // baked-in defaults, so the file should contain ONLY user overrides — not
-  // a full copy of the defaults (which would pin stale values over time).
-  try {
-    fs.writeFileSync(
-      configPath,
-      [
-        '# ============================================================================',
-        '# TranscriptionSuite — User Configuration (sparse overrides)',
-        '# ============================================================================',
-        '# Only the keys you set here override the server defaults; everything else',
-        '# is inherited from the bundled config.yaml. See the full reference at',
-        '# server/config.yaml in the project repository.',
-        '#',
-        '# Uncomment and edit only what you want to change.',
-        '',
-        '# main_transcriber:',
-        '#   model: "nvidia/parakeet-tdt-0.6b-v3"',
-        '#   compute_type: "default"',
-        '#   device: "cuda"',
-        '',
-        '# diarization:',
-        '#   parallel: false',
-        '',
-      ].join('\n'),
-      { encoding: 'utf-8', flag: 'wx' },
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-      throw error;
-    }
-  }
-  return configPath;
+  // Seed (or migrate) the sparse overlay in the dedicated server-config subdir.
+  return ensureServerConfigSeed();
 });
 
 // ---------------------------------------------------------------------------
@@ -1006,8 +975,7 @@ ipcMain.handle('serverConfig:readTemplate', async () => {
 
 /** Read the user's local config.yaml (sparse overrides). Returns null if missing. */
 ipcMain.handle('serverConfig:readLocal', async () => {
-  const configDir = app.getPath('userData');
-  const configPath = path.join(configDir, 'config.yaml');
+  const configPath = getServerConfigPath();
   try {
     return fs.readFileSync(configPath, 'utf-8');
   } catch (error) {
@@ -1018,9 +986,8 @@ ipcMain.handle('serverConfig:readLocal', async () => {
 
 /** Write text to the user's local config.yaml. Creates parent dirs if needed. */
 ipcMain.handle('serverConfig:writeLocal', async (_event, yamlText: string) => {
-  const configDir = app.getPath('userData');
-  const configPath = path.join(configDir, 'config.yaml');
-  fs.mkdirSync(configDir, { recursive: true });
+  const configPath = getServerConfigPath();
+  fs.mkdirSync(getServerConfigDir(), { recursive: true });
   fs.writeFileSync(configPath, yamlText, 'utf-8');
 });
 
@@ -1690,7 +1657,7 @@ ipcMain.handle('updates:openReleasePage', async (_event, url: string) => {
  * can look up arbitrary configuration keys.
  */
 function readTlsConfig() {
-  const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
+  const userConfigPath = getServerConfigPath();
   const templateCandidates = [
     path.resolve(__dirname, '../../server/config.yaml'),
     path.join(process.resourcesPath ?? '', 'config.yaml'),

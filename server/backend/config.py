@@ -63,6 +63,14 @@ def get_user_config_dir() -> Path:
     if docker_user_config.exists() and docker_user_config.is_dir():
         return docker_user_config
 
+    # Explicit override: the dashboard sets USER_CONFIG_DIR for the native
+    # (macOS MLX) server so it reads the same dedicated config dir the dashboard
+    # writes to; advanced users can set it for manual runs. Takes precedence
+    # over the platform default.
+    env_dir = os.environ.get("USER_CONFIG_DIR", "").strip()
+    if env_dir:
+        return Path(env_dir)
+
     # Platform-specific user config directories
     if sys.platform == "win32":
         # Windows: Documents/TranscriptionSuite/

@@ -24,6 +24,11 @@ import os from 'os';
 import crypto from 'crypto';
 import { app } from 'electron';
 import {
+  ensureServerConfigSeed,
+  getServerConfigDir,
+  getServerConfigPath,
+} from './serverConfigPaths.js';
+import {
   type ContainerRuntimeKind,
   getRuntimeBin,
   getContainerRuntime,
@@ -1087,7 +1092,7 @@ function resolveTlsCertPaths(): TlsCertPaths {
   // provides defaults.  We read both as raw text and use simple line-based
   // regex extraction (no YAML parser) so there is no external dependency.
 
-  const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
+  const userConfigPath = getServerConfigPath();
   const templateCandidates = [
     path.resolve(__dirname, '../../server/config.yaml'),
     path.join(process.resourcesPath ?? '', 'config.yaml'),
@@ -1256,7 +1261,7 @@ function checkTailscaleCertsExist(): boolean {
 
   // NOTE: The config.yaml reading block below is intentionally parallel to the one
   // in resolveTlsCertPaths(). If the loading logic changes there, update here too.
-  const userConfigPath = path.join(app.getPath('userData'), 'config.yaml');
+  const userConfigPath = getServerConfigPath();
   const templateCandidates = [
     path.resolve(__dirname, '../../server/config.yaml'),
     path.join(process.resourcesPath ?? '', 'config.yaml'),
@@ -2391,10 +2396,14 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
 
   // Mount the user's config.yaml into the container so dashboard-edited
   // settings (beyond the env-bridged model keys) actually reach the server.
-  // The backend deep-merges this sparse overlay onto its baked-in defaults;
-  // env bridges (MAIN_TRANSCRIBER_MODEL, etc.) still win on top. The compose
-  // volume `${USER_CONFIG_DIR:-./.empty}:/user-config` resolves to this path.
-  composeEnv['USER_CONFIG_DIR'] = app.getPath('userData');
+  // We mount a DEDICATED server-config subdir (not the whole Electron userData
+  // dir) so the container never sees the Chromium profile (caches, Local State,
+  // cookies, dashboard-config.json). Seed/migrate it first so config.yaml always
+  // exists before the bind mount. The backend deep-merges this sparse overlay
+  // onto its defaults; env bridges (MAIN_TRANSCRIBER_MODEL, etc.) still win. The
+  // compose volume `${USER_CONFIG_DIR:-./.empty}:/user-config` resolves here.
+  ensureServerConfigSeed();
+  composeEnv['USER_CONFIG_DIR'] = getServerConfigDir();
 
   // Rotate the persistent server log — adds a session marker and trims old sessions.
   rotateServerLog();
