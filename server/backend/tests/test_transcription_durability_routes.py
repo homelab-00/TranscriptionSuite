@@ -457,3 +457,51 @@ class TestDismissTranscriptionResult:
         resp = asyncio.run(transcription.dismiss_transcription_result("job-null", _request()))
 
         assert resp.status_code == 200
+
+
+class TestTranscribeDecodeErrorRouting:
+    """FINDING #1 (route boundary): a decode failure must surface as a clean HTTP
+    400 whose detail contains NO server temp path — not a path-leaking 500."""
+
+    def _request_with_engine(self, engine):
+        job_tracker = SimpleNamespace(
+            try_start_job=lambda _c: (True, "job1", None),
+            is_cancelled=lambda: False,
+            end_job=lambda _j: None,
+        )
+        mm = SimpleNamespace(
+            ensure_transcription_loaded=lambda: None,
+            transcription_engine=engine,
+            job_tracker=job_tracker,
+        )
+        return SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(
+                    config={"main_transcriber": {"model": "tiny"}},
+                    model_manager=mm,
+                )
+            )
+        )
+
+    def test_audiodecodeerror_maps_to_clean_400(self):
+        import server.core.audio_utils as au
+
+        class _Upload:
+            filename = "bad.wav"
+
+            async def read(self):
+                return b"\x00\x00"
+
+        def _raise_decode(*_a, **_kw):
+            raise au.AudioDecodeError(au.AUDIO_DECODE_ERROR_MESSAGE)
+
+        request = self._request_with_engine(SimpleNamespace(transcribe_file=_raise_decode))
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(transcription.transcribe_quick(request, _Upload()))
+
+        assert exc.value.status_code == 400
+        assert exc.value.detail == au.AUDIO_DECODE_ERROR_MESSAGE
+        # The user-facing detail must never carry the server-side temp path.
+        assert "/tmp" not in exc.value.detail
+        assert "/var/folders" not in exc.value.detail

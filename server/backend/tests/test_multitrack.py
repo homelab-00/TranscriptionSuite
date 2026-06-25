@@ -373,8 +373,11 @@ class TestSplitChannels:
             return subprocess.CompletedProcess(cmd, 0)
 
         with patch("server.core.multitrack.subprocess.run", side_effect=failing_run):
-            with pytest.raises(RuntimeError, match="Failed to extract channel"):
+            with pytest.raises(RuntimeError, match="Failed to extract audio channel") as exc:
                 split_channels(str(tmp_path / "input.wav"), [0, 1])
+        # The clean message must not interpolate the raw subprocess error (which
+        # embeds the server-side temp paths) — FINDING #1 temp-path-leak hygiene.
+        assert "Command" not in str(exc.value)
 
     def test_cancellation_check_none_is_noop(self, tmp_path: Any) -> None:
         """Explicit None (the default) must preserve pre-change behavior."""

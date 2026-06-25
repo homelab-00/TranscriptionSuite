@@ -76,6 +76,9 @@ def _build_manager(
             return_value="tiny",
         ),
         patch("server.core.audio_utils.check_cuda_available", return_value=False),
+        # Also stub Metal so gpu_available is host-independent — otherwise the
+        # suite would report gpu_available=True when run on Apple Silicon.
+        patch("server.core.audio_utils.check_metal_available", return_value=False),
         patch("server.core.audio_utils.get_gpu_memory_info", return_value={}),
         patch.dict("os.environ", env, clear=False),
     ):
@@ -306,3 +309,32 @@ class TestGpuStatus:
         mgr = _build_manager(tmp_path)
 
         assert mgr.gpu_available is False
+
+    def test_gpu_available_on_metal_and_gpu_memory_null(self, tmp_path: Path):
+        """FINDING #3: Apple Metal up (CUDA down) -> gpu_available True, but
+        gpu_memory stays null (Apple unified memory has no dedicated-VRAM figure).
+        The gpu_memory assertion pins the get_status() `if check_cuda_available()`
+        decoupling — it would fail if that reverted to `if self.gpu_available`.
+        """
+        from server.core.model_manager import ModelManager
+
+        with (
+            patch(
+                "server.core.model_manager.resolve_main_transcriber_model",
+                return_value="tiny",
+            ),
+            patch("server.core.audio_utils.check_cuda_available", return_value=False),
+            patch("server.core.audio_utils.check_metal_available", return_value=True),
+            patch("server.core.audio_utils.get_gpu_memory_info", return_value={}),
+            patch.dict(
+                "os.environ",
+                {"BOOTSTRAP_STATUS_FILE": str(tmp_path / "nope.json")},
+                clear=False,
+            ),
+        ):
+            mgr = ModelManager({"main_transcriber": {"model": "tiny"}})
+            status = mgr.get_status()
+
+        assert mgr.gpu_available is True
+        assert status["gpu_available"] is True
+        assert status["gpu_memory"] is None

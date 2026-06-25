@@ -243,7 +243,11 @@ def split_channels(
             # Clean up the file we just created on failure
             Path(tmp.name).unlink(missing_ok=True)
             _cleanup_partials()
-            raise RuntimeError(f"Failed to extract channel {ch_idx}: {exc}") from exc
+            # Don't interpolate the raw subprocess error — it embeds the server-side
+            # temp paths (input + channel output). Log it server-side only and raise
+            # a clean message (FINDING #1 temp-path-leak hygiene).
+            logger.warning("Failed to extract channel %d: %s", ch_idx, exc)
+            raise RuntimeError(f"Failed to extract audio channel {ch_idx}") from exc
 
     return temp_paths
 
