@@ -151,3 +151,37 @@ def test_get_user_config_dir_ignores_empty_env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("USER_CONFIG_DIR", "   ")
     # Falls through to a platform default (never returns an empty path).
     assert str(_REAL_GET_USER_CONFIG_DIR()) not in ("", "   ")
+
+
+# ── Defaults located through the editable-install symlink (native macOS) ────
+# Regression: the native (MLX) launcher creates a self-referential symlink
+# server/backend/server -> . so `import server` resolves under the editable
+# install. That makes config.__file__ report one dir too deep
+# (server/backend/server/config.py), so parent.parent pointed at
+# server/backend/ and the bundled defaults at server/config.yaml were never
+# found — the sparse overlay then had no merge base. _defaults_candidates()
+# must .resolve() the symlink so the defaults are still located.
+
+
+@pytest.mark.skipif(
+    __import__("sys").platform == "win32", reason="symlink creation needs privileges on Windows"
+)
+def test_defaults_located_through_editable_symlink(tmp_path: Path, monkeypatch):
+    # Recreate the native-macOS layout: defaults one dir above the backend, and
+    # a self-referential symlink so the module is reachable one level deeper.
+    server_dir = tmp_path / "server"
+    backend = server_dir / "backend"
+    backend.mkdir(parents=True)
+    (server_dir / "config.yaml").write_text("stt:\n  buffer_size: 512\n", encoding="utf-8")
+    (backend / "config.py").write_text("# stub module\n", encoding="utf-8")
+    (backend / "server").symlink_to(".")  # editable-install self-reference
+
+    # config.__file__ as reported under the editable install (via the symlink).
+    deep_file = backend / "server" / "config.py"
+    monkeypatch.setattr(config, "__file__", str(deep_file))
+    # cwd must NOT accidentally contain a config.yaml (candidate #3).
+    monkeypatch.chdir(tmp_path)
+
+    cands = config.ServerConfig.__new__(config.ServerConfig)._defaults_candidates()
+    # The bundled defaults are found via the resolved (symlink-collapsed) path.
+    assert [p.resolve() for p in cands] == [(server_dir / "config.yaml").resolve()]

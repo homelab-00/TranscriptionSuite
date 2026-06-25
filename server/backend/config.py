@@ -138,9 +138,21 @@ class ServerConfig:
 
     def _defaults_candidates(self) -> list[Path]:
         """Readable baked-in default config files (NON-user), priority order."""
+        # .resolve() collapses the editable-install self-referential symlink
+        # (server/backend/server -> .) that the native macOS (MLX) launcher
+        # creates for package resolution. Without it, __file__ is reported one
+        # level too deep (server/backend/server/config.py), so parent.parent is
+        # server/backend/ and the bundled defaults are never found — leaving the
+        # sparse overlay with NO merge base. The defaults live one dir above the
+        # backend in both layouts: server/config.yaml (dev) and
+        # <resources>/config.yaml (packaged, electron-builder `to: config.yaml`).
+        # Docker is unaffected (/app/config.yaml wins first); on Linux dev
+        # __file__ is already canonical, so .resolve() is a no-op there.
+        module_dir = Path(__file__).resolve().parent.parent
         candidates = [
             Path("/app/config.yaml"),  # Docker image default
-            Path(__file__).parent.parent / "config.yaml",  # server/config.yaml (dev)
+            module_dir
+            / "config.yaml",  # server/config.yaml (dev) / <resources>/config.yaml (packaged)
             Path.cwd() / "config.yaml",  # current-directory fallback
         ]
         return [p for p in candidates if self._is_readable(p)]
