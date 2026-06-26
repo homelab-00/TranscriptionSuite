@@ -13,7 +13,6 @@ from server.core.stt.backends.whispercpp_backend import (
     _MAX_CHUNK_DURATION_S,
     _MAX_SEGMENTS_PER_AUDIO_SECOND,
     _MAX_WORDS_PER_AUDIO_SECOND,
-    _MAX_WORDS_PER_SEGMENT,
     _SEGMENT_CAP_FLOOR,
     _TIMEOUT_SECONDS_PER_AUDIO_SECOND,
     _WORDS_CAP_FLOOR,
@@ -896,37 +895,6 @@ class TestTranscribe:
         assert segments[0].text == "s0"
         assert segments[-1].text == "s99"
 
-    @pytest.mark.parametrize(
-        "count,expected",
-        [
-            (_MAX_WORDS_PER_SEGMENT - 1, _MAX_WORDS_PER_SEGMENT - 1),
-            (_MAX_WORDS_PER_SEGMENT, _MAX_WORDS_PER_SEGMENT),
-            (_MAX_WORDS_PER_SEGMENT + 1, _MAX_WORDS_PER_SEGMENT),
-            (_MAX_WORDS_PER_SEGMENT + 10, _MAX_WORDS_PER_SEGMENT),
-        ],
-    )
-    def test_word_cap_boundary(
-        self,
-        loaded_backend: WhisperCppBackend,
-        mock_httpx: MagicMock,
-        count: int,
-        expected: int,
-    ):
-        """Same boundary matrix as the segment cap."""
-        bloated = [
-            {"word": "x", "start": i * 0.001, "end": i * 0.001 + 0.0005} for i in range(count)
-        ]
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "segments": [{"text": "seg", "start": 0.0, "end": 999.0, "words": bloated}]
-                }
-            ),
-        )
-        segments, _ = loaded_backend.transcribe(np.zeros(16000, dtype=np.float32))
-        assert len(segments[0].words) == expected
-
     def test_language_injection_attempt_is_dropped(
         self,
         loaded_backend: WhisperCppBackend,
@@ -1312,6 +1280,44 @@ class TestSegmentProportionalCap:
             loaded_backend.transcribe(_seconds_of_audio(2))
         assert len(exc_info.value.segments) == 1
         assert exc_info.value.segments[0].text == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Proportional word cap (GH #172) — fail loud instead of silently truncate
+# ---------------------------------------------------------------------------
+
+
+class TestWordProportionalCap:
+    def _respond_with_words(self, mock_httpx, n_words):
+        bloated = [
+            {"word": "x", "start": i * 0.001, "end": i * 0.001 + 0.0005} for i in range(n_words)
+        ]
+        mock_httpx.post.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(
+                return_value={
+                    "segments": [{"text": "seg", "start": 0.0, "end": 30.0, "words": bloated}]
+                }
+            ),
+        )
+
+    def test_legit_words_kept(self, loaded_backend, mock_httpx):
+        # 100s audio -> word cap 4000; 800 words on one segment is fine.
+        self._respond_with_words(mock_httpx, 800)
+        segments, _ = loaded_backend.transcribe(_seconds_of_audio(100))
+        assert len(segments[0].words) == 800
+
+    def test_words_over_cap_raise(self, loaded_backend, mock_httpx):
+        # 1s audio -> word cap = floor 1000; 1001 words is implausible -> raise.
+        self._respond_with_words(mock_httpx, 1001)
+        with pytest.raises(WhisperCppResponseError):
+            loaded_backend.transcribe(_seconds_of_audio(1))
+
+    def test_word_floor_boundary_at_cap_is_kept(self, loaded_backend, mock_httpx):
+        # 1s audio -> word cap = floor 1000; exactly at cap is kept.
+        self._respond_with_words(mock_httpx, 1000)
+        segments, _ = loaded_backend.transcribe(_seconds_of_audio(1))
+        assert len(segments[0].words) == 1000
 
 
 # ---------------------------------------------------------------------------

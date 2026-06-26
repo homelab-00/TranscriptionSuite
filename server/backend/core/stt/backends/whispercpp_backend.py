@@ -65,8 +65,6 @@ _MAX_SEGMENTS_PER_AUDIO_SECOND = 20
 _MAX_WORDS_PER_AUDIO_SECOND = 40
 _SEGMENT_CAP_FLOOR = 200
 _WORDS_CAP_FLOOR = 1_000
-# Per-segment word cap (flat, Task 2 stub — superseded by _word_cap_for in Task 3).
-_MAX_WORDS_PER_SEGMENT = 5_000
 
 # Practical cap on user-supplied initial_prompt. whisper.cpp uses the prompt
 # as a decoder hint in the context window (~224 tokens ≈ ~1 KB of text). A
@@ -416,23 +414,25 @@ def _audio_to_wav_bytes(audio: np.ndarray, sample_rate: int) -> bytes:
     return buf.getvalue()
 
 
-def _parse_words(raw_words: Any) -> list[dict[str, Any]]:
+def _parse_words(raw_words: Any, word_cap: int, audio_duration_s: float) -> list[dict[str, Any]]:
     """Convert a sidecar ``words`` array into the normalised word-dict list.
 
-    Applies the same filter-then-cap discipline as the segment-level parser
+    Applies the same filter-then-bound discipline as the segment-level parser
     and silently drops per-word entries that fail validation (non-dict,
-    missing text, missing bounds, non-monotonic bounds).
+    missing text, missing bounds, non-monotonic bounds). Raises
+    ``WhisperCppResponseError`` if the count exceeds ``word_cap`` — an
+    implausible count means a malformed/hostile payload, not real speech
+    (GH #172).
     """
     if not isinstance(raw_words, list):
         return []
     dict_words = [w for w in raw_words if isinstance(w, dict)]
-    if len(dict_words) > _MAX_WORDS_PER_SEGMENT:
-        logger.warning(
-            "whisper-server segment had %d word dicts, truncating to %d",
-            len(dict_words),
-            _MAX_WORDS_PER_SEGMENT,
+    if len(dict_words) > word_cap:
+        raise WhisperCppResponseError(
+            f"whisper-server segment had {len(dict_words)} word dicts for "
+            f"{audio_duration_s:.0f}s of audio (max {word_cap}); rejecting the "
+            f"response rather than silently dropping words"
         )
-        dict_words = dict_words[:_MAX_WORDS_PER_SEGMENT]
 
     words: list[dict[str, Any]] = []
     for w in dict_words:
@@ -827,7 +827,8 @@ class WhisperCppBackend(STTBackend):
 
         Raises:
             WhisperCppResponseError: If the number of dict-typed segments
-                exceeds ``_segment_cap_for(audio_duration_s)``.
+                exceeds ``_segment_cap_for(audio_duration_s)``, or if any
+                segment's word count exceeds ``_word_cap_for(audio_duration_s)``.
         """
         segments: list[BackendSegment] = []
         raw_segments = result.get("segments")
@@ -851,8 +852,12 @@ class WhisperCppBackend(STTBackend):
                 f"response rather than silently dropping segments"
             )
 
+        # Loose per-segment sanity bound: chunk-duration-derived cap applied to
+        # each segment's word list (a single segment can't hold more words than
+        # the whole chunk's worth). Raises rather than silently truncating.
+        word_cap = _word_cap_for(audio_duration_s)
         for seg in dict_segments:
-            words = _parse_words(seg.get("words"))
+            words = _parse_words(seg.get("words"), word_cap, audio_duration_s)
 
             seg_start = _coerce_float(seg.get("start"))
             seg_end = _coerce_float(seg.get("end"))
