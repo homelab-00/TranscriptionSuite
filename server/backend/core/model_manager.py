@@ -802,6 +802,16 @@ class ModelManager:
                 self._diarization_engine.unload()
             except AttributeError:
                 logger.debug("Diarization engine has no unload method")
+            # GH #124 — tear down SortformerEngine's dedicated MLX owning thread so
+            # repeated model swaps don't leak a worker thread per swap. Called from
+            # this (non-owning) thread AFTER unload so the worker isn't shutting
+            # itself down. No-op for engines without the mixin (e.g. pyannote).
+            shutdown_mlx_thread = getattr(self._diarization_engine, "shutdown_mlx_thread", None)
+            if callable(shutdown_mlx_thread):
+                try:
+                    shutdown_mlx_thread()
+                except Exception:
+                    logger.debug("shutdown_mlx_thread failed (non-critical)", exc_info=True)
             self._diarization_engine = None
             clear_gpu_cache()
             logger.info("Diarization model unloaded")

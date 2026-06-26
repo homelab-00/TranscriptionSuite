@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 from server.config import get_config
 from server.core.diarization_engine import DiarizationResult, DiarizationSegment
+from server.core.stt.backends.mlx_thread_pin import MLXThreadAffinityMixin, mlx_pinned
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +42,18 @@ def sortformer_available() -> bool:
     return HAS_MLX_AUDIO
 
 
-class SortformerEngine:
+class SortformerEngine(MLXThreadAffinityMixin):
     """Metal-native speaker diarization via mlx-audio Sortformer.
 
     The interface mirrors :class:`DiarizationEngine` so it can be used as a
     drop-in replacement on Apple Silicon.
+
+    GH #124 — Sortformer is a second Metal-native MLX consumer (the #134 thread
+    pin only covered the four MLX STT backends). The server dispatches diarization
+    on ``asyncio.to_thread`` workers while the engine is materialized elsewhere, so
+    the same cross-thread "no stream (gpu,0)" hazard applies. This engine therefore
+    mixes in :class:`MLXThreadAffinityMixin` and decorates every GPU-touching method
+    with :func:`mlx_pinned`, funnelling all MLX work onto one owning thread.
     """
 
     def __init__(
@@ -63,6 +71,8 @@ class SortformerEngine:
                 "Install with: uv sync --extra mlx"
             )
 
+        # Names the dedicated MLX owning thread (mlx-sortformer-*) for the mixin.
+        self.backend_name = "sortformer"
         self.model_name = model
         self.threshold = threshold
         self.num_speakers = num_speakers
@@ -80,6 +90,7 @@ class SortformerEngine:
 
     # -- lifecycle ---------------------------------------------------------
 
+    @mlx_pinned
     def load(self) -> None:
         """Download (if needed) and load the Sortformer model."""
         if self._loaded:
@@ -90,8 +101,14 @@ class SortformerEngine:
         self._loaded = True
         logger.info("Sortformer model loaded")
 
+    @mlx_pinned
     def unload(self) -> None:
-        """Release model memory."""
+        """Release model memory.
+
+        Runs on the owning MLX thread; the executor itself is torn down separately
+        via :meth:`shutdown_mlx_thread` (called by the model manager) to avoid a
+        worker shutting itself down.
+        """
         if not self._loaded:
             return
         del self._model
@@ -111,6 +128,7 @@ class SortformerEngine:
 
     # -- inference ---------------------------------------------------------
 
+    @mlx_pinned
     def diarize_audio(
         self,
         audio_data: np.ndarray,
