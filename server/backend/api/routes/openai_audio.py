@@ -312,6 +312,23 @@ async def _dispatch_completion_webhook(*, source_label: str, result: Any, filena
     )
 
 
+def _set_diarization_status_header(
+    response: JSONResponse | PlainTextResponse, result: Any, *, requested: bool
+) -> None:
+    """Surface whether a *requested* diarization actually produced speaker labels
+    via an ``X-Diarization-Status`` header (GH #127).
+
+    The OpenAI response body schema has no diarization field, so a swallowed
+    diarization failure would otherwise be invisible — the header lets clients
+    that care detect it (``ready`` vs ``unavailable``) while leaving the
+    standardized body untouched. Not set when diarization was not requested.
+    """
+    if not requested:
+        return
+    performed = (getattr(result, "num_speakers", 0) or 0) > 0
+    response.headers["X-Diarization-Status"] = "ready" if performed else "unavailable"
+
+
 # ------------------------------------------------------------------
 # POST /v1/audio/transcriptions
 # ------------------------------------------------------------------
@@ -412,9 +429,11 @@ async def create_transcription(
             "verbose_json",
             "diarized_json",
         }
-        return _build_response(
+        api_response = _build_response(
             result, response_format, task="transcribe", include_words=include_words
         )
+        _set_diarization_status_header(api_response, result, requested=diarization)
+        return api_response
 
     except TranscriptionCancelledError:
         return _openai_error(500, "Transcription was cancelled", error_type="server_error")
@@ -528,9 +547,11 @@ async def create_translation(
             "verbose_json",
             "diarized_json",
         }
-        return _build_response(
+        api_response = _build_response(
             result, response_format, task="translate", include_words=include_words
         )
+        _set_diarization_status_header(api_response, result, requested=diarization)
+        return api_response
 
     except TranscriptionCancelledError:
         return _openai_error(500, "Transcription was cancelled", error_type="server_error")

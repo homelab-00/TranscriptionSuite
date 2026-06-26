@@ -798,3 +798,217 @@ class TestIntegratedDiarizationFallback:
         call = end_job_calls[0]
         assert call["job_id"] == "import-job-abc"
         assert call["result"]["error"] == "Transcription cancelled by user"
+
+
+# ── Diarization-outcome surfacing (GH #127 hardening) ───────────────────────
+#
+# #127: a diarization runtime failure was swallowed and the sync /audio route
+# returned num_speakers: 0 with NO signal to the client. These tests pin the
+# fix: when diarization was *requested*, an ``X-Diarization-Status`` response
+# header reports whether speaker labels were actually produced, so a silent
+# skip is visible. A header is used (not a body field) because the route is
+# bound to ``response_model=TranscriptionResponse``, which strips any extra
+# body key over real HTTP.
+
+
+def _make_diar_engine(monkeypatch, *, num_speakers: int | None, fail: bool):
+    """Build an engine whose integrated diarization either fails or returns
+    ``num_speakers`` speakers (mirrors TestIntegratedDiarizationPath setup).
+
+    ``monkeypatch`` is required so the injected fake ``server.core.stt.engine``
+    module is restored after the test — a raw ``sys.modules`` assignment would
+    leak the stub and break later tests that patch the real engine module.
+    """
+    import sys
+    import types as _types
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class _FakeTranscriptionResult:
+        text: str = ""
+        segments: list = field(default_factory=list)
+        words: list = field(default_factory=list)
+        language: str | None = None
+        language_probability: float = 0.0
+        duration: float = 0.0
+        num_speakers: int = 0
+
+        def to_dict(self) -> dict:
+            return {
+                "text": self.text,
+                "segments": self.segments,
+                "words": self.words,
+                "language": self.language,
+                "language_probability": self.language_probability,
+                "duration": self.duration,
+                "num_speakers": self.num_speakers,
+            }
+
+    fake_engine_mod = _types.ModuleType("server.core.stt.engine")
+    fake_engine_mod.TranscriptionResult = _FakeTranscriptionResult  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "server.core.stt.engine", fake_engine_mod)
+
+    class _DiarBackend:
+        preferred_input_sample_rate_hz = 16000
+        backend_name = "fake-whisperx"
+
+        def transcribe_with_diarization(self, audio_data, *, audio_sample_rate, **kwargs):
+            if fail:
+                raise RuntimeError("diarization model exploded")
+            return SimpleNamespace(
+                segments=[{"text": "hi", "speaker": "S1"}],
+                words=[],
+                language="en",
+                language_probability=0.9,
+                num_speakers=num_speakers,
+            )
+
+    return SimpleNamespace(
+        _backend=_DiarBackend(),
+        beam_size=5,
+        initial_prompt=None,
+        suppress_tokens=None,
+        faster_whisper_vad_filter=False,
+        # Plain-transcription fallback used when integrated diarization fails.
+        transcribe_file=lambda *a, **kw: _ResultStub(num_speakers=0),
+    )
+
+
+def _run_diar_audio(engine, response, monkeypatch, *, diarization=True):
+    from server.core import audio_utils
+
+    monkeypatch.setattr(audio_utils, "load_audio", lambda *a, **kw: ([0.0] * 16000, 16000))
+    req = _request_with_engine(engine)
+    return asyncio.run(
+        transcription.transcribe_audio(
+            request=req,
+            file=_UploadStub(),
+            response=response,
+            language=None,
+            translation_enabled=False,
+            translation_target_language=None,
+            word_timestamps=None,
+            diarization=diarization,
+            expected_speakers=None,
+            parallel_diarization=None,
+            multitrack=False,
+        )
+    )
+
+
+class TestDiarizationOutcomeSurfacing:
+    def test_integrated_failure_sets_unavailable_header(self, repo_mocks, monkeypatch):
+        """Integrated diarization raises → falls back to plain transcription →
+        header reports 'unavailable', not a silent num_speakers: 0."""
+        from starlette.responses import Response
+
+        engine = _make_diar_engine(monkeypatch, num_speakers=None, fail=True)
+        response = Response()
+        result = _run_diar_audio(engine, response, monkeypatch)
+
+        assert result["num_speakers"] == 0
+        assert response.headers.get("X-Diarization-Status") == "unavailable"
+
+    def test_integrated_success_sets_ready_header(self, repo_mocks, monkeypatch):
+        """A successful integrated diarization reports 'ready'."""
+        from starlette.responses import Response
+
+        engine = _make_diar_engine(monkeypatch, num_speakers=2, fail=False)
+        response = Response()
+        result = _run_diar_audio(engine, response, monkeypatch)
+
+        assert result["num_speakers"] == 2
+        assert response.headers.get("X-Diarization-Status") == "ready"
+
+    def test_no_diarization_request_omits_header(self, repo_mocks):
+        """When diarization is not requested, no header is added and the body
+        shape is unchanged."""
+        from starlette.responses import Response
+
+        fake_result = _ResultStub()
+        engine = SimpleNamespace(_backend=None, transcribe_file=lambda *a, **kw: fake_result)
+        req = _request_with_engine(engine)
+        response = Response()
+        result = asyncio.run(
+            transcription.transcribe_audio(
+                request=req,
+                file=_UploadStub(),
+                response=response,
+                language=None,
+                translation_enabled=False,
+                translation_target_language=None,
+                word_timestamps=None,
+                diarization=None,
+                expected_speakers=None,
+                parallel_diarization=None,
+                multitrack=False,
+            )
+        )
+
+        assert "diarization" not in result
+        assert "X-Diarization-Status" not in response.headers
+
+    def test_header_propagates_over_real_http(self, monkeypatch):
+        """End-to-end via TestClient: the X-Diarization-Status header reaches the
+        actual HTTP response, proving response_model=TranscriptionResponse does
+        NOT strip the signal. This is the regression guard for the blind spot a
+        body field would have hit (the direct-call tests above mutate the
+        Response object but never exercise FastAPI's serialization pipeline)."""
+        import io
+
+        from fastapi import FastAPI
+        from starlette.testclient import TestClient
+
+        # No integrated backend → standard parallel/sequential diarization path.
+        engine = SimpleNamespace(
+            _backend=None,
+            transcribe_file=lambda *a, **kw: _ResultStub(num_speakers=0),
+        )
+
+        app = FastAPI()
+        app.include_router(transcription.router)
+        app.state.model_manager = SimpleNamespace(
+            transcription_engine=engine,
+            ensure_transcription_loaded=lambda: engine,
+            job_tracker=SimpleNamespace(
+                try_start_job=lambda _c: (True, "job-http", None),
+                is_cancelled=lambda: False,
+                end_job=lambda _j: None,
+            ),
+        )
+        app.state.config = SimpleNamespace(get=lambda *a, default=None, **kw: default)
+
+        # Orchestrator returns (result, None) → no speaker labels → "unavailable".
+        monkeypatch.setattr(
+            "server.core.parallel_diarize.transcribe_and_diarize",
+            lambda *a, **kw: (_ResultStub(num_speakers=0), None),
+        )
+        monkeypatch.setattr(
+            "server.core.parallel_diarize.transcribe_then_diarize",
+            lambda *a, **kw: (_ResultStub(num_speakers=0), None),
+        )
+        # Neutralize side effects (auth gate, DB, webhook).
+        monkeypatch.setattr(transcription, "_assert_main_model_selected", lambda _r: None)
+        monkeypatch.setattr(transcription, "get_client_name", lambda _r: "test-client")
+        monkeypatch.setattr(transcription, "create_job", lambda **kw: None)
+        monkeypatch.setattr(transcription, "save_result", lambda **kw: None)
+        monkeypatch.setattr(transcription, "mark_delivered", lambda *a, **kw: None)
+        monkeypatch.setattr(transcription, "mark_failed", lambda *a, **kw: None)
+        monkeypatch.setattr(transcription, "set_audio_hash", lambda *a, **kw: None)
+
+        async def _no_webhook(*a, **kw):
+            return None
+
+        monkeypatch.setattr("server.core.webhook.dispatch", _no_webhook)
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post(
+            "/audio",
+            files={"file": ("test.wav", io.BytesIO(b"RIFF" + b"\x00" * 100), "audio/wav")},
+            data={"diarization": "true"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.headers.get("X-Diarization-Status") == "unavailable"
+        # Body stays exactly the response_model shape — no extra diarization key.
+        assert "diarization" not in resp.json()

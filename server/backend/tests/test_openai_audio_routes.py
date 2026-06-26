@@ -1085,3 +1085,51 @@ class TestDiarizationOverOpenAI:
         assert all("speaker" not in seg for seg in verbose_body["segments"])
         assert "SPEAKER_" not in resp_srt.text
         assert "Speaker 1:" not in resp_srt.text
+
+
+class TestDiarizationOutcomeHeaderOverOpenAI:
+    """GH #127 hardening: a diarization runtime failure on the OpenAI-compat
+    routes must be visible to the client. The standardized OpenAI response body
+    has no diarization field, so the signal rides on an ``X-Diarization-Status``
+    response header (clients that don't care simply ignore it)."""
+
+    def test_success_sets_ready_header(self, diarization_client):
+        client, _ = diarization_client
+        speaker_result = _make_diarized_result()  # num_speakers == 2
+        with _patch_parallel_diarize((speaker_result, None)):
+            resp = _upload(client, diarization="true", response_format="verbose_json")
+
+        assert resp.status_code == 200
+        assert resp.headers.get("X-Diarization-Status") == "ready"
+
+    def test_failure_sets_unavailable_header(self, diarization_client):
+        client, _ = diarization_client
+        plain = _make_result(num_speakers=0)  # diarization produced no speakers
+        with _patch_parallel_diarize((plain, None)):
+            resp = _upload(client, diarization="true", response_format="json")
+
+        assert resp.status_code == 200
+        # Body stays schema-clean; the failure rides on the header only.
+        assert resp.json() == {"text": "Hello world"}
+        assert resp.headers.get("X-Diarization-Status") == "unavailable"
+
+    def test_translation_failure_sets_unavailable_header(self, diarization_client):
+        client, _ = diarization_client
+        plain = _make_result(num_speakers=0)
+        with _patch_parallel_diarize((plain, None)):
+            resp = _upload(
+                client,
+                path="/v1/audio/translations",
+                diarization="true",
+                response_format="json",
+            )
+
+        assert resp.status_code == 200
+        assert resp.headers.get("X-Diarization-Status") == "unavailable"
+
+    def test_no_diarization_request_omits_header(self, openai_client):
+        client, _ = openai_client
+        resp = _upload(client, response_format="json")
+
+        assert resp.status_code == 200
+        assert "X-Diarization-Status" not in resp.headers
