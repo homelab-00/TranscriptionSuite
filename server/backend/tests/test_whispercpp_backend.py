@@ -1203,6 +1203,102 @@ class TestTranscribe:
 
 
 # ---------------------------------------------------------------------------
+# /inference response byte guard (GH #193) — bound the read BEFORE deserializing
+# ---------------------------------------------------------------------------
+
+
+class TestResponseByteGuard:
+    """The /inference body is bounded at HTTP read time so a hostile or
+    misconfigured WHISPERCPP_SERVER_URL cannot exhaust memory before any
+    segment/word cap (which only runs post-parse) gets a chance to reject it.
+
+    Both the declared ``Content-Length`` (honest servers) and the actual
+    streamed bytes (servers that omit/lie about it) are checked, and the read
+    aborts as soon as the ceiling is crossed — this is the real memory bound
+    the old post-parse list slice only pretended to be.
+    """
+
+    @staticmethod
+    def _stream_resp(*, headers=None, iter_bytes=None):
+        """A minimal streaming-response mock: a context manager exposing
+        ``headers``/``raise_for_status``/``iter_bytes`` (the surface the byte
+        guard reads), independent of the dual-capable ``_inference_response``."""
+        resp = MagicMock(status_code=200)
+        resp.headers = dict(headers or {})
+        resp.raise_for_status.return_value = None
+        if iter_bytes is not None:
+            resp.iter_bytes = iter_bytes
+        resp.__enter__.return_value = resp
+        resp.__exit__.return_value = False
+        return resp
+
+    def test_oversized_streamed_body_is_rejected_before_full_read(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A body with no/dishonest Content-Length that exceeds the cap must be
+        rejected, and the read must STOP at the ceiling (proving the memory
+        bound) rather than materialize the whole over-cap body."""
+        from server.core.stt.backends.whispercpp_backend import _MAX_RESPONSE_BYTES
+
+        piece = b"x" * (1024 * 1024)  # 1 MiB
+        # Enough pieces to blow well past the cap if the read ran to completion.
+        n_pieces = (_MAX_RESPONSE_BYTES // len(piece)) + 100
+        consumed = {"n": 0}
+
+        def iter_bytes():
+            for _ in range(n_pieces):
+                consumed["n"] += 1
+                yield piece
+
+        # No Content-Length header → the accumulator guard is what must fire.
+        mock_httpx.stream.return_value = self._stream_resp(iter_bytes=iter_bytes)
+        with pytest.raises(WhisperCppResponseError):
+            loaded_backend.transcribe(_seconds_of_audio(1))
+        # Bounded memory: the guard stopped reading once the cap was crossed,
+        # not after consuming every (over-cap) piece.
+        assert consumed["n"] <= (_MAX_RESPONSE_BYTES // len(piece)) + 1
+
+    def test_oversized_content_length_header_is_rejected_before_read(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """An honest server that declares a Content-Length above the cap must be
+        rejected BEFORE the body is read at all."""
+        from server.core.stt.backends.whispercpp_backend import _MAX_RESPONSE_BYTES
+
+        def iter_bytes():
+            raise AssertionError("must reject on Content-Length before reading the body")
+            yield  # pragma: no cover — makes this a generator
+
+        resp = self._stream_resp(
+            headers={"Content-Length": str(_MAX_RESPONSE_BYTES + 1)},
+            iter_bytes=iter_bytes,
+        )
+        mock_httpx.stream.return_value = resp
+        with pytest.raises(WhisperCppResponseError):
+            loaded_backend.transcribe(_seconds_of_audio(1))
+
+    def test_response_at_cap_is_accepted(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A well-formed response whose body is at/under the cap streams through
+        normally — the guard must not false-trip on legitimate transcripts."""
+        from server.core.stt.backends.whispercpp_backend import _MAX_RESPONSE_BYTES
+
+        body = json.dumps({"segments": [], "language": "en"}).encode()
+        assert len(body) <= _MAX_RESPONSE_BYTES
+
+        def iter_bytes():
+            # Deliberately chunked to exercise the accumulator loop.
+            yield body[: len(body) // 2]
+            yield body[len(body) // 2 :]
+
+        mock_httpx.stream.return_value = self._stream_resp(iter_bytes=iter_bytes)
+        segments, info = loaded_backend.transcribe(_seconds_of_audio(1))
+        assert segments == []
+        assert info.language == "en"
+
+
+# ---------------------------------------------------------------------------
 # Proportional segment cap (GH #172) — fail loud instead of silently truncate
 # ---------------------------------------------------------------------------
 
