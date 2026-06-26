@@ -16,7 +16,16 @@ import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from server.api.routes.utils import get_client_name
@@ -76,6 +85,7 @@ class TranscriptionResponse(BaseModel):
 @router.post("/file", response_model=TranscriptionResponse, include_in_schema=False)
 async def transcribe_audio(
     request: Request,
+    response: Response = None,  # noqa: RUF013 — FastAPI injects; used to set the diarization-status header
     file: UploadFile = File(...),  # noqa: B008
     language: str | None = Form(None),
     translation_enabled: bool = Form(False),
@@ -222,6 +232,22 @@ async def transcribe_audio(
         if diarization is None:
             diarization = False
 
+    # Whether the caller asked for diarization, captured BEFORE any failure
+    # path can reset ``diarization`` to False. Lets the integrated/standard
+    # return paths report a swallowed diarization failure to the client via an
+    # ``X-Diarization-Status`` header instead of an unexplained num_speakers: 0
+    # (GH #127). A header is used (not a body field) because this route is bound
+    # to response_model=TranscriptionResponse, which would strip an extra key.
+    diarization_requested = bool(diarization)
+
+    def _attach_diar_status(result_dict: dict[str, Any]) -> dict[str, Any]:
+        """Set X-Diarization-Status (ready|unavailable) when diarization was
+        requested, derived from whether speaker labels were actually produced."""
+        if response is not None and diarization_requested:
+            performed = (result_dict.get("num_speakers") or 0) > 0
+            response.headers["X-Diarization-Status"] = "ready" if performed else "unavailable"
+        return result_dict
+
     # Moved inside the main try/except/finally so that tempfile I/O failures
     # (client disconnect during read, disk full, etc.) trigger mark_failed and
     # end_job via the shared handlers below, instead of leaking a 'processing'
@@ -317,7 +343,7 @@ async def transcribe_audio(
                         _e,
                     )
 
-            return result_dict
+            return _attach_diar_status(result_dict)
 
         # Check if the backend supports single-pass diarization (WhisperX)
         backend = engine._backend
@@ -385,7 +411,7 @@ async def transcribe_audio(
                             _e,
                         )
 
-                return result_dict
+                return _attach_diar_status(result_dict)
 
             except TranscriptionCancelledError:
                 # User cancellation must not be silently converted to "fallback to
@@ -530,7 +556,7 @@ async def transcribe_audio(
                     _e,
                 )
 
-        return result_dict
+        return _attach_diar_status(result_dict)
 
     except ValueError as e:
         # Skip mark_failed if we already persisted a completed result — a later
