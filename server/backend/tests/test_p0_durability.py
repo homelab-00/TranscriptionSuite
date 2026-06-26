@@ -61,13 +61,40 @@ def _make_session(
 
 
 def _fake_transcription_result(text: str = "Hello world", duration: float = 1.5):
-    """Minimal transcription result matching engine.transcribe_file() output."""
-    return SimpleNamespace(
+    """Minimal transcription result matching engine.transcribe_file() output.
+
+    The ``to_dict`` attribute mirrors ``TranscriptionResult.to_dict()`` and is
+    required because ``_build_longform_result_payload`` (added in GH #172) now
+    calls ``result.to_dict()`` instead of reading fields directly.  The lambda
+    closes over ``result`` so mutations applied after construction (e.g.
+    ``self._transcribe_result.text = large_text`` in Dura-004 tests) are
+    reflected when ``to_dict()`` is invoked during ``process_transcription``.
+    """
+    result = SimpleNamespace(
         text=text,
         words=[],
         language="en",
         duration=duration,
+        segments=[],
+        language_probability=0.0,
+        num_speakers=0,
+        partial=False,
+        partial_reason=None,
     )
+    result.to_dict = lambda: {
+        "text": result.text,
+        "segments": result.segments,
+        "words": result.words,
+        "language": result.language,
+        "language_probability": round(result.language_probability, 3),
+        "duration": round(result.duration, 3),
+        "num_speakers": result.num_speakers,
+        "total_words": len(result.words),
+        "partial": result.partial,
+        "partial_reason": result.partial_reason,
+        "metadata": {"num_segments": len(result.segments)},
+    }
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════

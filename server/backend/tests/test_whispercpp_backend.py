@@ -7,13 +7,18 @@ from unittest.mock import MagicMock, patch
 import httpx
 import numpy as np
 import pytest
+from server.core.stt.backends.base import PartialTranscriptionError
 from server.core.stt.backends.whispercpp_backend import (
     _INFERENCE_TIMEOUT,
+    _MAX_CHUNK_DURATION_CEILING_S,
     _MAX_CHUNK_DURATION_S,
-    _MAX_SEGMENTS,
-    _MAX_WORDS_PER_SEGMENT,
+    _MAX_SEGMENTS_PER_AUDIO_SECOND,
+    _MAX_WORDS_PER_AUDIO_SECOND,
+    _SEGMENT_CAP_FLOOR,
     _TIMEOUT_SECONDS_PER_AUDIO_SECOND,
+    _WORDS_CAP_FLOOR,
     WhisperCppBackend,
+    WhisperCppResponseError,
     _audio_to_wav_bytes,
     _coerce_float,
     _inference_timeout_for,
@@ -22,7 +27,9 @@ from server.core.stt.backends.whispercpp_backend import (
     _resolve_timeout_config,
     _sanitize_for_error_preview,
     _sanitize_language_code,
+    _segment_cap_for,
     _validate_server_url,
+    _word_cap_for,
 )
 
 # ---------------------------------------------------------------------------
@@ -78,6 +85,10 @@ def _post_data(mock_httpx: MagicMock) -> dict:
     call = mock_httpx.post.call_args
     assert call is not None, "expected a POST to have been issued"
     return call.kwargs.get("data") or call[1].get("data", {}) or {}
+
+
+def _seconds_of_audio(seconds: float) -> np.ndarray:
+    return np.zeros(int(seconds * 16000), dtype=np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -864,31 +875,6 @@ class TestTranscribe:
         # The word with NaN start is dropped entirely.
         assert segments[0].words == []
 
-    @pytest.mark.parametrize(
-        "count,expected",
-        [
-            (_MAX_SEGMENTS - 1, _MAX_SEGMENTS - 1),  # below cap — all kept
-            (_MAX_SEGMENTS, _MAX_SEGMENTS),  # exactly at cap — all kept
-            (_MAX_SEGMENTS + 1, _MAX_SEGMENTS),  # one over — truncated
-            (_MAX_SEGMENTS + 50, _MAX_SEGMENTS),  # far over — truncated
-        ],
-    )
-    def test_segment_cap_boundary(
-        self,
-        loaded_backend: WhisperCppBackend,
-        mock_httpx: MagicMock,
-        count: int,
-        expected: int,
-    ):
-        """Boundary matrix for the cap — catches off-by-one mutations (>= vs >, -1 slice)."""
-        bloated = [{"text": "x", "start": 0.0, "end": 0.1} for _ in range(count)]
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": bloated}),
-        )
-        segments, _ = loaded_backend.transcribe(np.zeros(16000, dtype=np.float32))
-        assert len(segments) == expected
-
     def test_segment_cap_applies_after_filter(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
@@ -909,37 +895,6 @@ class TestTranscribe:
         assert len(segments) == 100
         assert segments[0].text == "s0"
         assert segments[-1].text == "s99"
-
-    @pytest.mark.parametrize(
-        "count,expected",
-        [
-            (_MAX_WORDS_PER_SEGMENT - 1, _MAX_WORDS_PER_SEGMENT - 1),
-            (_MAX_WORDS_PER_SEGMENT, _MAX_WORDS_PER_SEGMENT),
-            (_MAX_WORDS_PER_SEGMENT + 1, _MAX_WORDS_PER_SEGMENT),
-            (_MAX_WORDS_PER_SEGMENT + 10, _MAX_WORDS_PER_SEGMENT),
-        ],
-    )
-    def test_word_cap_boundary(
-        self,
-        loaded_backend: WhisperCppBackend,
-        mock_httpx: MagicMock,
-        count: int,
-        expected: int,
-    ):
-        """Same boundary matrix as the segment cap."""
-        bloated = [
-            {"word": "x", "start": i * 0.001, "end": i * 0.001 + 0.0005} for i in range(count)
-        ]
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "segments": [{"text": "seg", "start": 0.0, "end": 999.0, "words": bloated}]
-                }
-            ),
-        )
-        segments, _ = loaded_backend.transcribe(np.zeros(16000, dtype=np.float32))
-        assert len(segments[0].words) == expected
 
     def test_language_injection_attempt_is_dropped(
         self,
@@ -1262,6 +1217,111 @@ class TestTranscribe:
 
 
 # ---------------------------------------------------------------------------
+# Proportional segment cap (GH #172) — fail loud instead of silently truncate
+# ---------------------------------------------------------------------------
+
+
+class TestSegmentProportionalCap:
+    def _respond_with(self, mock_httpx, n_segments):
+        bloated = [{"text": "x", "start": 0.0, "end": 0.1} for _ in range(n_segments)]
+        mock_httpx.post.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={"segments": bloated}),
+        )
+
+    def test_legit_long_audio_is_not_truncated(self, loaded_backend, mock_httpx):
+        """GH #172 regression: a real long transcript keeps ALL its segments."""
+        # 100s audio -> cap = 2000; 1500 segments is legitimate and must survive.
+        self._respond_with(mock_httpx, 1500)
+        segments, _ = loaded_backend.transcribe(_seconds_of_audio(100))
+        assert len(segments) == 1500
+
+    def test_count_at_proportional_cap_is_kept(self, loaded_backend, mock_httpx):
+        # 100s -> cap 2000; exactly at cap is kept (boundary).
+        self._respond_with(mock_httpx, 2000)
+        segments, _ = loaded_backend.transcribe(_seconds_of_audio(100))
+        assert len(segments) == 2000
+
+    def test_count_over_proportional_cap_raises(self, loaded_backend, mock_httpx):
+        # 100s -> cap 2000; one over is an impossible payload -> raise, do NOT truncate.
+        self._respond_with(mock_httpx, 2001)
+        with pytest.raises(WhisperCppResponseError):
+            loaded_backend.transcribe(_seconds_of_audio(100))
+
+    def test_floor_boundary_at_cap_is_kept(self, loaded_backend, mock_httpx):
+        # 1s -> cap = floor 200; exactly at the floor is kept.
+        self._respond_with(mock_httpx, 200)
+        segments, _ = loaded_backend.transcribe(_seconds_of_audio(1))
+        assert len(segments) == 200
+
+    def test_floor_boundary_over_cap_raises(self, loaded_backend, mock_httpx):
+        # 1s -> cap = floor 200; one over the floor raises.
+        self._respond_with(mock_httpx, 201)
+        with pytest.raises(WhisperCppResponseError):
+            loaded_backend.transcribe(_seconds_of_audio(1))
+
+    def test_hostile_small_audio_huge_count_raises(self, loaded_backend, mock_httpx):
+        # The literal #172 attack shape: thousands of segments for ~1s of audio.
+        self._respond_with(mock_httpx, 11152)
+        with pytest.raises(WhisperCppResponseError):
+            loaded_backend.transcribe(_seconds_of_audio(1))
+
+    def test_chunked_earlier_segments_preserved_on_later_cap_raise(
+        self, loaded_backend, mock_httpx
+    ):
+        """WhisperCppResponseError on chunk N+1 must not discard chunk N's segments."""
+        good = [{"text": "ok", "start": 0.0, "end": 1.0}]
+        bloated = [{"text": "x", "start": 0.0, "end": 0.1} for _ in range(201)]
+        mock_httpx.post.side_effect = [
+            MagicMock(status_code=200, json=MagicMock(return_value={"segments": good})),
+            MagicMock(status_code=200, json=MagicMock(return_value={"segments": bloated})),
+        ]
+        loaded_backend._max_chunk_duration_s = 1  # force 1s chunks -> 2 chunks for 2s audio
+        with pytest.raises(PartialTranscriptionError) as exc_info:
+            loaded_backend.transcribe(_seconds_of_audio(2))
+        assert len(exc_info.value.segments) == 1
+        assert exc_info.value.segments[0].text == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Proportional word cap (GH #172) — fail loud instead of silently truncate
+# ---------------------------------------------------------------------------
+
+
+class TestWordProportionalCap:
+    def _respond_with_words(self, mock_httpx, n_words):
+        bloated = [
+            {"word": "x", "start": i * 0.001, "end": i * 0.001 + 0.0005} for i in range(n_words)
+        ]
+        mock_httpx.post.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(
+                return_value={
+                    "segments": [{"text": "seg", "start": 0.0, "end": 30.0, "words": bloated}]
+                }
+            ),
+        )
+
+    def test_legit_words_kept(self, loaded_backend, mock_httpx):
+        # 100s audio -> word cap 4000; 800 words on one segment is fine.
+        self._respond_with_words(mock_httpx, 800)
+        segments, _ = loaded_backend.transcribe(_seconds_of_audio(100))
+        assert len(segments[0].words) == 800
+
+    def test_words_over_cap_raise(self, loaded_backend, mock_httpx):
+        # 1s audio -> word cap = floor 1000; 1001 words is implausible -> raise.
+        self._respond_with_words(mock_httpx, 1001)
+        with pytest.raises(WhisperCppResponseError):
+            loaded_backend.transcribe(_seconds_of_audio(1))
+
+    def test_word_floor_boundary_at_cap_is_kept(self, loaded_backend, mock_httpx):
+        # 1s audio -> word cap = floor 1000; exactly at cap is kept.
+        self._respond_with_words(mock_httpx, 1000)
+        segments, _ = loaded_backend.transcribe(_seconds_of_audio(1))
+        assert len(segments[0].words) == 1000
+
+
+# ---------------------------------------------------------------------------
 # _inference_timeout_for — duration-scaled per-request timeout (GH #168)
 # ---------------------------------------------------------------------------
 
@@ -1474,6 +1534,16 @@ class TestWhisperCppConfigResolution:
         with patch.dict("os.environ", {"WHISPERCPP_CHUNK_DURATION_S": "10"}):
             assert _resolve_chunk_duration_config() == 60
 
+    def test_chunk_duration_config_is_ceilinged(self):
+        """A huge WHISPERCPP_CHUNK_DURATION_S must NOT disable chunking (GH #172):
+        long audio must always be split so the per-chunk proportional cap applies."""
+        with patch.dict("os.environ", {"WHISPERCPP_CHUNK_DURATION_S": "86400"}):  # 1 day
+            assert _resolve_chunk_duration_config() == _MAX_CHUNK_DURATION_CEILING_S
+
+    def test_chunk_duration_floor_still_applies_alongside_ceiling(self):
+        with patch.dict("os.environ", {"WHISPERCPP_CHUNK_DURATION_S": "5"}):
+            assert _resolve_chunk_duration_config() == 60
+
     def test_chunk_duration_defaults_when_no_source(self):
         with (
             patch.dict("os.environ", {}, clear=True),
@@ -1602,6 +1672,41 @@ class TestTranscribeCancellation:
             np.zeros(3 * 16000, dtype=np.float32), cancellation_check=lambda: False
         )
         assert mock_httpx.post.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Duration-proportional segment/word cap helpers (GH #172)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "duration_s,expected",
+    [
+        (0.0, _SEGMENT_CAP_FLOOR),  # empty/floor
+        (1.0, _SEGMENT_CAP_FLOOR),  # short clip pinned to floor
+        (10.0, _SEGMENT_CAP_FLOOR),  # exact crossover (200/20=10s): still floor
+        (11.0, 220),  # first step above crossover: proportional wins
+        (100.0, 100 * _MAX_SEGMENTS_PER_AUDIO_SECOND),  # proportional regime
+        (600.0, 600 * _MAX_SEGMENTS_PER_AUDIO_SECOND),  # 10-min chunk
+    ],
+)
+def test_segment_cap_for_is_proportional_with_floor(duration_s, expected):
+    assert _segment_cap_for(duration_s) == expected
+
+
+@pytest.mark.parametrize(
+    "duration_s,expected",
+    [
+        (0.0, _WORDS_CAP_FLOOR),
+        (1.0, _WORDS_CAP_FLOOR),
+        (25.0, _WORDS_CAP_FLOOR),  # exact crossover (1000/40=25s)
+        (26.0, 1_040),  # proportional wins
+        (100.0, 100 * _MAX_WORDS_PER_AUDIO_SECOND),
+        (600.0, 600 * _MAX_WORDS_PER_AUDIO_SECOND),  # 10-min chunk (symmetry with segment test)
+    ],
+)
+def test_word_cap_for_is_proportional_with_floor(duration_s, expected):
+    assert _word_cap_for(duration_s) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -1740,7 +1845,7 @@ class TestInternals:
                 {"text": "three", "start": 2.0, "end": 3.0},
             ],
         }
-        segments, info = WhisperCppBackend._parse_response(result)
+        segments, info = WhisperCppBackend._parse_response(result, 1.0)
         assert len(segments) == 3
         assert segments[0].text == "one"
         assert segments[1].text == "two"
@@ -1758,20 +1863,20 @@ class TestInternals:
                 {"text": "ok", "start": 0.0, "end": 1.0},
             ]
         }
-        segments, _ = WhisperCppBackend._parse_response(result)
+        segments, _ = WhisperCppBackend._parse_response(result, 1.0)
         assert len(segments) == 1
         assert segments[0].text == "ok"
 
     def test_parse_response_accepts_segments_as_none(self):
         """``segments: null`` must not blow up the parser."""
-        segments, info = WhisperCppBackend._parse_response({"segments": None})
+        segments, info = WhisperCppBackend._parse_response({"segments": None}, 1.0)
         assert segments == []
         assert info.language is None
 
     def test_parse_response_swaps_non_monotonic_bounds(self):
         """Segment with end<start should be swapped (with a warning), not emitted as-is."""
         result = {"segments": [{"text": "bad", "start": 5.0, "end": 2.0}]}
-        segments, _ = WhisperCppBackend._parse_response(result)
+        segments, _ = WhisperCppBackend._parse_response(result, 1.0)
         assert len(segments) == 1
         assert segments[0].start == 2.0
         assert segments[0].end == 5.0
@@ -1791,7 +1896,7 @@ class TestInternals:
                 }
             ]
         }
-        segments, _ = WhisperCppBackend._parse_response(result)
+        segments, _ = WhisperCppBackend._parse_response(result, 1.0)
         assert [w["word"] for w in segments[0].words] == ["good"]
 
     def test_parse_response_rejects_list_word_text(self):
@@ -1809,7 +1914,7 @@ class TestInternals:
                 }
             ]
         }
-        segments, _ = WhisperCppBackend._parse_response(result)
+        segments, _ = WhisperCppBackend._parse_response(result, 1.0)
         assert [w["word"] for w in segments[0].words] == ["good"]
 
     def test_mock_httpx_patches_the_call_site(self, mock_httpx: MagicMock):

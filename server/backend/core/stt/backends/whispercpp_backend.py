@@ -25,6 +25,15 @@ from server.core.stt.backends.base import (
 
 logger = logging.getLogger(__name__)
 
+
+class WhisperCppResponseError(RuntimeError):
+    """The sidecar returned a structurally implausible payload — more segments
+    or words than the audio duration could justify. Raised instead of silently
+    truncating so a malformed/hostile response can never masquerade as a
+    complete transcript (GH #172).
+    """
+
+
 _DEFAULT_SERVER_URL = "http://whisper-server:8080"
 # Floor for the per-request httpx timeout. The actual budget scales with chunk
 # duration via ``_inference_timeout_for`` (GH #168 / #153): long audio is split
@@ -33,6 +42,12 @@ _DEFAULT_SERVER_URL = "http://whisper-server:8080"
 # fixed 300s ceiling a 5h+ file could never satisfy.
 _INFERENCE_TIMEOUT = 300  # seconds — minimum per-request budget
 _MAX_CHUNK_DURATION_S = 10 * 60  # 10 min per /inference POST (mirrors the NeMo backends)
+# Hard ceiling on the configurable chunk duration. Even a deliberately huge
+# WHISPERCPP_CHUNK_DURATION_S must not route a whole multi-hour file through a
+# single un-chunked /inference request — that path re-exposes the GH #172
+# truncation and defeats per-chunk progress/cancellation. 30 min keeps each
+# chunk's plausible segment count far below any proportional cap.
+_MAX_CHUNK_DURATION_CEILING_S = 30 * 60
 _TIMEOUT_SECONDS_PER_AUDIO_SECOND = 2.0  # tolerate inference up to ~2× real-time
 _LOAD_TIMEOUT = 60
 
@@ -41,15 +56,21 @@ _LOAD_TIMEOUT = 60
 # coupling is grep-able.
 _WHISPER_SERVER_DEFAULT_BEAM_SIZE = 5
 
-# Defensive caps on the sidecar response. A compromised whisper-server —
-# or one reached through a misconfigured ``WHISPERCPP_SERVER_URL`` pointing
-# at a hostile service — could otherwise return a payload that exhausts
-# memory while being "parsed". A real 2-hour transcript holds ~5k segments
-# at whisper.cpp's default chunking, so 10k gives a 2× safety margin; real
-# words-per-segment is bounded by whisper's 30s audio window (< a few hundred
-# tokens), so 5k is already generous.
-_MAX_SEGMENTS = 10_000
-_MAX_WORDS_PER_SEGMENT = 5_000
+# Defensive sanity bounds on the sidecar response. A buggy or hostile
+# whisper-server (e.g. one reached through a misconfigured
+# ``WHISPERCPP_SERVER_URL`` pointing at a malicious service) could return a
+# payload with far more segments/words than the audio could possibly justify.
+# We bound the count PROPORTIONALLY to the chunk's audio duration: whisper.cpp
+# realistically emits well under ~2-3 segments/sec and ~3-4 words/sec, so the
+# rates below sit ~7-10x above any legitimate output and are unreachable by
+# real speech at ANY duration. Exceeding a proportional bound therefore means
+# a malformed/hostile payload, not a long recording — so we RAISE rather than
+# silently truncate (GH #172: never silently discard a completed transcription).
+# Floors keep very short clips from false-tripping the bound.
+_MAX_SEGMENTS_PER_AUDIO_SECOND = 20
+_MAX_WORDS_PER_AUDIO_SECOND = 40
+_SEGMENT_CAP_FLOOR = 200
+_WORDS_CAP_FLOOR = 1_000
 
 # Practical cap on user-supplied initial_prompt. whisper.cpp uses the prompt
 # as a decoder hint in the context window (~224 tokens ≈ ~1 KB of text). A
@@ -139,7 +160,7 @@ def _resolve_chunk_duration_config() -> int:
     if raw is None:
         return _MAX_CHUNK_DURATION_S
     try:
-        return max(60, int(float(raw)))
+        return min(_MAX_CHUNK_DURATION_CEILING_S, max(60, int(float(raw))))
     except (TypeError, ValueError):
         logger.warning(
             "Ignoring invalid whisper.cpp chunk duration %r (expected a number ≥ 60); using %ds",
@@ -147,6 +168,27 @@ def _resolve_chunk_duration_config() -> int:
             _MAX_CHUNK_DURATION_S,
         )
         return _MAX_CHUNK_DURATION_S
+
+
+def _segment_cap_for(audio_duration_s: float) -> int:
+    """Max plausible segment count for ``audio_duration_s`` of audio.
+
+    Proportional to duration with a floor for very short clips. A real
+    transcript can never reach this; exceeding it means a malformed/hostile
+    sidecar payload (GH #172).
+    """
+    return max(_SEGMENT_CAP_FLOOR, math.ceil(audio_duration_s * _MAX_SEGMENTS_PER_AUDIO_SECOND))
+
+
+def _word_cap_for(audio_duration_s: float) -> int:
+    """Max plausible word count for ``audio_duration_s`` of audio.
+
+    Proportional to duration with a floor for very short clips. Applied per
+    segment as a loose sanity bound (a single segment cannot contain more words
+    than the whole chunk's worth); a real transcript never reaches it, so
+    exceeding it means a malformed/hostile sidecar payload (GH #172).
+    """
+    return max(_WORDS_CAP_FLOOR, math.ceil(audio_duration_s * _MAX_WORDS_PER_AUDIO_SECOND))
 
 
 def _resolve_timeout_config() -> tuple[int, float]:
@@ -378,23 +420,25 @@ def _audio_to_wav_bytes(audio: np.ndarray, sample_rate: int) -> bytes:
     return buf.getvalue()
 
 
-def _parse_words(raw_words: Any) -> list[dict[str, Any]]:
+def _parse_words(raw_words: Any, word_cap: int, audio_duration_s: float) -> list[dict[str, Any]]:
     """Convert a sidecar ``words`` array into the normalised word-dict list.
 
-    Applies the same filter-then-cap discipline as the segment-level parser
+    Applies the same filter-then-bound discipline as the segment-level parser
     and silently drops per-word entries that fail validation (non-dict,
-    missing text, missing bounds, non-monotonic bounds).
+    missing text, missing bounds, non-monotonic bounds). Raises
+    ``WhisperCppResponseError`` if the count exceeds ``word_cap`` — an
+    implausible count means a malformed/hostile payload, not real speech
+    (GH #172).
     """
     if not isinstance(raw_words, list):
         return []
     dict_words = [w for w in raw_words if isinstance(w, dict)]
-    if len(dict_words) > _MAX_WORDS_PER_SEGMENT:
-        logger.warning(
-            "whisper-server segment had %d word dicts, truncating to %d",
-            len(dict_words),
-            _MAX_WORDS_PER_SEGMENT,
+    if len(dict_words) > word_cap:
+        raise WhisperCppResponseError(
+            f"whisper-server segment had {len(dict_words)} word dicts for "
+            f"{audio_duration_s:.0f}s of audio (max {word_cap}); rejecting the "
+            f"response rather than silently dropping words"
         )
-        dict_words = dict_words[:_MAX_WORDS_PER_SEGMENT]
 
     words: list[dict[str, Any]] = []
     for w in dict_words:
@@ -743,7 +787,8 @@ class WhisperCppBackend(STTBackend):
                 f"response from /inference: {body_preview}"
             ) from exc
 
-        return self._parse_response(result)
+        audio_duration_s = len(chunk) / sample_rate if sample_rate else 0.0
+        return self._parse_response(result, audio_duration_s)
 
     def supports_translation(self) -> bool:
         return True
@@ -763,6 +808,7 @@ class WhisperCppBackend(STTBackend):
     @staticmethod
     def _parse_response(
         result: dict[str, Any],
+        audio_duration_s: float,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         """Convert whisper-server /inference verbose_json into segments + info.
 
@@ -784,27 +830,40 @@ class WhisperCppBackend(STTBackend):
                 ]
               }]
             }
+
+        Raises:
+            WhisperCppResponseError: If the number of dict-typed segments
+                exceeds ``_segment_cap_for(audio_duration_s)``, or if any
+                segment's word count exceeds ``_word_cap_for(audio_duration_s)``.
         """
         segments: list[BackendSegment] = []
         raw_segments = result.get("segments")
         if not isinstance(raw_segments, list):
             raw_segments = []
 
-        # Filter to dict-typed segments FIRST, cap afterwards. If we capped
-        # first and the payload had thousands of stray non-dict entries at
-        # the front, the cap would slice them out and drop the real segments
-        # that followed.
+        # Filter to dict-typed segments FIRST, bound afterwards. If we bounded
+        # first and the payload had thousands of stray non-dict entries at the
+        # front, the bound would reject real segments that followed.
         dict_segments = [s for s in raw_segments if isinstance(s, dict)]
-        if len(dict_segments) > _MAX_SEGMENTS:
-            logger.warning(
-                "whisper-server returned %d segment dicts, truncating to %d to bound memory",
-                len(dict_segments),
-                _MAX_SEGMENTS,
+        seg_cap = _segment_cap_for(audio_duration_s)
+        if len(dict_segments) > seg_cap:
+            # A real transcript cannot exceed the proportional bound; this is a
+            # malformed/hostile sidecar payload. RAISE rather than silently
+            # truncate (GH #172). In the chunked path transcribe()'s per-chunk
+            # handler converts this into a surfaced partial result; in the
+            # single-request path it fails the job loudly with no data lost.
+            raise WhisperCppResponseError(
+                f"whisper-server returned {len(dict_segments)} segment dicts for "
+                f"{audio_duration_s:.0f}s of audio (max {seg_cap}); rejecting the "
+                f"response rather than silently dropping segments"
             )
-            dict_segments = dict_segments[:_MAX_SEGMENTS]
 
+        # Loose per-segment sanity bound: chunk-duration-derived cap applied to
+        # each segment's word list (a single segment can't hold more words than
+        # the whole chunk's worth). Raises rather than silently truncating.
+        word_cap = _word_cap_for(audio_duration_s)
         for seg in dict_segments:
-            words = _parse_words(seg.get("words"))
+            words = _parse_words(seg.get("words"), word_cap, audio_duration_s)
 
             seg_start = _coerce_float(seg.get("start"))
             seg_end = _coerce_float(seg.get("end"))

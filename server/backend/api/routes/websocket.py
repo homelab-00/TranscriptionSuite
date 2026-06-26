@@ -67,6 +67,18 @@ _PREVIEW_MAX_SECONDS = 60
 _PREVIEW_DEFAULT_SECONDS = 20
 
 
+def _build_longform_result_payload(result: Any) -> dict[str, Any]:
+    """Full longform result for persistence + delivery.
+
+    Mirrors the main HTTP submit path, which persists ``result.to_dict()`` so a
+    WebSocket-submitted longform job keeps its segment-level data and any
+    ``partial``/``partial_reason`` truncation signal — previously this path
+    dropped segments, num_speakers, and partial flags from BOTH the persisted
+    result_json and the client message (GH #172 follow-up).
+    """
+    return sanitize_for_json(result.to_dict())
+
+
 class TranscriptionSession:
     """
     Manages a single transcription session.
@@ -371,15 +383,8 @@ class TranscriptionSession:
 
             result = transcribe_future.result()
 
-            # Build and sanitize result payload
-            result_payload = sanitize_for_json(
-                {
-                    "text": result.text,
-                    "words": result.words or [],
-                    "language": result.language,
-                    "duration": result.duration,
-                }
-            )
+            # Build and sanitize result payload (full result — see GH #172).
+            result_payload = _build_longform_result_payload(result)
 
             # PERSIST BEFORE DELIVER — result must survive even if delivery fails
             _result_persisted = False

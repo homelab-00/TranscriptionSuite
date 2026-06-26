@@ -1507,14 +1507,11 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
             word_timestamps=True,
         )
 
-        result_payload = sanitize_for_json(
-            {
-                "text": result.text,
-                "words": result.words or [],
-                "language": result.language,
-                "duration": result.duration,
-            }
-        )
+        # Persist the FULL result (segments, num_speakers, partial flags) — the
+        # retry path previously dropped them, so a retried job lost segment-level
+        # data permanently (GET /result replays result_json). Mirrors the main
+        # submit path and the WS longform path (GH #172).
+        result_payload = sanitize_for_json(result.to_dict())
 
         save_result(
             job_id=job_id,
