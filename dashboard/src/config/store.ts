@@ -149,7 +149,9 @@ const DEFAULT_CONFIG: ClientConfig = {
   ui: {
     sidebarCollapsed: false,
     blurEffectsEnabled: true,
-    idleAnimationsEnabled: true,
+    // GH #87 — default OFF: idle visualizer waves cost ~85% CPU / ~32% GPU at
+    // idle on Apple Silicon (continuous compositor repaint). Opt-in via Settings.
+    idleAnimationsEnabled: false,
   },
 };
 

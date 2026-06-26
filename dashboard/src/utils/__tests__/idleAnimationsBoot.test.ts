@@ -1,13 +1,14 @@
 /**
  * idleAnimationsBoot — unit tests for the GH-87 "Idle animations" boot probe.
  *
- * Unlike the old combined "Low idle usage" mode, this defaults ON and is
- * INDEPENDENT of blur: the `data-idle-animations="off"` attribute is applied
- * only when storage holds the literal boolean `false`. Every failure mode
- * (missing storage, missing key, malformed JSON, getItem throwing, any
- * non-false value) must fall through to the documented default (animations
- * ON, no attribute). The function MUST never throw — bootstrap runs before
- * React mounts.
+ * Defaults OFF (GH #87): the idle wave animations continuously force the
+ * compositor/main-thread to repaint (~85% CPU / ~32% GPU at idle on Apple
+ * Silicon), so `data-idle-animations="off"` is applied by default and ONLY the
+ * explicit literal boolean `true` (a deliberate Settings opt-in) leaves the
+ * animations running. Every other value/failure mode (missing storage, missing
+ * key, malformed JSON, getItem throwing, any non-true value) falls through to
+ * the default OFF (attribute set). The function MUST never throw — bootstrap
+ * runs before React mounts.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -49,27 +50,27 @@ describe('applyIdleAnimationsBoot', () => {
     expect(doc.documentElement.dataset.idleAnimations).toBe('off');
   });
 
-  it('leaves attribute unset when storage holds true', () => {
+  it('leaves attribute unset only when storage holds the explicit true opt-in', () => {
     const storage = makeStorage({ [IDLE_ANIMATIONS_STORAGE_KEY]: 'true' });
     applyIdleAnimationsBoot(storage, doc as unknown as Document);
     expect(doc.documentElement.dataset.idleAnimations).toBeUndefined();
   });
 
-  it('leaves attribute unset when key is absent (first run, default ON)', () => {
+  it('sets off when key is absent (first run, default OFF)', () => {
     const storage = makeStorage();
     applyIdleAnimationsBoot(storage, doc as unknown as Document);
-    expect(doc.documentElement.dataset.idleAnimations).toBeUndefined();
+    expect(doc.documentElement.dataset.idleAnimations).toBe('off');
   });
 
-  it('does not throw and leaves attribute unset on JSON parse failure', () => {
+  it('does not throw and sets off (default) on JSON parse failure', () => {
     const storage = makeStorage({ [IDLE_ANIMATIONS_STORAGE_KEY]: 'not-json' });
     expect(() => applyIdleAnimationsBoot(storage, doc as unknown as Document)).not.toThrow();
-    expect(doc.documentElement.dataset.idleAnimations).toBeUndefined();
+    expect(doc.documentElement.dataset.idleAnimations).toBe('off');
   });
 
-  it('does not throw and leaves attribute unset when storage is null', () => {
+  it('does not throw and sets off (default) when storage is null', () => {
     expect(() => applyIdleAnimationsBoot(null, doc as unknown as Document)).not.toThrow();
-    expect(doc.documentElement.dataset.idleAnimations).toBeUndefined();
+    expect(doc.documentElement.dataset.idleAnimations).toBe('off');
   });
 
   it('does not throw when document is null', () => {
@@ -77,25 +78,25 @@ describe('applyIdleAnimationsBoot', () => {
     expect(() => applyIdleAnimationsBoot(storage, null)).not.toThrow();
   });
 
-  it('does not throw and leaves attribute unset when storage.getItem throws', () => {
+  it('does not throw and sets off (default) when storage.getItem throws', () => {
     const storage: MockStorage = {
       getItem: vi.fn(() => {
         throw new Error('storage disabled');
       }),
     };
     expect(() => applyIdleAnimationsBoot(storage, doc as unknown as Document)).not.toThrow();
-    expect(doc.documentElement.dataset.idleAnimations).toBeUndefined();
+    expect(doc.documentElement.dataset.idleAnimations).toBe('off');
   });
 
-  it('treats non-false JSON values as ON (no attribute set)', () => {
-    // Only the literal boolean `false` should freeze animations.
-    for (const value of ['1', '0', 'null', '"off"']) {
+  it('treats non-true JSON values as OFF (attribute set)', () => {
+    // Only the literal boolean `true` should leave animations running.
+    for (const value of ['1', '0', 'null', '"on"']) {
       const docMock = makeDoc();
       applyIdleAnimationsBoot(
         makeStorage({ [IDLE_ANIMATIONS_STORAGE_KEY]: value }),
         docMock as unknown as Document,
       );
-      expect(docMock.documentElement.dataset.idleAnimations).toBeUndefined();
+      expect(docMock.documentElement.dataset.idleAnimations).toBe('off');
     }
   });
 });
@@ -103,12 +104,12 @@ describe('applyIdleAnimationsBoot', () => {
 /**
  * readPersistedIdleAnimations — used to seed SettingsModal's
  * savedIdleAnimationsRef so the modal close-branch revert agrees with the
- * attribute the boot probe applied. Default true (animations ON) on every
- * failure/missing path; false only for the literal boolean `false`.
+ * attribute the boot probe applied. Default false (animations OFF) on every
+ * failure/missing path; true only for the explicit literal boolean `true`.
  */
 describe('readPersistedIdleAnimations', () => {
-  it('returns true when key is absent', () => {
-    expect(readPersistedIdleAnimations(makeStorage())).toBe(true);
+  it('returns false when key is absent (default OFF)', () => {
+    expect(readPersistedIdleAnimations(makeStorage())).toBe(false);
   });
 
   it('returns false when storage holds the literal string "false"', () => {
@@ -117,29 +118,29 @@ describe('readPersistedIdleAnimations', () => {
     ).toBe(false);
   });
 
-  it('returns true when storage holds true', () => {
+  it('returns true only when storage holds the explicit true opt-in', () => {
     expect(
       readPersistedIdleAnimations(makeStorage({ [IDLE_ANIMATIONS_STORAGE_KEY]: 'true' })),
     ).toBe(true);
   });
 
-  it('returns true when storage is null (no localStorage available)', () => {
-    expect(readPersistedIdleAnimations(null)).toBe(true);
+  it('returns false when storage is null (no localStorage available)', () => {
+    expect(readPersistedIdleAnimations(null)).toBe(false);
   });
 
-  it('returns true on JSON parse failure', () => {
+  it('returns false on JSON parse failure', () => {
     expect(
       readPersistedIdleAnimations(makeStorage({ [IDLE_ANIMATIONS_STORAGE_KEY]: 'not-json' })),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('returns true when storage.getItem throws', () => {
+  it('returns false when storage.getItem throws', () => {
     const storage: MockStorage = {
       getItem: vi.fn(() => {
         throw new Error('storage disabled');
       }),
     };
-    expect(readPersistedIdleAnimations(storage)).toBe(true);
+    expect(readPersistedIdleAnimations(storage)).toBe(false);
   });
 
   it('agrees with applyIdleAnimationsBoot on the same input (state-mirror invariant)', () => {
