@@ -296,7 +296,7 @@ export class MLXServerManager {
    * MLX venv's Python as an independent subprocess, so it works whether or not
    * the Metal server is running.
    */
-  async downloadModelToCache(modelId: string): Promise<void> {
+  async downloadModelToCache(modelId: string, hfToken?: string): Promise<void> {
     const trimmed = this._assertSafeModelId(modelId);
 
     const python = this._resolveVenvPython();
@@ -314,11 +314,21 @@ export class MLXServerManager {
     const pyCmd =
       'import sys; from huggingface_hub import snapshot_download; ' +
       'snapshot_download(sys.argv[1], cache_dir=sys.argv[2])';
+    const env: Record<string, string> = {
+      ...(process.env as Record<string, string>),
+      HF_HOME: hfHome,
+    };
+    // GH #124 — forward the user's HuggingFace token so GATED models (e.g. the
+    // pyannote diarization repo) can be downloaded while the server is stopped.
+    // The token is otherwise injected only at server start, so this standalone
+    // subprocess never saw it and the "add your token in Settings" hint below was
+    // a dead end for gated repos.
+    if (hfToken) env.HF_TOKEN = hfToken;
     try {
       await execFileAsync(python, ['-c', pyCmd, trimmed, hubDir], {
         maxBuffer: 10 * 1024 * 1024,
         timeout: 600_000, // 10 minutes for large models
-        env: { ...process.env, HF_HOME: hfHome },
+        env,
       });
     } catch (err: unknown) {
       const stderr: string = (err as { stderr?: string })?.stderr ?? '';

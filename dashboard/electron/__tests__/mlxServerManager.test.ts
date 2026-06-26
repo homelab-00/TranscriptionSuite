@@ -563,5 +563,27 @@ describe('[GH #136] MLXServerManager native model cache', () => {
         manager.downloadModelToCache('mlx-community/parakeet-tdt-0.6b-v3'),
       ).rejects.toThrow(/gated model/);
     });
+
+    it('forwards the HF token into the download subprocess env when provided (gated models, GH #124)', async () => {
+      mockExistsSync.mockImplementation(
+        (p: string) => p.includes('uvicorn') || p.includes('python3'),
+      );
+      await manager.downloadModelToCache('pyannote/speaker-diarization-community-1', 'hf_tok123');
+      const call = mockExecFile.mock.calls[0]; // [file, args, options, callback]
+      const options = call[2] as { env?: Record<string, string> };
+      expect(options.env?.HF_TOKEN).toBe('hf_tok123');
+      expect(options.env?.HF_HOME).toBeDefined();
+    });
+
+    it('does not set HF_TOKEN when no token is provided', async () => {
+      delete process.env.HF_TOKEN;
+      mockExistsSync.mockImplementation(
+        (p: string) => p.includes('uvicorn') || p.includes('python3'),
+      );
+      await manager.downloadModelToCache('mlx-community/parakeet-tdt-0.6b-v3');
+      const call = mockExecFile.mock.calls[0];
+      const options = call[2] as { env?: Record<string, string> };
+      expect(options.env?.HF_TOKEN).toBeUndefined();
+    });
   });
 });

@@ -2406,7 +2406,9 @@ ipcMain.handle('mlx:getLogs', (_event, tail?: number) => {
 
 // Native model-cache ops for the Metal/MLX profile (no Docker container).
 ipcMain.handle('mlx:downloadModelToCache', async (_event, modelId: string) => {
-  await mlxServerManager.downloadModelToCache(modelId);
+  // GH #124 — forward the stored HF token so gated models download while stopped.
+  const hfToken = (store.get('server.hfToken') as string) || undefined;
+  await mlxServerManager.downloadModelToCache(modelId, hfToken);
 });
 
 ipcMain.handle('mlx:checkModelsCached', async (_event, modelIds: string[]) => {
