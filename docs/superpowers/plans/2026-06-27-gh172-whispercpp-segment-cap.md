@@ -350,9 +350,11 @@ def _parse_words(raw_words: Any, word_cap: int) -> list[dict[str, Any]]:
         )
 ```
 
-Update the caller in `_parse_response` (line 807). Compute the word cap once from the chunk duration before the segment loop and pass it in:
+Update the caller in `_parse_response` (line 807). Compute the word cap once from the chunk duration before the segment loop and pass it in. NOTE: this is a deliberately LOOSE per-segment sanity bound — the cap is derived from the whole chunk's duration but applied to each segment's word list. A single segment cannot legitimately hold more words than the entire chunk's worth, so this still catches a hostile payload while never tripping on real speech (words are a ~50× non-issue; this is pure defense-in-depth). Do not over-engineer it into a per-segment-duration bound.
 
 ```python
+        # Loose per-segment sanity bound (see note above): chunk-duration-derived
+        # cap applied to each segment's word list.
         word_cap = _word_cap_for(audio_duration_s)
         for seg in dict_segments:
             words = _parse_words(seg.get("words"), word_cap)
