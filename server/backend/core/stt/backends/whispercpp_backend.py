@@ -41,13 +41,26 @@ _LOAD_TIMEOUT = 60
 # coupling is grep-able.
 _WHISPER_SERVER_DEFAULT_BEAM_SIZE = 5
 
-# Defensive caps on the sidecar response. A compromised whisper-server —
-# or one reached through a misconfigured ``WHISPERCPP_SERVER_URL`` pointing
-# at a hostile service — could otherwise return a payload that exhausts
-# memory while being "parsed". A real 2-hour transcript holds ~5k segments
-# at whisper.cpp's default chunking, so 10k gives a 2× safety margin; real
-# words-per-segment is bounded by whisper's 30s audio window (< a few hundred
-# tokens), so 5k is already generous.
+# Defensive sanity bounds on the sidecar response. A buggy or hostile
+# whisper-server (e.g. one reached through a misconfigured
+# ``WHISPERCPP_SERVER_URL`` pointing at a malicious service) could return a
+# payload with far more segments/words than the audio could possibly justify.
+# We bound the count PROPORTIONALLY to the chunk's audio duration: whisper.cpp
+# realistically emits well under ~2-3 segments/sec and ~3-4 words/sec, so the
+# rates below sit ~7-10x above any legitimate output and are unreachable by
+# real speech at ANY duration. Exceeding a proportional bound therefore means
+# a malformed/hostile payload, not a long recording — so we RAISE rather than
+# silently truncate (GH #172: never silently discard a completed transcription).
+# Floors keep very short clips from false-tripping the bound.
+_MAX_SEGMENTS_PER_AUDIO_SECOND = 20
+_MAX_WORDS_PER_AUDIO_SECOND = 40
+_SEGMENT_CAP_FLOOR = 200
+_WORDS_CAP_FLOOR = 1_000
+# Backward-compat flat caps retained so that (a) the pre-existing truncation
+# code in _parse_response/_parse_words does not raise NameError (ruff F821)
+# and (b) the legacy test parametrize decorators evaluate at collection time.
+# These names are superseded by _segment_cap_for/_word_cap_for and will be
+# deleted when the truncation logic is rewritten in Task 2/3 (GH #172).
 _MAX_SEGMENTS = 10_000
 _MAX_WORDS_PER_SEGMENT = 5_000
 
@@ -147,6 +160,27 @@ def _resolve_chunk_duration_config() -> int:
             _MAX_CHUNK_DURATION_S,
         )
         return _MAX_CHUNK_DURATION_S
+
+
+def _segment_cap_for(audio_duration_s: float) -> int:
+    """Max plausible segment count for ``audio_duration_s`` of audio.
+
+    Proportional to duration with a floor for very short clips. A real
+    transcript can never reach this; exceeding it means a malformed/hostile
+    sidecar payload (GH #172).
+    """
+    return max(_SEGMENT_CAP_FLOOR, math.ceil(audio_duration_s * _MAX_SEGMENTS_PER_AUDIO_SECOND))
+
+
+def _word_cap_for(audio_duration_s: float) -> int:
+    """Max plausible word count for ``audio_duration_s`` of audio.
+
+    Proportional to duration with a floor for very short clips. Applied per
+    segment as a loose sanity bound (a single segment cannot contain more words
+    than the whole chunk's worth); a real transcript never reaches it, so
+    exceeding it means a malformed/hostile sidecar payload (GH #172).
+    """
+    return max(_WORDS_CAP_FLOOR, math.ceil(audio_duration_s * _MAX_WORDS_PER_AUDIO_SECOND))
 
 
 def _resolve_timeout_config() -> tuple[int, float]:

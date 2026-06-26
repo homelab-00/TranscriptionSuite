@@ -11,8 +11,12 @@ from server.core.stt.backends.whispercpp_backend import (
     _INFERENCE_TIMEOUT,
     _MAX_CHUNK_DURATION_S,
     _MAX_SEGMENTS,
+    _MAX_SEGMENTS_PER_AUDIO_SECOND,
+    _MAX_WORDS_PER_AUDIO_SECOND,
     _MAX_WORDS_PER_SEGMENT,
+    _SEGMENT_CAP_FLOOR,
     _TIMEOUT_SECONDS_PER_AUDIO_SECOND,
+    _WORDS_CAP_FLOOR,
     WhisperCppBackend,
     _audio_to_wav_bytes,
     _coerce_float,
@@ -22,7 +26,9 @@ from server.core.stt.backends.whispercpp_backend import (
     _resolve_timeout_config,
     _sanitize_for_error_preview,
     _sanitize_language_code,
+    _segment_cap_for,
     _validate_server_url,
+    _word_cap_for,
 )
 
 # ---------------------------------------------------------------------------
@@ -1602,6 +1608,41 @@ class TestTranscribeCancellation:
             np.zeros(3 * 16000, dtype=np.float32), cancellation_check=lambda: False
         )
         assert mock_httpx.post.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Duration-proportional segment/word cap helpers (GH #172)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "duration_s,expected",
+    [
+        (0.0, _SEGMENT_CAP_FLOOR),  # empty/floor
+        (1.0, _SEGMENT_CAP_FLOOR),  # short clip pinned to floor
+        (10.0, _SEGMENT_CAP_FLOOR),  # exact crossover (200/20=10s): still floor
+        (11.0, 220),  # first step above crossover: proportional wins
+        (100.0, 100 * _MAX_SEGMENTS_PER_AUDIO_SECOND),  # proportional regime
+        (600.0, 600 * _MAX_SEGMENTS_PER_AUDIO_SECOND),  # 10-min chunk
+    ],
+)
+def test_segment_cap_for_is_proportional_with_floor(duration_s, expected):
+    assert _segment_cap_for(duration_s) == expected
+
+
+@pytest.mark.parametrize(
+    "duration_s,expected",
+    [
+        (0.0, _WORDS_CAP_FLOOR),
+        (1.0, _WORDS_CAP_FLOOR),
+        (25.0, _WORDS_CAP_FLOOR),  # exact crossover (1000/40=25s)
+        (26.0, 1_040),  # proportional wins
+        (100.0, 100 * _MAX_WORDS_PER_AUDIO_SECOND),
+        (600.0, 600 * _MAX_WORDS_PER_AUDIO_SECOND),  # 10-min chunk (symmetry with segment test)
+    ],
+)
+def test_word_cap_for_is_proportional_with_floor(duration_s, expected):
+    assert _word_cap_for(duration_s) == expected
 
 
 # ---------------------------------------------------------------------------
