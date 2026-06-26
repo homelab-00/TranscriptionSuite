@@ -443,6 +443,8 @@ git commit -m "fix(stt): ceiling whisper.cpp chunk duration so long audio is alw
 
 ## Task 5: Real HTTP-read byte guard (hardening — the memory bound the old cap only pretended to be)
 
+> **DEFERRED (2026-06-27)** to a separate follow-up issue. Reason: the true streaming bound requires migrating ~75 `mock_httpx.post` test call-sites (incl. `.call_count`/`.call_args`/`.assert_not_called` and multi-response `side_effect` lists) to `.stream` — high effort + regression risk for a defense-in-depth measure against a misconfiguration-only threat. Critically, deferring causes NO regression: the old flat `_MAX_SEGMENTS` cap also ran *after* `resp.json()` had already parsed the whole body, so it never bounded the read either. The core GH #172 data-loss fix (Tasks 1-4 + 6) is complete and self-contained without this. The follow-up should introduce a shared test-mock helper first, then switch `_transcribe_chunk` to `client.stream` with the byte accumulator below.
+
 > This restores/upgrades the genuine memory protection. It can be deferred if the team wants the minimal #172 fix, but it is the correct place for the "bound memory" intent — `resp.json()` currently materializes any payload size before any cap runs.
 
 **Files:**
