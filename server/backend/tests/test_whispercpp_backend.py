@@ -45,7 +45,7 @@ from server.core.stt.backends.whispercpp_backend import (
 #   * legacy post path: resp.json() returns the payload
 #   * streaming path:   `with ... as resp: resp.iter_bytes()` yields the body
 # /load still uses client.post directly, so its mocks stay on .post.
-_INFERENCE_METHOD = "post"  # flipped to "stream" when the byte guard lands
+_INFERENCE_METHOD = "stream"  # production reads /inference via client.stream() (GH #193)
 
 
 def _inf(mock_httpx: MagicMock) -> MagicMock:

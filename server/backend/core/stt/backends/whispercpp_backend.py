@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import math
 import os
@@ -71,6 +72,15 @@ _MAX_SEGMENTS_PER_AUDIO_SECOND = 20
 _MAX_WORDS_PER_AUDIO_SECOND = 40
 _SEGMENT_CAP_FLOOR = 200
 _WORDS_CAP_FLOOR = 1_000
+
+# Hard ceiling on a single /inference response body, enforced WHILE reading so a
+# hostile or misconfigured ``WHISPERCPP_SERVER_URL`` returning a multi-GB body is
+# rejected before it is deserialized into memory. The proportional segment/word
+# caps above only run AFTER the body is parsed, so they cannot bound the read —
+# this is the real memory guard the old post-parse list slice only pretended to
+# be (GH #193). A 6-hour verbose_json transcript with word timestamps is well
+# under this, so it never trips on legitimate output.
+_MAX_RESPONSE_BYTES = 256 * 1024 * 1024  # 256 MiB
 
 # Practical cap on user-supplied initial_prompt. whisper.cpp uses the prompt
 # as a decoder hint in the context window (~224 tokens ≈ ~1 KB of text). A
@@ -748,14 +758,38 @@ class WhisperCppBackend(STTBackend):
         )
 
         client = self._ensure_client()
+        body = bytearray()
         try:
-            resp = client.post(
+            # Stream the response and bound it AT READ TIME (GH #193): a hostile
+            # or misconfigured sidecar could otherwise return a multi-GB body
+            # that ``resp.json()`` would materialize whole, exhausting memory
+            # before any segment/word cap (which only runs post-parse) could
+            # reject it. Reject early on an honest server's declared
+            # Content-Length, and — for servers that omit or lie about it —
+            # abort the read the instant the accumulated bytes cross the ceiling.
+            with client.stream(
+                "POST",
                 f"{self._server_url}/inference",
                 files={"file": ("audio.wav", wav_bytes, "audio/wav")},
                 data=data,
                 timeout=timeout,
-            )
-            resp.raise_for_status()
+            ) as resp:
+                resp.raise_for_status()
+                declared = resp.headers.get("Content-Length")
+                if declared and declared.isdigit() and int(declared) > _MAX_RESPONSE_BYTES:
+                    raise WhisperCppResponseError(
+                        f"whisper.cpp sidecar at {self._server_url} declared a "
+                        f"{int(declared)}-byte /inference response "
+                        f"(max {_MAX_RESPONSE_BYTES}); refusing to read it"
+                    )
+                for piece in resp.iter_bytes():
+                    body += piece
+                    if len(body) > _MAX_RESPONSE_BYTES:
+                        raise WhisperCppResponseError(
+                            f"whisper.cpp sidecar at {self._server_url} returned a "
+                            f"/inference response exceeding {_MAX_RESPONSE_BYTES} "
+                            f"bytes; aborting read to bound memory"
+                        )
         except (httpx.NetworkError, OSError) as exc:
             raise RuntimeError(_SIDECAR_UNREACHABLE_MSG.format(url=self._server_url)) from exc
         except httpx.TimeoutException as exc:
@@ -778,10 +812,11 @@ class WhisperCppBackend(STTBackend):
             ) from exc
 
         try:
-            result = resp.json()
+            result = json.loads(bytes(body))
         except ValueError as exc:
-            # Sidecar returned non-JSON (e.g. plain-text error page).
-            body_preview = _sanitize_for_error_preview(resp.content) or "(empty)"
+            # Sidecar returned non-JSON (e.g. plain-text error page) or an empty
+            # body — surface it instead of letting a None/garbage parse through.
+            body_preview = _sanitize_for_error_preview(bytes(body)) or "(empty)"
             raise RuntimeError(
                 f"whisper.cpp sidecar at {self._server_url} returned non-JSON "
                 f"response from /inference: {body_preview}"
