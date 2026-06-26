@@ -10,6 +10,7 @@ import pytest
 from server.core.stt.backends.base import PartialTranscriptionError
 from server.core.stt.backends.whispercpp_backend import (
     _INFERENCE_TIMEOUT,
+    _MAX_CHUNK_DURATION_CEILING_S,
     _MAX_CHUNK_DURATION_S,
     _MAX_SEGMENTS_PER_AUDIO_SECOND,
     _MAX_WORDS_PER_AUDIO_SECOND,
@@ -1531,6 +1532,16 @@ class TestWhisperCppConfigResolution:
 
     def test_chunk_duration_floor_enforced(self):
         with patch.dict("os.environ", {"WHISPERCPP_CHUNK_DURATION_S": "10"}):
+            assert _resolve_chunk_duration_config() == 60
+
+    def test_chunk_duration_config_is_ceilinged(self):
+        """A huge WHISPERCPP_CHUNK_DURATION_S must NOT disable chunking (GH #172):
+        long audio must always be split so the per-chunk proportional cap applies."""
+        with patch.dict("os.environ", {"WHISPERCPP_CHUNK_DURATION_S": "86400"}):  # 1 day
+            assert _resolve_chunk_duration_config() == _MAX_CHUNK_DURATION_CEILING_S
+
+    def test_chunk_duration_floor_still_applies_alongside_ceiling(self):
+        with patch.dict("os.environ", {"WHISPERCPP_CHUNK_DURATION_S": "5"}):
             assert _resolve_chunk_duration_config() == 60
 
     def test_chunk_duration_defaults_when_no_source(self):

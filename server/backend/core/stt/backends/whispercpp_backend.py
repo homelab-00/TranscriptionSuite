@@ -42,6 +42,12 @@ _DEFAULT_SERVER_URL = "http://whisper-server:8080"
 # fixed 300s ceiling a 5h+ file could never satisfy.
 _INFERENCE_TIMEOUT = 300  # seconds — minimum per-request budget
 _MAX_CHUNK_DURATION_S = 10 * 60  # 10 min per /inference POST (mirrors the NeMo backends)
+# Hard ceiling on the configurable chunk duration. Even a deliberately huge
+# WHISPERCPP_CHUNK_DURATION_S must not route a whole multi-hour file through a
+# single un-chunked /inference request — that path re-exposes the GH #172
+# truncation and defeats per-chunk progress/cancellation. 30 min keeps each
+# chunk's plausible segment count far below any proportional cap.
+_MAX_CHUNK_DURATION_CEILING_S = 30 * 60
 _TIMEOUT_SECONDS_PER_AUDIO_SECOND = 2.0  # tolerate inference up to ~2× real-time
 _LOAD_TIMEOUT = 60
 
@@ -154,7 +160,7 @@ def _resolve_chunk_duration_config() -> int:
     if raw is None:
         return _MAX_CHUNK_DURATION_S
     try:
-        return max(60, int(float(raw)))
+        return min(_MAX_CHUNK_DURATION_CEILING_S, max(60, int(float(raw))))
     except (TypeError, ValueError):
         logger.warning(
             "Ignoring invalid whisper.cpp chunk duration %r (expected a number ≥ 60); using %ds",
