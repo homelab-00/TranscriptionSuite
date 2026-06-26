@@ -208,7 +208,12 @@ Pick **Docker** or **Podman** — the app auto-detects whichever is installed (D
    sudo usermod -aG docker $USER
    ```
    Then **log out and back in** (or reboot) for it to take effect.
-3. **NVIDIA GPU:** install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html). Skip this for CPU mode.
+3. **NVIDIA GPU:** install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html), then wire it into Docker and restart the daemon:
+   ```bash
+   sudo nvidia-ctk runtime configure --runtime=docker
+   sudo systemctl restart docker
+   ```
+   Skip this for CPU mode. (If a later driver update breaks GPU access, switch Docker to CDI mode — see [GPU not working after a system update](#gpu-not-working-after-a-system-update-linux).)
 
 **Podman** (4.7+ required for `podman compose`):
 
@@ -221,11 +226,11 @@ Pick **Docker** or **Podman** — the app auto-detects whichever is installed (D
    systemctl --user enable --now podman.socket
    ```
    Without it, compose commands fail with "Cannot connect to the Docker daemon" even though `podman` itself works.
-3. **NVIDIA GPU:** configure CDI (needs nvidia-container-toolkit 1.14+):
+3. **NVIDIA GPU:** install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) (1.14+), then configure CDI by generating the device spec:
    ```bash
    sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
    ```
-   Skip this for CPU mode.
+   The `nvidia-ctk` command is provided by the toolkit, so it must be installed first. Skip this for CPU mode.
 
 Then continue with the shared steps: [§2.5 Download the Dashboard app](#25-download-the-dashboard-app) and [§2.6 Set Up the Server](#26-setting-up-the-server).
 

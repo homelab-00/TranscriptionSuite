@@ -534,6 +534,10 @@ const store = new Store({
     'folderWatch.notebookPath': '',
     'folderWatch.sessionWatchActive': false,
     'folderWatch.notebookWatchActive': false,
+    // GH-120 — how Folder Watch resolves a detected duplicate without blocking
+    // the import queue on the interactive modal. 'create_new' | 'ask'.
+    // Default 'create_new': unattended batch never stalls and never drops a file.
+    'folderWatch.duplicatePolicy': 'create_new',
   },
 });
 
