@@ -25,6 +25,15 @@ from server.core.stt.backends.base import (
 
 logger = logging.getLogger(__name__)
 
+
+class WhisperCppResponseError(RuntimeError):
+    """The sidecar returned a structurally implausible payload — more segments
+    or words than the audio duration could justify. Raised instead of silently
+    truncating so a malformed/hostile response can never masquerade as a
+    complete transcript (GH #172).
+    """
+
+
 _DEFAULT_SERVER_URL = "http://whisper-server:8080"
 # Floor for the per-request httpx timeout. The actual budget scales with chunk
 # duration via ``_inference_timeout_for`` (GH #168 / #153): long audio is split
@@ -56,12 +65,7 @@ _MAX_SEGMENTS_PER_AUDIO_SECOND = 20
 _MAX_WORDS_PER_AUDIO_SECOND = 40
 _SEGMENT_CAP_FLOOR = 200
 _WORDS_CAP_FLOOR = 1_000
-# Backward-compat flat caps retained so that (a) the pre-existing truncation
-# code in _parse_response/_parse_words does not raise NameError (ruff F821)
-# and (b) the legacy test parametrize decorators evaluate at collection time.
-# These names are superseded by _segment_cap_for/_word_cap_for and will be
-# deleted when the truncation logic is rewritten in Task 2/3 (GH #172).
-_MAX_SEGMENTS = 10_000
+# Per-segment word cap (flat, Task 2 stub — superseded by _word_cap_for in Task 3).
 _MAX_WORDS_PER_SEGMENT = 5_000
 
 # Practical cap on user-supplied initial_prompt. whisper.cpp uses the prompt
@@ -777,7 +781,8 @@ class WhisperCppBackend(STTBackend):
                 f"response from /inference: {body_preview}"
             ) from exc
 
-        return self._parse_response(result)
+        audio_duration_s = len(chunk) / sample_rate if sample_rate else 0.0
+        return self._parse_response(result, audio_duration_s)
 
     def supports_translation(self) -> bool:
         return True
@@ -797,6 +802,7 @@ class WhisperCppBackend(STTBackend):
     @staticmethod
     def _parse_response(
         result: dict[str, Any],
+        audio_duration_s: float,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         """Convert whisper-server /inference verbose_json into segments + info.
 
@@ -818,24 +824,32 @@ class WhisperCppBackend(STTBackend):
                 ]
               }]
             }
+
+        Raises:
+            WhisperCppResponseError: If the number of dict-typed segments
+                exceeds ``_segment_cap_for(audio_duration_s)``.
         """
         segments: list[BackendSegment] = []
         raw_segments = result.get("segments")
         if not isinstance(raw_segments, list):
             raw_segments = []
 
-        # Filter to dict-typed segments FIRST, cap afterwards. If we capped
-        # first and the payload had thousands of stray non-dict entries at
-        # the front, the cap would slice them out and drop the real segments
-        # that followed.
+        # Filter to dict-typed segments FIRST, bound afterwards. If we bounded
+        # first and the payload had thousands of stray non-dict entries at the
+        # front, the bound would reject real segments that followed.
         dict_segments = [s for s in raw_segments if isinstance(s, dict)]
-        if len(dict_segments) > _MAX_SEGMENTS:
-            logger.warning(
-                "whisper-server returned %d segment dicts, truncating to %d to bound memory",
-                len(dict_segments),
-                _MAX_SEGMENTS,
+        seg_cap = _segment_cap_for(audio_duration_s)
+        if len(dict_segments) > seg_cap:
+            # A real transcript cannot exceed the proportional bound; this is a
+            # malformed/hostile sidecar payload. RAISE rather than silently
+            # truncate (GH #172). In the chunked path transcribe()'s per-chunk
+            # handler converts this into a surfaced partial result; in the
+            # single-request path it fails the job loudly with no data lost.
+            raise WhisperCppResponseError(
+                f"whisper-server returned {len(dict_segments)} segment dicts for "
+                f"{audio_duration_s:.0f}s of audio (max {seg_cap}); rejecting the "
+                f"response rather than silently dropping segments"
             )
-            dict_segments = dict_segments[:_MAX_SEGMENTS]
 
         for seg in dict_segments:
             words = _parse_words(seg.get("words"))
