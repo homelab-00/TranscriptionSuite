@@ -53,6 +53,7 @@ import { ModelProfilesPanel } from '../profiles/ModelProfilesPanel';
 import { useLanguages } from '../../src/hooks/useLanguages';
 import { MAIN_MODEL_PRESETS } from '../../src/services/modelSelection';
 import { CANARY_TRANSLATION_TARGETS } from '../../src/services/modelCapabilities';
+import type { DuplicatePolicy } from '../../src/stores/importQueueStore';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -67,6 +68,20 @@ const DEFAULT_SHORTCUTS = {
 const REMOTE_PROFILE_OPTIONS = ['Tailscale', 'LAN'] as const;
 const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
+// GH-120 — Folder Watch duplicate-handling policy. Display order + labels for
+// the App-tab dropdown; values map to importQueueStore's DuplicatePolicy.
+// ('skip' is intentionally not offered — see DuplicatePolicy docs: it could
+// drop a file with no retrievable transcript, violating the data-loss invariant.)
+const DUPLICATE_POLICY_ORDER: DuplicatePolicy[] = ['create_new', 'ask'];
+const DUPLICATE_POLICY_LABELS: Record<DuplicatePolicy, string> = {
+  create_new: 'Always create a new entry',
+  ask: 'Ask each time',
+};
+/** Coerce any stored/legacy value (e.g. a removed 'skip') to a valid policy so
+ *  a corrupt config never blanks the dropdown — defaults to 'create_new'. */
+function normalizeDuplicatePolicy(raw: unknown): DuplicatePolicy {
+  return raw === 'ask' ? 'ask' : 'create_new';
+}
 
 function normalizeConfigString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -185,6 +200,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     pasteAtCursor: false,
     blurEffectsEnabled: true,
     idleAnimationsEnabled: false, // GH #87 — default OFF (see idleAnimationsBoot)
+    duplicatePolicy: 'create_new' as DuplicatePolicy, // GH-120 — Folder Watch
   });
   // Issue #87 — track the LAST SAVED Blur effects value so we can revert any
   // unsaved live-preview DOM changes if the modal closes via X without Save.
@@ -412,6 +428,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 pasteAtCursor: (cfg['app.pasteAtCursor'] as boolean) ?? prev.pasteAtCursor,
                 blurEffectsEnabled: loadedBlurEffectsEnabled,
                 idleAnimationsEnabled: loadedIdleAnimationsEnabled,
+                duplicatePolicy: normalizeDuplicatePolicy(cfg['folderWatch.duplicatePolicy']),
               }));
               setShortcutSettings((prev) => ({
                 ...prev,
@@ -548,6 +565,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['app.pasteAtCursor', appSettings.pasteAtCursor],
         ['ui.blurEffectsEnabled', appSettings.blurEffectsEnabled],
         ['ui.idleAnimationsEnabled', appSettings.idleAnimationsEnabled],
+        ['folderWatch.duplicatePolicy', appSettings.duplicatePolicy],
         ['shortcuts.startRecording', shortcutSettings.startRecording.trim()],
         ['shortcuts.stopTranscribe', shortcutSettings.stopTranscribe.trim()],
       ];
@@ -920,6 +938,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           }}
           label="Start minimized to system tray"
         />
+      </Section>
+      <Section title="Folder Watch">
+        <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
+          When a duplicate is detected
+        </label>
+        <CustomSelect
+          value={DUPLICATE_POLICY_LABELS[appSettings.duplicatePolicy]}
+          onChange={(v) => {
+            const policy =
+              DUPLICATE_POLICY_ORDER.find((p) => DUPLICATE_POLICY_LABELS[p] === v) ?? 'create_new';
+            setAppSettings((prev) => ({ ...prev, duplicatePolicy: policy }));
+            setIsDirty(true);
+          }}
+          options={DUPLICATE_POLICY_ORDER.map((p) => DUPLICATE_POLICY_LABELS[p])}
+        />
+        <p className="mt-2 text-xs text-slate-500">
+          Folder Watch transcribes batches unattended. Choose how it handles a file whose audio
+          matches an existing transcription, instead of pausing to ask for every file. Manual
+          imports always ask.
+        </p>
       </Section>
       <Section title="Appearance">
         <AppleSwitch

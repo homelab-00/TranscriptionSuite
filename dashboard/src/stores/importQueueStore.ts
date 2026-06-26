@@ -14,12 +14,14 @@ import type {
   FileImportJobResult,
   JobTrackerResult,
   UploadResponse,
+  DedupMatch,
 } from '../api/types';
 import { resolveTranscriptionOutput } from '../services/transcriptionFormatters';
 import { supportsAutoDetect } from '../services/modelCapabilities';
 import { getConfig } from '../config/store';
 import { useDedupChoiceStore } from './dedupChoiceStore';
 import { useAriaAnnouncerStore } from './ariaAnnouncerStore';
+import type { DedupChoice } from '../../components/import/DedupPromptModal';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -213,6 +215,50 @@ function filenameFromPath(filePath: string): string {
   return parts[parts.length - 1] || filePath;
 }
 
+// ─── Duplicate resolution (GH-120) ───────────────────────────────────────────
+
+/** How Folder Watch (session-auto) jobs resolve a server-detected duplicate
+ *  without blocking the import queue on the interactive modal.
+ *
+ *  Only two values are offered. A 'skip'/use-existing policy is deliberately
+ *  NOT supported: a session-import dedup match is a bare audio-hash anchor with
+ *  no retrievable transcript in the DB (the /import worker writes results to the
+ *  in-memory job tracker, never to the durability row — see _run_file_import in
+ *  server/backend/api/routes/transcription.py), so auto-skipping could leave a
+ *  file with no transcript and violate the data-loss invariant. Unattended jobs
+ *  therefore only ever create a new entry or ask. */
+export type DuplicatePolicy = 'ask' | 'create_new';
+
+/** Default when `folderWatch.duplicatePolicy` is unset, unknown, or unreadable:
+ *  create a new entry so an unattended batch never stalls AND never silently
+ *  drops a file (the data-loss invariant). */
+const DEFAULT_DUPLICATE_POLICY: DuplicatePolicy = 'create_new';
+
+/**
+ * Decide how to resolve a server-detected duplicate for a session import.
+ *
+ * Manual imports (`session-normal`) always prompt the user via the interactive
+ * DedupPromptModal. Folder Watch imports (`session-auto`) follow the configured
+ * `folderWatch.duplicatePolicy` so a batch runs unattended (GH-120). Only the
+ * explicit `'ask'` policy falls back to the modal; every other case — the
+ * `'create_new'` default, an unknown/legacy stored value (e.g. a removed
+ * `'skip'`), or an IPC read failure — creates a new entry, so a corrupt config
+ * can never re-block the queue or skip a file.
+ */
+export async function resolveDuplicateChoice(
+  jobType: ImportJobType,
+  matches: DedupMatch[],
+): Promise<DedupChoice> {
+  if (jobType === 'session-auto') {
+    const policy =
+      (await getConfig<DuplicatePolicy>('folderWatch.duplicatePolicy').catch(() => undefined)) ??
+      DEFAULT_DUPLICATE_POLICY;
+    if (policy !== 'ask') return 'create_new';
+    // policy === 'ask' → fall through to the interactive prompt below.
+  }
+  return useDedupChoiceStore.getState().requestChoice(matches);
+}
+
 const POLL_INTERVAL_MS = 5_000;
 const MAX_POLLS = (24 * 60 * 60 * 1000) / POLL_INTERVAL_MS; // 24 hours
 
@@ -297,12 +343,13 @@ async function processSessionJob(
   const { job_id: serverJobId } = importResponse;
 
   // Issue #104, Story 2.4 + Sprint 2 Item 4 — full DedupPromptModal flow.
-  // When the server reports prior matches, await the user's choice via
-  // useDedupChoiceStore. The container component (mounted at App level)
-  // renders the modal and resolves the promise.
+  // When the server reports prior matches, resolve the duplicate. Manual
+  // imports await the user's choice via the interactive modal; Folder Watch
+  // (session-auto) jobs follow folderWatch.duplicatePolicy so a batch runs
+  // unattended instead of blocking the queue on the modal (GH-120).
   if (importResponse.dedup_matches?.length) {
     const first = importResponse.dedup_matches[0];
-    const choice = await useDedupChoiceStore.getState().requestChoice(importResponse.dedup_matches);
+    const choice = await resolveDuplicateChoice(job.type, importResponse.dedup_matches);
 
     if (choice === 'use_existing' || choice === 'cancel') {
       // User picked "Use existing" (or pressed Esc / closed): cancel the
@@ -325,7 +372,7 @@ async function processSessionJob(
       return;
     }
     // 'create_new': continue with the existing happy path.
-    toast.warning(`Duplicate of '${first.name}' detected. Creating a new entry as requested.`);
+    toast.warning(`Duplicate of '${first.name}' detected — creating a new entry.`);
   }
 
   const result = await pollForSessionResult(serverJobId);

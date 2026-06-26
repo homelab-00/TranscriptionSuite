@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 
 // Mock apiClient before importing the store
 vi.mock('../api/client', () => ({
@@ -32,6 +32,13 @@ vi.mock('sonner', () => ({
   },
 }));
 
+// Mock the config store so resolveDuplicateChoice's policy read is deterministic
+// (GH-120). All other exports stay real — only getConfig is stubbed.
+vi.mock('../config/store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../config/store')>();
+  return { ...actual, getConfig: vi.fn() };
+});
+
 // Stub window.electronAPI
 Object.defineProperty(globalThis, 'window', {
   value: globalThis,
@@ -41,6 +48,7 @@ Object.defineProperty(globalThis, 'window', {
 import { toast } from 'sonner';
 import {
   useImportQueueStore,
+  resolveDuplicateChoice,
   selectPendingCount,
   selectCompletedCount,
   selectErrorCount,
@@ -50,6 +58,10 @@ import {
   selectNotebookJobs,
 } from './importQueueStore';
 import type { UnifiedImportJob } from './importQueueStore';
+import { useDedupChoiceStore } from './dedupChoiceStore';
+import { getConfig } from '../config/store';
+import type { DedupMatch } from '../api/types';
+import type { DedupChoice } from '../../components/import/DedupPromptModal';
 
 function resetStore() {
   useImportQueueStore.setState({
@@ -673,6 +685,81 @@ describe('importQueueStore', () => {
       });
       expect(getState().jobs).toHaveLength(1);
       expect(lastJobOptions()?.language).toBe('es');
+    });
+  });
+
+  // ── resolveDuplicateChoice (GH-120 — Folder Watch duplicate policy) ────
+  //
+  // The dedup gate must NOT block unattended Folder Watch (session-auto) jobs
+  // on the interactive modal. session-auto jobs resolve duplicates per the
+  // configured folderWatch.duplicatePolicy; manual (session-normal) jobs always
+  // prompt. Default policy is 'create_new' so batch runs unattended out of the
+  // box without ever silently dropping a file (data-loss invariant).
+
+  describe('resolveDuplicateChoice (GH-120 — Folder Watch duplicate policy)', () => {
+    const MATCHES: DedupMatch[] = [
+      {
+        recording_id: 'c3b4c22a',
+        name: 'prior.mp3',
+        created_at: '2026-05-07T00:00:00Z',
+        source: 'transcription_job',
+      },
+    ];
+    let requestChoiceSpy: Mock<(matches: DedupMatch[]) => Promise<DedupChoice>>;
+
+    beforeEach(() => {
+      // Override the dedup-choice store's interactive resolver so we can assert
+      // whether the modal would have been raised.
+      requestChoiceSpy = vi.fn(
+        (_m: DedupMatch[]): Promise<DedupChoice> => Promise.resolve('create_new'),
+      );
+      useDedupChoiceStore.setState({ requestChoice: requestChoiceSpy });
+      vi.mocked(getConfig).mockReset();
+    });
+
+    it('session-auto with no policy set defaults to create_new WITHOUT prompting (the GH-120 fix)', async () => {
+      vi.mocked(getConfig).mockResolvedValue(undefined);
+      const choice = await resolveDuplicateChoice('session-auto', MATCHES);
+      expect(choice).toBe('create_new');
+      expect(requestChoiceSpy).not.toHaveBeenCalled();
+    });
+
+    it("session-auto with policy 'create_new' resolves create_new without prompting", async () => {
+      vi.mocked(getConfig).mockResolvedValue('create_new');
+      const choice = await resolveDuplicateChoice('session-auto', MATCHES);
+      expect(choice).toBe('create_new');
+      expect(requestChoiceSpy).not.toHaveBeenCalled();
+    });
+
+    it("session-auto with policy 'ask' prompts the user via the interactive modal", async () => {
+      vi.mocked(getConfig).mockResolvedValue('ask');
+      const choice = await resolveDuplicateChoice('session-auto', MATCHES);
+      expect(requestChoiceSpy).toHaveBeenCalledWith(MATCHES);
+      expect(choice).toBe('create_new'); // whatever the modal returned
+    });
+
+    it('session-auto with an unknown/legacy policy value falls back to create_new (never re-blocks, never skips)', async () => {
+      // e.g. a 'skip' value persisted by an earlier build, or a corrupt manual edit.
+      // Must NOT fall through to the modal (that would re-introduce GH-120) and must
+      // NOT skip transcription (that would risk data loss).
+      vi.mocked(getConfig).mockResolvedValue('skip' as never);
+      const choice = await resolveDuplicateChoice('session-auto', MATCHES);
+      expect(choice).toBe('create_new');
+      expect(requestChoiceSpy).not.toHaveBeenCalled();
+    });
+
+    it('session-auto defaults to create_new when the config read throws (no error cascade)', async () => {
+      vi.mocked(getConfig).mockRejectedValue(new Error('IPC unavailable'));
+      const choice = await resolveDuplicateChoice('session-auto', MATCHES);
+      expect(choice).toBe('create_new');
+      expect(requestChoiceSpy).not.toHaveBeenCalled();
+    });
+
+    it('session-normal (manual import) always prompts, ignoring the folder-watch policy', async () => {
+      vi.mocked(getConfig).mockResolvedValue('create_new');
+      const choice = await resolveDuplicateChoice('session-normal', MATCHES);
+      expect(requestChoiceSpy).toHaveBeenCalledWith(MATCHES);
+      expect(choice).toBe('create_new');
     });
   });
 
