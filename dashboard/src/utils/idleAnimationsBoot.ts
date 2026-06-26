@@ -18,8 +18,12 @@
  * Save so this synchronous boot-time read sees the latest choice.
  *
  * Default behavior (no entry, parse failure, missing storage, or any
- * access error) is ON — matching the shipped iOS-glass design, so the
- * attribute is only ever applied when the user has explicitly opted out.
+ * access error) is OFF (GH #87) — the idle wave animations are decorative
+ * but continuously force the compositor/main-thread to repaint every frame,
+ * measured at ~85% CPU / ~32% GPU at idle on Apple Silicon (M2 Pro). The
+ * `data-idle-animations="off"` attribute is therefore applied by default,
+ * and only the explicit literal boolean `true` (a deliberate opt-in via
+ * Settings) leaves the animations running.
  */
 
 export const IDLE_ANIMATIONS_STORAGE_KEY = 'ts-config:ui.idleAnimationsEnabled';
@@ -36,23 +40,24 @@ function defaultDocument(): Document | null {
 
 /**
  * Synchronously read the persisted Idle animations choice. Returns the
- * boolean equivalent, defaulting to true (animations ON) for any failure
- * mode: missing storage, missing key, JSON parse failure, or storage.getItem
- * throwing. Used by both `applyIdleAnimationsBoot` (DOM-mutating boot path)
- * and by SettingsModal to seed `savedIdleAnimationsRef` so the modal-close
- * revert branch agrees with the attribute the boot probe actually applied.
+ * boolean equivalent, defaulting to false (animations OFF, GH #87) for any
+ * failure mode: missing storage, missing key, JSON parse failure, or
+ * storage.getItem throwing. Only the explicit literal boolean `true` enables
+ * the animations. Used by both `applyIdleAnimationsBoot` (DOM-mutating boot
+ * path) and by SettingsModal to seed `savedIdleAnimationsRef` so the
+ * modal-close revert branch agrees with the attribute the boot probe applied.
  */
 export function readPersistedIdleAnimations(
   storage: StorageReader | null = defaultStorage(),
 ): boolean {
-  if (!storage) return true;
+  if (!storage) return false;
   try {
     const raw = storage.getItem(IDLE_ANIMATIONS_STORAGE_KEY);
-    if (raw !== null) return JSON.parse(raw) !== false;
+    if (raw !== null) return JSON.parse(raw) === true;
   } catch {
-    // fall through to default ON
+    // fall through to default OFF
   }
-  return true;
+  return false;
 }
 
 export function applyIdleAnimationsBoot(

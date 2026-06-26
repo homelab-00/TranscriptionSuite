@@ -184,7 +184,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     runtimeProfile: 'cpu' as RuntimeProfile,
     pasteAtCursor: false,
     blurEffectsEnabled: true,
-    idleAnimationsEnabled: true,
+    idleAnimationsEnabled: false, // GH #87 — default OFF (see idleAnimationsBoot)
   });
   // Issue #87 — track the LAST SAVED Blur effects value so we can revert any
   // unsaved live-preview DOM changes if the modal closes via X without Save.
@@ -392,7 +392,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               const loadedBlurEffectsEnabled = (cfg['ui.blurEffectsEnabled'] as boolean) ?? true;
               savedBlurEffectsRef.current = loadedBlurEffectsEnabled;
               const loadedIdleAnimationsEnabled =
-                (cfg['ui.idleAnimationsEnabled'] as boolean) ?? true;
+                (cfg['ui.idleAnimationsEnabled'] as boolean) ?? false; // GH #87 — default OFF
               savedIdleAnimationsRef.current = loadedIdleAnimationsEnabled;
               setAppSettings((prev) => ({
                 ...prev,

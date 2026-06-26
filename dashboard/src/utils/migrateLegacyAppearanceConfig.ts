@@ -7,8 +7,10 @@
  *   - idle animations OFF  (`ui.idleAnimationsEnabled = false`)
  *   - blur effects OFF     (`ui.blurEffectsEnabled = false`)
  * A legacy value of `false` (the old default) simply means animations ON,
- * which is also the new default, so it maps to `idleAnimationsEnabled=true`
- * and leaves blur untouched.
+ * so it maps to an EXPLICIT `idleAnimationsEnabled=true` (preserving that
+ * user's animating experience) and leaves blur untouched. Note: the NEW
+ * default for users with no legacy or new key at all is OFF (GH #87) — the
+ * explicit migration write is what keeps legacy users' setting intact.
  *
  * Runs synchronously against localStorage BEFORE the boot probes
  * (blurEffectsBoot / idleAnimationsBoot) in `index.tsx`, so the very first

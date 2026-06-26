@@ -498,11 +498,12 @@ const store = new Store({
     // installation via Settings → App → Blur effects.
     'ui.blurEffectsEnabled': true,
     /* GH-87 — "Idle animations" toggle, independent of blur. When false,
-       freezes the idle visualizer waves to cut idle CPU/GPU. Default true (ON)
-       on every platform, so the animating design is preserved unless the user
-       opts out via Settings -> App -> Idle animations. Legacy
-       ui.lowIdleUsageEnabled values are migrated client-side at boot. */
-    'ui.idleAnimationsEnabled': true,
+       freezes the idle visualizer waves to cut idle CPU/GPU. Default FALSE (OFF):
+       the waves continuously force compositor/main-thread repaint, measured at
+       ~85% CPU / ~32% GPU at idle on Apple Silicon (M2 Pro). Users opt in via
+       Settings -> App -> Idle animations. Legacy ui.lowIdleUsageEnabled values
+       are migrated client-side at boot. Blur stays ON by default (cheap). */
+    'ui.idleAnimationsEnabled': false,
     'server.host': 'localhost',
     'server.port': 9786,
     'server.https': false,
