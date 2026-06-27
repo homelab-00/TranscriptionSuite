@@ -358,7 +358,7 @@ def _sanitize_language_code(value: Any) -> str | None:
     return candidate
 
 
-def _sanitize_for_error_preview(body: bytes, *, limit: int = 200) -> str:
+def _sanitize_for_error_preview(body: bytes | bytearray, *, limit: int = 200) -> str:
     """Produce a safe short preview of an untrusted response body for an error.
 
     Non-printable and control characters are replaced so the resulting string
@@ -776,7 +776,15 @@ class WhisperCppBackend(STTBackend):
             ) as resp:
                 resp.raise_for_status()
                 declared = resp.headers.get("Content-Length")
-                if declared and declared.isdigit() and int(declared) > _MAX_RESPONSE_BYTES:
+                # ``isascii()`` first: str.isdigit() is True for non-ASCII digit
+                # codepoints (e.g. "²") that int() then rejects, and a hostile
+                # sidecar can smuggle byte 0xB2 → "²" into the header.
+                if (
+                    declared
+                    and declared.isascii()
+                    and declared.isdigit()
+                    and int(declared) > _MAX_RESPONSE_BYTES
+                ):
                     raise WhisperCppResponseError(
                         f"whisper.cpp sidecar at {self._server_url} declared a "
                         f"{int(declared)}-byte /inference response "
@@ -812,11 +820,13 @@ class WhisperCppBackend(STTBackend):
             ) from exc
 
         try:
-            result = json.loads(bytes(body))
+            # json.loads / the preview accept the bytearray directly — no full
+            # copy, so a near-cap body isn't transiently doubled in memory.
+            result = json.loads(body)
         except ValueError as exc:
             # Sidecar returned non-JSON (e.g. plain-text error page) or an empty
             # body — surface it instead of letting a None/garbage parse through.
-            body_preview = _sanitize_for_error_preview(bytes(body)) or "(empty)"
+            body_preview = _sanitize_for_error_preview(body) or "(empty)"
             raise RuntimeError(
                 f"whisper.cpp sidecar at {self._server_url} returned non-JSON "
                 f"response from /inference: {body_preview}"

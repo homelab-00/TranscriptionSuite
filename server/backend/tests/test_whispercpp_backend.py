@@ -1277,6 +1277,30 @@ class TestResponseByteGuard:
         with pytest.raises(WhisperCppResponseError):
             loaded_backend.transcribe(_seconds_of_audio(1))
 
+    def test_non_ascii_content_length_is_ignored(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A bogus non-ASCII Content-Length must be ignored, not crash the read.
+
+        A hostile sidecar can put raw byte 0xB2 in the header, which httpx
+        decodes (latin-1) to ``"²"``. ``str.isdigit()`` is True for it but
+        ``int("²")`` raises ValueError — which none of the read handlers catch.
+        The guard must only honour ASCII digits and otherwise fall through to
+        the streamed-bytes accumulator, reading the (valid) body normally.
+        """
+        body = json.dumps({"segments": [], "language": "en"}).encode()
+
+        def iter_bytes():
+            yield body
+
+        mock_httpx.stream.return_value = self._stream_resp(
+            headers={"Content-Length": "²"},  # superscript two: isdigit() True, int() raises
+            iter_bytes=iter_bytes,
+        )
+        segments, info = loaded_backend.transcribe(_seconds_of_audio(1))
+        assert segments == []
+        assert info.language == "en"
+
     def test_response_at_cap_is_accepted(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
