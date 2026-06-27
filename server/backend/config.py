@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 FALLBACK_MAIN_TRANSCRIBER_MODEL = "Systran/faster-whisper-large-v3"
 DISABLED_MODEL_SENTINEL = "__none__"
 
+# Parallel diarization co-loads the STT and diarization models on the GPU at the
+# same time, which can OOM cards with <16GB VRAM. The safe default is OFF
+# (sequential), matching server/config.yaml's shipped value and the dashboard
+# toggles. This constant is the single source of truth for that fallback so the
+# default never drifts across the routes that read it (see GH #173).
+DEFAULT_PARALLEL_DIARIZATION = False
+
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge *overlay* onto *base*, returning a NEW dict.
@@ -527,6 +534,26 @@ def resolve_live_transcriber_model(config: ServerConfig | dict[str, Any]) -> str
         return ""
 
     return live_model or legacy_live_model or resolve_main_transcriber_model(config)
+
+
+def resolve_parallel_diarization_default(config: ServerConfig | dict[str, Any]) -> bool:
+    """
+    Resolve the server-side default for parallel (vs sequential) diarization.
+
+    This is the canonical resolver used across the transcription routes so the
+    fallback is not duplicated. When ``diarization.parallel`` is absent (e.g. a
+    degraded config whose baked-in defaults failed to load), the default is
+    ``DEFAULT_PARALLEL_DIARIZATION`` (OFF/sequential) — the safe choice that
+    avoids co-loading STT + diarization on the GPU. An explicit value (from the
+    defaults file or a user overlay) is always honoured.
+    """
+    if isinstance(config, ServerConfig):
+        value = config.get("diarization", "parallel", default=DEFAULT_PARALLEL_DIARIZATION)
+    else:
+        value = _dict_get(config, "diarization", "parallel")
+        if value is None:
+            value = DEFAULT_PARALLEL_DIARIZATION
+    return bool(value)
 
 
 # Global config instance

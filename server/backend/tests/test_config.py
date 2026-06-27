@@ -114,3 +114,30 @@ def test_resolve_live_transcriber_model_uses_disabled_main_fallback():
     }
     assert config.resolve_main_transcriber_model(payload) == ""
     assert config.resolve_live_transcriber_model(payload) == ""
+
+
+# ── resolve_parallel_diarization_default ─────────────────────────────────────
+# The default MUST be OFF (sequential) in every case, even when the
+# diarization.parallel key is entirely absent (e.g. a defaults-less / degraded
+# config). Parallel co-loads STT + diarization on the GPU and can OOM <16GB
+# cards, so the safe fallback is False — matching server/config.yaml's shipped
+# default and the dashboard UI toggles. See GH #173 investigation.
+
+
+def test_resolve_parallel_diarization_default_is_off_when_key_absent():
+    assert config.resolve_parallel_diarization_default({}) is False
+    assert config.resolve_parallel_diarization_default({"diarization": {}}) is False
+
+
+def test_resolve_parallel_diarization_default_respects_explicit_value():
+    assert config.resolve_parallel_diarization_default({"diarization": {"parallel": True}}) is True
+    assert (
+        config.resolve_parallel_diarization_default({"diarization": {"parallel": False}}) is False
+    )
+
+
+def test_resolve_parallel_diarization_default_accepts_serverconfig(tmp_path):
+    # ServerConfig() loads the baked-in defaults (parallel: false) as the merge
+    # base, so the resolver must return False for a stock config too.
+    cfg = config.ServerConfig()
+    assert config.resolve_parallel_diarization_default(cfg) is False

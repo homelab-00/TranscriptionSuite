@@ -29,7 +29,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from server.api.routes.utils import get_client_name
-from server.config import resolve_main_transcriber_model
+from server.config import resolve_main_transcriber_model, resolve_parallel_diarization_default
 from server.core.json_utils import sanitize_for_json
 from server.core.model_manager import TranscriptionCancelledError
 from server.core.stt.backends.base import BackendDependencyError, STTBackend
@@ -441,7 +441,7 @@ async def transcribe_audio(
             use_parallel = (
                 parallel_diarization
                 if parallel_diarization is not None
-                else config.get("diarization", "parallel", default=True)
+                else resolve_parallel_diarization_default(config)
             )
 
             if use_parallel:
@@ -1268,7 +1268,7 @@ async def import_and_transcribe(
 
     # Resolve parallel diarization default from config before entering background thread
     config = request.app.state.config
-    use_parallel_default = config.get("diarization", "parallel", default=True)
+    use_parallel_default = resolve_parallel_diarization_default(config)
 
     # Capture event loop for webhook dispatch from background thread
     loop = asyncio.get_running_loop()
