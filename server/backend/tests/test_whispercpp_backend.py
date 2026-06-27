@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -31,6 +32,67 @@ from server.core.stt.backends.whispercpp_backend import (
     _validate_server_url,
     _word_cap_for,
 )
+
+# ---------------------------------------------------------------------------
+# /inference response seam (GH #193)
+# ---------------------------------------------------------------------------
+#
+# GH #193: production will read the /inference response via client.stream(...)
+# (accumulating resp.iter_bytes() under a byte ceiling) instead of
+# client.post(...) + resp.json(). To make that switch a ONE-LINE change here
+# (flip _INFERENCE_METHOD), _inference_response() builds a DUAL-CAPABLE mock
+# response usable by BOTH read paths:
+#   * legacy post path: resp.json() returns the payload
+#   * streaming path:   `with ... as resp: resp.iter_bytes()` yields the body
+# /load still uses client.post directly, so its mocks stay on .post.
+_INFERENCE_METHOD = "stream"  # production reads /inference via client.stream() (GH #193)
+
+
+def _inf(mock_httpx: MagicMock) -> MagicMock:
+    """The mocked httpx.Client method production uses to call /inference."""
+    return getattr(mock_httpx, _INFERENCE_METHOD)
+
+
+def _inference_response(
+    payload: dict | None = None,
+    *,
+    raw: bytes | None = None,
+    status_code: int = 200,
+    headers: dict | None = None,
+    raise_status: Exception | None = None,
+) -> MagicMock:
+    """Build a mock /inference response that works for BOTH the post path
+    (resp.json()) and the stream path (context manager + resp.iter_bytes()).
+    Pass `raw=` for a non-JSON body (resp.json() then raises ValueError and the
+    streamed bytes fail json.loads). Pass `raise_status=` to make
+    resp.raise_for_status() raise."""
+    body = raw if raw is not None else json.dumps({} if payload is None else payload).encode()
+    resp = MagicMock(status_code=status_code, content=body)
+    resp.headers = dict(headers or {})
+    if raise_status is not None:
+        resp.raise_for_status.side_effect = raise_status
+    else:
+        resp.raise_for_status.return_value = None
+    if raw is not None:
+        resp.json.side_effect = ValueError("not json")
+    else:
+        resp.json.return_value = {} if payload is None else payload
+    resp.iter_bytes.return_value = [body]
+    # Context-manager protocol for the future streaming path.
+    resp.__enter__.return_value = resp
+    resp.__exit__.return_value = False
+    return resp
+
+
+def _inference_url(mock_httpx: MagicMock) -> str:
+    """The URL of the last /inference call, regardless of post-vs-stream shape.
+    post(url, ...) puts the url at args[0]; stream("POST", url, ...) at args[1]."""
+    call = _inf(mock_httpx).call_args
+    assert call is not None, "expected an /inference call to have been issued"
+    if _INFERENCE_METHOD == "stream":
+        return call.args[1] if len(call.args) > 1 else call.kwargs.get("url", "")
+    return call.args[0] if call.args else call.kwargs.get("url", "")
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -82,7 +144,7 @@ def loaded_backend(backend: WhisperCppBackend, mock_httpx: MagicMock) -> Whisper
 
 def _post_data(mock_httpx: MagicMock) -> dict:
     """Return the ``data`` kwarg of the last POST call on the mocked client."""
-    call = mock_httpx.post.call_args
+    call = _inf(mock_httpx).call_args
     assert call is not None, "expected a POST to have been issued"
     return call.kwargs.get("data") or call[1].get("data", {}) or {}
 
@@ -538,18 +600,13 @@ class TestTranscribe:
         short-circuits the HTTP call (``return [], BackendTranscriptionInfo(...)``
         at the top of ``transcribe``) would no longer silently pass.
         """
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": [], "language": "en"}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": [], "language": "en"})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio)
-        call = mock_httpx.post.call_args
+        call = _inf(mock_httpx).call_args
         assert call is not None, "expected a POST to have been issued"
         # URL assertion — catches any routing regression.
-        assert call.args[0].endswith("/inference") or call.kwargs.get("url", "").endswith(
-            "/inference"
-        )
+        assert _inference_url(mock_httpx).endswith("/inference")
         files = call.kwargs.get("files")
         assert files is not None, "expected a multipart 'file' upload"
         assert "file" in files
@@ -563,38 +620,35 @@ class TestTranscribe:
         # - segment "start"/"end" are floats in seconds
         # - "tokens" is a flat list of int token IDs
         # - per-word timing lives in "words"
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "language": "en",
-                    "detected_language": "en",
-                    "detected_language_probability": 0.97,
-                    "segments": [
-                        {
-                            "id": 0,
-                            "text": " Hello world",
-                            "start": 0.0,
-                            "end": 2.5,
-                            "tokens": [50363, 31373, 995, 50257],
-                            "words": [
-                                {
-                                    "word": " Hello",
-                                    "start": 0.0,
-                                    "end": 1.0,
-                                    "probability": 0.95,
-                                },
-                                {
-                                    "word": " world",
-                                    "start": 1.1,
-                                    "end": 2.5,
-                                    "probability": 0.90,
-                                },
-                            ],
-                        }
-                    ],
-                }
-            ),
+        _inf(mock_httpx).return_value = _inference_response(
+            {
+                "language": "en",
+                "detected_language": "en",
+                "detected_language_probability": 0.97,
+                "segments": [
+                    {
+                        "id": 0,
+                        "text": " Hello world",
+                        "start": 0.0,
+                        "end": 2.5,
+                        "tokens": [50363, 31373, 995, 50257],
+                        "words": [
+                            {
+                                "word": " Hello",
+                                "start": 0.0,
+                                "end": 1.0,
+                                "probability": 0.95,
+                            },
+                            {
+                                "word": " world",
+                                "start": 1.1,
+                                "end": 2.5,
+                                "probability": 0.90,
+                            },
+                        ],
+                    }
+                ],
+            }
         )
         audio = np.zeros(32000, dtype=np.float32)
         segments, info = loaded_backend.transcribe(audio)
@@ -618,15 +672,12 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """Explicit guard against lstrip-vs-strip regressions."""
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "segments": [
-                        {"text": "  Hello world   ", "start": 0.0, "end": 1.0},
-                    ]
-                }
-            ),
+        _inf(mock_httpx).return_value = _inference_response(
+            {
+                "segments": [
+                    {"text": "  Hello world   ", "start": 0.0, "end": 1.0},
+                ]
+            }
         )
         audio = np.zeros(16000, dtype=np.float32)
         segments, _ = loaded_backend.transcribe(audio)
@@ -644,24 +695,21 @@ class TestTranscribe:
         ``AttributeError: 'int' object has no attribute 'get'`` because
         whisper.cpp's server returns a flat list of integer token IDs.
         """
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "language": "en",
-                    "segments": [
-                        {
-                            "id": 0,
-                            "text": " hi",
-                            "start": 0.0,
-                            "end": 0.5,
-                            "tokens": [50363, 23105, 50257],  # <-- int IDs
-                            # NB: no "words" key — e.g. server ran with
-                            # --no-timestamps, so callers must still succeed.
-                        }
-                    ],
-                }
-            ),
+        _inf(mock_httpx).return_value = _inference_response(
+            {
+                "language": "en",
+                "segments": [
+                    {
+                        "id": 0,
+                        "text": " hi",
+                        "start": 0.0,
+                        "end": 0.5,
+                        "tokens": [50363, 23105, 50257],  # <-- int IDs
+                        # NB: no "words" key — e.g. server ran with
+                        # --no-timestamps, so callers must still succeed.
+                    }
+                ],
+            }
         )
         audio = np.zeros(16000, dtype=np.float32)
         segments, info = loaded_backend.transcribe(audio)
@@ -674,27 +722,24 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """Non-dict or missing-field word entries must not crash the parser."""
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "language": "en",
-                    "segments": [
-                        {
-                            "text": " ok",
-                            "start": 0.0,
-                            "end": 1.0,
-                            "words": [
-                                42,  # stray int
-                                {"word": "", "start": 0.0, "end": 0.1},  # empty text
-                                {"word": "   ", "start": 0.0, "end": 0.1},  # whitespace only
-                                {"word": "bad", "start": None, "end": 0.5},  # None start
-                                {"word": "ok", "start": 0.0, "end": 1.0, "probability": 0.8},
-                            ],
-                        }
-                    ],
-                }
-            ),
+        _inf(mock_httpx).return_value = _inference_response(
+            {
+                "language": "en",
+                "segments": [
+                    {
+                        "text": " ok",
+                        "start": 0.0,
+                        "end": 1.0,
+                        "words": [
+                            42,  # stray int
+                            {"word": "", "start": 0.0, "end": 0.1},  # empty text
+                            {"word": "   ", "start": 0.0, "end": 0.1},  # whitespace only
+                            {"word": "bad", "start": None, "end": 0.5},  # None start
+                            {"word": "ok", "start": 0.0, "end": 1.0, "probability": 0.8},
+                        ],
+                    }
+                ],
+            }
         )
         audio = np.zeros(16000, dtype=np.float32)
         segments, _info = loaded_backend.transcribe(audio)
@@ -709,29 +754,26 @@ class TestTranscribe:
         Before the fix, ``w.get("word") or w.get("text")`` would treat 0 as
         falsy and fall through to ``text``. Now we check explicitly for None.
         """
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "segments": [
-                        {
-                            "text": "x",
-                            "start": 0.0,
-                            "end": 1.0,
-                            "words": [
-                                # Integer 0 as "word" — must serialize as "0",
-                                # not fall through to "text".
-                                {
-                                    "word": 0,
-                                    "text": "wrong-fallback",
-                                    "start": 0.0,
-                                    "end": 0.5,
-                                },
-                            ],
-                        }
-                    ]
-                }
-            ),
+        _inf(mock_httpx).return_value = _inference_response(
+            {
+                "segments": [
+                    {
+                        "text": "x",
+                        "start": 0.0,
+                        "end": 1.0,
+                        "words": [
+                            # Integer 0 as "word" — must serialize as "0",
+                            # not fall through to "text".
+                            {
+                                "word": 0,
+                                "text": "wrong-fallback",
+                                "start": 0.0,
+                                "end": 0.5,
+                            },
+                        ],
+                    }
+                ]
+            }
         )
         audio = np.zeros(16000, dtype=np.float32)
         segments, _ = loaded_backend.transcribe(audio)
@@ -741,10 +783,7 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """Empty or absent segments list must return an empty transcription cleanly."""
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({})
         audio = np.zeros(16000, dtype=np.float32)
         segments, info = loaded_backend.transcribe(audio)
         assert segments == []
@@ -760,16 +799,13 @@ class TestTranscribe:
         """Segments without start/end must warn so downstream timing issues are visible."""
         import logging
 
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "language": "en",
-                    "segments": [
-                        {"id": 0, "text": " hi"}  # no start/end
-                    ],
-                }
-            ),
+        _inf(mock_httpx).return_value = _inference_response(
+            {
+                "language": "en",
+                "segments": [
+                    {"id": 0, "text": " hi"}  # no start/end
+                ],
+            }
         )
         audio = np.zeros(16000, dtype=np.float32)
         with caplog.at_level(logging.WARNING, logger="server.core.stt.backends.whispercpp_backend"):
@@ -790,26 +826,23 @@ class TestTranscribe:
         "silently defaulted". Using a unique non-default value per word
         makes the preservation contract observable.
         """
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "language": "en",
-                    "detected_language_probability": 0.42,
-                    "segments": [
-                        {
-                            "text": " a b c",
-                            "start": 0.0,
-                            "end": 0.3,
-                            "words": [
-                                {"word": "a", "start": 0.0, "end": 0.1, "probability": 0.0},
-                                {"word": "b", "start": 0.1, "end": 0.2, "probability": 0.37},
-                                {"word": "c", "start": 0.2, "end": 0.3, "probability": 0.91},
-                            ],
-                        }
-                    ],
-                }
-            ),
+        _inf(mock_httpx).return_value = _inference_response(
+            {
+                "language": "en",
+                "detected_language_probability": 0.42,
+                "segments": [
+                    {
+                        "text": " a b c",
+                        "start": 0.0,
+                        "end": 0.3,
+                        "words": [
+                            {"word": "a", "start": 0.0, "end": 0.1, "probability": 0.0},
+                            {"word": "b", "start": 0.1, "end": 0.2, "probability": 0.37},
+                            {"word": "c", "start": 0.2, "end": 0.3, "probability": 0.91},
+                        ],
+                    }
+                ],
+            }
         )
         audio = np.zeros(16000, dtype=np.float32)
         segments, info = loaded_backend.transcribe(audio)
@@ -820,21 +853,18 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """Distinguishes the default-path from the preservation-path above."""
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "segments": [
-                        {
-                            "text": " a",
-                            "start": 0.0,
-                            "end": 0.1,
-                            # Intentionally no "probability" key.
-                            "words": [{"word": "a", "start": 0.0, "end": 0.1}],
-                        }
-                    ],
-                }
-            ),
+        _inf(mock_httpx).return_value = _inference_response(
+            {
+                "segments": [
+                    {
+                        "text": " a",
+                        "start": 0.0,
+                        "end": 0.1,
+                        # Intentionally no "probability" key.
+                        "words": [{"word": "a", "start": 0.0, "end": 0.1}],
+                    }
+                ],
+            }
         )
         audio = np.zeros(16000, dtype=np.float32)
         segments, _ = loaded_backend.transcribe(audio)
@@ -844,27 +874,24 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """NaN/Inf from a broken sidecar must not poison the segment list."""
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "segments": [
-                        {
-                            "text": "bad",
-                            "start": float("nan"),
-                            "end": float("inf"),
-                            "words": [
-                                {
-                                    "word": "x",
-                                    "start": float("nan"),
-                                    "end": 0.5,
-                                    "probability": 1.0,
-                                },
-                            ],
-                        }
-                    ]
-                }
-            ),
+        _inf(mock_httpx).return_value = _inference_response(
+            {
+                "segments": [
+                    {
+                        "text": "bad",
+                        "start": float("nan"),
+                        "end": float("inf"),
+                        "words": [
+                            {
+                                "word": "x",
+                                "start": float("nan"),
+                                "end": 0.5,
+                                "probability": 1.0,
+                            },
+                        ],
+                    }
+                ]
+            }
         )
         audio = np.zeros(16000, dtype=np.float32)
         segments, _ = loaded_backend.transcribe(audio)
@@ -887,10 +914,7 @@ class TestTranscribe:
         """
         noise = [42] * 500
         real = [{"text": f"s{i}", "start": float(i), "end": float(i) + 1.0} for i in range(100)]
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": noise + real}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": noise + real})
         segments, _ = loaded_backend.transcribe(np.zeros(16000, dtype=np.float32))
         assert len(segments) == 100
         assert segments[0].text == "s0"
@@ -910,14 +934,11 @@ class TestTranscribe:
         """
         import logging
 
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "language": "en\nCRITICAL root: spliced log line",
-                    "segments": [],
-                }
-            ),
+        _inf(mock_httpx).return_value = _inference_response(
+            {
+                "language": "en\nCRITICAL root: spliced log line",
+                "segments": [],
+            }
         )
         audio = np.zeros(16000, dtype=np.float32)
         with caplog.at_level(logging.DEBUG):
@@ -931,12 +952,9 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """Non-JSON response body must be sanitized before embedding in the error."""
-        resp = MagicMock(
-            status_code=200,
-            content=b"<html>\x1b[31mcrash\x00boom</html>",
+        _inf(mock_httpx).return_value = _inference_response(
+            raw=b"<html>\x1b[31mcrash\x00boom</html>"
         )
-        resp.json.side_effect = ValueError("not json")
-        mock_httpx.post.return_value = resp
         audio = np.zeros(16000, dtype=np.float32)
         with pytest.raises(RuntimeError) as excinfo:
             loaded_backend.transcribe(audio)
@@ -950,10 +968,7 @@ class TestTranscribe:
     def test_translate_task_sends_flag(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": [], "language": "en"}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": [], "language": "en"})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio, task="translate")
         data = _post_data(mock_httpx)
@@ -967,10 +982,7 @@ class TestTranscribe:
         A mutation that always set ``data['translate'] = 'true'`` would
         otherwise slip past ``test_translate_task_sends_flag``.
         """
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": [], "language": "en"}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": [], "language": "en"})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio, task="transcribe")
         data = _post_data(mock_httpx)
@@ -988,10 +1000,7 @@ class TestTranscribe:
         ``True`` would serialize as ``"True"`` and silently break
         word-boundary splitting. Assert the exact value, not just the key.
         """
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": [], "language": "en"}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": [], "language": "en"})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio, word_timestamps=True)
         data = _post_data(mock_httpx)
@@ -1006,10 +1015,7 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """word_timestamps=False must not send split_on_word."""
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": [], "language": "en"}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": [], "language": "en"})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio, word_timestamps=False)
         data = _post_data(mock_httpx)
@@ -1018,10 +1024,7 @@ class TestTranscribe:
     def test_language_and_prompt_forwarded(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": [], "language": "el"}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": [], "language": "el"})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio, language="el", initial_prompt="Καλημέρα")
         data = _post_data(mock_httpx)
@@ -1036,10 +1039,7 @@ class TestTranscribe:
         Mutation guard: ``if language:`` → ``if not language:`` would
         now fail loudly instead of quietly inverting the branch.
         """
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": []}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": []})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio, language=None, initial_prompt=None)
         data = _post_data(mock_httpx)
@@ -1050,10 +1050,7 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """Whitespace-only values must not be forwarded."""
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": []}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": []})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio, language="   ", initial_prompt="  \t ")
         data = _post_data(mock_httpx)
@@ -1064,10 +1061,7 @@ class TestTranscribe:
         """A 10 MB initial_prompt must not be uploaded as-is — whisper.cpp only
         uses ~224 tokens anyway."""
         huge_prompt = "x" * 100_000
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": []}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": []})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio, initial_prompt=huge_prompt)
         data = _post_data(mock_httpx)
@@ -1090,10 +1084,7 @@ class TestTranscribe:
         beam_size: int,
         expected: str,
     ):
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": [], "language": "en"}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": [], "language": "en"})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio, beam_size=beam_size)
         data = _post_data(mock_httpx)
@@ -1108,10 +1099,7 @@ class TestTranscribe:
         A mutation ``!=`` → ``<`` would still pass the 1/4 cases but fail
         here; ``!=`` → ``>`` would still pass 6/10 but fail here.
         """
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": []}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": []})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio, beam_size=5)
         data = _post_data(mock_httpx)
@@ -1136,7 +1124,7 @@ class TestTranscribe:
         segments, info = loaded_backend.transcribe(np.zeros(0, dtype=np.float32))
         assert segments == []
         assert info.language is None
-        mock_httpx.post.assert_not_called()
+        _inf(mock_httpx).assert_not_called()
 
     def test_unsupported_params_are_accepted_and_silently_dropped(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
@@ -1148,10 +1136,7 @@ class TestTranscribe:
         sidecar image, so they must be accepted (for interface parity with
         other backends) but never leak into the POST body.
         """
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": [], "language": "en"}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": [], "language": "en"})
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(
             audio,
@@ -1168,7 +1153,7 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """transcribe() should raise RuntimeError with actionable message when sidecar is down."""
-        mock_httpx.post.side_effect = httpx.ConnectError("connection refused")
+        _inf(mock_httpx).side_effect = httpx.ConnectError("connection refused")
         audio = np.zeros(16000, dtype=np.float32)
         with pytest.raises(RuntimeError, match="whisper.cpp sidecar is not reachable"):
             loaded_backend.transcribe(audio)
@@ -1177,7 +1162,7 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """transcribe() should raise RuntimeError when DNS resolution fails."""
-        mock_httpx.post.side_effect = OSError(5, "No address associated with hostname")
+        _inf(mock_httpx).side_effect = OSError(5, "No address associated with hostname")
         audio = np.zeros(16000, dtype=np.float32)
         with pytest.raises(RuntimeError, match="whisper.cpp sidecar is not reachable"):
             loaded_backend.transcribe(audio)
@@ -1186,7 +1171,7 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """Inference timeout must surface the inference-timeout message."""
-        mock_httpx.post.side_effect = httpx.ReadTimeout("deadline")
+        _inf(mock_httpx).side_effect = httpx.ReadTimeout("deadline")
         audio = np.zeros(16000, dtype=np.float32)
         with pytest.raises(RuntimeError, match="transcription timed out"):
             loaded_backend.transcribe(audio)
@@ -1195,11 +1180,14 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """A 5xx from /inference must surface as an actionable RuntimeError."""
-        resp = MagicMock(status_code=503)
-        resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "503 Service Unavailable", request=MagicMock(), response=resp
+        _inf(mock_httpx).return_value = _inference_response(
+            status_code=503,
+            raise_status=httpx.HTTPStatusError(
+                "503 Service Unavailable",
+                request=MagicMock(),
+                response=MagicMock(status_code=503),
+            ),
         )
-        mock_httpx.post.return_value = resp
         audio = np.zeros(16000, dtype=np.float32)
         with pytest.raises(RuntimeError, match="returned HTTP 503"):
             loaded_backend.transcribe(audio)
@@ -1208,12 +1196,130 @@ class TestTranscribe:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """A non-JSON body (HTML error page, empty string, etc.) must be surfaced."""
-        resp = MagicMock(status_code=200, content=b"<html>fatal</html>")
-        resp.json.side_effect = ValueError("not json")
-        mock_httpx.post.return_value = resp
+        _inf(mock_httpx).return_value = _inference_response(raw=b"<html>fatal</html>")
         audio = np.zeros(16000, dtype=np.float32)
         with pytest.raises(RuntimeError, match="non-JSON"):
             loaded_backend.transcribe(audio)
+
+
+# ---------------------------------------------------------------------------
+# /inference response byte guard (GH #193) — bound the read BEFORE deserializing
+# ---------------------------------------------------------------------------
+
+
+class TestResponseByteGuard:
+    """The /inference body is bounded at HTTP read time so a hostile or
+    misconfigured WHISPERCPP_SERVER_URL cannot exhaust memory before any
+    segment/word cap (which only runs post-parse) gets a chance to reject it.
+
+    Both the declared ``Content-Length`` (honest servers) and the actual
+    streamed bytes (servers that omit/lie about it) are checked, and the read
+    aborts as soon as the ceiling is crossed — this is the real memory bound
+    the old post-parse list slice only pretended to be.
+    """
+
+    @staticmethod
+    def _stream_resp(*, headers=None, iter_bytes=None):
+        """A minimal streaming-response mock: a context manager exposing
+        ``headers``/``raise_for_status``/``iter_bytes`` (the surface the byte
+        guard reads), independent of the dual-capable ``_inference_response``."""
+        resp = MagicMock(status_code=200)
+        resp.headers = dict(headers or {})
+        resp.raise_for_status.return_value = None
+        if iter_bytes is not None:
+            resp.iter_bytes = iter_bytes
+        resp.__enter__.return_value = resp
+        resp.__exit__.return_value = False
+        return resp
+
+    def test_oversized_streamed_body_is_rejected_before_full_read(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A body with no/dishonest Content-Length that exceeds the cap must be
+        rejected, and the read must STOP at the ceiling (proving the memory
+        bound) rather than materialize the whole over-cap body."""
+        from server.core.stt.backends.whispercpp_backend import _MAX_RESPONSE_BYTES
+
+        piece = b"x" * (1024 * 1024)  # 1 MiB
+        # Enough pieces to blow well past the cap if the read ran to completion.
+        n_pieces = (_MAX_RESPONSE_BYTES // len(piece)) + 100
+        consumed = {"n": 0}
+
+        def iter_bytes():
+            for _ in range(n_pieces):
+                consumed["n"] += 1
+                yield piece
+
+        # No Content-Length header → the accumulator guard is what must fire.
+        mock_httpx.stream.return_value = self._stream_resp(iter_bytes=iter_bytes)
+        with pytest.raises(WhisperCppResponseError):
+            loaded_backend.transcribe(_seconds_of_audio(1))
+        # Bounded memory: the guard stopped reading once the cap was crossed,
+        # not after consuming every (over-cap) piece.
+        assert consumed["n"] <= (_MAX_RESPONSE_BYTES // len(piece)) + 1
+
+    def test_oversized_content_length_header_is_rejected_before_read(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """An honest server that declares a Content-Length above the cap must be
+        rejected BEFORE the body is read at all."""
+        from server.core.stt.backends.whispercpp_backend import _MAX_RESPONSE_BYTES
+
+        def iter_bytes():
+            raise AssertionError("must reject on Content-Length before reading the body")
+            yield  # pragma: no cover — makes this a generator
+
+        resp = self._stream_resp(
+            headers={"Content-Length": str(_MAX_RESPONSE_BYTES + 1)},
+            iter_bytes=iter_bytes,
+        )
+        mock_httpx.stream.return_value = resp
+        with pytest.raises(WhisperCppResponseError):
+            loaded_backend.transcribe(_seconds_of_audio(1))
+
+    def test_non_ascii_content_length_is_ignored(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A bogus non-ASCII Content-Length must be ignored, not crash the read.
+
+        A hostile sidecar can put raw byte 0xB2 in the header, which httpx
+        decodes (latin-1) to ``"²"``. ``str.isdigit()`` is True for it but
+        ``int("²")`` raises ValueError — which none of the read handlers catch.
+        The guard must only honour ASCII digits and otherwise fall through to
+        the streamed-bytes accumulator, reading the (valid) body normally.
+        """
+        body = json.dumps({"segments": [], "language": "en"}).encode()
+
+        def iter_bytes():
+            yield body
+
+        mock_httpx.stream.return_value = self._stream_resp(
+            headers={"Content-Length": "²"},  # superscript two: isdigit() True, int() raises
+            iter_bytes=iter_bytes,
+        )
+        segments, info = loaded_backend.transcribe(_seconds_of_audio(1))
+        assert segments == []
+        assert info.language == "en"
+
+    def test_response_at_cap_is_accepted(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A well-formed response whose body is at/under the cap streams through
+        normally — the guard must not false-trip on legitimate transcripts."""
+        from server.core.stt.backends.whispercpp_backend import _MAX_RESPONSE_BYTES
+
+        body = json.dumps({"segments": [], "language": "en"}).encode()
+        assert len(body) <= _MAX_RESPONSE_BYTES
+
+        def iter_bytes():
+            # Deliberately chunked to exercise the accumulator loop.
+            yield body[: len(body) // 2]
+            yield body[len(body) // 2 :]
+
+        mock_httpx.stream.return_value = self._stream_resp(iter_bytes=iter_bytes)
+        segments, info = loaded_backend.transcribe(_seconds_of_audio(1))
+        assert segments == []
+        assert info.language == "en"
 
 
 # ---------------------------------------------------------------------------
@@ -1224,10 +1330,7 @@ class TestTranscribe:
 class TestSegmentProportionalCap:
     def _respond_with(self, mock_httpx, n_segments):
         bloated = [{"text": "x", "start": 0.0, "end": 0.1} for _ in range(n_segments)]
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": bloated}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": bloated})
 
     def test_legit_long_audio_is_not_truncated(self, loaded_backend, mock_httpx):
         """GH #172 regression: a real long transcript keeps ALL its segments."""
@@ -1272,9 +1375,9 @@ class TestSegmentProportionalCap:
         """WhisperCppResponseError on chunk N+1 must not discard chunk N's segments."""
         good = [{"text": "ok", "start": 0.0, "end": 1.0}]
         bloated = [{"text": "x", "start": 0.0, "end": 0.1} for _ in range(201)]
-        mock_httpx.post.side_effect = [
-            MagicMock(status_code=200, json=MagicMock(return_value={"segments": good})),
-            MagicMock(status_code=200, json=MagicMock(return_value={"segments": bloated})),
+        _inf(mock_httpx).side_effect = [
+            _inference_response({"segments": good}),
+            _inference_response({"segments": bloated}),
         ]
         loaded_backend._max_chunk_duration_s = 1  # force 1s chunks -> 2 chunks for 2s audio
         with pytest.raises(PartialTranscriptionError) as exc_info:
@@ -1293,13 +1396,8 @@ class TestWordProportionalCap:
         bloated = [
             {"word": "x", "start": i * 0.001, "end": i * 0.001 + 0.0005} for i in range(n_words)
         ]
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(
-                return_value={
-                    "segments": [{"text": "seg", "start": 0.0, "end": 30.0, "words": bloated}]
-                }
-            ),
+        _inf(mock_httpx).return_value = _inference_response(
+            {"segments": [{"text": "seg", "start": 0.0, "end": 30.0, "words": bloated}]}
         )
 
     def test_legit_words_kept(self, loaded_backend, mock_httpx):
@@ -1362,27 +1460,27 @@ class TestTranscribeChunking:
 
     @staticmethod
     def _resp(payload: dict) -> MagicMock:
-        return MagicMock(status_code=200, json=MagicMock(return_value=payload))
+        return _inference_response(payload)
 
     def test_short_audio_uses_single_post(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """Audio at/below the chunk threshold keeps the original single-POST path."""
         loaded_backend._max_chunk_duration_s = 600  # 1s of audio is well under
-        mock_httpx.post.return_value = self._resp({"segments": [], "language": "en"})
+        _inf(mock_httpx).return_value = self._resp({"segments": [], "language": "en"})
         loaded_backend.transcribe(np.zeros(16000, dtype=np.float32))
-        assert mock_httpx.post.call_count == 1
+        assert _inf(mock_httpx).call_count == 1
 
     def test_long_audio_splits_into_chunks(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """Audio longer than the threshold is split into ceil(total/chunk) POSTs."""
         loaded_backend._max_chunk_duration_s = 1  # 1s chunks
-        mock_httpx.post.side_effect = [
+        _inf(mock_httpx).side_effect = [
             self._resp({"segments": [], "language": "en"}) for _ in range(3)
         ]
         loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))
-        assert mock_httpx.post.call_count == 3
+        assert _inf(mock_httpx).call_count == 3
 
     def test_chunk_timestamps_offset_to_global_timeline(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
@@ -1404,7 +1502,7 @@ class TestTranscribeChunking:
                 ],
             }
 
-        mock_httpx.post.side_effect = [self._resp(payload(i)) for i in range(3)]
+        _inf(mock_httpx).side_effect = [self._resp(payload(i)) for i in range(3)]
         segments, _ = loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))
         assert [s.start for s in segments] == [0.0, 1.0, 2.0]
         assert [s.end for s in segments] == [0.5, 1.5, 2.5]
@@ -1416,7 +1514,7 @@ class TestTranscribeChunking:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [
+        _inf(mock_httpx).side_effect = [
             self._resp({"segments": [], "language": "en"}) for _ in range(3)
         ]
         calls: list[tuple[int, int]] = []
@@ -1431,7 +1529,7 @@ class TestTranscribeChunking:
     ):
         """Result language/probability is taken from the first chunk's detection."""
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [
+        _inf(mock_httpx).side_effect = [
             self._resp({"language": "el", "detected_language_probability": 0.83, "segments": []}),
             self._resp({"language": "en", "detected_language_probability": 0.10, "segments": []}),
         ]
@@ -1445,11 +1543,11 @@ class TestTranscribeChunking:
         """When auto-detecting, chunk 0's language is forwarded to later chunks so a
         quiet/ambiguous later chunk can't flip the language mid-file."""
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [
+        _inf(mock_httpx).side_effect = [
             self._resp({"language": "el", "segments": []}) for _ in range(3)
         ]
         loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32), language=None)
-        calls = mock_httpx.post.call_args_list
+        calls = _inf(mock_httpx).call_args_list
         assert "language" not in (calls[0].kwargs.get("data") or {})  # chunk 0 auto-detects
         assert calls[1].kwargs["data"].get("language") == "el"  # pinned thereafter
         assert calls[2].kwargs["data"].get("language") == "el"
@@ -1459,11 +1557,11 @@ class TestTranscribeChunking:
     ):
         """A user-pinned language is sent to every chunk and never overridden."""
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [
+        _inf(mock_httpx).side_effect = [
             self._resp({"language": "en", "segments": []}) for _ in range(2)
         ]
         loaded_backend.transcribe(np.zeros(2 * 16000, dtype=np.float32), language="fr")
-        for call in mock_httpx.post.call_args_list:
+        for call in _inf(mock_httpx).call_args_list:
             assert call.kwargs["data"].get("language") == "fr"
 
     def test_each_chunk_post_uses_scaled_timeout(
@@ -1471,20 +1569,20 @@ class TestTranscribeChunking:
     ):
         """Every chunk POST carries the duration-scaled timeout (floored at 300)."""
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [self._resp({"segments": []}) for _ in range(2)]
+        _inf(mock_httpx).side_effect = [self._resp({"segments": []}) for _ in range(2)]
         loaded_backend.transcribe(np.zeros(2 * 16000, dtype=np.float32))
         expected = _inference_timeout_for(16000, 16000)  # 1s chunk → floored at 300
-        for call in mock_httpx.post.call_args_list:
+        for call in _inf(mock_httpx).call_args_list:
             assert call.kwargs.get("timeout") == expected
 
     def test_single_post_timeout_scales_for_long_subthreshold_audio(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """A 200s file (< 600s threshold) stays single-POST but its timeout scales past 300."""
-        mock_httpx.post.return_value = self._resp({"segments": []})
+        _inf(mock_httpx).return_value = self._resp({"segments": []})
         loaded_backend.transcribe(np.zeros(200 * 16000, dtype=np.float32))
-        assert mock_httpx.post.call_count == 1
-        assert mock_httpx.post.call_args.kwargs.get("timeout") == 400  # max(300, 200 * 2)
+        assert _inf(mock_httpx).call_count == 1
+        assert _inf(mock_httpx).call_args.kwargs.get("timeout") == 400  # max(300, 200 * 2)
 
     def test_empty_middle_chunk_still_advances_offset(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
@@ -1492,7 +1590,7 @@ class TestTranscribeChunking:
         """A silent middle chunk (no segments) still advances the offset clock so the
         third chunk's segments land at the correct global time."""
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [
+        _inf(mock_httpx).side_effect = [
             self._resp({"language": "en", "segments": [{"text": "a", "start": 0.0, "end": 0.5}]}),
             self._resp({"language": "en", "segments": []}),  # silence
             self._resp({"language": "en", "segments": [{"text": "c", "start": 0.0, "end": 0.5}]}),
@@ -1609,7 +1707,7 @@ class TestWhisperCppConfigResolution:
 class TestTranscribeCancellation:
     @staticmethod
     def _resp(payload: dict) -> MagicMock:
-        return MagicMock(status_code=200, json=MagicMock(return_value=payload))
+        return _inference_response(payload)
 
     def test_supports_cancellation_is_true(self, backend: WhisperCppBackend):
         assert backend.supports_cancellation() is True
@@ -1621,7 +1719,7 @@ class TestTranscribeCancellation:
         from server.core.model_manager import TranscriptionCancelledError
 
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [
+        _inf(mock_httpx).side_effect = [
             self._resp({"segments": [], "language": "en"}) for _ in range(3)
         ]
         polls = {"n": 0}
@@ -1634,7 +1732,7 @@ class TestTranscribeCancellation:
             loaded_backend.transcribe(
                 np.zeros(3 * 16000, dtype=np.float32), cancellation_check=cancel
             )
-        assert mock_httpx.post.call_count == 1  # only chunk 0 was sent before the cancel
+        assert _inf(mock_httpx).call_count == 1  # only chunk 0 was sent before the cancel
 
     def test_cancellation_before_first_chunk_sends_nothing(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
@@ -1642,36 +1740,36 @@ class TestTranscribeCancellation:
         from server.core.model_manager import TranscriptionCancelledError
 
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [
+        _inf(mock_httpx).side_effect = [
             self._resp({"segments": [], "language": "en"}) for _ in range(3)
         ]
         with pytest.raises(TranscriptionCancelledError):
             loaded_backend.transcribe(
                 np.zeros(3 * 16000, dtype=np.float32), cancellation_check=lambda: True
             )
-        assert mock_httpx.post.call_count == 0
+        assert _inf(mock_httpx).call_count == 0
 
     def test_none_cancellation_check_completes_all_chunks(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [
+        _inf(mock_httpx).side_effect = [
             self._resp({"segments": [], "language": "en"}) for _ in range(3)
         ]
         loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))  # no cancellation_check
-        assert mock_httpx.post.call_count == 3
+        assert _inf(mock_httpx).call_count == 3
 
     def test_cancellation_never_true_completes(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [
+        _inf(mock_httpx).side_effect = [
             self._resp({"segments": [], "language": "en"}) for _ in range(3)
         ]
         loaded_backend.transcribe(
             np.zeros(3 * 16000, dtype=np.float32), cancellation_check=lambda: False
         )
-        assert mock_httpx.post.call_count == 3
+        assert _inf(mock_httpx).call_count == 3
 
 
 # ---------------------------------------------------------------------------
@@ -1717,7 +1815,7 @@ def test_word_cap_for_is_proportional_with_floor(duration_s, expected):
 class TestTranscribePartialPersistence:
     @staticmethod
     def _resp(payload: dict) -> MagicMock:
-        return MagicMock(status_code=200, json=MagicMock(return_value=payload))
+        return _inference_response(payload)
 
     def test_mid_chunk_failure_raises_partial_with_completed_work(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
@@ -1727,7 +1825,7 @@ class TestTranscribePartialPersistence:
         from server.core.stt.backends.base import PartialTranscriptionError
 
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [
+        _inf(mock_httpx).side_effect = [
             self._resp({"language": "en", "segments": [{"text": "a", "start": 0.0, "end": 0.5}]}),
             self._resp({"language": "en", "segments": [{"text": "b", "start": 0.0, "end": 0.5}]}),
             httpx.ReadTimeout("sidecar died"),  # chunk 2 fails
@@ -1747,7 +1845,7 @@ class TestTranscribePartialPersistence:
         from server.core.stt.backends.base import PartialTranscriptionError
 
         loaded_backend._max_chunk_duration_s = 1
-        mock_httpx.post.side_effect = [httpx.ReadTimeout("sidecar died")]  # chunk 0 fails
+        _inf(mock_httpx).side_effect = [httpx.ReadTimeout("sidecar died")]  # chunk 0 fails
         with pytest.raises(RuntimeError) as excinfo:
             loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))
         assert not isinstance(excinfo.value, PartialTranscriptionError)
@@ -1759,7 +1857,7 @@ class TestTranscribePartialPersistence:
         """Single-POST (sub-threshold) failures keep the original error."""
         from server.core.stt.backends.base import PartialTranscriptionError
 
-        mock_httpx.post.side_effect = httpx.ReadTimeout("boom")
+        _inf(mock_httpx).side_effect = httpx.ReadTimeout("boom")
         with pytest.raises(RuntimeError) as excinfo:
             loaded_backend.transcribe(np.zeros(16000, dtype=np.float32))  # 1s, single POST
         assert not isinstance(excinfo.value, PartialTranscriptionError)
@@ -1772,10 +1870,7 @@ class TestTranscribePartialPersistence:
 
 class TestWarmup:
     def test_warmup_when_loaded(self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock):
-        mock_httpx.post.return_value = MagicMock(
-            status_code=200,
-            json=MagicMock(return_value={"segments": [], "language": "en"}),
-        )
+        _inf(mock_httpx).return_value = _inference_response({"segments": [], "language": "en"})
         loaded_backend.warmup()  # should not raise
 
     def test_warmup_noop_when_not_loaded(self, backend: WhisperCppBackend):
@@ -1785,7 +1880,7 @@ class TestWarmup:
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """A failing inference during warmup must not propagate."""
-        mock_httpx.post.side_effect = httpx.ConnectError("oops")
+        _inf(mock_httpx).side_effect = httpx.ConnectError("oops")
         loaded_backend.warmup()  # must not raise
         # The backend should still be marked loaded — warmup failure is cosmetic.
         assert loaded_backend.is_loaded()
