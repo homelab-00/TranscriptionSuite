@@ -1564,12 +1564,26 @@ TAG=v1.3.3 PYTORCH_VARIANT=cu126 \
   IMAGE_REPO=ghcr.io/homelab-00/transcriptionsuite-server-legacy \
   docker compose -f server/docker/docker-compose.yml build --no-cache
 ./build/docker-build-push.sh --variant legacy v1.3.3
+
+# Vulkan-WSL2 image (same cu129 wheels as default, separate GHCR repo):
+TAG=v1.3.3 \
+  IMAGE_REPO=ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2 \
+  docker compose -f server/docker/docker-compose.yml build --no-cache
+./build/docker-build-push.sh --variant vulkan-wsl2 v1.3.3
 ```
 The three env vars for the legacy build:
 - `PYTORCH_VARIANT=cu126` — compose `build.args` picks it up and bakes it into
   the image as an `ENV` so bootstrap branches correctly on first run.
 - `IMAGE_REPO=…-legacy` — the templated `image:` line tags the build under the
   legacy repo locally (what `docker-build-push.sh --variant legacy` then pushes).
+- `TAG` — the version tag, same semantics as before.
+
+The vulkan-wsl2 build takes only **two** env vars — it omits `PYTORCH_VARIANT`
+because this variant uses the same cu129 wheels as default. The Vulkan GGML
+transcription runs in a native `whisper-server.exe` sidecar, so the main server
+image is unchanged from default; only the target GHCR repo differs:
+- `IMAGE_REPO=…-vulkan-wsl2` — tags the build under the vulkan-wsl2 repo locally
+  (what `docker-build-push.sh --variant vulkan-wsl2` then pushes).
 - `TAG` — the version tag, same semantics as before.
 
 *One-shot (runs `docker build` with the right build-arg, then pushes):*
@@ -1579,16 +1593,27 @@ The three env vars for the legacy build:
 
 # Legacy:
 ./build/docker-build-push.sh --variant legacy --build v1.3.3
+
+# Vulkan-WSL2:
+./build/docker-build-push.sh --variant vulkan-wsl2 --build v1.3.3
 ```
 
-*Releasing both variants of the same version:* run the two legacy commands
-(or the one-shot legacy command) after the two default ones. Each targets its
-own GHCR repo and its own `:latest` alias, so they never collide.
+*Releasing all variants of the same version:* run the legacy and vulkan-wsl2
+commands (or their one-shot equivalents) after the two default ones. Each
+targets its own GHCR repo and its own `:latest` alias, so they never collide.
 
 `--variant legacy` flips both the build-arg (`PYTORCH_VARIANT=cu126`) and the
-push target. `latest` is auto-tagged only within the `-legacy` repo; the
-default repo is never touched by a legacy run. See `build/docker-build-push.sh
---help` for full usage.
+push target. `--variant vulkan-wsl2` flips only the push target (build-arg stays
+at the cu129 default). `latest` is auto-tagged only within each variant's own
+repo; the default repo is never touched by a legacy or vulkan-wsl2 run. See
+`build/docker-build-push.sh --help` for full usage.
+
+> **First push of a new GHCR package?** GHCR defaults new package visibility to
+> **Private** — the same gap that broke anonymous pulls for `-legacy` in v1.3.3
+> (issues #83/#99). After the first `transcriptionsuite-server-vulkan-wsl2` push,
+> flip the package to Public and verify with an anonymous pull
+> (`docker logout ghcr.io && docker pull …-vulkan-wsl2:<tag>`). The push script
+> prints the exact settings URL and verification command on completion.
 
 **Trade-offs:**
 - Legacy first-run bootstrap is longer than the default variant — without
