@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 from server.api.routes.utils import get_client_name
-from server.config import resolve_main_transcriber_model
+from server.config import resolve_main_transcriber_model, resolve_parallel_diarization_default
 from server.core.formatters import (
     format_diarized_json,
     format_json,
@@ -206,7 +206,7 @@ async def _run_transcription(
         use_parallel = (
             parallel_diarization
             if parallel_diarization is not None
-            else config.get("diarization", "parallel", default=True)
+            else resolve_parallel_diarization_default(config)
         )
 
         if use_parallel:

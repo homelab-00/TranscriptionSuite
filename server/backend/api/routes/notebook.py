@@ -32,7 +32,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, field_validator
 from server.api.routes.utils import get_client_name, sanitize_for_log
-from server.config import get_config
+from server.config import get_config, resolve_parallel_diarization_default
 from server.core.stt.backends.factory import detect_backend_type
 from server.core.subtitle_export import _to_float, build_subtitle_cues, render_ass, render_srt
 from server.database.backup import DatabaseBackupManager
@@ -1333,7 +1333,7 @@ async def upload_and_transcribe(
 
     # Resolve parallel diarization default from config before entering background thread
     config = request.app.state.config
-    use_parallel_default = config.get("diarization", "parallel", default=True)
+    use_parallel_default = resolve_parallel_diarization_default(config)
 
     # Issue #104, Story 6.2 — snapshot the profile at upload time so the
     # background thread (which may finish minutes later) sees the SAME

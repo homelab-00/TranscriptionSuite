@@ -24,7 +24,11 @@ from server.api.routes.utils import (
     authenticate_websocket_from_headers,
     require_admin,
 )
-from server.config import resolve_live_transcriber_model, resolve_main_transcriber_model
+from server.config import (
+    resolve_live_transcriber_model,
+    resolve_main_transcriber_model,
+    resolve_parallel_diarization_default,
+)
 
 from server import __version__
 
@@ -73,7 +77,7 @@ async def get_admin_status(request: Request) -> dict[str, Any]:
                     "device": live_device,
                 },
                 "diarization": {
-                    "parallel": config.get("diarization", "parallel", default=True),
+                    "parallel": resolve_parallel_diarization_default(config),
                 },
                 # Backward-compat aliases consumed by older clients.
                 "transcription": {
@@ -112,7 +116,7 @@ async def update_diarization_settings(request: Request) -> dict[str, Any]:
     return {
         "status": "ok",
         "diarization": {
-            "parallel": config.get("diarization", "parallel", default=True),
+            "parallel": resolve_parallel_diarization_default(config),
         },
     }
 
