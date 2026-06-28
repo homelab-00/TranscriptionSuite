@@ -72,6 +72,9 @@ nemo = [
 vibevoice_asr = [
     "vibevoice @ git+https://github.com/microsoft/VibeVoice.git@1807b858d4f7dffdd286249a01616c243e488c9e",
 ]
+sensevoice = [
+    "funasr>=1.3.12",
+]
 mlx = [
     "parakeet-mlx>=0.2.0",
     "canary-mlx>=0.1.0",
