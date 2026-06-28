@@ -24,6 +24,9 @@ _MLX_CANARY_PATTERN = re.compile(r"^[^/]+/canary[^/]*-mlx", re.IGNORECASE)
 # MLX VibeVoice must be checked before the generic VibeVoice pattern.
 _MLX_VIBEVOICE_PATTERN = re.compile(r"^mlx-community/vibevoice-asr", re.IGNORECASE)
 _MLX_PATTERN = re.compile(r"^mlx-community/", re.IGNORECASE)
+# SenseVoice (FunAudioLLM) via FunASR — any "<org>/sensevoice…" repo id.
+# No MLX SenseVoice variant exists; matched before the mlx-community patterns by design.
+_SENSEVOICE_PATTERN = re.compile(r"^[^/]+/sensevoice", re.IGNORECASE)
 
 
 def _looks_like_whispercpp(name: str) -> bool:
@@ -57,6 +60,8 @@ def detect_backend_type(model_name: str) -> str:
         return "mlx_vibevoice"
     if _VIBEVOICE_ASR_PATTERN.match(name):
         return "vibevoice_asr"
+    if _SENSEVOICE_PATTERN.match(name):
+        return "sensevoice"
     if _looks_like_whispercpp(name):
         return "whispercpp"
     if _MLX_PARAKEET_PATTERN.match(name):
@@ -86,6 +91,11 @@ def is_nemo_model(model_name: str) -> bool:
 def is_vibevoice_asr_model(model_name: str) -> bool:
     """Return True if *model_name* selects a VibeVoice-ASR backend variant."""
     return detect_backend_type(model_name) == "vibevoice_asr"
+
+
+def is_sensevoice_model(model_name: str) -> bool:
+    """Return True if *model_name* selects the SenseVoice (FunASR) backend."""
+    return detect_backend_type(model_name) == "sensevoice"
 
 
 def is_whispercpp_model(model_name: str) -> bool:
@@ -134,6 +144,11 @@ def create_backend(model_name: str) -> STTBackend:
         from server.core.stt.backends.vibevoice_asr_backend import VibeVoiceASRBackend
 
         return VibeVoiceASRBackend()
+
+    if backend_type == "sensevoice":
+        from server.core.stt.backends.sensevoice_backend import SenseVoiceBackend
+
+        return SenseVoiceBackend()
 
     if backend_type == "whispercpp":
         from server.core.stt.backends.whispercpp_backend import WhisperCppBackend
