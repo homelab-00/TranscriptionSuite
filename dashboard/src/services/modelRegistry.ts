@@ -13,11 +13,13 @@ import {
   isWhisperCppModel,
   isMLXModel,
   isMLXParakeetModel,
+  isSenseVoiceModel,
 } from './modelCapabilities';
 
 export type ModelFamily =
   | 'whisper'
   | 'nemo'
+  | 'sensevoice'
   | 'vibevoice'
   | 'whispercpp'
   | 'mlx'
@@ -67,6 +69,20 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     parameterCount: '1B',
     huggingfaceUrl: 'https://huggingface.co/nvidia/canary-1b-v2',
     capabilities: { translation: true, liveMode: false, diarization: false, languageCount: 25 },
+    roles: ['main'],
+    requiresRuntime: 'cuda',
+  },
+
+  // ── SenseVoice (FunASR) ──────────────────────────────────────────────────
+  {
+    id: 'iic/SenseVoiceSmall',
+    displayName: 'SenseVoice Small',
+    family: 'sensevoice',
+    description:
+      'Alibaba FunAudioLLM non-autoregressive ASR. Very fast, CPU-capable. 5 languages (zh/en/yue/ja/ko) — no Greek, no translation. Linux/NVIDIA, requires INSTALL_FUNASR=true.',
+    parameterCount: '234M',
+    huggingfaceUrl: 'https://huggingface.co/FunAudioLLM/SenseVoiceSmall',
+    capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 5 },
     roles: ['main'],
     requiresRuntime: 'cuda',
   },
@@ -551,6 +567,7 @@ export function getModelById(id: string): ModelInfo | undefined {
 /** Detect the display family for an arbitrary model ID. */
 export function detectModelFamily(modelId: string): ModelFamily {
   if (isParakeetModel(modelId) || isCanaryModel(modelId)) return 'nemo';
+  if (isSenseVoiceModel(modelId)) return 'sensevoice';
   // MLX check must come before VibeVoice — mlx-community/VibeVoice-ASR-bf16
   // matches both isMLXModel and isVibeVoiceASRModel.
   if (isMLXParakeetModel(modelId) || isMLXModel(modelId)) return 'mlx';
