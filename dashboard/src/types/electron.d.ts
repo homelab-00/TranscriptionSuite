@@ -43,6 +43,7 @@ interface StartContainerOptions {
   installWhisper?: boolean;
   installNemo?: boolean;
   installVibeVoiceAsr?: boolean;
+  installFunasr?: boolean;
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;
@@ -174,6 +175,7 @@ interface ElectronAPI {
       whisper?: { available: boolean; reason?: string };
       nemo?: { available: boolean; reason?: string };
       vibevoiceAsr?: { available: boolean; reason?: string };
+      sensevoice?: { available: boolean; reason?: string };
     } | null>;
     getLogs: (tail?: number) => Promise<string[]>;
     startLogStream: (tail?: number) => Promise<void>;

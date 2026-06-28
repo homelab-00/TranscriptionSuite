@@ -95,6 +95,10 @@ describe('modelFamilyFromName', () => {
     expect(modelFamilyFromName('microsoft/VibeVoice-ASR')).toBe('vibevoice');
   });
 
+  it('returns sensevoice for SenseVoiceSmall', () => {
+    expect(modelFamilyFromName('iic/SenseVoiceSmall')).toBe('sensevoice');
+  });
+
   it('returns whisper for faster-whisper models', () => {
     expect(modelFamilyFromName('Systran/faster-whisper-large-v3')).toBe('whisper');
   });
@@ -129,6 +133,10 @@ describe('familyDisplayName', () => {
 
   it('returns VibeVoice-ASR for vibevoice', () => {
     expect(familyDisplayName('vibevoice')).toBe('VibeVoice-ASR');
+  });
+
+  it('returns SenseVoice (FunASR) for sensevoice', () => {
+    expect(familyDisplayName('sensevoice')).toBe('SenseVoice (FunASR)');
   });
 });
 
@@ -274,6 +282,7 @@ describe('computeMissingModelFamilies', () => {
         composeInstallWhisperEnabled: false,
         composeInstallNemoEnabled: false,
         composeInstallVibeVoiceAsrEnabled: false,
+        composeInstallFunasrEnabled: false,
         bootstrapStatus: null,
       }),
     ).toEqual([]);
@@ -285,6 +294,7 @@ describe('computeMissingModelFamilies', () => {
       composeInstallWhisperEnabled: false,
       composeInstallNemoEnabled: false,
       composeInstallVibeVoiceAsrEnabled: false,
+      composeInstallFunasrEnabled: false,
       bootstrapStatus: null,
     });
 
@@ -297,6 +307,7 @@ describe('computeMissingModelFamilies', () => {
       composeInstallWhisperEnabled: false,
       composeInstallNemoEnabled: true,
       composeInstallVibeVoiceAsrEnabled: false,
+      composeInstallFunasrEnabled: false,
       bootstrapStatus: null,
     });
 
@@ -309,9 +320,52 @@ describe('computeMissingModelFamilies', () => {
       composeInstallWhisperEnabled: false,
       composeInstallNemoEnabled: false,
       composeInstallVibeVoiceAsrEnabled: false,
+      composeInstallFunasrEnabled: false,
       bootstrapStatus: {
         source: 'runtime-volume-bootstrap-status',
         whisper: { available: true },
+      },
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it('returns sensevoice missing when nothing covers it', () => {
+    const result = computeMissingModelFamilies({
+      mainModel: 'iic/SenseVoiceSmall',
+      composeInstallWhisperEnabled: false,
+      composeInstallNemoEnabled: false,
+      composeInstallVibeVoiceAsrEnabled: false,
+      composeInstallFunasrEnabled: false,
+      bootstrapStatus: null,
+    });
+
+    expect(result).toEqual(['sensevoice']);
+  });
+
+  it('returns empty when the FunASR compose flag covers sensevoice', () => {
+    const result = computeMissingModelFamilies({
+      mainModel: 'iic/SenseVoiceSmall',
+      composeInstallWhisperEnabled: false,
+      composeInstallNemoEnabled: false,
+      composeInstallVibeVoiceAsrEnabled: false,
+      composeInstallFunasrEnabled: true,
+      bootstrapStatus: null,
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it('returns empty when bootstrap status covers sensevoice', () => {
+    const result = computeMissingModelFamilies({
+      mainModel: 'iic/SenseVoiceSmall',
+      composeInstallWhisperEnabled: false,
+      composeInstallNemoEnabled: false,
+      composeInstallVibeVoiceAsrEnabled: false,
+      composeInstallFunasrEnabled: false,
+      bootstrapStatus: {
+        source: 'runtime-volume-bootstrap-status',
+        sensevoice: { available: true },
       },
     });
 
@@ -339,11 +393,16 @@ describe('toInstallFlagPatch', () => {
     expect(toInstallFlagPatch(['vibevoice'])).toEqual({ installVibeVoiceAsr: true });
   });
 
+  it('sets installFunasr for sensevoice family', () => {
+    expect(toInstallFlagPatch(['sensevoice'])).toEqual({ installFunasr: true });
+  });
+
   it('sets all flags for all families', () => {
-    expect(toInstallFlagPatch(['whisper', 'nemo', 'vibevoice'])).toEqual({
+    expect(toInstallFlagPatch(['whisper', 'nemo', 'vibevoice', 'sensevoice'])).toEqual({
       installWhisper: true,
       installNemo: true,
       installVibeVoiceAsr: true,
+      installFunasr: true,
     });
   });
 });
@@ -475,6 +534,7 @@ describe('computeMissingModelFamilies — whispercpp never missing', () => {
       composeInstallWhisperEnabled: false,
       composeInstallNemoEnabled: false,
       composeInstallVibeVoiceAsrEnabled: false,
+      composeInstallFunasrEnabled: false,
       bootstrapStatus: null,
     });
     expect(result).not.toContain('whispercpp');
@@ -487,6 +547,7 @@ describe('computeMissingModelFamilies — whispercpp never missing', () => {
       composeInstallWhisperEnabled: false,
       composeInstallNemoEnabled: false,
       composeInstallVibeVoiceAsrEnabled: false,
+      composeInstallFunasrEnabled: false,
       bootstrapStatus: null,
     });
     expect(result).not.toContain('whispercpp');

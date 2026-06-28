@@ -784,6 +784,7 @@ export interface OptionalDependencyBootstrapStatus {
   whisper?: OptionalDependencyBootstrapFeatureStatus;
   nemo?: OptionalDependencyBootstrapFeatureStatus;
   vibevoiceAsr?: OptionalDependencyBootstrapFeatureStatus;
+  sensevoice?: OptionalDependencyBootstrapFeatureStatus;
 }
 
 interface DockerDfVolumeRow {
@@ -801,6 +802,7 @@ export interface StartContainerOptions {
   installWhisper?: boolean;
   installNemo?: boolean;
   installVibeVoiceAsr?: boolean;
+  installFunasr?: boolean;
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;
@@ -2138,6 +2140,7 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     installWhisper,
     installNemo,
     installVibeVoiceAsr,
+    installFunasr,
     mainTranscriberModel,
     liveTranscriberModel,
     diarizationModel,
@@ -2342,6 +2345,13 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     const vibevoiceValue = installVibeVoiceAsr ? 'true' : 'false';
     composeEnv['INSTALL_VIBEVOICE_ASR'] = vibevoiceValue;
     envUpdates['INSTALL_VIBEVOICE_ASR'] = vibevoiceValue;
+  }
+
+  // Pass SenseVoice (FunASR) install preference to the container (optional backend dependency)
+  if (installFunasr !== undefined) {
+    const funasrValue = installFunasr ? 'true' : 'false';
+    composeEnv['INSTALL_FUNASR'] = funasrValue;
+    envUpdates['INSTALL_FUNASR'] = funasrValue;
   }
 
   // Pass ASR model selections to the container (empty string = use config.yaml default)
@@ -2755,13 +2765,15 @@ async function readOptionalDependencyBootstrapStatus(): Promise<OptionalDependen
         whisper?: unknown;
         nemo?: unknown;
         vibevoice_asr?: unknown;
+        sensevoice?: unknown;
       };
     };
 
     const whisper = parseOptionalDependencyBootstrapFeature(parsed.features?.whisper);
     const nemo = parseOptionalDependencyBootstrapFeature(parsed.features?.nemo);
     const vibevoiceAsr = parseOptionalDependencyBootstrapFeature(parsed.features?.vibevoice_asr);
-    if (!whisper && !nemo && !vibevoiceAsr) {
+    const sensevoice = parseOptionalDependencyBootstrapFeature(parsed.features?.sensevoice);
+    if (!whisper && !nemo && !vibevoiceAsr && !sensevoice) {
       return null;
     }
 
@@ -2770,6 +2782,7 @@ async function readOptionalDependencyBootstrapStatus(): Promise<OptionalDependen
       ...(whisper ? { whisper } : {}),
       ...(nemo ? { nemo } : {}),
       ...(vibevoiceAsr ? { vibevoiceAsr } : {}),
+      ...(sensevoice ? { sensevoice } : {}),
     };
   } catch {
     return null;

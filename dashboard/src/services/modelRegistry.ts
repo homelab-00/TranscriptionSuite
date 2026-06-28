@@ -82,7 +82,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
       'Alibaba FunAudioLLM non-autoregressive ASR. Very fast, CPU-capable. 5 languages (zh/en/yue/ja/ko) — no Greek, no translation. Linux/NVIDIA, requires INSTALL_FUNASR=true.',
     parameterCount: '234M',
     huggingfaceUrl: 'https://huggingface.co/FunAudioLLM/SenseVoiceSmall',
-    capabilities: { translation: false, liveMode: true, diarization: false, languageCount: 5 },
+    capabilities: { translation: false, liveMode: false, diarization: false, languageCount: 5 },
     roles: ['main'],
     requiresRuntime: 'cuda',
   },

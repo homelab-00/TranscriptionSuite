@@ -48,6 +48,7 @@ export interface StartContainerOnboardingOptions {
   installWhisper?: boolean;
   installNemo?: boolean;
   installVibeVoiceAsr?: boolean;
+  installFunasr?: boolean;
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;
