@@ -58,3 +58,28 @@ class TestSenseVoiceFactory:
         assert detect_backend_type("nvidia/parakeet-tdt-0.6b-v3") == "parakeet"
         # Bilateral coverage: the public helper agrees on the negative case too.
         assert is_sensevoice_model("Systran/faster-whisper-large-v3") is False
+
+
+# --- bootstrap model-name helpers -----------------------------------------
+
+
+class TestBootstrapSelection:
+    def _bootstrap(self):
+        import importlib.util
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "docker" / "bootstrap_runtime.py"
+        spec = importlib.util.spec_from_file_location("bootstrap_runtime_under_test", path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+    def test_sensevoice_recognised_and_not_whisper(self) -> None:
+        bootstrap = self._bootstrap()
+        assert bootstrap.is_sensevoice_model_name("iic/SenseVoiceSmall") is True
+        # Must NOT be misclassified as a whisper model (else funasr never installs).
+        assert bootstrap.is_whisper_model_name("iic/SenseVoiceSmall") is False
+        # Real whisper ids still classify as whisper.
+        assert bootstrap.is_whisper_model_name("Systran/faster-whisper-large-v3") is True
+        assert bootstrap.is_sensevoice_model_name("nvidia/parakeet-tdt-0.6b-v3") is False

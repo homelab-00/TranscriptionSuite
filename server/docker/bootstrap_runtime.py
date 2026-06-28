@@ -56,6 +56,7 @@ _VIBEVOICE_ASR_MODEL_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", r
 _VIBEVOICE_ASR_4BIT_MODEL_PATTERN = re.compile(
     r"^[^/]+/vibevoice-asr(?:-[^/]+)?-4bit$", re.IGNORECASE
 )
+_SENSEVOICE_MODEL_PATTERN = re.compile(r"^[^/]+/sensevoice", re.IGNORECASE)
 _VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS: tuple[str, ...] = (
     "accelerate>=0.26.0",
     "bitsandbytes>=0.43.1",
@@ -150,12 +151,22 @@ def is_nemo_model_name(model_name: str | None) -> bool:
     return name.startswith("nvidia/parakeet") or name.startswith("nvidia/canary")
 
 
+def is_sensevoice_model_name(model_name: str | None) -> bool:
+    """Return True when *model_name* selects the SenseVoice (FunASR) backend."""
+    name = normalize_selected_model_name(model_name)
+    return bool(_SENSEVOICE_MODEL_PATTERN.match(name))
+
+
 def is_whisper_model_name(model_name: str | None) -> bool:
     """Return True when *model_name* belongs to the faster-whisper family."""
     name = normalize_selected_model_name(model_name)
     if not name:
         return False
-    return not is_nemo_model_name(name) and not is_vibevoice_asr_model_name(name)
+    return (
+        not is_nemo_model_name(name)
+        and not is_vibevoice_asr_model_name(name)
+        and not is_sensevoice_model_name(name)
+    )
 
 
 _NVIDIA_PROC_VERSION = Path("/proc/driver/nvidia/version")
@@ -1037,7 +1048,7 @@ def should_reuse_cached_feature_status(
     features = previous_status_payload.get("features")
     if not isinstance(features, dict):
         return False
-    for key in ("whisper", "nemo", "vibevoice_asr"):
+    for key in ("whisper", "nemo", "vibevoice_asr", "sensevoice"):
         entry = features.get(key)
         if not isinstance(entry, dict):
             return False
@@ -1267,6 +1278,56 @@ except Exception as exc:
     )
 """
 
+    try:
+        result = subprocess.run(
+            [str(venv_python), "-c", checker],
+            text=True,
+            capture_output=True,
+            timeout=max(30, min(timeout_seconds, 300)),
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "available": False,
+            "reason": "import_failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    output = (result.stdout or "").strip().splitlines()
+    if not output:
+        return {"available": False, "reason": "import_failed"}
+    try:
+        payload = json.loads(output[-1])
+    except json.JSONDecodeError:
+        return {"available": False, "reason": "import_failed"}
+
+    result_payload = {
+        "available": bool(payload.get("available", False)),
+        "reason": str(payload.get("reason", "import_failed") or "import_failed"),
+    }
+    error = payload.get("error")
+    if error:
+        result_payload["error"] = str(error)
+    return result_payload
+
+
+def check_funasr_import(
+    venv_python: Path,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    checker = """
+import importlib.util
+import json
+
+try:
+    spec = importlib.util.find_spec("funasr")
+    if spec is None:
+        print(json.dumps({"available": False, "reason": "import_failed", "error": "funasr: not found"}))
+    else:
+        print(json.dumps({"available": True, "reason": "ready"}))
+except Exception as exc:
+    print(json.dumps({"available": False, "reason": "import_failed", "error": f"{type(exc).__name__}: {exc}"}))
+"""
     try:
         result = subprocess.run(
             [str(venv_python), "-c", checker],
@@ -1753,6 +1814,9 @@ def main() -> int:
     vibevoice_selected = is_vibevoice_asr_model_name(main_model) or is_vibevoice_asr_model_name(
         live_model
     )
+    sensevoice_selected = is_sensevoice_model_name(main_model) or is_sensevoice_model_name(
+        live_model
+    )
 
     # ── Reuse cached feature status when deps are unchanged ───────────────
     _reuse_feature_cache = should_reuse_cached_feature_status(
@@ -2122,6 +2186,72 @@ def main() -> int:
             persistent=True,
         )
 
+    # \u2500\u2500 SenseVoice (optional, FunASR pipeline) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    sensevoice_start = time.perf_counter()
+    install_funasr = parse_bool_env("INSTALL_FUNASR", False)
+    sensevoice_status: dict[str, Any]
+
+    if not sensevoice_selected and not install_funasr:
+        sensevoice_status = {"available": False, "reason": "not_selected"}
+        log("SenseVoice not selected by configured models, skipping feature check")
+    elif _reuse_feature_cache and not install_funasr:
+        sensevoice_status = previous_status_payload["features"]["sensevoice"]
+        log(
+            "SenseVoice feature check: reusing cached result "
+            f"(available={sensevoice_status.get('available')})"
+        )
+    else:
+        existing_sensevoice_status = check_funasr_import(
+            venv_python=venv_python,
+            timeout_seconds=timeout_seconds,
+        )
+        if existing_sensevoice_status.get("available"):
+            sensevoice_status = existing_sensevoice_status
+            log("FunASR already available, skipping optional install")
+        elif install_funasr:
+            log("Installing FunASR for SenseVoice support...")
+            try:
+                run_command(
+                    ["uv", "pip", "install", "--python", str(venv_python), "funasr>=1.3.12"],
+                    timeout_seconds=timeout_seconds,
+                    env=build_uv_sync_env(venv_dir=venv_dir, cache_dir=cache_dir),
+                )
+                sensevoice_status = check_funasr_import(
+                    venv_python=venv_python,
+                    timeout_seconds=timeout_seconds,
+                )
+                if sensevoice_status.get("available"):
+                    log("FunASR installed")
+                else:
+                    failure_error = str(sensevoice_status.get("error", "")).strip()
+                    log(
+                        "FunASR installation completed but import check failed "
+                        f"({sensevoice_status.get('reason', 'import_failed')}"
+                        + (f": {failure_error}" if failure_error else "")
+                        + ")"
+                    )
+            except Exception as exc:
+                sensevoice_status = {
+                    "available": False,
+                    "reason": "install_failed",
+                    "error": str(exc),
+                }
+                log(f"FunASR installation failed: {exc}")
+        else:
+            sensevoice_status = {"available": False, "reason": "selected_but_not_requested"}
+            log(
+                "SenseVoice model selected but INSTALL_FUNASR is not enabled, "
+                "skipping optional install"
+            )
+    log_timing("SenseVoice feature check complete", sensevoice_start)
+    if sensevoice_selected and not sensevoice_status.get("available"):
+        emit_event(
+            "warn-sensevoice",
+            "warning",
+            f"SenseVoice unavailable \u2014 {sensevoice_status.get('reason', 'unavailable')}",
+            persistent=True,
+        )
+
     status_write_start = time.perf_counter()
     write_status_file(
         status_file,
@@ -2141,6 +2271,7 @@ def main() -> int:
                 "whisper": whisper_status,
                 "nemo": nemo_status,
                 "vibevoice_asr": vibevoice_asr_status,
+                "sensevoice": sensevoice_status,
             },
         },
     )
