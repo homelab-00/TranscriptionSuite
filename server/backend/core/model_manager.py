@@ -224,6 +224,8 @@ class ModelManager:
         self._vibevoice_asr_feature_available: bool = False
         self._vibevoice_asr_feature_reason: str = "not_requested"
         self._vibevoice_asr_feature_error: str | None = None
+        self._sensevoice_feature_available: bool = False
+        self._sensevoice_feature_reason: str = "not_requested"
 
         # Job tracker for ensuring only one transcription runs at a time
         self.job_tracker = TranscriptionJobTracker()
@@ -247,6 +249,7 @@ class ModelManager:
         self._initialize_whisper_feature_status()
         self._initialize_nemo_feature_status()
         self._initialize_vibevoice_asr_feature_status()
+        self._initialize_sensevoice_feature_status()
         self._initialize_whispercpp_feature_status()
 
         # Fix 3: Start background NeMo import if NeMo models will be used
@@ -414,6 +417,38 @@ class ModelManager:
         self._vibevoice_asr_feature_reason = "requested" if install_requested else "not_requested"
         self._vibevoice_asr_feature_error = None
 
+    def _initialize_sensevoice_feature_status(self) -> None:
+        """Initialize SenseVoice (FunASR) feature availability from bootstrap state/env."""
+        status_file = os.environ.get("BOOTSTRAP_STATUS_FILE", "/runtime/bootstrap-status.json")
+        try:
+            import json
+            from pathlib import Path
+
+            path = Path(status_file)
+            if path.exists():
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                sensevoice = payload.get("features", {}).get("sensevoice", {})
+                available = bool(sensevoice.get("available", False))
+                reason = str(sensevoice.get("reason", "not_requested") or "not_requested")
+                self._sensevoice_feature_available = available
+                self._sensevoice_feature_reason = reason
+                logger.info(
+                    "Loaded SenseVoice feature status from bootstrap: "
+                    f"available={available}, reason={reason}"
+                )
+                return
+        except Exception as e:
+            logger.debug(f"Could not load SenseVoice feature status from bootstrap: {e}")
+
+        install_requested = os.environ.get("INSTALL_FUNASR", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self._sensevoice_feature_available = False
+        self._sensevoice_feature_reason = "requested" if install_requested else "not_requested"
+
     def _initialize_whispercpp_feature_status(self) -> None:
         """Initialize whisper.cpp sidecar feature availability.
 
@@ -540,6 +575,13 @@ class ModelManager:
         if self._vibevoice_asr_feature_error:
             status["error"] = self._vibevoice_asr_feature_error
         return status
+
+    def get_sensevoice_feature_status(self) -> dict[str, Any]:
+        """Return SenseVoice (FunASR) feature availability for API clients."""
+        return {
+            "available": self._sensevoice_feature_available,
+            "reason": self._sensevoice_feature_reason,
+        }
 
     def _get_mlx_feature_status(self) -> dict[str, Any]:
         """Check if MLX (Apple Silicon Metal) STT is available via mlx-audio."""
@@ -990,6 +1032,7 @@ class ModelManager:
                 "vibevoice_asr": self.get_vibevoice_asr_feature_status(),
                 "whispercpp": self.get_whispercpp_feature_status(),
                 "mlx": self._get_mlx_feature_status(),
+                "sensevoice": self.get_sensevoice_feature_status(),
             },
         }
         return status

@@ -105,6 +105,7 @@ export interface StartContainerOptions {
   installWhisper?: boolean;
   installNemo?: boolean;
   installVibeVoiceAsr?: boolean;
+  installFunasr?: boolean;
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;
@@ -229,6 +230,7 @@ export interface ElectronAPI {
       whisper?: { available: boolean; reason?: string };
       nemo?: { available: boolean; reason?: string };
       vibevoiceAsr?: { available: boolean; reason?: string };
+      sensevoice?: { available: boolean; reason?: string };
     } | null>;
     checkTailscaleCertsExist: () => Promise<boolean>;
     getLogs: (tail?: number) => Promise<string[]>;
@@ -585,6 +587,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         whisper?: { available: boolean; reason?: string };
         nemo?: { available: boolean; reason?: string };
         vibevoiceAsr?: { available: boolean; reason?: string };
+        sensevoice?: { available: boolean; reason?: string };
       } | null>,
     checkTailscaleCertsExist: () =>
       ipcRenderer.invoke('docker:checkTailscaleCertsExist') as Promise<boolean>,

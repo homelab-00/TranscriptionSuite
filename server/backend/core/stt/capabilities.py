@@ -11,6 +11,8 @@ _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
 _VIBEVOICE_ASR_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
 _MLX_PARAKEET_PATTERN = re.compile(r"^mlx-community/parakeet", re.IGNORECASE)
 _MLX_CANARY_PATTERN = re.compile(r"^[^/]+/canary[^/]*-mlx", re.IGNORECASE)
+# SenseVoice (FunAudioLLM) — any "<org>/sensevoice…" repo id.
+_SENSEVOICE_PATTERN = re.compile(r"^[^/]+/sensevoice", re.IGNORECASE)
 
 
 def normalize_model_name(model_name: str | None) -> str:
@@ -63,6 +65,10 @@ def supports_english_translation(model_name: str | None) -> bool:
 
     # VibeVoice-ASR is ASR + diarization only (no translation support in v1 integration).
     if _VIBEVOICE_ASR_PATTERN.match(name):
+        return False
+
+    # SenseVoice (FunASR) is ASR-only in Phase 1 — no translate task.
+    if _SENSEVOICE_PATTERN.match(name):
         return False
 
     # Whisper turbo is not intended for translation.

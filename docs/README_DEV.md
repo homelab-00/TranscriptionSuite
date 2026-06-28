@@ -153,6 +153,7 @@ Technical documentation for developing and building TranscriptionSuite.
       - [Dependency Logic](#dependency-logic)
       - [Download Flow](#download-flow)
       - [Limitations](#limitations-1)
+    - [8.6 SenseVoice / FunASR Backend](#86-sensevoice--funasr-backend)
   - [9. Dashboard Development](#9-dashboard-development)
     - [9.1 Running from Source](#91-running-from-source)
     - [9.2 Tech Stack](#92-tech-stack)
@@ -527,7 +528,8 @@ TranscriptionSuite/
 │   │   │   │       ├── mlx_whisper_backend.py   # MLX Whisper via mlx-audio (word timestamps, alignment_heads patch)
 │   │   │   │       ├── mlx_parakeet_backend.py  # MLX Parakeet via parakeet-mlx
 │   │   │   │       ├── mlx_canary_backend.py    # MLX Canary via canary-mlx
-│   │   │   │       └── mlx_vibevoice_backend.py # MLX VibeVoice-ASR via mlx-audio (native diarization)
+│   │   │   │       ├── mlx_vibevoice_backend.py # MLX VibeVoice-ASR via mlx-audio (native diarization)
+│   │   │   │       └── sensevoice_backend.py    # Alibaba SenseVoice (FunASR) — zh/en/yue/ja/ko, Linux/NVIDIA, no translation
 │   │   │   ├── diarization_engine.py    # PyAnnote wrapper
 │   │   │   ├── sortformer_engine.py     # Metal-native Sortformer diarization via mlx-audio (no HF token)
 │   │   │   ├── model_manager.py         # Model lifecycle, job tracking
@@ -1275,6 +1277,7 @@ Boost uses `[project.optional-dependencies]` groups in `pyproject.toml`:
 | `whisper` | `faster-whisper`, `ctranslate2`, `whisperx` | `INSTALL_WHISPER=true` **or** configured model name is a faster-whisper variant |
 | `nemo` | `nemo_toolkit[asr]` | `INSTALL_NEMO=true` **or** configured model name is a NeMo/Parakeet variant |
 | `vibevoice_asr` | `vibevoice` (git+ ref) | `INSTALL_VIBEVOICE_ASR=true` **or** configured model name matches the VibeVoice-ASR pattern |
+| `sensevoice` | `funasr>=1.3.12` | `INSTALL_FUNASR=true` **or** configured model name matches `iic/SenseVoice*` |
 
 Extras are part of the **structural fingerprint**. Adding or removing an extra triggers a `rebuild-sync`.
 
@@ -1294,7 +1297,7 @@ This appears in `docker logs` and in the server log file.
 `/runtime/bootstrap-status.json` is written at the end of every bootstrap run. It records:
 
 - The selected sync mode and selection reason.
-- Feature availability for each backend (`whisper`, `nemo`, `vibevoice_asr`, `diarization`).
+- Feature availability for each backend (`whisper`, `nemo`, `vibevoice_asr`, `sensevoice`, `diarization`).
 - A `preload_cache_key` for diarization (so the expensive PyAnnote pipeline load is skipped on restart if nothing changed).
 - Package delta counts and diagnostics.
 
@@ -1329,6 +1332,7 @@ The server's `/api/status` endpoint reads this file to report backend capability
 | `INSTALL_WHISPER` | `false` | Force-enable the `whisper` extra regardless of configured model. |
 | `INSTALL_NEMO` | `false` | Force-enable the `nemo` extra regardless of configured model. |
 | `INSTALL_VIBEVOICE_ASR` | `false` | Force-enable the `vibevoice_asr` extra regardless of configured model. |
+| `INSTALL_FUNASR` | `false` | Force-enable the `sensevoice` extra regardless of configured model. |
 
 **Config reset semantics**
 - Normal image/runtime updates do **not** require deleting `~/.config/TranscriptionSuite` (or platform equivalent).
@@ -2362,7 +2366,8 @@ server/backend/
 │           ├── mlx_whisper_backend.py    # MLX Whisper via mlx-audio (word timestamps, alignment_heads monkey-patch)
 │           ├── mlx_parakeet_backend.py   # MLX Parakeet via parakeet-mlx (long-audio chunking)
 │           ├── mlx_canary_backend.py     # MLX Canary via canary-mlx (multitask, reuses Parakeet chunking)
-│           └── mlx_vibevoice_backend.py  # MLX VibeVoice-ASR via mlx-audio (native diarization, JSON segment parse)
+│           ├── mlx_vibevoice_backend.py  # MLX VibeVoice-ASR via mlx-audio (native diarization, JSON segment parse)
+│           └── sensevoice_backend.py     # Alibaba SenseVoice via FunASR (zh/en/yue/ja/ko; Linux/NVIDIA; no translation)
 ├── database/
 │   ├── database.py               # SQLite + FTS5 operations
 │   ├── job_repository.py         # Transcription job CRUD (persist-before-deliver, retry, recovery)
@@ -2487,6 +2492,22 @@ The existing `downloadModelToCache()` entry point detects GGML files via `isGgml
 - **No translation** for turbo variants - large-v3 and medium GGML models support translation; turbo variants do not.
 - **One model at a time** - model switching requires a server restart (sidecar loads model at startup).
 - **AMD/Intel only** - CUDA users should prefer faster-whisper models for better performance and feature coverage.
+
+### 8.6 SenseVoice / FunASR Backend
+
+**Phase 1: Linux/NVIDIA, transcriber-only.** `sensevoice_backend.py` wraps Alibaba FunAudioLLM's `funasr.AutoModel` (SenseVoiceSmall + `fsmn-vad`) pulling weights from HuggingFace (`hub="hf"`).
+
+**Supported languages:** zh / en / yue / ja / ko only — **no Greek**. No translation. No word-level timestamps (diarization falls back to segment-level via the existing pyannote two-pass pipeline).
+
+**Factory routing:** model IDs matching `^<org>/sensevoice` (case-insensitive) → `detect_backend_type` returns `"sensevoice"` → `SenseVoiceBackend`. The pattern is explicitly excluded from the whisper default path in `factory.py`, `capabilities.py`, `bootstrap_runtime.py`, and the dashboard `isWhisperModel` helper.
+
+**Optional install — gated behind `INSTALL_FUNASR=true`** (mirrors `INSTALL_NEMO`). The `sensevoice` extra (`funasr>=1.3.12`) is defined in `server/backend/pyproject.toml`. If FunASR is not installed, `SenseVoiceBackend.load()` raises `BackendDependencyError`, surfaced to the client as HTTP 503 with a remedy message.
+
+**Feature status** is reported via `ModelManager.get_sensevoice_feature_status()` in `GET /api/status` → `features.sensevoice`. The dashboard gates the install prompt on `INSTALL_FUNASR` (label `'SenseVoice (FunASR)'`).
+
+**Dashboard integration:** model family `'sensevoice'` in `modelRegistry.ts`; capability helpers `isSenseVoiceModel` / `SENSEVOICE_LANGUAGES` in `modelCapabilities.ts`; shown as an amber section in the Model Manager panel (Docker-only; hidden on Metal).
+
+**Out of scope in Phase 1:** FunASR's own diarization, word timestamps, emotion/event tags, sherpa-onnx / SenseVoice.cpp runtimes, Windows/macOS/Apple Silicon support, ModelScope (CN) download.
 
 ---
 

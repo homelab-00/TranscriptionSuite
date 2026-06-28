@@ -54,7 +54,7 @@ import {
 import { isRuntimeProfile, type RuntimeProfile } from './src/types/runtime';
 
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
-type MissingFamily = 'whisper' | 'nemo' | 'vibevoice';
+type MissingFamily = 'whisper' | 'nemo' | 'vibevoice' | 'sensevoice';
 
 const HF_TERMS_URL = 'https://huggingface.co/pyannote/speaker-diarization-community-1';
 
@@ -580,11 +580,13 @@ const AppInner: React.FC = () => {
           composeInstallWhisper,
           composeInstallNemo,
           composeInstallVibeVoiceAsr,
+          composeInstallFunasr,
           bootstrapStatus,
         ] = await Promise.all([
           readComposeEnvValue('INSTALL_WHISPER'),
           readComposeEnvValue('INSTALL_NEMO'),
           readComposeEnvValue('INSTALL_VIBEVOICE_ASR'),
+          readComposeEnvValue('INSTALL_FUNASR'),
           getOptionalDependencyBootstrapStatus(),
         ]);
 
@@ -594,6 +596,7 @@ const AppInner: React.FC = () => {
           composeInstallWhisperEnabled: isComposeEnvFlagEnabled(composeInstallWhisper),
           composeInstallNemoEnabled: isComposeEnvFlagEnabled(composeInstallNemo),
           composeInstallVibeVoiceAsrEnabled: isComposeEnvFlagEnabled(composeInstallVibeVoiceAsr),
+          composeInstallFunasrEnabled: isComposeEnvFlagEnabled(composeInstallFunasr),
           bootstrapStatus,
         });
 

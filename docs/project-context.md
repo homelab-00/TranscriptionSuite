@@ -130,6 +130,7 @@ durability:
   - `nvidia/canary*` → CanaryBackend (NeMo, Docker)
   - `mlx-community/vibevoice-asr*` → MLXVibeVoiceBackend (Apple Silicon) — checked before generic VibeVoice
   - `[user]/vibevoice-asr*` → VibeVoiceASRBackend
+  - `iic/SenseVoice*` (or any `<org>/sensevoice*`) → SenseVoiceBackend (FunASR; Linux/NVIDIA only; zh/en/yue/ja/ko; no translation; requires `INSTALL_FUNASR=true`)
   - GGML pattern (`ggml-*.bin`, `.gguf`) → WhisperCppBackend
   - `mlx-community/parakeet*` → MLXParakeetBackend (Apple Silicon)
   - `[user]/canary*-mlx` → MLXCanaryBackend (Apple Silicon)
@@ -274,6 +275,7 @@ durability:
 - **Python 3.13 lhotse patch**: `_patch_sampler_for_python313()` in ParakeetBackend — required for NeMo compatibility
 - **VibeVoice OOM**: `DEFAULT_MAX_CHUNK_DURATION_S = 60` (1 minute) — was 600s, caused CUDA OOM on 12GB GPU. Never increase without GPU memory testing
 - **NeMo requires `INSTALL_NEMO=true`** env var in Docker — not installed by default
+- **SenseVoice (FunASR) requires `INSTALL_FUNASR=true`** env var in Docker — not installed by default; Linux/NVIDIA only
 
 #### GPU Crash Resilience
 - **CUDA health probe**: `cuda_health_check()` in `audio_utils.py` runs at startup between prewarm and ModelManager init

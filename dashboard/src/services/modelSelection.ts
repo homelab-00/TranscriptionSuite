@@ -1,6 +1,7 @@
 import {
   isMLXModel,
   isNemoModel,
+  isSenseVoiceModel,
   isVibeVoiceASRModel,
   isWhisperCppModel,
 } from './modelCapabilities';
@@ -74,12 +75,14 @@ export type OptionalDependencyBootstrapStatus = {
   whisper?: OptionalDependencyBootstrapFeatureStatus;
   nemo?: OptionalDependencyBootstrapFeatureStatus;
   vibevoiceAsr?: OptionalDependencyBootstrapFeatureStatus;
+  sensevoice?: OptionalDependencyBootstrapFeatureStatus;
 } | null;
 
 export type InstallFlagPatch = {
   installWhisper?: true;
   installNemo?: true;
   installVibeVoiceAsr?: true;
+  installFunasr?: true;
 };
 
 function normalize(value: string | null | undefined): string {
@@ -106,6 +109,7 @@ export function modelFamilyFromName(value: string | null | undefined): ModelFami
   const modelName = normalizeForModelFamily(value);
   if (!modelName) return 'none';
   if (isNemoModel(modelName)) return 'nemo';
+  if (isSenseVoiceModel(modelName)) return 'sensevoice';
   // MLX check must come before VibeVoice — mlx-community/VibeVoice-ASR-bf16
   // matches both isMLXModel and isVibeVoiceASRModel.
   if (isMLXModel(modelName)) return 'mlx';
@@ -118,6 +122,7 @@ export function familyDisplayName(family: Exclude<ModelFamily, 'none'>): string 
   if (family === 'whisper') return 'faster-whisper';
   if (family === 'nemo') return 'NeMo';
   if (family === 'whispercpp') return 'whisper.cpp';
+  if (family === 'sensevoice') return 'SenseVoice (FunASR)';
   return 'VibeVoice-ASR';
 }
 
@@ -189,6 +194,7 @@ export function computeMissingModelFamilies(options: {
   composeInstallWhisperEnabled: boolean;
   composeInstallNemoEnabled: boolean;
   composeInstallVibeVoiceAsrEnabled: boolean;
+  composeInstallFunasrEnabled: boolean;
   bootstrapStatus: OptionalDependencyBootstrapStatus;
 }): Exclude<ModelFamily, 'none'>[] {
   const requiredFamilies = computeRequiredModelFamilies({
@@ -217,6 +223,12 @@ export function computeMissingModelFamilies(options: {
   ) {
     installedFamilies.add('vibevoice');
   }
+  if (
+    options.composeInstallFunasrEnabled ||
+    options.bootstrapStatus?.sensevoice?.available === true
+  ) {
+    installedFamilies.add('sensevoice');
+  }
 
   return requiredFamilies.filter((family) => !installedFamilies.has(family));
 }
@@ -236,6 +248,10 @@ export function toInstallFlagPatch(
     }
     if (family === 'vibevoice') {
       nextFlags.installVibeVoiceAsr = true;
+      continue;
+    }
+    if (family === 'sensevoice') {
+      nextFlags.installFunasr = true;
       continue;
     }
     // 'whispercpp' — sidecar is self-contained, no install flag needed.
