@@ -644,8 +644,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 logger.warning(warning_message, exc_info=True)
                 _log_time(timing_label)
             else:
-                logger.error("Model preload failed")
-                raise
+                # A non-dependency model-load failure (bad model id, corrupt
+                # cache, OOM, ...) must not brick the whole server: the dashboard,
+                # audio notebook, search, and transcription history all work
+                # without a loaded transcription model. Degrade gracefully like
+                # the dependency path above — log loudly and continue. The
+                # dashboard reports the server as "not ready" (Record stays
+                # disabled with a reason) so the user can fix the model selection
+                # and restart, instead of facing a crash-looping container.
+                logger.error(
+                    "Model preload failed for model=%s — continuing startup "
+                    "without a loaded transcription model; fix the model "
+                    "selection in the dashboard and restart.",
+                    selected_main_model,
+                    exc_info=True,
+                )
+                _log_time("model preload failed (continuing without model)")
         else:
             _log_time("model preload complete")
 

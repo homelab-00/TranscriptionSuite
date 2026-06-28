@@ -61,10 +61,23 @@ class TestLifecycle:
             backend.load("iic/SenseVoiceSmall", device="cuda", gpu_device_index=0)
             assert backend.is_loaded()
             call_kwargs = stubs["funasr"].AutoModel.call_args.kwargs
-            assert call_kwargs["model"] == "iic/SenseVoiceSmall"
+            # hub="hf" downloads from HuggingFace, where the repo is the
+            # FunAudioLLM-namespaced id (the ModelScope "iic/..." id 404s on HF).
+            assert call_kwargs["model"] == "FunAudioLLM/SenseVoiceSmall"
             assert call_kwargs["device"] == "cuda:0"
             assert call_kwargs["vad_model"] == "fsmn-vad"
             assert call_kwargs["hub"] == "hf"
+            # The canonical, user-facing id is preserved on the backend.
+            assert backend._model_name == "iic/SenseVoiceSmall"
+
+    def test_modelscope_id_maps_to_hf_repo(self) -> None:
+        from server.core.stt.backends.sensevoice_backend import _resolve_hf_repo_id
+
+        # Known ModelScope id -> HuggingFace repo id (the bug: hub=hf + iic/... 404s).
+        assert _resolve_hf_repo_id("iic/SenseVoiceSmall") == "FunAudioLLM/SenseVoiceSmall"
+        # Unknown / already-HF ids pass through unchanged.
+        assert _resolve_hf_repo_id("FunAudioLLM/SenseVoiceSmall") == "FunAudioLLM/SenseVoiceSmall"
+        assert _resolve_hf_repo_id("some-org/sensevoice-custom") == "some-org/sensevoice-custom"
 
     def test_unload_clears_model(self) -> None:
         from server.core.stt.backends.sensevoice_backend import SenseVoiceBackend

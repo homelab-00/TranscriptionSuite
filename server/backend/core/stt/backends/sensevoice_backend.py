@@ -37,6 +37,17 @@ SAMPLE_RATE = 16000
 _SENSEVOICE_LANGUAGES = frozenset({"zh", "en", "yue", "ja", "ko"})
 _LANG_TOKEN_RE = re.compile(r"<\|(zh|en|yue|ja|ko)\|>", re.IGNORECASE)
 
+# FunASR's ``model=`` argument is a *hub repo id*, and the hub determines the
+# namespace. The canonical id ``iic/SenseVoiceSmall`` lives on ModelScope; on
+# HuggingFace (``hub="hf"``) the same weights are published under the FunAudioLLM
+# org, and the bare ``iic/…`` id 404s (FunASR then silently retries it as an
+# architecture key and dies with a misleading "not registered"). Map the
+# well-known ModelScope ids to their HF equivalents so users can keep configuring
+# the recognisable ``iic/SenseVoiceSmall``; unknown ids pass through unchanged.
+_MODELSCOPE_TO_HF_REPO = {
+    "iic/SenseVoiceSmall": "FunAudioLLM/SenseVoiceSmall",
+}
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,6 +56,11 @@ def _compose_device(device: str, gpu_device_index: int) -> str:
     if device == "cuda":
         return f"cuda:{int(gpu_device_index)}"
     return device
+
+
+def _resolve_hf_repo_id(model_name: str) -> str:
+    """Translate a ModelScope model id to its HuggingFace repo id for ``hub="hf"``."""
+    return _MODELSCOPE_TO_HF_REPO.get(model_name, model_name)
 
 
 def _extract_language(raw_text: str | None) -> str | None:
@@ -96,12 +112,15 @@ class SenseVoiceBackend(STTBackend):
 
         gpu_device_index = kwargs.get("gpu_device_index", 0)
         funasr_device = _compose_device(device, gpu_device_index)
+        hf_repo_id = _resolve_hf_repo_id(model_name)
 
-        logger.info(f"Loading SenseVoice model: {model_name} on {funasr_device}")
+        logger.info(f"Loading SenseVoice model: {model_name} (hf:{hf_repo_id}) on {funasr_device}")
         # hub="hf": pull weights from HuggingFace, not the CN-hosted ModelScope.
+        # The repo id must be the HF namespace (FunAudioLLM/…), not the ModelScope
+        # "iic/…" id, which 404s on HF — see _resolve_hf_repo_id.
         # disable_update=True: skip the ModelScope version ping (offline-friendly).
         self._model = AutoModel(
-            model=model_name,
+            model=hf_repo_id,
             vad_model="fsmn-vad",
             vad_kwargs={"max_single_segment_time": 30000},
             device=funasr_device,

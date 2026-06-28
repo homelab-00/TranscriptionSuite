@@ -2194,12 +2194,18 @@ def main() -> int:
     if not sensevoice_selected and not install_funasr:
         sensevoice_status = {"available": False, "reason": "not_selected"}
         log("SenseVoice not selected by configured models, skipping feature check")
-    elif _reuse_feature_cache and not install_funasr:
+    elif (
+        _reuse_feature_cache
+        and not install_funasr
+        and previous_status_payload.get("features", {}).get("sensevoice", {}).get("available")
+    ):
+        # Only trust a *positive* cached result. A cached "unavailable" (e.g. a
+        # stale "not_selected" from before this model was configured) must not be
+        # parroted back when SenseVoice is now selected — fall through to a fresh
+        # import check so we report the accurate reason and pick up a funasr that
+        # was installed out of band.
         sensevoice_status = previous_status_payload["features"]["sensevoice"]
-        log(
-            "SenseVoice feature check: reusing cached result "
-            f"(available={sensevoice_status.get('available')})"
-        )
+        log("SenseVoice feature check: reusing cached result (available=True)")
     else:
         existing_sensevoice_status = check_funasr_import(
             venv_python=venv_python,

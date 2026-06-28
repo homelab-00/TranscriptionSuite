@@ -208,7 +208,7 @@ no shared registry. Cross-user dedup is an explicit non-goal.
 
 **Source priority:** User config (`~/.config/TranscriptionSuite/`) → Docker mount (`/user-config/`) → Container default → Repo default
 
-**Environment overrides:** `MAIN_TRANSCRIBER_MODEL`, `LIVE_TRANSCRIBER_MODEL`, `DIARIZATION_MODEL`, `LOG_LEVEL`, `INSTALL_WHISPER`, `INSTALL_NEMO`, `INSTALL_VIBEVOICE_ASR`, `HF_TOKEN`, `WHISPERCPP_SERVER_URL`
+**Environment overrides:** `MAIN_TRANSCRIBER_MODEL`, `LIVE_TRANSCRIBER_MODEL`, `DIARIZATION_MODEL`, `LOG_LEVEL`, `INSTALL_WHISPER`, `INSTALL_NEMO`, `INSTALL_VIBEVOICE_ASR`, `INSTALL_FUNASR`, `HF_TOKEN`, `WHISPERCPP_SERVER_URL`
 
 **Key config sections:** `longform_recording`, `static_transcription`, `main_transcriber`, `parakeet`,
 `sortformer`, `mlx`, `vibevoice_asr`, `live_transcriber`, `diarization`, `audio_processing`, `storage`,

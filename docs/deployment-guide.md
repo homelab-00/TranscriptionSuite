@@ -269,6 +269,7 @@ non-flipping cu129 path is zero-cost.
 | `INSTALL_WHISPER` | false | Install faster-whisper extras |
 | `INSTALL_NEMO` | false | Install NeMo toolkit |
 | `INSTALL_VIBEVOICE_ASR` | false | Install VibeVoice backend |
+| `INSTALL_FUNASR` | false | Install FunASR for SenseVoice models (Linux/NVIDIA) |
 | `PYTORCH_VARIANT` | cu129 | PyTorch wheels: `cu129`, `cu126` (legacy GPU), or `cpu` (no CUDA, GH #125) |
 | `UV_NATIVE_TLS` | false | Trust the system CA store for `uv` (corporate TLS interception, GH #125) |
 | `TLS_ENABLED` | false | Enable HTTPS + auth |
