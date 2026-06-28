@@ -260,6 +260,15 @@ class TestFeatureStatusFallback:
             "reason": "not_requested",
         }
 
+    def test_sensevoice_fallback_requested(self, tmp_path: Path):
+        # No bootstrap file, but INSTALL_FUNASR=true in env → reason 'requested'.
+        mgr = _build_manager(tmp_path, env_overrides={"INSTALL_FUNASR": "true"})
+
+        assert mgr.get_sensevoice_feature_status() == {
+            "available": False,
+            "reason": "requested",
+        }
+
 
 # ── _classify_diarization_error ───────────────────────────────────────────
 

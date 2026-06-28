@@ -440,8 +440,14 @@ class ModelManager:
         except Exception as e:
             logger.debug(f"Could not load SenseVoice feature status from bootstrap: {e}")
 
+        install_requested = os.environ.get("INSTALL_FUNASR", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         self._sensevoice_feature_available = False
-        self._sensevoice_feature_reason = "not_requested"
+        self._sensevoice_feature_reason = "requested" if install_requested else "not_requested"
 
     def _initialize_whispercpp_feature_status(self) -> None:
         """Initialize whisper.cpp sidecar feature availability.
