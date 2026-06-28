@@ -83,3 +83,25 @@ class TestBootstrapSelection:
         # Real whisper ids still classify as whisper.
         assert bootstrap.is_whisper_model_name("Systran/faster-whisper-large-v3") is True
         assert bootstrap.is_sensevoice_model_name("nvidia/parakeet-tdt-0.6b-v3") is False
+
+
+# --- model_manager feature status -----------------------------------------
+
+
+class TestSenseVoiceFeatureStatus:
+    def test_reads_sensevoice_from_bootstrap_status(self, tmp_path, monkeypatch) -> None:
+        import json
+
+        status = {"features": {"sensevoice": {"available": True, "reason": "ready"}}}
+        status_file = tmp_path / "bootstrap-status.json"
+        status_file.write_text(json.dumps(status), encoding="utf-8")
+        monkeypatch.setenv("BOOTSTRAP_STATUS_FILE", str(status_file))
+
+        from server.core.model_manager import ModelManager
+
+        mgr = object.__new__(ModelManager)
+        mgr._sensevoice_feature_available = False
+        mgr._sensevoice_feature_reason = "not_requested"
+        mgr._initialize_sensevoice_feature_status()
+
+        assert mgr.get_sensevoice_feature_status() == {"available": True, "reason": "ready"}

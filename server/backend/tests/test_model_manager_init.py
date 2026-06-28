@@ -37,6 +37,7 @@ def _make_bootstrap_status(
     whisper: dict | None = None,
     nemo: dict | None = None,
     vibevoice_asr: dict | None = None,
+    sensevoice: dict | None = None,
 ) -> Path:
     """Write a bootstrap-status.json and return its path."""
     features: dict[str, Any] = {}
@@ -48,6 +49,8 @@ def _make_bootstrap_status(
         features["nemo"] = nemo
     if vibevoice_asr is not None:
         features["vibevoice_asr"] = vibevoice_asr
+    if sensevoice is not None:
+        features["sensevoice"] = sensevoice
 
     status_file = tmp_path / "bootstrap-status.json"
     status_file.write_text(json.dumps({"features": features}), encoding="utf-8")
@@ -158,6 +161,30 @@ class TestFeatureStatusFromBootstrap:
         assert status["available"] is False
         assert status["error"] == "No module named 'nemo'"
 
+    def test_sensevoice_available_from_bootstrap(self, tmp_path: Path):
+        sf = _make_bootstrap_status(tmp_path, sensevoice={"available": True, "reason": "ready"})
+
+        mgr = _build_manager(tmp_path, status_file=sf)
+
+        # Asserts both the __init__ chain AND the get_status() wiring (FIX 1).
+        status = mgr.get_status()
+        assert status["features"]["sensevoice"] == {
+            "available": True,
+            "reason": "ready",
+        }
+
+    def test_sensevoice_unavailable_from_bootstrap(self, tmp_path: Path):
+        sf = _make_bootstrap_status(
+            tmp_path, sensevoice={"available": False, "reason": "not_selected"}
+        )
+
+        mgr = _build_manager(tmp_path, status_file=sf)
+
+        assert mgr.get_sensevoice_feature_status() == {
+            "available": False,
+            "reason": "not_selected",
+        }
+
 
 # ── Feature status fallback (no bootstrap file) ──────────────────────────
 
@@ -222,6 +249,16 @@ class TestFeatureStatusFallback:
         status = mgr.get_vibevoice_asr_feature_status()
         assert status["available"] is False
         assert status["reason"] == "requested"
+
+    def test_sensevoice_fallback_not_requested(self, tmp_path: Path):
+        # No bootstrap file → _build_manager points BOOTSTRAP_STATUS_FILE at a
+        # nonexistent path, so the initializer must fall back to not_requested.
+        mgr = _build_manager(tmp_path)
+
+        assert mgr.get_sensevoice_feature_status() == {
+            "available": False,
+            "reason": "not_requested",
+        }
 
 
 # ── _classify_diarization_error ───────────────────────────────────────────
