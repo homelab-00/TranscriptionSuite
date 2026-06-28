@@ -6,6 +6,7 @@ import {
   isWhisperModel,
   isWhisperCppModel,
   isVibeVoiceASRModel,
+  isSenseVoiceModel,
   isEnglishOnlyWhisperModel,
   filterLanguagesForModel,
   pickDefaultLanguage,
@@ -14,6 +15,7 @@ import {
   supportsDiarization,
   NEMO_LANGUAGES,
   CANARY_TRANSLATION_TARGETS,
+  SENSEVOICE_LANGUAGES,
 } from './modelCapabilities';
 
 // ---------------------------------------------------------------------------
@@ -436,6 +438,63 @@ describe('supportsTranslation with GGML models', () => {
 
   it('returns false for GGML turbo models', () => {
     expect(supportsTranslation('ggml-large-v3-turbo.bin')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SenseVoice capabilities
+// ---------------------------------------------------------------------------
+describe('SenseVoice capabilities', () => {
+  it('detects SenseVoice model ids', () => {
+    expect(isSenseVoiceModel('iic/SenseVoiceSmall')).toBe(true);
+    expect(isSenseVoiceModel('FunAudioLLM/SenseVoiceSmall')).toBe(true);
+    expect(isSenseVoiceModel('Systran/faster-whisper-large-v3')).toBe(false);
+  });
+
+  it('is not treated as a Whisper model', () => {
+    expect(isWhisperModel('iic/SenseVoiceSmall')).toBe(false);
+  });
+
+  it('does not support translation', () => {
+    expect(supportsTranslation('iic/SenseVoiceSmall')).toBe(false);
+  });
+
+  it('restricts languages to the 5 SenseVoice languages + Auto Detect', () => {
+    const all = ['Auto Detect', 'English', 'Chinese', 'Greek', 'Japanese', 'Korean', 'Cantonese'];
+    const filtered = filterLanguagesForModel(all, 'iic/SenseVoiceSmall');
+    expect(filtered).toEqual([
+      'Auto Detect',
+      'English',
+      'Chinese',
+      'Japanese',
+      'Korean',
+      'Cantonese',
+    ]);
+    expect(filtered).not.toContain('Greek');
+  });
+
+  it('SENSEVOICE_LANGUAGES contains exactly 5 languages', () => {
+    expect(SENSEVOICE_LANGUAGES.size).toBe(5);
+    for (const lang of ['English', 'Chinese', 'Japanese', 'Korean', 'Cantonese']) {
+      expect(SENSEVOICE_LANGUAGES.has(lang)).toBe(true);
+    }
+    expect(SENSEVOICE_LANGUAGES.has('Greek')).toBe(false);
+  });
+
+  it('returns false for null/undefined/empty/whitespace', () => {
+    expect(isSenseVoiceModel(null)).toBe(false);
+    expect(isSenseVoiceModel(undefined)).toBe(false);
+    expect(isSenseVoiceModel('')).toBe(false);
+    expect(isSenseVoiceModel('   ')).toBe(false);
+  });
+
+  it('detects SenseVoice ids case-insensitively', () => {
+    expect(isSenseVoiceModel('IIC/SenseVoiceSmall')).toBe(true);
+    expect(isSenseVoiceModel('iic/SENSEVOICESMALL')).toBe(true);
+  });
+
+  it('supports auto-detect (language auto-detection)', () => {
+    expect(supportsAutoDetect('iic/SenseVoiceSmall')).toBe(true);
   });
 });
 

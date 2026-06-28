@@ -12,6 +12,7 @@ const MLX_PARAKEET_PATTERN = /^mlx-community\/parakeet/i;
 // Matches community Canary MLX ports: eelcor/canary-1b-v2-mlx, Mediform/canary-1b-v2-mlx-q8, qfuxa/canary-mlx, etc.
 const MLX_CANARY_PATTERN = /^[^/]+\/canary[^/]*-mlx/i;
 const MLX_PATTERN = /^mlx-community\//i;
+const SENSEVOICE_PATTERN = /^[^/]+\/sensevoice/i;
 
 /**
  * The 25 European languages supported by NeMo ASR models
@@ -77,6 +78,18 @@ export const CANARY_TRANSLATION_TARGETS: readonly string[] = [
 ];
 
 /**
+ * The 5 first-class languages SenseVoiceSmall actually supports
+ * (despite the model's "50+ languages" marketing). No Greek.
+ */
+export const SENSEVOICE_LANGUAGES: ReadonlySet<string> = new Set([
+  'English',
+  'Chinese',
+  'Japanese',
+  'Korean',
+  'Cantonese',
+]);
+
+/**
  * Returns true if the model is an NVIDIA Parakeet / NeMo ASR-only model.
  */
 export function isParakeetModel(modelName: string | null | undefined): boolean {
@@ -135,7 +148,8 @@ export function isWhisperModel(modelName: string | null | undefined): boolean {
     !isNemoModel(modelName) &&
     !isVibeVoiceASRModel(modelName) &&
     !isWhisperCppModel(modelName) &&
-    !isMLXModel(modelName)
+    !isMLXModel(modelName) &&
+    !isSenseVoiceModel(modelName)
   );
 }
 
@@ -145,6 +159,14 @@ export function isWhisperModel(modelName: string | null | undefined): boolean {
 export function isVibeVoiceASRModel(modelName: string | null | undefined): boolean {
   const name = (modelName ?? '').trim();
   return VIBEVOICE_ASR_PATTERN.test(name);
+}
+
+/**
+ * Returns true if the model is a SenseVoice (FunASR) backend variant.
+ */
+export function isSenseVoiceModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim();
+  return SENSEVOICE_PATTERN.test(name);
 }
 
 /**
@@ -215,6 +237,10 @@ export function filterLanguagesForModel(
   const keepAutoDetect = (l: string): boolean =>
     l !== 'Auto Detect' || supportsAutoDetect(modelName);
 
+  if (isSenseVoiceModel(modelName)) {
+    // SenseVoiceSmall: zh/en/yue/ja/ko only, plus Auto Detect.
+    return languages.filter((l) => l === 'Auto Detect' || SENSEVOICE_LANGUAGES.has(l));
+  }
   if (isVibeVoiceASRModel(modelName)) {
     return languages.filter((l) => l === 'Auto Detect');
   }
@@ -255,6 +281,8 @@ export function supportsTranslation(modelName: string | null | undefined): boole
   if (isMLXCanaryModel(modelName)) return false;
   // VibeVoice-ASR (v1 integration) is ASR+diarization only.
   if (isVibeVoiceASRModel(modelName)) return false;
+  // SenseVoice is ASR-only (5 languages, no translation task).
+  if (isSenseVoiceModel(modelName)) return false;
   if (name.includes('turbo')) return false;
   if (name.endsWith('.en')) return false;
 
