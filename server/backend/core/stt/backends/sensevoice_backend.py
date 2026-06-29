@@ -129,7 +129,7 @@ def _tokens_to_words(
 def _segment_words(
     timestamp: list[list[Any]] | None, seg_start_s: float, seg_end_s: float
 ) -> list[dict[str, Any]]:
-    """Best-effort: return words whose midpoint falls within [seg_start, seg_end].
+    """Best-effort: return words whose midpoint falls within [seg_start, seg_end).
 
     The top-level CTC ``timestamp`` is whole-clip; slice it per sentence. Any
     parse problem yields [] (segment-level fallback — never a hard dependency).
@@ -141,7 +141,7 @@ def _segment_words(
             mid = (float(w["start"]) + float(w["end"])) / 2.0
         except (TypeError, ValueError, KeyError):
             continue
-        if seg_start_s <= mid <= seg_end_s:
+        if seg_start_s <= mid < seg_end_s:
             out.append(w)
     return out
 

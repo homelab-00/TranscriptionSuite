@@ -481,3 +481,27 @@ class TestWordTimestamps:
         with patch.dict(sys.modules, stubs):
             segments, _ = backend.transcribe(np.zeros(16000, dtype=np.float32))
         assert all(s.words == [] for s in segments)
+
+    def test_words_sliced_per_sentence_window(self) -> None:
+        # The whole-clip timestamp list is sliced per sentence by midpoint window.
+        model = _FakeAutoModel(
+            [
+                {
+                    "text": "<|en|>Hello world. Goodbye.",
+                    "sentence_info": [
+                        {"sentence": "<|en|>Hello world.", "start": 0, "end": 1000, "spk": 0},
+                        {"sentence": "<|en|>Goodbye.", "start": 1000, "end": 2000, "spk": 0},
+                    ],
+                    "timestamp": [
+                        ["▁Hello", 0.0, 0.4],
+                        ["▁world", 0.4, 0.9],
+                        ["▁Goodbye", 1.2, 1.8],
+                    ],
+                }
+            ]
+        )
+        backend, stubs = _load(model, cam=True)
+        with patch.dict(sys.modules, stubs):
+            segments, _ = backend.transcribe(np.zeros(16000, dtype=np.float32))
+        assert [w["word"] for w in segments[0].words] == ["Hello", "world"]
+        assert [w["word"] for w in segments[1].words] == ["Goodbye"]
