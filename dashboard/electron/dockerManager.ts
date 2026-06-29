@@ -806,6 +806,7 @@ export interface StartContainerOptions {
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;
+  sensevoiceDiarizationEngine?: string;
   whispercppModel?: string;
 }
 
@@ -2144,6 +2145,7 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     mainTranscriberModel,
     liveTranscriberModel,
     diarizationModel,
+    sensevoiceDiarizationEngine,
     whispercppModel,
   } = options;
 
@@ -2366,6 +2368,10 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   if (diarizationModel !== undefined) {
     composeEnv['DIARIZATION_MODEL'] = diarizationModel;
     envUpdates['DIARIZATION_MODEL'] = diarizationModel;
+  }
+  if (sensevoiceDiarizationEngine !== undefined) {
+    composeEnv['SENSEVOICE_DIARIZATION_ENGINE'] = sensevoiceDiarizationEngine;
+    envUpdates['SENSEVOICE_DIARIZATION_ENGINE'] = sensevoiceDiarizationEngine;
   }
 
   // Vulkan profiles: set whisper-server URL and optional GGML model path.

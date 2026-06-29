@@ -84,6 +84,7 @@ interface ServerViewProps {
       mainTranscriberModel?: string;
       liveTranscriberModel?: string;
       diarizationModel?: string;
+      sensevoiceDiarizationEngine?: string;
       whispercppModel?: string;
     },
   ) => Promise<void>;
