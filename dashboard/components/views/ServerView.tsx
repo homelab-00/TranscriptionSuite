@@ -1098,14 +1098,19 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     }
   }, [runtimeProfile, localSelectionsHydrated, mainModelSelection, mainCustomModel]);
 
-  // Reset Sortformer selection to the pyannote default on any non-Metal runtime.
-  // Sortformer is Metal/MLX-only — keeping it selected off-Metal would start the
-  // server with an invalid diarization config.
   useEffect(() => {
-    if (!isMetal && diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION) {
+    // Sortformer is Metal/MLX-only; on any non-Metal runtime fall back to the
+    // pyannote default. Gated on hydration to match the other
+    // selection-mutating effects in this file (avoids pre-hydration churn).
+    // Persisting the corrected value is intentional — Sortformer is unusable off-Metal.
+    if (
+      localSelectionsHydrated &&
+      !isMetal &&
+      diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION
+    ) {
       setDiarizationModelSelection(DIARIZATION_DEFAULT_MODEL);
     }
-  }, [isMetal, diarizationModelSelection]);
+  }, [localSelectionsHydrated, isMetal, diarizationModelSelection]);
 
   // Persist model selection UI state.
   useEffect(() => {
