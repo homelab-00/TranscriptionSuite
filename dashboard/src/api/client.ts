@@ -522,6 +522,7 @@ export class APIClient {
     if (options?.enable_diarization) fd.append('diarization', 'true');
     if (options?.expected_speakers)
       fd.append('expected_speakers', String(options.expected_speakers));
+    if (options?.diarization_engine) fd.append('diarization_engine', options.diarization_engine);
     if (options?.multitrack) fd.append('multitrack', 'true');
     if (options?.profile_id != null) fd.append('profile_id', String(options.profile_id));
     return this.postFormData('/api/transcribe/audio', fd);
@@ -768,6 +769,7 @@ export class APIClient {
       fd.append('expected_speakers', String(options.expected_speakers));
     if (options?.parallel_diarization !== undefined)
       fd.append('parallel_diarization', String(options.parallel_diarization));
+    if (options?.diarization_engine) fd.append('diarization_engine', options.diarization_engine);
     if (options?.multitrack) fd.append('multitrack', 'true');
     if (options?.file_created_at) fd.append('file_created_at', options.file_created_at);
     if (options?.title) fd.append('title', options.title);
@@ -844,6 +846,7 @@ export class APIClient {
       fd.append('expected_speakers', String(options.expected_speakers));
     if (options?.parallel_diarization !== undefined)
       fd.append('parallel_diarization', String(options.parallel_diarization));
+    if (options?.diarization_engine) fd.append('diarization_engine', options.diarization_engine);
     if (options?.multitrack) fd.append('multitrack', 'true');
     if (options?.profile_id != null) fd.append('profile_id', String(options.profile_id));
     return this.postFormData('/api/transcribe/import', fd);

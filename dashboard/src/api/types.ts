@@ -114,6 +114,8 @@ export interface TranscriptionUploadOptions {
   title?: string;
   /** Active recording-profile id (FR18). Snapshotted server-side at job start. */
   profile_id?: number | null;
+  /** SenseVoice-only: which diarization engine to use ('funasr' CAM++ or 'pyannote'). */
+  diarization_engine?: 'funasr' | 'pyannote';
 }
 
 export interface LanguagesResponse {
