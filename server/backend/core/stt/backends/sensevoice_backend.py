@@ -126,6 +126,26 @@ def _tokens_to_words(
     return words
 
 
+def _segment_words(
+    timestamp: list[list[Any]] | None, seg_start_s: float, seg_end_s: float
+) -> list[dict[str, Any]]:
+    """Best-effort: return words whose midpoint falls within [seg_start, seg_end].
+
+    The top-level CTC ``timestamp`` is whole-clip; slice it per sentence. Any
+    parse problem yields [] (segment-level fallback — never a hard dependency).
+    """
+    words = _tokens_to_words(timestamp, segment_offset_s=0.0)
+    out: list[dict[str, Any]] = []
+    for w in words:
+        try:
+            mid = (float(w["start"]) + float(w["end"])) / 2.0
+        except (TypeError, ValueError, KeyError):
+            continue
+        if seg_start_s <= mid <= seg_end_s:
+            out.append(w)
+    return out
+
+
 def _write_temp_wav(audio: np.ndarray, sample_rate: int) -> str:
     """Write float32 mono audio to a temp 16-bit WAV and return its path."""
     fd, path = tempfile.mkstemp(suffix=".wav", prefix="sensevoice_")
@@ -271,6 +291,7 @@ class SenseVoiceBackend(STTBackend):
                 batch_size_s=300,
                 merge_vad=True,
                 merge_length_s=15,
+                output_timestamp=True,
             )
         finally:
             try:
@@ -384,7 +405,8 @@ class SenseVoiceBackend(STTBackend):
                 )
                 start = float(sentence.get("start") or 0) / 1000.0
                 end = float(sentence.get("end") or 0) / 1000.0
-                segments.append(BackendSegment(text=text, start=start, end=end, words=[]))
+                seg_words = _segment_words(first.get("timestamp"), start, end)
+                segments.append(BackendSegment(text=text, start=start, end=end, words=seg_words))
             return segments, info
 
         # Fallback: one segment spanning the whole clip (no timestamps available).

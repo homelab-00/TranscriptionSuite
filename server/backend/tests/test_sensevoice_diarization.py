@@ -440,3 +440,44 @@ class TestTokensToWords:
 
         words = _tokens_to_words([["▁", 0.0, 0.1], ["Hello", 0.1, 0.5]], segment_offset_s=0.0)
         assert [w["word"] for w in words] == ["Hello"]
+
+
+class TestWordTimestamps:
+    def test_words_populated_when_timestamps_present(self) -> None:
+        model = _FakeAutoModel(
+            [
+                {
+                    "text": "<|en|>Hello world.",
+                    "sentence_info": [
+                        {"sentence": "<|en|>Hello world.", "start": 0, "end": 1000, "spk": 0},
+                    ],
+                    "timestamp": [
+                        ["▁Hello", 0.0, 0.4],
+                        ["▁world", 0.4, 0.9],
+                    ],
+                }
+            ]
+        )
+        backend, stubs = _load(model, cam=True)
+        with patch.dict(sys.modules, stubs):
+            segments, _ = backend.transcribe(np.zeros(16000, dtype=np.float32))
+        # output_timestamp must have been requested
+        assert model.generate.call_args.kwargs.get("output_timestamp") is True
+        all_words = [w for s in segments for w in s.words]
+        assert [w["word"] for w in all_words] == ["Hello", "world"]
+
+    def test_missing_timestamps_keeps_empty_words(self) -> None:
+        model = _FakeAutoModel(
+            [
+                {
+                    "text": "<|en|>Hi.",
+                    "sentence_info": [
+                        {"sentence": "<|en|>Hi.", "start": 0, "end": 500, "spk": 0},
+                    ],
+                }
+            ]  # no "timestamp" key
+        )
+        backend, stubs = _load(model, cam=True)
+        with patch.dict(sys.modules, stubs):
+            segments, _ = backend.transcribe(np.zeros(16000, dtype=np.float32))
+        assert all(s.words == [] for s in segments)
