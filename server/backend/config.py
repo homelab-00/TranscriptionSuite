@@ -556,6 +556,35 @@ def resolve_parallel_diarization_default(config: ServerConfig | dict[str, Any]) 
     return bool(value)
 
 
+# Default diarization engine for the SenseVoice STT model only.
+DEFAULT_SENSEVOICE_DIARIZATION_ENGINE = "funasr"
+
+
+def resolve_sensevoice_diarization_engine(
+    model_name: str | None,
+    request_value: str | None,
+    config_default: str | None,
+    *,
+    funasr_diar_available: bool,
+) -> str:
+    """Resolve the diarization engine for a transcription job.
+
+    Returns "funasr" (CAM++ single-pass) or "pyannote" (two-pass). "funasr" is
+    only ever returned for SenseVoice models, and only when CAM++ is available;
+    every other model and every fallback resolves to "pyannote".
+    """
+    from server.core.stt.backends.factory import is_sensevoice_model
+
+    if not is_sensevoice_model(model_name or ""):
+        return "pyannote"
+    chosen = (request_value or "auto").strip().lower()
+    if chosen == "auto":
+        chosen = (config_default or DEFAULT_SENSEVOICE_DIARIZATION_ENGINE).strip().lower()
+    if chosen == "funasr" and funasr_diar_available:
+        return "funasr"
+    return "pyannote"
+
+
 # Global config instance
 _config: ServerConfig | None = None
 
