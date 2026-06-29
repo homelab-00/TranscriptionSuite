@@ -50,6 +50,7 @@ import {
   isWhisperCppModel,
   isMLXModel,
   isNemoModel,
+  isSenseVoiceModel,
 } from '../../src/services/modelCapabilities';
 import { MODEL_REGISTRY, getModelsByFamily } from '../../src/services/modelRegistry';
 import {
@@ -94,6 +95,11 @@ interface ServerViewProps {
 const DIARIZATION_SORTFORMER_OPTION = 'Sortformer (Metal; ≤ 4 speakers)';
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
+
+// SenseVoice diarization-engine selector (start-time, SenseVoice-only).
+const ENGINE_CAMPP_OPTION = 'CAM++ (fast, built-in)';
+const ENGINE_PYANNOTE_OPTION = 'pyannote (two-pass)';
+const SENSEVOICE_ENGINE_OPTIONS = [ENGINE_CAMPP_OPTION, ENGINE_PYANNOTE_OPTION];
 
 // GGML models for the Vulkan sidecar — computed once from registry. In Vulkan
 // mode these populate the Main Transcriber dropdown (Branch B: the main pick
@@ -245,6 +251,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     DIARIZATION_SORTFORMER_OPTION,
   );
   const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
+  const [sensevoiceEngineSelection, setSensevoiceEngineSelection] = useState(ENGINE_CAMPP_OPTION);
   const [diarizationHydrated, setDiarizationHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
 
@@ -458,6 +465,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       api.config.get('server.liveCustomModel'),
       api.config.get('server.diarizationModelSelection'),
       api.config.get('server.diarizationCustomModel'),
+      api.config.get('server.sensevoiceDiarizationEngine'),
       api.config.get('server.whispercppModel'),
       api.config.get('server.runtimeProfile'),
     ])
@@ -469,6 +477,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           storedLiveCustom,
           storedDiarizationSelection,
           storedDiarizationCustom,
+          storedSensevoiceEngine,
           storedWhispercppModel,
           storedRuntimeProfile,
         ]: unknown[]) => {
@@ -568,6 +577,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             nextDiarizationCustom = '';
           }
 
+          // SenseVoice diarization engine: stored as the display string.
+          const storedEngine = getString(storedSensevoiceEngine);
+          const nextSensevoiceEngine =
+            storedEngine && SENSEVOICE_ENGINE_OPTIONS.includes(storedEngine)
+              ? storedEngine
+              : ENGINE_CAMPP_OPTION;
+
           // Branch B migration: the dedicated "GGML Sidecar Model" selector is
           // gone — the Main Transcriber now owns the sidecar model in Vulkan
           // mode. If a user is upgrading from that era and their persisted main
@@ -593,6 +609,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           setLiveCustomModel(nextLiveCustom);
           setDiarizationModelSelection(nextDiarizationSelection);
           setDiarizationCustomModel(nextDiarizationCustom);
+          setSensevoiceEngineSelection(nextSensevoiceEngine);
         },
       )
       .catch(() => {})
@@ -895,6 +912,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     mainCustomModel,
     configuredMainModel,
   );
+  // SenseVoice-only: the diarization-engine selector is greyed unless the main
+  // transcriber is a SenseVoice model.
+  const isSenseVoiceMain = isSenseVoiceModel(activeTranscriber);
   const activeLiveModel = resolveLiveModelSelectionValue(
     liveModelSelection,
     liveCustomModel,
@@ -921,6 +941,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       : diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION
         ? ''
         : DIARIZATION_DEFAULT_MODEL;
+
+  // SenseVoice diarization engine env value: 'funasr' (CAM++ default) or 'pyannote'.
+  const sensevoiceEngineValue =
+    sensevoiceEngineSelection === ENGINE_PYANNOTE_OPTION ? 'pyannote' : 'funasr';
 
   // MLX native-process start/stop handlers (depend on activeTranscriber declared above)
   const handleMLXStart = useCallback(async () => {
@@ -1118,6 +1142,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (!api?.config) return;
     void api.config.set('server.diarizationCustomModel', diarizationCustomModel).catch(() => {});
   }, [localSelectionsHydrated, diarizationCustomModel]);
+
+  useEffect(() => {
+    if (!localSelectionsHydrated) return;
+    const api = (window as any).electronAPI;
+    if (!api?.config) return;
+    void api.config
+      .set('server.sensevoiceDiarizationEngine', sensevoiceEngineSelection)
+      .catch(() => {});
+  }, [localSelectionsHydrated, sensevoiceEngineSelection]);
 
   // Check model download cache whenever the active model names or container state change
   useEffect(() => {
@@ -2012,6 +2045,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                             mainTranscriberModel: sanitizeModelName(activeTranscriber),
                             liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
                             diarizationModel: sanitizeModelName(activeDiarizationModel),
+                            sensevoiceDiarizationEngine: sensevoiceEngineValue,
                             ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
                           })
                         }
@@ -2037,6 +2071,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                             mainTranscriberModel: sanitizeModelName(activeTranscriber),
                             liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
                             diarizationModel: sanitizeModelName(activeDiarizationModel),
+                            sensevoiceDiarizationEngine: sensevoiceEngineValue,
                             ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
                           })
                         }
@@ -2606,6 +2641,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                   />
                 )}
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-slate-300">Diarization Engine</label>
+                </div>
+                <CustomSelect
+                  value={sensevoiceEngineSelection}
+                  onChange={setSensevoiceEngineSelection}
+                  options={SENSEVOICE_ENGINE_OPTIONS}
+                  className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
+                  disabled={isRunning || !isSenseVoiceMain}
+                />
               </div>
             </GlassCard>
           </div>
