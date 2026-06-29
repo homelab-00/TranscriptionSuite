@@ -310,3 +310,36 @@ class TestIntegratedDiarizationPredicate:
         from server.core.stt.backends.base import use_integrated_diarization_for
 
         assert use_integrated_diarization_for(None, "funasr") is False
+
+    def test_non_sensevoice_integrated_backend_keeps_single_pass(self) -> None:
+        # WhisperX/VibeVoice override transcribe_with_diarization and must KEEP
+        # their single-pass path; the SenseVoice engine resolver (which returns
+        # "pyannote" for them) must NOT disable it.
+        from server.core.stt.backends.base import (
+            DiarizedTranscriptionResult,
+            STTBackend,
+            use_integrated_diarization_for,
+        )
+
+        class _IntegratedNonSenseVoice(STTBackend):
+            def load(self, *a, **k): ...
+            def unload(self): ...
+            def is_loaded(self):
+                return True
+
+            def warmup(self): ...
+            def transcribe(self, *a, **k): ...
+            def supports_translation(self):
+                return False
+
+            def transcribe_with_diarization(self, *a, **k):  # overrides the base no-op
+                return DiarizedTranscriptionResult(segments=[], words=[], num_speakers=0)
+
+            @property
+            def backend_name(self):
+                return "whisperx"
+
+        be = _IntegratedNonSenseVoice()
+        # Realistic case: resolver returns "pyannote" for non-SenseVoice → still single-pass.
+        assert use_integrated_diarization_for(be, "pyannote") is True
+        assert use_integrated_diarization_for(be, "funasr") is True

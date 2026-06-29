@@ -212,12 +212,20 @@ class STTBackend(abc.ABC):
 def use_integrated_diarization_for(backend: STTBackend | None, resolved_engine: str) -> bool:
     """True when the route should use a backend's single-pass diarization.
 
-    Requires (a) the backend overrides ``transcribe_with_diarization`` and
-    (b) the resolved engine is ``"funasr"`` (CAM++). Any other engine routes to
-    the two-pass pyannote pipeline.
+    A backend qualifies only if it overrides ``transcribe_with_diarization``.
+    For SenseVoice, the single-pass (CAM++) path is additionally gated on the
+    resolved engine: ``"funasr"`` uses single-pass, ``"pyannote"`` routes to the
+    two-pass pipeline. Every OTHER integrated backend (WhisperX, VibeVoice) keeps
+    its single-pass path unconditionally — the SenseVoice engine resolver does
+    not apply to them.
     """
     if backend is None:
         return False
-    if resolved_engine != "funasr":
+    overrides = (
+        type(backend).transcribe_with_diarization is not STTBackend.transcribe_with_diarization
+    )
+    if not overrides:
         return False
-    return type(backend).transcribe_with_diarization is not STTBackend.transcribe_with_diarization
+    if backend.backend_name == "sensevoice":
+        return resolved_engine == "funasr"
+    return True
