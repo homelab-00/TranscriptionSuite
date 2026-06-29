@@ -81,7 +81,7 @@ def _format_spk(spk: Any) -> str:
         return raw or "UNKNOWN"
 
 
-_WORD_START_MARKER = "▁"  # SentencePiece "▁"
+_WORD_START_MARKER = "▁"  # U+2581; visually similar to "_" — named constant avoids confusion
 
 
 def _tokens_to_words(
@@ -101,11 +101,14 @@ def _tokens_to_words(
     cur_start: float | None = None
     cur_end: float | None = None
     try:
-        for piece, start, end in (t for t in tokens):
+        for piece, start, end in tokens:
             piece_s = str(piece)
             s = float(start) + segment_offset_s
             e = float(end) + segment_offset_s
             if piece_s == _WORD_START_MARKER:
+                if cur_text:
+                    words.append({"word": cur_text, "start": cur_start, "end": cur_end})
+                    cur_text, cur_start, cur_end = "", None, None
                 continue
             starts_word = piece_s.startswith(_WORD_START_MARKER)
             clean = piece_s[1:] if starts_word else piece_s

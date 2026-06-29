@@ -425,3 +425,18 @@ class TestTokensToWords:
         assert _tokens_to_words([], 0.0) == []
         assert _tokens_to_words(None, 0.0) == []  # type: ignore[arg-type]
         assert _tokens_to_words([["bad"]], 0.0) == []
+
+    def test_standalone_marker_separates_words(self) -> None:
+        from server.core.stt.backends.sensevoice_backend import _tokens_to_words
+
+        words = _tokens_to_words(
+            [["▁Hello", 0.0, 0.5], ["▁", 0.5, 0.6], ["world", 0.6, 1.0]],
+            segment_offset_s=0.0,
+        )
+        assert [w["word"] for w in words] == ["Hello", "world"]
+
+    def test_leading_standalone_marker_skipped(self) -> None:
+        from server.core.stt.backends.sensevoice_backend import _tokens_to_words
+
+        words = _tokens_to_words([["▁", 0.0, 0.1], ["Hello", 0.1, 0.5]], segment_offset_s=0.0)
+        assert [w["word"] for w in words] == ["Hello"]
