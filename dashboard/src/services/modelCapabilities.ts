@@ -190,7 +190,8 @@ export function supportsDiarization(modelName: string | null | undefined): boole
 
 /**
  * Returns true if the model supports FunASR-native CAM++ single-pass diarization.
- * SenseVoice-only — every other backend uses the pyannote two-pass path.
+ * SenseVoice-only (FunASR CAM++). Whisper/NeMo reach diarization via the pyannote
+ * two-pass path; VibeVoice uses its own integrated engine; whisper.cpp has none.
  */
 export function supportsFunasrDiarization(modelName: string | null | undefined): boolean {
   return isSenseVoiceModel(modelName);
