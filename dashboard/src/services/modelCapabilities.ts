@@ -189,6 +189,14 @@ export function supportsDiarization(modelName: string | null | undefined): boole
 }
 
 /**
+ * Returns true if the model supports FunASR-native CAM++ single-pass diarization.
+ * SenseVoice-only — every other backend uses the pyannote two-pass path.
+ */
+export function supportsFunasrDiarization(modelName: string | null | undefined): boolean {
+  return isSenseVoiceModel(modelName);
+}
+
+/**
  * Returns true if the model is an English-only Whisper variant (name ends with `.en`).
  */
 export function isEnglishOnlyWhisperModel(modelName: string | null | undefined): boolean {

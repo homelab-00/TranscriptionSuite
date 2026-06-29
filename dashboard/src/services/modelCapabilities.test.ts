@@ -13,6 +13,7 @@ import {
   supportsAutoDetect,
   supportsTranslation,
   supportsDiarization,
+  supportsFunasrDiarization,
   NEMO_LANGUAGES,
   CANARY_TRANSLATION_TARGETS,
   SENSEVOICE_LANGUAGES,
@@ -424,6 +425,22 @@ describe('supportsDiarization', () => {
   it('returns true for null/undefined', () => {
     expect(supportsDiarization(null)).toBe(true);
     expect(supportsDiarization(undefined)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// supportsFunasrDiarization
+// ---------------------------------------------------------------------------
+describe('supportsFunasrDiarization', () => {
+  it('returns true only for SenseVoice models', () => {
+    expect(supportsFunasrDiarization('iic/SenseVoiceSmall')).toBe(true);
+    expect(supportsFunasrDiarization('FunAudioLLM/SenseVoiceSmall')).toBe(true);
+  });
+  it('returns false for every other backend', () => {
+    expect(supportsFunasrDiarization('Systran/faster-whisper-large-v3')).toBe(false);
+    expect(supportsFunasrDiarization('nvidia/parakeet-tdt-0.6b-v3')).toBe(false);
+    expect(supportsFunasrDiarization('microsoft/VibeVoice-ASR')).toBe(false);
+    expect(supportsFunasrDiarization(null)).toBe(false);
   });
 });
 
