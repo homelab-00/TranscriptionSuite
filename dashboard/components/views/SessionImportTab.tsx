@@ -40,7 +40,6 @@ import {
   supportsAutoDetect,
   supportsTranslation,
   isCanaryModel,
-  supportsFunasrDiarization,
 } from '../../src/services/modelCapabilities';
 import { toast } from 'sonner';
 
@@ -93,8 +92,6 @@ export const SessionImportTab: React.FC = () => {
   const [hideTimestamps, setHideTimestamps] = useState(false);
   const [parallelDiarization, setParallelDiarization] = useState<boolean>(false);
   const [parallelDefault, setParallelDefault] = useState<boolean>(false);
-  // SenseVoice-only: CAM++ (funasr) is the default, pyannote is the override.
-  const [diarizationEngine, setDiarizationEngine] = useState<'funasr' | 'pyannote'>('funasr');
   const [multitrack, setMultitrack] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isDragOverWatch, setIsDragOverWatch] = useState(false);
@@ -115,7 +112,6 @@ export const SessionImportTab: React.FC = () => {
   const supportsExplicitWordTimestampToggle = activeModel
     ? supportsExplicitWordTimestampToggleForModel(activeModel)
     : backendType !== 'vibevoice_asr';
-  const showEngineSelector = supportsFunasrDiarization(activeModel);
 
   // gh-102 followup: file-import surface honors the same language /
   // translation selection the live-recording surface persists from
@@ -260,10 +256,6 @@ export const SessionImportTab: React.FC = () => {
     }
   }, [supportsExplicitWordTimestampToggle]);
 
-  useEffect(() => {
-    if (!showEngineSelector) setDiarizationEngine('funasr');
-  }, [showEngineSelector]);
-
   // Hide hint once a watch path is selected
   useEffect(() => {
     if (sessionWatchPath && showWatchHint) {
@@ -344,8 +336,6 @@ export const SessionImportTab: React.FC = () => {
         enable_diarization: multitrack ? false : diarization,
         enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
         parallel_diarization: diarization && !multitrack ? parallelDiarization : undefined,
-        diarization_engine:
-          showEngineSelector && diarization && !multitrack ? diarizationEngine : undefined,
         multitrack: multitrack || undefined,
       });
 
@@ -364,8 +354,6 @@ export const SessionImportTab: React.FC = () => {
       diarization,
       multitrack,
       parallelDiarization,
-      diarizationEngine,
-      showEngineSelector,
       supportsExplicitWordTimestampToggle,
       wordTimestamps,
       sessionWatchPath,
@@ -818,29 +806,6 @@ export const SessionImportTab: React.FC = () => {
                   }
                 />
               </div>
-              {showEngineSelector && (
-                <>
-                  <div className="h-px bg-white/5"></div>
-                  <div className="flex items-center justify-between gap-4 pl-1">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-white">Diarization Engine</p>
-                      <p className="text-xs text-slate-400">
-                        CAM++ (fast, built-in) or pyannote (two-pass)
-                      </p>
-                    </div>
-                    <select
-                      value={diarizationEngine}
-                      onChange={(e) =>
-                        setDiarizationEngine(e.target.value === 'pyannote' ? 'pyannote' : 'funasr')
-                      }
-                      className="focus:border-accent-cyan/50 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white scheme-dark outline-none"
-                    >
-                      <option value="funasr">CAM++</option>
-                      <option value="pyannote">pyannote</option>
-                    </select>
-                  </div>
-                </>
-              )}
             </>
           )}
           <div className="h-px bg-white/5"></div>
