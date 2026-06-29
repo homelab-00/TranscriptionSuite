@@ -343,3 +343,28 @@ class TestIntegratedDiarizationPredicate:
         # Realistic case: resolver returns "pyannote" for non-SenseVoice → still single-pass.
         assert use_integrated_diarization_for(be, "pyannote") is True
         assert use_integrated_diarization_for(be, "funasr") is True
+
+
+class TestBootstrapWarmDownload:
+    def _bootstrap(self):
+        import importlib.util
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "docker" / "bootstrap_runtime.py"
+        spec = importlib.util.spec_from_file_location("bootstrap_warm_under_test", path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+    def test_warm_download_is_non_fatal_on_failure(self) -> None:
+        from pathlib import Path
+
+        bootstrap = self._bootstrap()
+
+        # A venv_python that fails the subprocess must NOT raise.
+        result = bootstrap.warm_download_sensevoice_models(
+            venv_python=Path("/nonexistent/python"),
+            timeout_seconds=30,
+        )
+        assert result is False  # signalled failure, did not raise

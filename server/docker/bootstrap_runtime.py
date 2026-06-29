@@ -1361,6 +1361,50 @@ except Exception as exc:
     return result_payload
 
 
+def warm_download_sensevoice_models(
+    venv_python: Path,
+    timeout_seconds: int,
+) -> bool:
+    """Best-effort pre-fetch of cam++ + fsmn-vad into the HF cache.
+
+    Both repos are ungated (~30 MB total). Failure is non-fatal — the runtime
+    load-degrade still covers a missing model — so this never raises.
+    Returns True if the prefetch subprocess reported success.
+    """
+    prefetch = """
+import json
+try:
+    from huggingface_hub import snapshot_download
+    snapshot_download("funasr/campplus")
+    snapshot_download("funasr/fsmn-vad")
+    print(json.dumps({"ok": True}))
+except Exception as exc:
+    print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}))
+"""
+    try:
+        result = subprocess.run(
+            [str(venv_python), "-c", prefetch],
+            text=True,
+            capture_output=True,
+            timeout=max(60, min(timeout_seconds, 600)),
+            check=False,
+        )
+    except Exception as exc:
+        log(f"SenseVoice CAM++ warm-download skipped (non-fatal): {type(exc).__name__}: {exc}")
+        return False
+
+    output = (result.stdout or "").strip().splitlines()
+    try:
+        payload = json.loads(output[-1]) if output else {"ok": False}
+    except json.JSONDecodeError:
+        payload = {"ok": False}
+    if payload.get("ok"):
+        log("SenseVoice CAM++ models warm-downloaded (cam++, fsmn-vad)")
+        return True
+    log(f"SenseVoice CAM++ warm-download did not complete (non-fatal): {payload.get('error', '')}")
+    return False
+
+
 def check_vibevoice_asr_import(
     venv_python: Path,
     timeout_seconds: int,
@@ -2228,6 +2272,10 @@ def main() -> int:
                 )
                 if sensevoice_status.get("available"):
                     log("FunASR installed")
+                    warm_download_sensevoice_models(
+                        venv_python=venv_python,
+                        timeout_seconds=timeout_seconds,
+                    )
                 else:
                     failure_error = str(sensevoice_status.get("error", "")).strip()
                     log(
