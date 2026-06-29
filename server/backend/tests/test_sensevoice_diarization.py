@@ -95,17 +95,19 @@ def _load(model: _FakeAutoModel, *, cam: bool = True):
 class TestAlwaysLoadCamPP:
     def test_load_builds_with_spk_model_when_enabled(self) -> None:
         model = _FakeAutoModel()
-        _, stubs = _load(model, cam=True)
+        backend, stubs = _load(model, cam=True)
         kwargs = stubs["funasr"].AutoModel.call_args.kwargs
         assert kwargs["spk_model"] == "cam++"
         assert kwargs["spk_mode"] == "vad_segment"
         assert kwargs["vad_model"] == "fsmn-vad"
+        assert backend._diarization_loaded is True
 
     def test_load_omits_spk_model_when_disabled(self) -> None:
         model = _FakeAutoModel()
-        _, stubs = _load(model, cam=False)
+        backend, stubs = _load(model, cam=False)
         kwargs = stubs["funasr"].AutoModel.call_args.kwargs
         assert "spk_model" not in kwargs
+        assert backend._diarization_loaded is False
 
     def test_transcribe_reads_sentence_key(self) -> None:
         # With cam++ loaded, segments arrive under "sentence", not "text".
@@ -140,3 +142,19 @@ class TestAlwaysLoadCamPP:
         with patch.dict(sys.modules, stubs):
             segments, _ = backend.transcribe(np.zeros(16000, dtype=np.float32))
         assert [s.text for s in segments] == ["Legacy."]
+
+    def test_cam_build_fails_falls_back_to_transcriber_only(self) -> None:
+        from server.core.stt.backends.sensevoice_backend import SenseVoiceBackend
+
+        model = _FakeAutoModel()
+        stubs = _funasr_stub(model)
+        # First AutoModel(...) (with spk keys) raises; retry without spk keys succeeds.
+        stubs["funasr"].AutoModel.side_effect = [RuntimeError("cam++ unavailable"), model]
+        with patch.dict(sys.modules, stubs):
+            backend = SenseVoiceBackend()
+            backend.load("iic/SenseVoiceSmall", device="cpu", sensevoice_diarization=True)
+        assert backend.is_loaded()
+        assert backend._diarization_loaded is False
+        second_call_kwargs = stubs["funasr"].AutoModel.call_args_list[1].kwargs
+        assert "spk_model" not in second_call_kwargs
+        assert "spk_mode" not in second_call_kwargs
