@@ -1386,6 +1386,7 @@ except Exception as exc:
             [str(venv_python), "-c", prefetch],
             text=True,
             capture_output=True,
+            # Floor at 60 s — adequate for ~30 MB on a slow link; cap at 600 s.
             timeout=max(60, min(timeout_seconds, 600)),
             check=False,
         )
@@ -1401,7 +1402,11 @@ except Exception as exc:
     if payload.get("ok"):
         log("SenseVoice CAM++ models warm-downloaded (cam++, fsmn-vad)")
         return True
-    log(f"SenseVoice CAM++ warm-download did not complete (non-fatal): {payload.get('error', '')}")
+    error_detail = payload.get("error", "")
+    log(
+        "SenseVoice CAM++ warm-download did not complete (non-fatal)"
+        + (f": {error_detail}" if error_detail else "")
+    )
     return False
 
 

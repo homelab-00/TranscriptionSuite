@@ -368,3 +368,29 @@ class TestBootstrapWarmDownload:
             timeout_seconds=30,
         )
         assert result is False  # signalled failure, did not raise
+
+    def test_warm_download_returns_true_on_success(self) -> None:
+        import subprocess as _sp
+        from pathlib import Path
+
+        bootstrap = self._bootstrap()
+        fake = _sp.CompletedProcess(args=[], returncode=0, stdout='{"ok": true}\n', stderr="")
+        with patch.object(bootstrap.subprocess, "run", return_value=fake):
+            ok = bootstrap.warm_download_sensevoice_models(
+                venv_python=Path("/any"), timeout_seconds=60
+            )
+        assert ok is True
+
+    def test_warm_download_returns_false_on_non_json_stdout(self) -> None:
+        import subprocess as _sp
+        from pathlib import Path
+
+        bootstrap = self._bootstrap()
+        fake = _sp.CompletedProcess(
+            args=[], returncode=1, stdout="Traceback (most recent call last):\n", stderr=""
+        )
+        with patch.object(bootstrap.subprocess, "run", return_value=fake):
+            ok = bootstrap.warm_download_sensevoice_models(
+                venv_python=Path("/any"), timeout_seconds=60
+            )
+        assert ok is False
