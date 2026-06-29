@@ -333,6 +333,15 @@ diarization:
     # Note that when this is set to (false) we also unload the main model during diarization.
     parallel: false
 
+    # Default speaker-diarization engine for the SenseVoice STT model ONLY.
+    # "funasr"   - FunASR-native CAM++ single-pass (default; fast, ungated, no HF token)
+    # "pyannote" - the standard two-pass pyannote diarizer (override)
+    # Ignored for all non-SenseVoice models — this setting does not affect them;
+    # each backend keeps its own diarization behaviour.
+    # The dashboard can override this per-transcription.
+    # Default: "funasr"
+    sensevoice_engine: "funasr"
+
 # ----------------------------------------------------------------------------
 # Audio Settings
 # ----------------------------------------------------------------------------
