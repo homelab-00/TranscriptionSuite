@@ -244,6 +244,7 @@ class ServerConfig:
         ("MAIN_TRANSCRIBER_MODEL", ("main_transcriber", "model")),
         ("LIVE_TRANSCRIBER_MODEL", ("live_transcriber", "model")),
         ("DIARIZATION_MODEL", ("diarization", "model")),
+        ("SENSEVOICE_DIARIZATION_ENGINE", ("diarization", "sensevoice_engine")),
         ("WHISPERCPP_SERVER_URL", ("whisper_cpp", "server_url")),
         ("WHISPERCPP_CHUNK_DURATION_S", ("whisper_cpp", "chunk_duration_s")),
         ("WHISPERCPP_INFERENCE_TIMEOUT_S", ("whisper_cpp", "inference_timeout_s")),
