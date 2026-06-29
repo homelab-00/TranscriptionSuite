@@ -104,6 +104,7 @@ class SenseVoiceBackend(STTBackend):
         self._model: Any | None = None
         self._model_name: str | None = None
         self._device: str | None = None
+        self._diarization_loaded: bool = False
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -115,18 +116,41 @@ class SenseVoiceBackend(STTBackend):
         hf_repo_id = _resolve_hf_repo_id(model_name)
 
         logger.info(f"Loading SenseVoice model: {model_name} (hf:{hf_repo_id}) on {funasr_device}")
-        # hub="hf": pull weights from HuggingFace, not the CN-hosted ModelScope.
-        # The repo id must be the HF namespace (FunAudioLLM/…), not the ModelScope
-        # "iic/…" id, which 404s on HF — see _resolve_hf_repo_id.
-        # disable_update=True: skip the ModelScope version ping (offline-friendly).
-        self._model = AutoModel(
-            model=hf_repo_id,
-            vad_model="fsmn-vad",
-            vad_kwargs={"max_single_segment_time": 30000},
-            device=funasr_device,
-            hub="hf",
-            disable_update=True,
-        )
+        # CAM++ single-pass diarization is the default for SenseVoice. cam++ is
+        # ~28 MB, so we build it into the model unconditionally (when requested)
+        # rather than reloading on a per-job toggle. Disable via
+        # sensevoice_diarization=False (e.g. cam++ unavailable offline).
+        want_diarization = bool(kwargs.get("sensevoice_diarization", True))
+        model_kwargs: dict[str, Any] = {
+            "model": hf_repo_id,
+            "vad_model": "fsmn-vad",
+            "vad_kwargs": {"max_single_segment_time": 30000},
+            "device": funasr_device,
+            "hub": "hf",
+            "disable_update": True,
+        }
+        if want_diarization:
+            # spk_mode="vad_segment" matches SenseVoice (no token timestamps) and
+            # skips funasr's punc_segment warning + forced fallback.
+            model_kwargs["spk_model"] = "cam++"
+            model_kwargs["spk_mode"] = "vad_segment"
+        try:
+            self._model = AutoModel(**model_kwargs)
+        except Exception:
+            if want_diarization:
+                logger.warning(
+                    "SenseVoice: building with cam++ failed; retrying transcriber-only "
+                    "(diarization will fall back to pyannote).",
+                    exc_info=True,
+                )
+                model_kwargs.pop("spk_model", None)
+                model_kwargs.pop("spk_mode", None)
+                self._model = AutoModel(**model_kwargs)
+                self._diarization_loaded = False
+            else:
+                raise
+        else:
+            self._diarization_loaded = want_diarization
         self._model_name = model_name
         self._device = funasr_device
         logger.info("SenseVoice model loaded")
@@ -135,6 +159,7 @@ class SenseVoiceBackend(STTBackend):
         self._model = None
         self._model_name = None
         self._device = None
+        self._diarization_loaded = False
         clear_gpu_cache()
 
     def is_loaded(self) -> bool:
@@ -243,7 +268,9 @@ class SenseVoiceBackend(STTBackend):
         if isinstance(sentence_info, list) and sentence_info:
             segments: list[BackendSegment] = []
             for sentence in sentence_info:
-                text = rich_transcription_postprocess(str(sentence.get("text", "")))
+                text = rich_transcription_postprocess(
+                    str(sentence.get("sentence") or sentence.get("text") or "")
+                )
                 start = float(sentence.get("start", 0.0)) / 1000.0
                 end = float(sentence.get("end", 0.0)) / 1000.0
                 segments.append(BackendSegment(text=text, start=start, end=end, words=[]))
