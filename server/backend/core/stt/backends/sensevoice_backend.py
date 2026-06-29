@@ -337,8 +337,8 @@ class SenseVoiceBackend(STTBackend):
                 text = rich_transcription_postprocess(
                     str(sentence.get("sentence") or sentence.get("text") or "")
                 )
-                start = float(sentence.get("start", 0.0)) / 1000.0
-                end = float(sentence.get("end", 0.0)) / 1000.0
+                start = float(sentence.get("start") or 0) / 1000.0
+                end = float(sentence.get("end") or 0) / 1000.0
                 segments.append(BackendSegment(text=text, start=start, end=end, words=[]))
             return segments, info
 
@@ -380,8 +380,8 @@ class SenseVoiceBackend(STTBackend):
                 segments.append(
                     {
                         "text": text,
-                        "start": float(sentence.get("start", 0.0)) / 1000.0,
-                        "end": float(sentence.get("end", 0.0)) / 1000.0,
+                        "start": float(sentence.get("start") or 0) / 1000.0,
+                        "end": float(sentence.get("end") or 0) / 1000.0,
                         "speaker": speaker,
                         "words": [],
                     }

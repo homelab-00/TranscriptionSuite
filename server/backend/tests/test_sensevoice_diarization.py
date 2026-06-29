@@ -228,3 +228,46 @@ class TestCamPPSinglePass:
         assert res.num_speakers == 0
         assert res.segments[0]["speaker"] == "UNKNOWN"
         assert res.segments[0]["text"] == "Fallback text."
+
+    def test_none_timing_does_not_drop_transcript(self) -> None:
+        # funasr can emit start/end=None on a VAD edge; must NOT raise (never drop).
+        model = _FakeAutoModel(
+            [
+                {
+                    "text": "<|en|>full",
+                    "sentence_info": [
+                        {"sentence": "<|en|>Hi.", "start": None, "end": None, "spk": 0},
+                    ],
+                }
+            ]
+        )
+        backend, stubs = _load(model, cam=True)
+        with patch.dict(sys.modules, stubs):
+            res = backend.transcribe_with_diarization(np.zeros(16000, dtype=np.float32))
+        assert res is not None
+        assert res.segments[0]["text"] == "Hi."
+        assert res.segments[0]["start"] == 0.0
+        assert res.segments[0]["end"] == 0.0
+
+    def test_raises_if_model_not_loaded(self) -> None:
+        from server.core.stt.backends.sensevoice_backend import SenseVoiceBackend
+
+        with pytest.raises(RuntimeError, match="not loaded"):
+            SenseVoiceBackend().transcribe_with_diarization(np.zeros(16000, dtype=np.float32))
+
+
+class TestFormatSpk:
+    @pytest.mark.parametrize(
+        ("val", "expected"),
+        [
+            (None, "UNKNOWN"),
+            (0, "SPEAKER_00"),
+            (2.0, "SPEAKER_02"),
+            ("3", "SPEAKER_03"),
+            ("", "UNKNOWN"),
+        ],
+    )
+    def test_format_spk(self, val: object, expected: str) -> None:
+        from server.core.stt.backends.sensevoice_backend import _format_spk
+
+        assert _format_spk(val) == expected
