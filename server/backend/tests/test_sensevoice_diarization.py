@@ -10,7 +10,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest  # noqa: F401
+import pytest
 
 # --- config.resolve_sensevoice_diarization_engine --------------------------
 
@@ -158,3 +158,73 @@ class TestAlwaysLoadCamPP:
         second_call_kwargs = stubs["funasr"].AutoModel.call_args_list[1].kwargs
         assert "spk_model" not in second_call_kwargs
         assert "spk_mode" not in second_call_kwargs
+
+
+class TestCamPPSinglePass:
+    def test_parses_spk_into_speaker_labels(self) -> None:
+        model = _FakeAutoModel(
+            [
+                {
+                    "text": "<|en|>full",
+                    "sentence_info": [
+                        {"sentence": "<|en|>Hi there.", "start": 0, "end": 1500, "spk": 0},
+                        {"sentence": "<|en|>Hello back.", "start": 1500, "end": 3000, "spk": 1},
+                    ],
+                }
+            ]
+        )
+        backend, stubs = _load(model, cam=True)
+        with patch.dict(sys.modules, stubs):
+            res = backend.transcribe_with_diarization(np.zeros(48000, dtype=np.float32))
+        assert res is not None
+        assert [s["speaker"] for s in res.segments] == ["SPEAKER_00", "SPEAKER_01"]
+        assert [s["text"] for s in res.segments] == ["Hi there.", "Hello back."]
+        assert res.segments[0]["start"] == 0.0 and res.segments[0]["end"] == pytest.approx(1.5)
+        assert res.words == []
+        assert res.num_speakers == 2
+
+    def test_single_speaker_all_spk0(self) -> None:
+        model = _FakeAutoModel(
+            [
+                {
+                    "text": "<|en|>full",
+                    "sentence_info": [
+                        {"sentence": "<|en|>One.", "start": 0, "end": 1000, "spk": 0},
+                        {"sentence": "<|en|>Two.", "start": 1000, "end": 2000, "spk": 0},
+                    ],
+                }
+            ]
+        )
+        backend, stubs = _load(model, cam=True)
+        with patch.dict(sys.modules, stubs):
+            res = backend.transcribe_with_diarization(np.zeros(32000, dtype=np.float32))
+        assert {s["speaker"] for s in res.segments} == {"SPEAKER_00"}
+        assert res.num_speakers == 1
+
+    def test_empty_sentence_info_degrades_to_plain(self) -> None:
+        model = _FakeAutoModel([{"text": "<|en|>Just merged text."}])  # no sentence_info
+        backend, stubs = _load(model, cam=True)
+        with patch.dict(sys.modules, stubs):
+            res = backend.transcribe_with_diarization(np.zeros(16000, dtype=np.float32))
+        assert res is not None
+        assert len(res.segments) == 1
+        assert res.segments[0]["text"] == "Just merged text."
+        assert res.segments[0]["speaker"] == "UNKNOWN"
+        assert res.num_speakers == 0
+
+    def test_diarized_generate_error_degrades_to_plain(self) -> None:
+        # The spk-path crash (distribute_spk TypeError) is specific to the
+        # diarized call; a plain re-transcribe of the same audio still works.
+        model = _FakeAutoModel()
+        model.generate.side_effect = [
+            TypeError("'>' not supported between 'float' and 'NoneType'"),
+            [{"text": "<|en|>Fallback text."}],
+        ]
+        backend, stubs = _load(model, cam=True)
+        with patch.dict(sys.modules, stubs):
+            res = backend.transcribe_with_diarization(np.zeros(16000, dtype=np.float32))
+        # Transcript preserved, no labels — never dropped.
+        assert res is not None
+        assert res.num_speakers == 0
+        assert res.segments[0]["speaker"] == "UNKNOWN"
+        assert res.segments[0]["text"] == "Fallback text."
