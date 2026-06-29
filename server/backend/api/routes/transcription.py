@@ -346,20 +346,32 @@ async def transcribe_audio(
 
             return _attach_diar_status(result_dict)
 
-        # Resolve the diarization engine (funasr CAM++ single-pass vs pyannote two-pass).
-        from server.config import resolve_sensevoice_diarization_engine
-        from server.core.stt.backends.base import use_integrated_diarization_for
-
+        # Resolve the diarization engine (funasr CAM++ single-pass vs pyannote two-pass)
+        # only when diarization is requested. Resolving lazily means a request without
+        # app.state.config (e.g. a minimal test harness) never touches it, and the
+        # non-diarized path does zero engine-resolution work. If config is absent the
+        # resolver falls back to its own DEFAULT_SENSEVOICE_DIARIZATION_ENGINE ("funasr").
         backend = engine._backend
-        resolved_diar_engine = resolve_sensevoice_diarization_engine(
-            getattr(engine, "model_name", None),
-            diarization_engine,
-            request.app.state.config.get("diarization", "sensevoice_engine", default="funasr"),
-            funasr_diar_available=getattr(backend, "_diarization_loaded", False),
-        )
-        use_integrated_diarization = diarization and use_integrated_diarization_for(
-            backend, resolved_diar_engine
-        )
+        use_integrated_diarization = False
+        if diarization:
+            from server.config import resolve_sensevoice_diarization_engine
+            from server.core.stt.backends.base import use_integrated_diarization_for
+
+            app_config = getattr(request.app.state, "config", None)
+            sensevoice_engine_default = (
+                app_config.get("diarization", "sensevoice_engine", default="funasr")
+                if app_config is not None
+                else "funasr"
+            )
+            resolved_diar_engine = resolve_sensevoice_diarization_engine(
+                getattr(engine, "model_name", None),
+                diarization_engine,
+                sensevoice_engine_default,
+                funasr_diar_available=getattr(backend, "_diarization_loaded", False),
+            )
+            use_integrated_diarization = use_integrated_diarization_for(
+                backend, resolved_diar_engine
+            )
 
         if use_integrated_diarization:
             # --- Integrated backend single-pass path (e.g. WhisperX, VibeVoice) ---
@@ -911,20 +923,24 @@ def _run_file_import(
                 )
             return
 
-        # Resolve the diarization engine (funasr CAM++ single-pass vs pyannote two-pass).
+        # Resolve the diarization engine (funasr CAM++ single-pass vs pyannote two-pass)
+        # only when diarization is requested, mirroring the first gate site so the
+        # non-diarized path does zero engine-resolution work.
         backend = engine._backend
-        from server.config import resolve_sensevoice_diarization_engine
-        from server.core.stt.backends.base import use_integrated_diarization_for
+        use_integrated_diarization = False
+        if enable_diarization:
+            from server.config import resolve_sensevoice_diarization_engine
+            from server.core.stt.backends.base import use_integrated_diarization_for
 
-        resolved_diar_engine = resolve_sensevoice_diarization_engine(
-            getattr(engine, "model_name", None),
-            diarization_engine,
-            sensevoice_engine_default,
-            funasr_diar_available=getattr(backend, "_diarization_loaded", False),
-        )
-        use_integrated_diarization = enable_diarization and use_integrated_diarization_for(
-            backend, resolved_diar_engine
-        )
+            resolved_diar_engine = resolve_sensevoice_diarization_engine(
+                getattr(engine, "model_name", None),
+                diarization_engine,
+                sensevoice_engine_default,
+                funasr_diar_available=getattr(backend, "_diarization_loaded", False),
+            )
+            use_integrated_diarization = use_integrated_diarization_for(
+                backend, resolved_diar_engine
+            )
 
         diarization_outcome: dict[str, Any] = {
             "requested": bool(enable_diarization),
