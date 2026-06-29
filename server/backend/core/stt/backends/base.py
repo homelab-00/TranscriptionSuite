@@ -207,3 +207,17 @@ class STTBackend(abc.ABC):
     @abc.abstractmethod
     def backend_name(self) -> str:
         """Short identifier for this backend (e.g. ``"whisper"``, ``"parakeet"``)."""
+
+
+def use_integrated_diarization_for(backend: STTBackend | None, resolved_engine: str) -> bool:
+    """True when the route should use a backend's single-pass diarization.
+
+    Requires (a) the backend overrides ``transcribe_with_diarization`` and
+    (b) the resolved engine is ``"funasr"`` (CAM++). Any other engine routes to
+    the two-pass pyannote pipeline.
+    """
+    if backend is None:
+        return False
+    if resolved_engine != "funasr":
+        return False
+    return type(backend).transcribe_with_diarization is not STTBackend.transcribe_with_diarization

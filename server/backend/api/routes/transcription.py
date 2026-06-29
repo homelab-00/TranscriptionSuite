@@ -32,7 +32,7 @@ from server.api.routes.utils import get_client_name
 from server.config import resolve_main_transcriber_model, resolve_parallel_diarization_default
 from server.core.json_utils import sanitize_for_json
 from server.core.model_manager import TranscriptionCancelledError
-from server.core.stt.backends.base import BackendDependencyError, STTBackend
+from server.core.stt.backends.base import BackendDependencyError
 from server.database.dedup_query import find_duplicates_anywhere
 from server.database.job_repository import (
     create_job,
@@ -94,6 +94,7 @@ async def transcribe_audio(
     diarization: bool | None = Form(None),
     expected_speakers: int | None = Form(None),
     parallel_diarization: bool | None = Form(None),
+    diarization_engine: str | None = Form(None),
     multitrack: bool = Form(False),
     profile_id: int | None = Form(None),
 ) -> dict[str, Any]:
@@ -345,13 +346,19 @@ async def transcribe_audio(
 
             return _attach_diar_status(result_dict)
 
-        # Check if the backend supports single-pass diarization (WhisperX)
+        # Resolve the diarization engine (funasr CAM++ single-pass vs pyannote two-pass).
+        from server.config import resolve_sensevoice_diarization_engine
+        from server.core.stt.backends.base import use_integrated_diarization_for
+
         backend = engine._backend
-        use_integrated_diarization = (
-            diarization
-            and backend is not None
-            and type(backend).transcribe_with_diarization
-            is not STTBackend.transcribe_with_diarization
+        resolved_diar_engine = resolve_sensevoice_diarization_engine(
+            getattr(engine, "model_name", None),
+            diarization_engine,
+            request.app.state.config.get("diarization", "sensevoice_engine", default="funasr"),
+            funasr_diar_available=getattr(backend, "_diarization_loaded", False),
+        )
+        use_integrated_diarization = diarization and use_integrated_diarization_for(
+            backend, resolved_diar_engine
         )
 
         if use_integrated_diarization:
@@ -830,6 +837,8 @@ def _run_file_import(
     expected_speakers: int | None,
     parallel_diarization: bool | None,
     use_parallel_default: bool,
+    diarization_engine: str | None = None,
+    sensevoice_engine_default: str = "funasr",
     multitrack: bool,
     job_id: str,
     event_loop: Any = None,
@@ -902,13 +911,19 @@ def _run_file_import(
                 )
             return
 
-        # Check if the backend supports single-pass diarization (WhisperX)
+        # Resolve the diarization engine (funasr CAM++ single-pass vs pyannote two-pass).
         backend = engine._backend
-        use_integrated_diarization = (
-            enable_diarization
-            and backend is not None
-            and type(backend).transcribe_with_diarization
-            is not STTBackend.transcribe_with_diarization
+        from server.config import resolve_sensevoice_diarization_engine
+        from server.core.stt.backends.base import use_integrated_diarization_for
+
+        resolved_diar_engine = resolve_sensevoice_diarization_engine(
+            getattr(engine, "model_name", None),
+            diarization_engine,
+            sensevoice_engine_default,
+            funasr_diar_available=getattr(backend, "_diarization_loaded", False),
+        )
+        use_integrated_diarization = enable_diarization and use_integrated_diarization_for(
+            backend, resolved_diar_engine
         )
 
         diarization_outcome: dict[str, Any] = {
@@ -1160,6 +1175,7 @@ async def import_and_transcribe(
     enable_word_timestamps: bool = Form(True),
     expected_speakers: int | None = Form(None),
     parallel_diarization: bool | None = Form(None),
+    diarization_engine: str | None = Form(None),
     multitrack: bool = Form(False),
 ) -> dict[str, Any]:
     """
@@ -1288,6 +1304,10 @@ async def import_and_transcribe(
             expected_speakers=expected_speakers,
             parallel_diarization=parallel_diarization,
             use_parallel_default=use_parallel_default,
+            diarization_engine=diarization_engine,
+            sensevoice_engine_default=config.get(
+                "diarization", "sensevoice_engine", default="funasr"
+            ),
             multitrack=multitrack,
             job_id=job_id,
             event_loop=loop,

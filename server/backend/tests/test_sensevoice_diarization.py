@@ -271,3 +271,42 @@ class TestFormatSpk:
         from server.core.stt.backends.sensevoice_backend import _format_spk
 
         assert _format_spk(val) == expected
+
+
+class TestIntegratedDiarizationPredicate:
+    def test_funasr_engine_uses_integrated_for_sensevoice(self) -> None:
+        from server.core.stt.backends.base import use_integrated_diarization_for
+        from server.core.stt.backends.sensevoice_backend import SenseVoiceBackend
+
+        assert use_integrated_diarization_for(SenseVoiceBackend(), "funasr") is True
+
+    def test_pyannote_engine_skips_integrated(self) -> None:
+        from server.core.stt.backends.base import use_integrated_diarization_for
+        from server.core.stt.backends.sensevoice_backend import SenseVoiceBackend
+
+        assert use_integrated_diarization_for(SenseVoiceBackend(), "pyannote") is False
+
+    def test_backend_without_override_is_false(self) -> None:
+        from server.core.stt.backends.base import STTBackend, use_integrated_diarization_for
+
+        class _Plain(STTBackend):  # minimal stub; does NOT override transcribe_with_diarization
+            def load(self, *a, **k): ...
+            def unload(self): ...
+            def is_loaded(self):
+                return True
+
+            def warmup(self): ...
+            def transcribe(self, *a, **k): ...
+            def supports_translation(self):
+                return False
+
+            @property
+            def backend_name(self):
+                return "plain"
+
+        assert use_integrated_diarization_for(_Plain(), "funasr") is False
+
+    def test_none_backend_is_false(self) -> None:
+        from server.core.stt.backends.base import use_integrated_diarization_for
+
+        assert use_integrated_diarization_for(None, "funasr") is False
