@@ -394,3 +394,34 @@ class TestBootstrapWarmDownload:
                 venv_python=Path("/any"), timeout_seconds=60
             )
         assert ok is False
+
+
+class TestTokensToWords:
+    def test_merges_sentencepiece_subwords_on_marker(self) -> None:
+        from server.core.stt.backends.sensevoice_backend import _tokens_to_words
+
+        # SentencePiece: "▁" marks a word start; pieces in seconds.
+        tokens = [
+            ["▁Hello", 0.30, 0.54],
+            ["▁wor", 0.54, 0.78],
+            ["ld", 0.78, 0.96],
+        ]
+        words = _tokens_to_words(tokens, segment_offset_s=0.0)
+        assert [w["word"] for w in words] == ["Hello", "world"]
+        assert words[0]["start"] == pytest.approx(0.30)
+        assert words[1]["start"] == pytest.approx(0.54)
+        assert words[1]["end"] == pytest.approx(0.96)
+
+    def test_applies_segment_offset(self) -> None:
+        from server.core.stt.backends.sensevoice_backend import _tokens_to_words
+
+        words = _tokens_to_words([["▁Hi", 0.0, 0.2]], segment_offset_s=10.0)
+        assert words[0]["start"] == pytest.approx(10.0)
+        assert words[0]["end"] == pytest.approx(10.2)
+
+    def test_empty_or_malformed_returns_empty(self) -> None:
+        from server.core.stt.backends.sensevoice_backend import _tokens_to_words
+
+        assert _tokens_to_words([], 0.0) == []
+        assert _tokens_to_words(None, 0.0) == []  # type: ignore[arg-type]
+        assert _tokens_to_words([["bad"]], 0.0) == []

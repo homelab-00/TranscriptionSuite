@@ -81,6 +81,48 @@ def _format_spk(spk: Any) -> str:
         return raw or "UNKNOWN"
 
 
+_WORD_START_MARKER = "▁"  # SentencePiece "▁"
+
+
+def _tokens_to_words(
+    tokens: list[list[Any]] | None, segment_offset_s: float
+) -> list[dict[str, Any]]:
+    """Merge CTC sub-word tokens ([piece, start_s, end_s]) into words.
+
+    A new word starts on a piece beginning with the SentencePiece "▁" marker.
+    Times are in seconds; ``segment_offset_s`` is added to make VAD-segment-relative
+    timestamps absolute. Malformed input yields an empty list (caller falls back
+    to segment-level).
+    """
+    if not tokens:
+        return []
+    words: list[dict[str, Any]] = []
+    cur_text = ""
+    cur_start: float | None = None
+    cur_end: float | None = None
+    try:
+        for piece, start, end in (t for t in tokens):
+            piece_s = str(piece)
+            s = float(start) + segment_offset_s
+            e = float(end) + segment_offset_s
+            if piece_s == _WORD_START_MARKER:
+                continue
+            starts_word = piece_s.startswith(_WORD_START_MARKER)
+            clean = piece_s[1:] if starts_word else piece_s
+            if starts_word or cur_start is None:
+                if cur_text:
+                    words.append({"word": cur_text, "start": cur_start, "end": cur_end})
+                cur_text, cur_start, cur_end = clean, s, e
+            else:
+                cur_text += clean
+                cur_end = e
+    except (TypeError, ValueError):
+        return []
+    if cur_text:
+        words.append({"word": cur_text, "start": cur_start, "end": cur_end})
+    return words
+
+
 def _write_temp_wav(audio: np.ndarray, sample_rate: int) -> str:
     """Write float32 mono audio to a temp 16-bit WAV and return its path."""
     fd, path = tempfile.mkstemp(suffix=".wav", prefix="sensevoice_")
