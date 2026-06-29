@@ -16,7 +16,13 @@ import pytest  # noqa: F401
 
 
 class TestResolveEngine:
-    def _resolve(self, model_name, request_value, config_default, available):
+    def _resolve(
+        self,
+        model_name: str | None,
+        request_value: str | None,
+        config_default: str | None,
+        available: bool,
+    ) -> str:
         from server.config import resolve_sensevoice_diarization_engine
 
         return resolve_sensevoice_diarization_engine(
@@ -30,10 +36,14 @@ class TestResolveEngine:
         assert (
             self._resolve("Systran/faster-whisper-large-v3", "funasr", "funasr", True) == "pyannote"
         )
+        assert self._resolve(None, "funasr", "funasr", True) == "pyannote"
 
     def test_sensevoice_auto_uses_config_default(self) -> None:
         assert self._resolve("iic/SenseVoiceSmall", "auto", "funasr", True) == "funasr"
         assert self._resolve("iic/SenseVoiceSmall", None, "pyannote", True) == "pyannote"
+        # config_default=None → falls back to DEFAULT_SENSEVOICE_DIARIZATION_ENGINE ("funasr")
+        assert self._resolve("iic/SenseVoiceSmall", None, None, True) == "funasr"
+        assert self._resolve("iic/SenseVoiceSmall", "auto", None, True) == "funasr"
 
     def test_sensevoice_explicit_override(self) -> None:
         assert self._resolve("iic/SenseVoiceSmall", "pyannote", "funasr", True) == "pyannote"
