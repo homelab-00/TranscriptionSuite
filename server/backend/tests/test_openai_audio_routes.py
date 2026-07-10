@@ -58,6 +58,10 @@ def openai_client():
     app.include_router(openai_audio.router, prefix="/v1/audio")
 
     mock_engine = MagicMock()
+    # A real engine always exposes a string model_name; the diarization-engine
+    # resolver reads it, so keep the mock faithful (a bare MagicMock attribute
+    # would crash is_sensevoice_model's regex).
+    mock_engine.model_name = "test-model"
     mock_engine.transcribe_file.return_value = _make_result()
 
     # `ensure_transcription_loaded` is the canonical self-heal entry point
@@ -740,6 +744,9 @@ def diarization_client():
 
     mock_engine = MagicMock()
     mock_engine._backend = None  # force Path 2 (parallel/sequential)
+    # Non-SenseVoice string model_name: resolver returns "pyannote", and with
+    # _backend=None the gate stays False — Path 2 runs exactly as before.
+    mock_engine.model_name = "test-model"
     mock_engine.transcribe_file.return_value = _make_result()
 
     app.state.model_manager = SimpleNamespace(
@@ -1133,3 +1140,197 @@ class TestDiarizationOutcomeHeaderOverOpenAI:
 
         assert resp.status_code == 200
         assert "X-Diarization-Status" not in resp.headers
+
+
+# ------------------------------------------------------------------
+# SenseVoice diarization-engine resolver gate (server-wide setting)
+# ------------------------------------------------------------------
+
+
+class _CountingIntegratedBackend:
+    """Duck-typed backend that overrides ``transcribe_with_diarization`` and
+    records how many times the route drove its single-pass path.
+
+    ``backend_name`` and ``_diarization_loaded`` are configurable so a single
+    class covers SenseVoice (gated on the resolved engine) and non-SenseVoice
+    integrated backends (WhisperX/VibeVoice — always single-pass).
+    """
+
+    preferred_input_sample_rate_hz = 16000
+
+    def __init__(self, backend_name: str, *, diarization_loaded: bool = True):
+        self._name = backend_name
+        self._diarization_loaded = diarization_loaded
+        self.calls = 0
+
+    def transcribe_with_diarization(self, audio_data, *, audio_sample_rate, **kwargs):
+        self.calls += 1
+        return SimpleNamespace(
+            segments=[{"start_time": 0.0, "end_time": 1.0, "text": "hi", "speaker": "SPEAKER_00"}],
+            words=[],
+            language="en",
+            language_probability=0.9,
+            num_speakers=1,
+        )
+
+    @property
+    def backend_name(self) -> str:
+        return self._name
+
+
+def _build_engine_resolver_app(*, backend, model_name: str, sensevoice_engine: str):
+    """Mount the openai router with a SenseVoice-capable engine and a server-wide
+    ``diarization.sensevoice_engine`` config value."""
+    from server.api.routes import openai_audio
+
+    app = FastAPI()
+    app.include_router(openai_audio.router, prefix="/v1/audio")
+
+    mock_engine = MagicMock()
+    mock_engine._backend = backend
+    mock_engine.model_name = model_name
+    mock_engine.beam_size = 5
+    mock_engine.initial_prompt = None
+    mock_engine.suppress_tokens = None
+    mock_engine.faster_whisper_vad_filter = False
+    mock_engine.transcribe_file.return_value = _make_result()
+
+    app.state.model_manager = SimpleNamespace(
+        ensure_transcription_loaded=lambda: mock_engine,
+        transcription_engine=mock_engine,
+        job_tracker=SimpleNamespace(
+            try_start_job=lambda cn: (True, "job-1", None),
+            end_job=lambda j: None,
+            is_cancelled=lambda: False,
+        ),
+    )
+
+    def _cfg_get(*args, default=None, **kwargs):
+        if list(args[:2]) == ["diarization", "sensevoice_engine"]:
+            return sensevoice_engine
+        return default
+
+    app.state.config = SimpleNamespace(transcription={"model": model_name}, get=_cfg_get)
+    return app, mock_engine
+
+
+def _stub_engine_module(monkeypatch):
+    """The integrated single-pass path does an inline
+    ``from server.core.stt.engine import TranscriptionResult``; the real module
+    pulls torch + webrtcvad (absent in the test env). Inject a stub.
+    """
+    import sys as _sys
+    import types as _types
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class _FakeTranscriptionResult:
+        text: str = ""
+        segments: list = field(default_factory=list)
+        words: list = field(default_factory=list)
+        language: str | None = None
+        language_probability: float = 0.0
+        duration: float = 0.0
+        num_speakers: int = 0
+
+    fake_mod = _types.ModuleType("server.core.stt.engine")
+    fake_mod.TranscriptionResult = _FakeTranscriptionResult  # type: ignore[attr-defined]
+    monkeypatch.setitem(_sys.modules, "server.core.stt.engine", fake_mod)
+
+
+class TestSenseVoiceDiarizationEngineGate:
+    """The server-wide ``diarization.sensevoice_engine`` setting now governs the
+    OpenAI-compat route: ``funasr`` -> CAM++ single-pass, ``pyannote`` -> two-pass.
+    Non-SenseVoice integrated backends keep single-pass regardless (invariant).
+    """
+
+    def test_sensevoice_pyannote_routes_to_two_pass(self):
+        """THE FIX: SenseVoice + engine=pyannote must NOT use CAM++ single-pass;
+        it falls through to the standard two-pass path."""
+        backend = _CountingIntegratedBackend("sensevoice", diarization_loaded=True)
+        app, _ = _build_engine_resolver_app(
+            backend=backend, model_name="iic/SenseVoiceSmall", sensevoice_engine="pyannote"
+        )
+        speaker_result = _make_diarized_result()
+        with (
+            patch(
+                "server.api.routes.openai_audio.resolve_main_transcriber_model",
+                return_value="iic/SenseVoiceSmall",
+            ),
+            _patch_parallel_diarize((speaker_result, None)),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = _upload(client, diarization="true", response_format="diarized_json")
+
+        assert resp.status_code == 200
+        # Two-pass path produced the speakers; CAM++ single-pass was never touched.
+        assert resp.json()["num_speakers"] == 2
+        assert backend.calls == 0
+
+    def test_sensevoice_funasr_uses_single_pass(self, monkeypatch):
+        """SenseVoice + engine=funasr (default) + CAM++ loaded -> single-pass."""
+        _stub_engine_module(monkeypatch)
+        backend = _CountingIntegratedBackend("sensevoice", diarization_loaded=True)
+        app, _ = _build_engine_resolver_app(
+            backend=backend, model_name="iic/SenseVoiceSmall", sensevoice_engine="funasr"
+        )
+        monkeypatch.setattr(
+            "server.core.audio_utils.load_audio",
+            lambda *a, **kw: ([0.0] * 16000, 16000),
+        )
+        with patch(
+            "server.api.routes.openai_audio.resolve_main_transcriber_model",
+            return_value="iic/SenseVoiceSmall",
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = _upload(client, diarization="true", response_format="diarized_json")
+
+        assert resp.status_code == 200
+        assert backend.calls == 1
+
+    def test_sensevoice_funasr_but_campp_unloaded_falls_to_two_pass(self):
+        """SenseVoice + engine=funasr but CAM++ failed to load -> resolver returns
+        pyannote -> two-pass (never an all-UNKNOWN single-pass)."""
+        backend = _CountingIntegratedBackend("sensevoice", diarization_loaded=False)
+        app, _ = _build_engine_resolver_app(
+            backend=backend, model_name="iic/SenseVoiceSmall", sensevoice_engine="funasr"
+        )
+        speaker_result = _make_diarized_result()
+        with (
+            patch(
+                "server.api.routes.openai_audio.resolve_main_transcriber_model",
+                return_value="iic/SenseVoiceSmall",
+            ),
+            _patch_parallel_diarize((speaker_result, None)),
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = _upload(client, diarization="true", response_format="diarized_json")
+
+        assert resp.status_code == 200
+        assert resp.json()["num_speakers"] == 2
+        assert backend.calls == 0
+
+    def test_non_sensevoice_backend_keeps_single_pass_under_pyannote(self, monkeypatch):
+        """INVARIANT: a non-SenseVoice integrated backend (WhisperX) must keep its
+        single-pass path even when the SenseVoice engine setting is pyannote."""
+        _stub_engine_module(monkeypatch)
+        backend = _CountingIntegratedBackend("whisperx", diarization_loaded=True)
+        app, _ = _build_engine_resolver_app(
+            backend=backend,
+            model_name="Systran/faster-whisper-large-v3",
+            sensevoice_engine="pyannote",
+        )
+        monkeypatch.setattr(
+            "server.core.audio_utils.load_audio",
+            lambda *a, **kw: ([0.0] * 16000, 16000),
+        )
+        with patch(
+            "server.api.routes.openai_audio.resolve_main_transcriber_model",
+            return_value="Systran/faster-whisper-large-v3",
+        ):
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = _upload(client, diarization="true", response_format="diarized_json")
+
+        assert resp.status_code == 200
+        # pyannote SenseVoice config must not disable WhisperX single-pass.
+        assert backend.calls == 1

@@ -874,16 +874,34 @@ def _run_transcription(
         # (Issue #76).
         engine = model_manager.ensure_transcription_loaded()
 
-        # Check if the backend supports single-pass diarization (WhisperX)
-        from server.core.stt.backends.base import STTBackend
-
+        # Resolve the diarization engine (funasr CAM++ single-pass vs pyannote
+        # two-pass) only when diarization is requested. For SenseVoice this honors
+        # the server-wide engine setting (config diarization.sensevoice_engine);
+        # every other integrated backend (WhisperX, VibeVoice) keeps its
+        # single-pass path unconditionally. This is a threaded worker with no
+        # request object, so the config default comes from the get_config()
+        # singleton rather than app.state.config.
         backend = engine._backend
-        use_integrated_diarization = (
-            enable_diarization
-            and backend is not None
-            and type(backend).transcribe_with_diarization
-            is not STTBackend.transcribe_with_diarization
-        )
+        use_integrated_diarization = False
+        if enable_diarization:
+            from server.config import resolve_sensevoice_diarization_engine
+            from server.core.stt.backends.base import use_integrated_diarization_for
+
+            app_config = get_config()
+            sensevoice_engine_default = (
+                app_config.get("diarization", "sensevoice_engine", default="funasr")
+                if app_config is not None
+                else "funasr"
+            )
+            resolved_diar_engine = resolve_sensevoice_diarization_engine(
+                getattr(engine, "model_name", None),
+                None,
+                sensevoice_engine_default,
+                funasr_diar_available=getattr(backend, "_diarization_loaded", False),
+            )
+            use_integrated_diarization = use_integrated_diarization_for(
+                backend, resolved_diar_engine
+            )
 
         # Run diarization if enabled
         diarization_segments = None
