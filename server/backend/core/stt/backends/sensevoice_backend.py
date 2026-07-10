@@ -81,71 +81,6 @@ def _format_spk(spk: Any) -> str:
         return raw or "UNKNOWN"
 
 
-_WORD_START_MARKER = "▁"  # U+2581; visually similar to "_" — named constant avoids confusion
-
-
-def _tokens_to_words(
-    tokens: list[list[Any]] | None, segment_offset_s: float
-) -> list[dict[str, Any]]:
-    """Merge CTC sub-word tokens ([piece, start_s, end_s]) into words.
-
-    A new word starts on a piece beginning with the SentencePiece "▁" marker.
-    Times are in seconds; ``segment_offset_s`` is added to make VAD-segment-relative
-    timestamps absolute. Malformed input yields an empty list (caller falls back
-    to segment-level).
-    """
-    if not tokens:
-        return []
-    words: list[dict[str, Any]] = []
-    cur_text = ""
-    cur_start: float | None = None
-    cur_end: float | None = None
-    try:
-        for piece, start, end in tokens:
-            piece_s = str(piece)
-            s = float(start) + segment_offset_s
-            e = float(end) + segment_offset_s
-            if piece_s == _WORD_START_MARKER:
-                if cur_text:
-                    words.append({"word": cur_text, "start": cur_start, "end": cur_end})
-                    cur_text, cur_start, cur_end = "", None, None
-                continue
-            starts_word = piece_s.startswith(_WORD_START_MARKER)
-            clean = piece_s[1:] if starts_word else piece_s
-            if starts_word or cur_start is None:
-                if cur_text:
-                    words.append({"word": cur_text, "start": cur_start, "end": cur_end})
-                cur_text, cur_start, cur_end = clean, s, e
-            else:
-                cur_text += clean
-                cur_end = e
-    except (TypeError, ValueError):
-        return []
-    if cur_text:
-        words.append({"word": cur_text, "start": cur_start, "end": cur_end})
-    return words
-
-
-def _segment_words(
-    timestamp: list[list[Any]] | None, seg_start_s: float, seg_end_s: float
-) -> list[dict[str, Any]]:
-    """Best-effort: return words whose midpoint falls within [seg_start, seg_end).
-
-    The top-level CTC ``timestamp`` is whole-clip; slice it per sentence. Any
-    parse problem yields [] (segment-level fallback — never a hard dependency).
-    """
-    words = _tokens_to_words(timestamp, segment_offset_s=0.0)
-    out: list[dict[str, Any]] = []
-    for w in words:
-        try:
-            mid = (float(w["start"]) + float(w["end"])) / 2.0
-        except (TypeError, ValueError, KeyError):
-            continue
-        if seg_start_s <= mid < seg_end_s:
-            out.append(w)
-    return out
-
-
 def _write_temp_wav(audio: np.ndarray, sample_rate: int) -> str:
     """Write float32 mono audio to a temp 16-bit WAV and return its path."""
     fd, path = tempfile.mkstemp(suffix=".wav", prefix="sensevoice_")
@@ -291,7 +226,6 @@ class SenseVoiceBackend(STTBackend):
                 batch_size_s=300,
                 merge_vad=True,
                 merge_length_s=15,
-                output_timestamp=True,
             )
         finally:
             try:
@@ -405,8 +339,7 @@ class SenseVoiceBackend(STTBackend):
                 )
                 start = float(sentence.get("start") or 0) / 1000.0
                 end = float(sentence.get("end") or 0) / 1000.0
-                seg_words = _segment_words(first.get("timestamp"), start, end)
-                segments.append(BackendSegment(text=text, start=start, end=end, words=seg_words))
+                segments.append(BackendSegment(text=text, start=start, end=end, words=[]))
             return segments, info
 
         # Fallback: one segment spanning the whole clip (no timestamps available).
