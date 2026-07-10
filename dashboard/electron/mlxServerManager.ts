@@ -17,6 +17,7 @@ import { app, BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ensureServerConfigSeed, getServerConfigDir } from './serverConfigPaths.js';
+import { hfCacheDirName } from './hfRepoAliases.js';
 import type { MlxLogSink } from './mlxLogSink.js';
 
 const execFileAsync = promisify(execFile);
@@ -367,8 +368,9 @@ export class MLXServerManager {
       if (!trimmed || trimmed.includes('..') || trimmed.includes('\\') || trimmed.includes('\0'))
         continue;
 
-      // HuggingFace convention: "org/name" → "models--org--name" under hub/.
-      const cacheName = `models--${trimmed.replace(/\//g, '--')}`;
+      // HuggingFace convention: "org/name" → "models--org--name" under hub/
+      // (resolves the ModelScope→HF alias first, e.g. iic/SenseVoiceSmall).
+      const cacheName = hfCacheDirName(trimmed);
       const dir = path.resolve(path.join(hubDir, cacheName));
       if (path.dirname(dir) !== resolvedHub) continue; // not a direct child of hub
       if (!fs.existsSync(dir)) continue;
@@ -394,7 +396,7 @@ export class MLXServerManager {
   async removeModelCache(modelId: string): Promise<void> {
     const trimmed = this._assertSafeModelId(modelId);
     const hubDir = path.join(this._resolveHfHome(), 'hub');
-    const cacheName = `models--${trimmed.replace(/\//g, '--')}`;
+    const cacheName = hfCacheDirName(trimmed);
     const dir = path.resolve(path.join(hubDir, cacheName));
     if (path.dirname(dir) !== path.resolve(hubDir)) {
       throw new Error('Refusing to remove a cache directory outside the hub directory');

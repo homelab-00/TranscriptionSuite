@@ -39,6 +39,7 @@ import {
   getRuntimePathAdditions,
 } from './containerRuntime.js';
 import { type WslSupport, resetWslSupportCache } from './wslDetect.js';
+import { hfCacheDirName, resolveHfRepoId } from './hfRepoAliases.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -3666,8 +3667,12 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, Mod
       );
 
       for (const id of hubIds) {
-        // HuggingFace convention: "Systran/faster-whisper-large-v3" → "models--Systran--faster-whisper-large-v3"
-        const cacheName = `models--${id.trim().replace(/\//g, '--')}`;
+        // HuggingFace convention: "Systran/faster-whisper-large-v3" → "models--Systran--faster-whisper-large-v3".
+        // Some ids (e.g. the ModelScope "iic/SenseVoiceSmall") are cached under a
+        // different HF repo id, so resolve the alias before deriving the dir name.
+        // The RESULT stays keyed under the ORIGINAL id so callers (and the badge)
+        // can look it up by the configured id.
+        const cacheName = hfCacheDirName(id);
         const exists = entries.has(cacheName);
         if (!exists) {
           result[id] = { exists: false };
@@ -3712,7 +3717,9 @@ async function removeModelCache(modelId: string): Promise<void> {
     const sanitized = path.basename(trimmed);
     await exec(await runtimeBin(), ['exec', CONTAINER_NAME, 'rm', '-f', `/models/${sanitized}`]);
   } else {
-    const cacheName = `models--${trimmed.replace(/\//g, '--')}`;
+    // Resolve the ModelScope→HF alias so we delete the directory the model was
+    // actually cached under (otherwise SenseVoice removal silently no-ops).
+    const cacheName = hfCacheDirName(trimmed);
     await exec(await runtimeBin(), [
       'exec',
       CONTAINER_NAME,
@@ -3803,13 +3810,16 @@ async function downloadModelToCache(modelId: string): Promise<void> {
 
   // Pass the model ID as an argv value instead of interpolating it into code.
   // Use the runtime venv's Python, which has huggingface_hub installed.
+  // Resolve the ModelScope→HF alias so the download uses the HF repo id
+  // (the bare "iic/…" id 404s on HuggingFace).
+  const hfRepoId = resolveHfRepoId(trimmedModelId);
   const pyCmd =
     "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1], cache_dir='/models/hub')";
   const bin = await runtimeBin();
   try {
     await execFileAsync(
       bin,
-      ['exec', CONTAINER_NAME, '/runtime/.venv/bin/python3', '-c', pyCmd, trimmedModelId],
+      ['exec', CONTAINER_NAME, '/runtime/.venv/bin/python3', '-c', pyCmd, hfRepoId],
       {
         maxBuffer: 10 * 1024 * 1024,
         timeout: 600_000, // 10 minutes for large models
