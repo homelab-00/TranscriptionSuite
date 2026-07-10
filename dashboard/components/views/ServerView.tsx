@@ -95,11 +95,16 @@ interface ServerViewProps {
 const DIARIZATION_SORTFORMER_OPTION = 'Sortformer (Metal; ≤ 4 speakers)';
 const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
 const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
-
-// SenseVoice diarization-engine selector (start-time, SenseVoice-only).
-const ENGINE_CAMPP_OPTION = 'CAM++ (fast, built-in)';
-const ENGINE_PYANNOTE_OPTION = 'pyannote (two-pass)';
-const SENSEVOICE_ENGINE_OPTIONS = [ENGINE_CAMPP_OPTION, ENGINE_PYANNOTE_OPTION];
+// CAM++ is SenseVoice's built-in single-pass diarizer, merged into the single
+// Diarization Model dropdown. It is a UI label (not a model id): selecting it
+// sends SENSEVOICE_DIARIZATION_ENGINE=funasr and an EMPTY DIARIZATION_MODEL, so
+// the server keeps its config.yaml pyannote default as the fallback diarizer if
+// cam++ fails to load. Its literal string doubles as the legacy
+// `server.sensevoiceDiarizationEngine` value the one-shot migration recognises.
+const DIARIZATION_CAMPP_OPTION = 'CAM++ (fast, built-in)';
+// CAM++'s HuggingFace repo (cache dir models--funasr--campplus). Used only for
+// the download badge / cache check, since CAM++ sends an empty DIARIZATION_MODEL.
+const CAMPP_HF_REPO = 'funasr/campplus';
 
 // GGML models for the Vulkan sidecar — computed once from registry. In Vulkan
 // mode these populate the Main Transcriber dropdown (Branch B: the main pick
@@ -124,6 +129,7 @@ const LIVE_MODEL_SELECTION_OPTIONS = new Set([
   LIVE_MODEL_CUSTOM_OPTION,
 ]);
 const DIARIZATION_MODEL_SELECTION_OPTIONS = new Set([
+  DIARIZATION_CAMPP_OPTION,
   DIARIZATION_SORTFORMER_OPTION,
   DIARIZATION_DEFAULT_MODEL,
   DIARIZATION_MODEL_CUSTOM_OPTION,
@@ -137,6 +143,7 @@ const UI_SENTINEL_VALUES = new Set([
   MAIN_MODEL_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   LIVE_MODEL_CUSTOM_OPTION,
+  DIARIZATION_CAMPP_OPTION,
   DIARIZATION_SORTFORMER_OPTION,
   DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
@@ -251,7 +258,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     DIARIZATION_SORTFORMER_OPTION,
   );
   const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
-  const [sensevoiceEngineSelection, setSensevoiceEngineSelection] = useState(ENGINE_CAMPP_OPTION);
   const [diarizationHydrated, setDiarizationHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
 
@@ -360,6 +366,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // no-token Metal-native default; pyannote is opt-in and needs a HuggingFace token.
   const diarizationOptions = useMemo(
     () => [
+      DIARIZATION_CAMPP_OPTION,
       DIARIZATION_SORTFORMER_OPTION,
       DIARIZATION_DEFAULT_MODEL,
       DIARIZATION_MODEL_CUSTOM_OPTION,
@@ -551,11 +558,44 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             nextLiveCustom = '';
           }
 
+          // ── Merged diarization control (one-shot migration) ──────────────
+          // The diarization engine used to be a second, separate dropdown backed by
+          // server.sensevoiceDiarizationEngine. It is now folded into this one
+          // control, which keeps the original server.diarizationModelSelection key
+          // so the Model Manager tab and the Metal boot auto-start in
+          // electron/main.ts keep reading the same value. A new key would have
+          // desynced those readers, and whichever component mounted first would win.
+          //
+          // The retired engine key doubles as the migration marker: it is consumed
+          // (cleared to an empty string, which getString reports as null) once the
+          // fold is applied, so this can never re-fire. If that write ever failed,
+          // the migration would merely re-apply the setting the user was already
+          // effectively running before the merge, which is benign.
+          const legacyEngineRaw = getString(storedSensevoiceEngine);
           let nextDiarizationSelection =
             getString(storedDiarizationSelection) ?? DIARIZATION_SORTFORMER_OPTION;
           let nextDiarizationCustom = getString(storedDiarizationCustom) ?? '';
 
-          // Migrate the old 'Auto (best available)' label to the new Sortformer option.
+          if (legacyEngineRaw) {
+            // Preserve EFFECTIVE behavior: pre-merge, a SenseVoice main plus
+            // engine=CAM++ meant CAM++ actually ran and the diarization-model pick
+            // was ignored entirely. Every other combination kept the model pick,
+            // because engine=funasr was a no-op for non-SenseVoice mains.
+            const migratedMainModel = resolveMainModelSelectionValue(
+              nextMainSelection,
+              nextMainCustom,
+              configuredMainModel,
+            );
+            if (
+              legacyEngineRaw === DIARIZATION_CAMPP_OPTION &&
+              isSenseVoiceModel(migratedMainModel)
+            ) {
+              nextDiarizationSelection = DIARIZATION_CAMPP_OPTION;
+            }
+            void api.config.set('server.sensevoiceDiarizationEngine', '').catch(() => {});
+          }
+
+          // Migrate the old 'Auto (best available)' label to the Sortformer option.
           if (nextDiarizationSelection === 'Auto (best available)') {
             nextDiarizationSelection = DIARIZATION_SORTFORMER_OPTION;
           }
@@ -576,13 +616,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           if (nextDiarizationSelection !== DIARIZATION_MODEL_CUSTOM_OPTION) {
             nextDiarizationCustom = '';
           }
-
-          // SenseVoice diarization engine: stored as the display string.
-          const storedEngine = getString(storedSensevoiceEngine);
-          const nextSensevoiceEngine =
-            storedEngine && SENSEVOICE_ENGINE_OPTIONS.includes(storedEngine)
-              ? storedEngine
-              : ENGINE_CAMPP_OPTION;
 
           // Branch B migration: the dedicated "GGML Sidecar Model" selector is
           // gone — the Main Transcriber now owns the sidecar model in Vulkan
@@ -609,7 +642,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           setLiveCustomModel(nextLiveCustom);
           setDiarizationModelSelection(nextDiarizationSelection);
           setDiarizationCustomModel(nextDiarizationCustom);
-          setSensevoiceEngineSelection(nextSensevoiceEngine);
         },
       )
       .catch(() => {})
@@ -713,6 +745,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               storedDiarizationModel === DIARIZATION_MODEL_CUSTOM_OPTION
                 ? storedDiarizationCustom_auto.trim()
                 : storedDiarizationModel === DIARIZATION_SORTFORMER_OPTION ||
+                    storedDiarizationModel === DIARIZATION_CAMPP_OPTION ||
                     storedDiarizationModel === 'Auto (best available)' ||
                     !storedDiarizationModel
                   ? ''
@@ -934,17 +967,39 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const liveModeModelConstraintMessage =
     'Live Mode supports faster-whisper and whisper.cpp (GGML) models.';
 
-  // Active diarization model name — empty string = Sortformer (server auto-select)
+  // Active diarization model name — empty string = server auto-select. Both
+  // Sortformer and CAM++ send an EMPTY DIARIZATION_MODEL: Sortformer is picked
+  // server-side (empty model + mps/cpu), and CAM++ runs SenseVoice's integrated
+  // single-pass diarizer while leaving the config.yaml pyannote default in place
+  // as the fallback if cam++ fails to load.
   const activeDiarizationModel =
     diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION
       ? diarizationCustomModel.trim() || configuredDiarizationModel || DIARIZATION_DEFAULT_MODEL
-      : diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION
+      : diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION ||
+          diarizationModelSelection === DIARIZATION_CAMPP_OPTION
         ? ''
         : DIARIZATION_DEFAULT_MODEL;
 
-  // SenseVoice diarization engine env value: 'funasr' (CAM++ default) or 'pyannote'.
+  // SenseVoice diarization engine env value: 'funasr' only when the merged
+  // dropdown is set to CAM++, else 'pyannote'. This is a harmless no-op unless
+  // the main transcriber is SenseVoice (the server ignores it otherwise).
   const sensevoiceEngineValue =
-    sensevoiceEngineSelection === ENGINE_PYANNOTE_OPTION ? 'pyannote' : 'funasr';
+    diarizationModelSelection === DIARIZATION_CAMPP_OPTION ? 'funasr' : 'pyannote';
+
+  // Model id used for the download badge / cache check. CAM++ sends an empty
+  // DIARIZATION_MODEL, so surface CAM++'s own HuggingFace repo instead.
+  const diarizationStatusModelId =
+    diarizationModelSelection === DIARIZATION_CAMPP_OPTION ? CAMPP_HF_REPO : activeDiarizationModel;
+
+  // Per-option greying for the merged Diarization Model dropdown. CAM++ requires
+  // a SenseVoice main transcriber; Sortformer requires the Metal runtime.
+  const diarizationOptionMeta = useMemo<Record<string, OptionMeta>>(() => {
+    const meta: Record<string, OptionMeta> = {};
+    if (!isSenseVoiceMain)
+      meta[DIARIZATION_CAMPP_OPTION] = { disabled: true, badge: 'SenseVoice only' };
+    if (!isMetal) meta[DIARIZATION_SORTFORMER_OPTION] = { disabled: true, badge: 'Requires Metal' };
+    return meta;
+  }, [isSenseVoiceMain, isMetal]);
 
   // MLX native-process start/stop handlers (depend on activeTranscriber declared above)
   const handleMLXStart = useCallback(async () => {
@@ -1112,6 +1167,35 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     }
   }, [localSelectionsHydrated, isMetal, diarizationModelSelection]);
 
+  useEffect(() => {
+    // CAM++ is SenseVoice-only; if the main transcriber is not a SenseVoice
+    // model, fall back to the pyannote default. Mirrors the Sortformer reset
+    // above. Gated on hydration to avoid pre-hydration churn.
+    //
+    // Guard: until adminStatus lands, configuredMainModel is DISABLED_MODEL_SENTINEL,
+    // so activeTranscriber resolves to that sentinel rather than the loading
+    // placeholder. It is truthy, so a placeholder-only check lets the reset through
+    // and CLOBBERS a legitimately stored CAM++ pick. Require adminStatus (matching
+    // the sibling seed effects) and reject both transient values explicitly.
+    if (!adminStatus) return;
+    if (
+      localSelectionsHydrated &&
+      activeTranscriber &&
+      activeTranscriber !== MODEL_DEFAULT_LOADING_PLACEHOLDER &&
+      activeTranscriber !== DISABLED_MODEL_SENTINEL &&
+      !isSenseVoiceMain &&
+      diarizationModelSelection === DIARIZATION_CAMPP_OPTION
+    ) {
+      setDiarizationModelSelection(DIARIZATION_DEFAULT_MODEL);
+    }
+  }, [
+    adminStatus,
+    localSelectionsHydrated,
+    activeTranscriber,
+    isSenseVoiceMain,
+    diarizationModelSelection,
+  ]);
+
   // Persist model selection UI state.
   useEffect(() => {
     if (!localSelectionsHydrated) return;
@@ -1145,6 +1229,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (!localSelectionsHydrated) return;
     const api = (window as any).electronAPI;
     if (!api?.config) return;
+    // Persist the merged control under the NEW key so the one-shot migration in
+    // the hydration effect can never re-fire and clobber a later user choice.
     void api.config
       .set('server.diarizationModelSelection', diarizationModelSelection)
       .catch(() => {});
@@ -1157,15 +1243,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     void api.config.set('server.diarizationCustomModel', diarizationCustomModel).catch(() => {});
   }, [localSelectionsHydrated, diarizationCustomModel]);
 
-  useEffect(() => {
-    if (!localSelectionsHydrated) return;
-    const api = (window as any).electronAPI;
-    if (!api?.config) return;
-    void api.config
-      .set('server.sensevoiceDiarizationEngine', sensevoiceEngineSelection)
-      .catch(() => {});
-  }, [localSelectionsHydrated, sensevoiceEngineSelection]);
-
   // Check model download cache whenever the active model names or container state change
   useEffect(() => {
     const api = (window as any).electronAPI;
@@ -1173,7 +1250,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
     // Collect unique model IDs to check
     const modelIds = [
-      ...new Set([activeTranscriber, normalizedLiveModel, activeDiarizationModel]),
+      ...new Set([activeTranscriber, normalizedLiveModel, diarizationStatusModelId]),
     ].filter(
       (id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER && id !== DISABLED_MODEL_SENTINEL,
     );
@@ -1193,7 +1270,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     return () => {
       if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
     };
-  }, [activeTranscriber, normalizedLiveModel, activeDiarizationModel, isRunning]);
+  }, [activeTranscriber, normalizedLiveModel, diarizationStatusModelId, isRunning]);
 
   // Compute per-option metadata for the Main Transcriber dropdown.
   // Models requiring a different runtime are dimmed with a badge.
@@ -2623,15 +2700,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-slate-300">Diarization Model</label>
-                  {isRunning && activeDiarizationModel && (
+                  {isRunning && diarizationStatusModelId && (
                     <div className="flex items-center gap-1.5">
                       <span
-                        className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeDiarizationModel]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
+                        className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[diarizationStatusModelId]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
                       />
                       <span
-                        className={`font-mono text-[10px] ${modelCacheStatus[activeDiarizationModel]?.exists ? 'text-green-400' : 'text-slate-500'}`}
+                        className={`font-mono text-[10px] ${modelCacheStatus[diarizationStatusModelId]?.exists ? 'text-green-400' : 'text-slate-500'}`}
                       >
-                        {modelCacheStatus[activeDiarizationModel]?.exists
+                        {modelCacheStatus[diarizationStatusModelId]?.exists
                           ? 'Downloaded'
                           : 'Missing'}
                       </span>
@@ -2642,16 +2719,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   value={diarizationModelSelection}
                   onChange={setDiarizationModelSelection}
                   options={diarizationOptions}
-                  optionMeta={
-                    isMetal
-                      ? undefined
-                      : {
-                          [DIARIZATION_SORTFORMER_OPTION]: {
-                            disabled: true,
-                            badge: 'Requires Metal',
-                          },
-                        }
-                  }
+                  optionMeta={diarizationOptionMeta}
                   className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
                   disabled={isRunning}
                 />
@@ -2665,16 +2733,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
                   />
                 )}
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-slate-300">Diarization Engine</label>
-                </div>
-                <CustomSelect
-                  value={sensevoiceEngineSelection}
-                  onChange={setSensevoiceEngineSelection}
-                  options={SENSEVOICE_ENGINE_OPTIONS}
-                  className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-                  disabled={isRunning || !isSenseVoiceMain}
-                />
               </div>
             </GlassCard>
           </div>

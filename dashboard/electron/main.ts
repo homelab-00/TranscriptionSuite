@@ -2334,7 +2334,28 @@ app.whenReady().then(async () => {
       resolvedLiveModel = 'Systran/faster-whisper-medium';
     }
 
-    const diarizationModel = (store.get('server.diarizationModelSelection') as string) || undefined;
+    // Resolve diarization selection sentinels the same way ServerView does. The
+    // stored value is a UI label, not always a model id: CAM++, Sortformer and the
+    // legacy Auto label all mean "let the server pick", which mlxServerManager
+    // expects as an empty model.
+    const DIARIZATION_CAMPP = 'CAM++ (fast, built-in)';
+    const DIARIZATION_SORTFORMER = 'Sortformer (Metal; ≤ 4 speakers)';
+    const DIARIZATION_CUSTOM = 'Custom (HuggingFace repo)';
+    const diarizationSelection = (store.get('server.diarizationModelSelection') as string) || '';
+    const diarizationCustomModel = (store.get('server.diarizationCustomModel') as string) || '';
+    let diarizationModel: string;
+    if (diarizationSelection === DIARIZATION_CUSTOM) {
+      diarizationModel = diarizationCustomModel.trim();
+    } else if (
+      !diarizationSelection ||
+      diarizationSelection === DIARIZATION_CAMPP ||
+      diarizationSelection === DIARIZATION_SORTFORMER ||
+      diarizationSelection === 'Auto (best available)'
+    ) {
+      diarizationModel = '';
+    } else {
+      diarizationModel = diarizationSelection;
+    }
 
     mlxServerManager
       .start({
