@@ -1,10 +1,10 @@
 meta:
-  spec_version: 1.0.60
+  spec_version: 1.1.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
   generated_from:
-    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
+    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/.claude/worktrees/server-tab-matrix-redesign/dashboard
     source_files:
       - App.tsx
       - components/__tests__/AddNoteModal.canary-language.test.tsx
@@ -68,6 +68,8 @@ meta:
       - components/ui/LogTerminal.tsx
       - components/ui/PersistentInfoBanner.tsx
       - components/ui/QueuePausedBanner.tsx
+      - components/ui/SelectorGroup.tsx
+      - components/ui/SelectorTile.tsx
       - components/ui/ShortcutCapture.tsx
       - components/ui/StatusLight.test.tsx
       - components/ui/StatusLight.tsx
@@ -88,6 +90,8 @@ meta:
       - components/views/ModelManagerTab.tsx
       - components/views/ModelManagerView.tsx
       - components/views/NotebookView.tsx
+      - components/views/server/InstanceSettingsSelectors.tsx
+      - components/views/server/RemoteConnectionCard.tsx
       - components/views/ServerConfigEditor.tsx
       - components/views/ServerView.tsx
       - components/views/SessionImportTab.tsx
@@ -98,7 +102,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-06-28T08:24:10.018Z
+    generated_at: 2026-07-11T18:11:50.540Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -190,22 +194,27 @@ foundation:
         - rgba(0, 0, 0, 0.7)
         - rgba(0,0,0,0.3)
         - rgba(0,0,0,0.4)
-        - rgba(167,139,250,0.15)
+        - rgba(192,132,252,0.2)
+        - rgba(203,213,225,0.2)
         - rgba(217, 70, 239, 0.5)
         - rgba(217,70,239,0.5)
         - rgba(22,31,50,0.9)
         - rgba(22,31,50,0.95)
+        - rgba(232,121,249,0.2)
+        - rgba(232,121,249,0.5)
         - rgba(239,22,238,0.5)
         - rgba(239,68,68,0.35)
         - rgba(239,68,68,0.6)
-        - rgba(244,63,94,0.15)
+        - rgba(248,113,113,0.2)
+        - rgba(250,204,21,0.2)
         - rgba(251, 146, 60, 0.3)
+        - rgba(251,146,60,0.2)
         - rgba(251,146,60,0.3)
         - rgba(251,146,60,0.5)
+        - rgba(251,191,36,0.2)
         - rgba(255, 255, 255, 0.1)
         - rgba(255, 255, 255, 0.2)
         - rgba(255, 255, 255, 0.4)
-        - rgba(255,145,0,0.15)
         - rgba(255,255,255,0.3)
         - rgba(34, 211, 238, 0.4)
         - rgba(34, 211, 238, 0.6)
@@ -217,6 +226,8 @@ foundation:
         - rgba(34,211,238,0.4)
         - rgba(34,211,238,0.5)
         - rgba(34,211,238,0.6)
+        - rgba(74,222,128,0.2)
+        - rgba(96,165,250,0.2)
         - rgba(96,165,250,0.6)
       accent_scale: *a1
       glass_scale: *a2
@@ -267,8 +278,20 @@ foundation:
       classes:
         - shadow
         - shadow-[0_0_10px_#22d3ee]
+        - shadow-[0_0_12px_rgba(192,132,252,0.2)]
+        - shadow-[0_0_12px_rgba(203,213,225,0.2)]
+        - shadow-[0_0_12px_rgba(232,121,249,0.2)]
+        - shadow-[0_0_12px_rgba(248,113,113,0.2)]
+        - shadow-[0_0_12px_rgba(250,204,21,0.2)]
+        - shadow-[0_0_12px_rgba(251,146,60,0.2)]
+        - shadow-[0_0_12px_rgba(251,191,36,0.2)]
+        - shadow-[0_0_12px_rgba(34,211,238,0.2)]
+        - shadow-[0_0_12px_rgba(74,222,128,0.2)]
+        - shadow-[0_0_12px_rgba(96,165,250,0.2)]
+        - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
-        - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
@@ -358,8 +381,20 @@ foundation:
         - min-w-[5rem]
         - p-[3px]
         - shadow-[0_0_10px_#22d3ee]
+        - shadow-[0_0_12px_rgba(192,132,252,0.2)]
+        - shadow-[0_0_12px_rgba(203,213,225,0.2)]
+        - shadow-[0_0_12px_rgba(232,121,249,0.2)]
+        - shadow-[0_0_12px_rgba(248,113,113,0.2)]
+        - shadow-[0_0_12px_rgba(250,204,21,0.2)]
+        - shadow-[0_0_12px_rgba(251,146,60,0.2)]
+        - shadow-[0_0_12px_rgba(251,191,36,0.2)]
+        - shadow-[0_0_12px_rgba(34,211,238,0.2)]
+        - shadow-[0_0_12px_rgba(74,222,128,0.2)]
+        - shadow-[0_0_12px_rgba(96,165,250,0.2)]
+        - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
-        - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+        - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
@@ -488,6 +523,7 @@ utility_allowlist:
     - bg-accent-orange
     - bg-accent-orange/10
     - bg-accent-orange/20
+    - bg-accent-rose/5
     - bg-accent-violet/15
     - bg-amber-400/10
     - bg-amber-400/20
@@ -503,6 +539,7 @@ utility_allowlist:
     - bg-black/50
     - bg-black/60
     - bg-black/70
+    - bg-black/75
     - bg-blue-400
     - bg-blue-400/10
     - bg-blue-400/20
@@ -519,6 +556,7 @@ utility_allowlist:
     - bg-glass-100/50
     - bg-glass-200
     - bg-glass-surface
+    - bg-green-400/10
     - bg-green-500
     - bg-green-500/10
     - bg-linear-to-b
@@ -527,15 +565,19 @@ utility_allowlist:
     - bg-linear-to-t
     - bg-neutral-700
     - bg-neutral-900
+    - bg-orange-400/10
     - bg-orange-500
     - bg-orange-500/10
+    - bg-purple-400/10
     - bg-purple-500
     - bg-purple-500/10
     - bg-red-400/10
     - bg-red-500
     - bg-red-500/10
     - bg-red-500/20
+    - bg-red-500/25
     - bg-red-500/5
+    - bg-slate-300/10
     - bg-slate-400/10
     - bg-slate-500
     - bg-slate-500/10
@@ -559,24 +601,30 @@ utility_allowlist:
     - border
     - border-2
     - border-4
+    - border-accent-amber/30
     - border-accent-cyan/10
     - border-accent-cyan/20
     - border-accent-cyan/30
     - border-accent-cyan/40
-    - border-accent-cyan/40!
+    - border-accent-cyan/60
     - border-accent-magenta/20
     - border-accent-magenta/5
+    - border-accent-magenta/60
     - border-accent-orange/20
+    - border-accent-orange/25
+    - border-accent-rose/20
     - border-amber-400/20
     - border-amber-400/25
     - border-amber-400/30
     - border-amber-400/40
+    - border-amber-400/60
     - border-amber-500/20
     - border-amber-500/30
     - border-amber-500/40
     - border-b
     - border-b-2
     - border-blue-400/30
+    - border-blue-400/60
     - border-blue-500/20
     - border-cyan-400/30
     - border-dashed
@@ -584,6 +632,7 @@ utility_allowlist:
     - border-emerald-400/40
     - border-glass-100
     - border-glass-border
+    - border-green-400/60
     - border-green-500/20
     - border-green-500/30
     - border-l
@@ -597,10 +646,16 @@ utility_allowlist:
     - border-l-red-500
     - border-l-slate-300
     - border-l-slate-500
+    - border-orange-400/60
     - border-orange-500/20
+    - border-purple-400/60
     - border-r
     - border-red-400/20
+    - border-red-400/40
+    - border-red-400/60
     - border-red-500/20
+    - border-red-500/25
+    - border-slate-300/60
     - border-slate-400/30
     - border-slate-500/40
     - border-slate-900
@@ -611,6 +666,7 @@ utility_allowlist:
     - border-white/5
     - border-yellow-400/20
     - border-yellow-400/30
+    - border-yellow-400/60
     - bottom-0
     - bottom-1
     - bottom-4
@@ -660,6 +716,7 @@ utility_allowlist:
     - from-slate-900/10
     - from-white/10
     - from-white/5
+    - gap-0.5
     - gap-1
     - gap-1.5
     - gap-2
@@ -671,6 +728,7 @@ utility_allowlist:
     - gap-8
     - gap-px
     - gap-x-3
+    - gap-y-1
     - grid
     - grid-cols-1
     - grid-cols-2
@@ -725,6 +783,7 @@ utility_allowlist:
     - hover:bg-red-500/10
     - hover:bg-red-500/20
     - hover:bg-red-500/30
+    - hover:bg-red-500/35
     - hover:bg-white/10
     - hover:bg-white/15
     - hover:bg-white/20
@@ -734,6 +793,7 @@ utility_allowlist:
     - hover:border-accent-cyan/50
     - hover:border-white/10
     - hover:border-white/20
+    - hover:border-white/25
     - hover:opacity-85
     - hover:scale-105
     - hover:shadow-accent-cyan/40
@@ -776,6 +836,7 @@ utility_allowlist:
     - left-8
     - lg:flex
     - lg:grid-cols-2
+    - lg:grid-cols-5
     - lg:p-10
     - line-clamp-2
     - m-0
@@ -807,10 +868,14 @@ utility_allowlist:
     - mb-4
     - mb-6
     - mb-8
+    - md:flex-row
     - md:grid-cols-2
     - md:grid-cols-4
+    - md:items-center
     - md:items-end
+    - md:justify-between
     - min-h-0
+    - min-h-20
     - min-h-32
     - min-h-full
     - min-height
@@ -824,6 +889,7 @@ utility_allowlist:
     - ml-0.5
     - ml-1
     - ml-2
+    - ml-3
     - ml-auto
     - ml-model
     - mr-1
@@ -848,6 +914,7 @@ utility_allowlist:
     - opacity-10
     - opacity-30
     - opacity-40
+    - opacity-45
     - opacity-50
     - opacity-60
     - opacity-70
@@ -873,6 +940,7 @@ utility_allowlist:
     - pb-0
     - pb-1
     - pb-10
+    - pb-2
     - pb-4
     - pb-8
     - pl-0
@@ -890,6 +958,7 @@ utility_allowlist:
     - pr-20
     - pr-3
     - pr-4
+    - pr-5
     - pr-6
     - pr-8
     - pt-0
@@ -926,7 +995,6 @@ utility_allowlist:
     - right-2
     - right-3
     - right-4
-    - right-align
     - ring-0
     - ring-1
     - ring-accent-cyan/20
@@ -970,6 +1038,8 @@ utility_allowlist:
     - slide-in-from-top-2
     - slide-in-from-top-4
     - sm:block
+    - sm:grid-cols-3
+    - sm:grid-cols-4
     - snap-mandatory
     - snap-start
     - snap-x
@@ -994,6 +1064,7 @@ utility_allowlist:
     - text-accent-cyan/80
     - text-accent-magenta
     - text-accent-orange
+    - text-accent-rose
     - text-accent-violet
     - text-accent-violet/80
     - text-amber-100
@@ -1026,7 +1097,9 @@ utility_allowlist:
     - text-orange-400
     - text-orange-500
     - text-purple-400
+    - text-red-100
     - text-red-200
+    - text-red-200/90
     - text-red-300
     - text-red-400
     - text-red-400/80
@@ -1040,6 +1113,7 @@ utility_allowlist:
     - text-slate-700
     - text-slate-900
     - text-sm
+    - text-violet-400
     - text-white
     - text-white/60
     - text-white/90
@@ -1125,6 +1199,7 @@ utility_allowlist:
     - bg-[#0f172a]
     - bg-[rgba(22,31,50,0.9)]
     - bg-[rgba(22,31,50,0.95)]
+    - bg-white/[0.02]
     - ease-[cubic-bezier(0.22,1,0.36,1)]
     - ease-[cubic-bezier(0.25,0.1,0.25,1)]
     - ease-[cubic-bezier(0.32,0.72,0,1)]
@@ -1142,8 +1217,20 @@ utility_allowlist:
     - min-w-[5rem]
     - p-[3px]
     - shadow-[0_0_10px_#22d3ee]
+    - shadow-[0_0_12px_rgba(192,132,252,0.2)]
+    - shadow-[0_0_12px_rgba(203,213,225,0.2)]
+    - shadow-[0_0_12px_rgba(232,121,249,0.2)]
+    - shadow-[0_0_12px_rgba(248,113,113,0.2)]
+    - shadow-[0_0_12px_rgba(250,204,21,0.2)]
+    - shadow-[0_0_12px_rgba(251,146,60,0.2)]
+    - shadow-[0_0_12px_rgba(251,191,36,0.2)]
+    - shadow-[0_0_12px_rgba(34,211,238,0.2)]
+    - shadow-[0_0_12px_rgba(74,222,128,0.2)]
+    - shadow-[0_0_12px_rgba(96,165,250,0.2)]
+    - shadow-[0_0_15px_rgba(251,146,60,0.5)]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]
-    - shadow-[0_0_15px_rgba(34,211,238,0.2)]!
+    - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+    - shadow-[0_0_18px_rgba(239,68,68,0.35)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
     - shadow-[0_0_5px_rgba(239,22,238,0.5)]
@@ -1582,6 +1669,23 @@ component_contracts:
     state_rules:
       - id: variant-closed-set
         rule: Only declared variant/size combinations are allowed without contract/version update.
+  CacheBadge:
+    file: components/views/server/InstanceSettingsSelectors.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   CalendarTab:
     file: components/views/NotebookView.tsx
     required_tokens:
@@ -2072,6 +2176,23 @@ component_contracts:
     state_rules:
       - id: import-switch-options
         rule: Speaker diarization and word timestamp option switches remain present in fixed order.
+  InstanceSettingsSelectors:
+    file: components/views/server/InstanceSettingsSelectors.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   IntelIcon:
     file: components/ui/icons/IntelIcon.tsx
     required_tokens:
@@ -2379,6 +2500,23 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  RemoteConnectionCard:
+    file: components/views/server/RemoteConnectionCard.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   SearchTab:
     file: components/views/NotebookView.tsx
     required_tokens:
@@ -2418,6 +2556,40 @@ component_contracts:
     state_rules:
       - id: heading-divider
         rule: Heading divider line remains part of section title structure.
+  SelectorGroup:
+    file: components/ui/SelectorGroup.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  SelectorTile:
+    file: components/ui/SelectorTile.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   ServerConfigEditor:
     file: components/views/ServerConfigEditor.tsx
     required_tokens:

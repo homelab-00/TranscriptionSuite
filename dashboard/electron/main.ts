@@ -514,6 +514,11 @@ const store = new Store({
     'updates.lastNotified': { appLatest: '', serverLatest: '' },
     'updates.bannerSnoozedUntil': 0,
     'server.runtimeProfile': 'cpu',
+    // Metal boot auto-start gate: true only after the user explicitly started
+    // the native MLX server (mlx:start) and until they stop it (mlx:stop).
+    // Keeps model downloads from beginning before the first explicit start —
+    // selecting the Metal runtime alone must not launch the server.
+    'server.mlxDesiredRunning': false,
     'server.gpuAutoDetectDone': false,
     // Issue #83 — opt-in legacy-GPU image variant (Pascal/Maxwell support).
     // Default false keeps behaviour unchanged for existing users. When true,
@@ -2306,9 +2311,14 @@ app.whenReady().then(async () => {
   // Crash-resilient container cleanup: sentinel survives SIGBUS/SIGKILL
   spawnContainerSentinel();
 
-  // Auto-start the native MLX server if the Metal runtime profile is selected.
+  // Auto-start the native MLX server only when the Metal profile is selected
+  // AND the user had explicitly started the server (mlx:start sets the flag,
+  // mlx:stop clears it). Merely selecting the Metal runtime must not start
+  // the server — its startup pre-downloads models, and downloads may only
+  // begin after an explicit start.
   const runtimeProfile = store.get('server.runtimeProfile') as string;
-  if (runtimeProfile === 'metal') {
+  const mlxDesiredRunning = store.get('server.mlxDesiredRunning') === true;
+  if (runtimeProfile === 'metal' && mlxDesiredRunning) {
     const port = (store.get('server.port') as number) ?? 9786;
     const hfToken = (store.get('server.hfToken') as string) || undefined;
     const mainTranscriberModel =
@@ -2416,10 +2426,12 @@ app.whenReady().then(async () => {
 
 ipcMain.handle('mlx:start', async (_event, opts: MLXStartOptions) => {
   await mlxServerManager.start(opts);
+  store.set('server.mlxDesiredRunning', true);
 });
 
 ipcMain.handle('mlx:stop', async () => {
   await mlxServerManager.stop();
+  store.set('server.mlxDesiredRunning', false);
 });
 
 ipcMain.handle('mlx:getStatus', () => {

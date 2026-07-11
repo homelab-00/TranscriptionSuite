@@ -18,7 +18,7 @@ structural invariant), but goes from six cards to five:
 | # | Card | Contents |
 |---|------|----------|
 | 1 | Docker Image / Inference Server (Metal) | unchanged |
-| 2 | **Instance Settings** (merged) | Runtime selector, Main model selector, Live model selector, Diarization selector, legacy-GPU toggle, Vulkan sidecar prompt, configuration summary strip |
+| 2 | **Instance Settings** (merged) | Runtime selector, Main model selector, Live model selector, Diarization selector, legacy-GPU toggle, Vulkan sidecar prompt |
 | 3 | **Remote Connection** (new) | Auth token field, Tailscale hostname field, firewall warning |
 | 4 | Persistent Volumes | unchanged (was #5) |
 | 5 | Clean Up | unchanged (was #6) |
@@ -80,11 +80,12 @@ GGML mains show a "not available for whisper.cpp models" info state.
 (`'CAM++ (fast, built-in)'` etc.) — only display labels change — so
 persisted configs and the one-shot migration keep working.
 
-### Summary strip
-A footer row inside card 2 summarizing the chosen combination (runtime +
-main + live + diarization) with capability chips (languages, translation,
-live, diarization, token requirement). This is the in-app matrix rendered
-for the *current* selection.
+### Capability glyphs (implemented in place of a separate summary strip)
+Each family tile carries a mini glyph row — language count, translation
+direction (→EN / A⇄B), live capability, diarization capability, and a key
+icon when the default diarization engine needs a HuggingFace token — with
+tooltips. The tile grid itself therefore renders the full in-app matrix; a
+separate summary footer would have duplicated it.
 
 ## 3. Single source of truth: `dashboard/src/services/instanceMatrix.ts`
 
