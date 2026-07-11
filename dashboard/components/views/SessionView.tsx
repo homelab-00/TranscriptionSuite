@@ -1055,8 +1055,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
     Array<{ job_id: string; completed_at: string; text_preview: string }>
   >([]);
   useEffect(() => {
-    const token = apiClient.getAuthToken();
-    fetch('/api/transcribe/recent', token ? { headers: { Authorization: `Bearer ${token}` } } : {})
+    // Absolute base URL via apiClient — a relative fetch resolves to the
+    // packaged renderer file:// origin and never reaches the backend (GH-202).
+    apiClient
+      .fetchRecentUndelivered()
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data)) setRecoveryJobs(data);
@@ -1251,11 +1253,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   <button
                     className="rounded px-2 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
                     onClick={() => {
-                      const viewToken = apiClient.getAuthToken();
-                      fetch(
-                        `/api/transcribe/result/${job.job_id}`,
-                        viewToken ? { headers: { Authorization: `Bearer ${viewToken}` } } : {},
-                      )
+                      apiClient
+                        .fetchTranscriptionResult(job.job_id)
                         .then(async (resp) => {
                           if (resp.status === 200) {
                             const data = await resp.json();
@@ -1277,13 +1276,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   <button
                     className="rounded px-2 py-1 text-xs font-semibold text-amber-300/60 hover:bg-amber-500/20 hover:text-amber-300"
                     onClick={() => {
-                      const dismissToken = apiClient.getAuthToken();
-                      fetch(`/api/transcribe/result/${job.job_id}/dismiss`, {
-                        method: 'POST',
-                        ...(dismissToken
-                          ? { headers: { Authorization: `Bearer ${dismissToken}` } }
-                          : {}),
-                      }).catch(() => {});
+                      apiClient.dismissTranscriptionResult(job.job_id).catch(() => {});
                       setRecoveryJobs((prev) => prev.filter((j) => j.job_id !== job.job_id));
                     }}
                   >

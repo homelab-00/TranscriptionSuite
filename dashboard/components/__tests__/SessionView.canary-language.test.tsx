@@ -147,6 +147,11 @@ vi.mock('../../src/api/client', () => ({
     unloadModels: vi.fn().mockResolvedValue(undefined),
     unloadLLMModel: vi.fn().mockResolvedValue(undefined),
     loadModelsStream: vi.fn().mockReturnValue(vi.fn()),
+    // GH-202 recovery notification (mounted via useEffect): return a Response
+    // whose json() yields an empty list so the recovery useEffect resolves.
+    fetchRecentUndelivered: vi.fn().mockResolvedValue({ json: async () => [] }),
+    fetchTranscriptionResult: vi.fn().mockResolvedValue({ status: 404, json: async () => ({}) }),
+    dismissTranscriptionResult: vi.fn().mockResolvedValue({ status: 200 }),
   },
 }));
 
