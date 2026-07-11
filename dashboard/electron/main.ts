@@ -33,6 +33,7 @@ import { createMlxLogSink, type MlxLogSink } from './mlxLogSink.js';
 import { TrayManager, type TrayState } from './trayManager.js';
 import { UpdateManager } from './updateManager.js';
 import { UpdateInstaller } from './updateInstaller.js';
+import { forceEnableWeeklyUpdatesOnce } from './updateMigration.js';
 import { createAppState, InstallGate } from './appState.js';
 import { CompatGuard } from './compatGuard.js';
 import { verifyChecksum } from './checksumVerifier.js';
@@ -487,8 +488,8 @@ const store = new Store({
     'app.showNotifications': true,
     'app.stopServerOnQuit': true,
     'app.startMinimized': false,
-    'app.updateChecksEnabled': false,
-    'app.updateCheckIntervalMode': '24h',
+    'app.updateChecksEnabled': true,
+    'app.updateCheckIntervalMode': '7d',
     'app.updateCheckCustomHours': 24,
     'app.modelSelectionOnboardingCompleted': false,
     'output.hideTimestamps': false,
@@ -513,6 +514,8 @@ const store = new Store({
     'updates.lastStatus': null,
     'updates.lastNotified': { appLatest: '', serverLatest: '' },
     'updates.bannerSnoozedUntil': 0,
+    'updates.forceOnMigrationDone': false,
+    'updates.dismissedAppVersion': '',
     'server.runtimeProfile': 'cpu',
     'server.gpuAutoDetectDone': false,
     // Issue #83 — opt-in legacy-GPU image variant (Pascal/Maxwell support).
@@ -2251,6 +2254,11 @@ app.whenReady().then(async () => {
   });
 
   trayManager.create();
+  // One-shot force-on migration for the default-on weekly rollout. Runs once;
+  // afterward the user's own enable/disable choice persists.
+  if (forceEnableWeeklyUpdatesOnce(store)) {
+    console.log('[UpdateMigration] forced weekly update checks ON (one-time).');
+  }
   updateManager.start();
 
   if (process.platform === 'win32') {
