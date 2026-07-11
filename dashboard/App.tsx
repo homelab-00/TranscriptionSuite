@@ -35,6 +35,7 @@ import { useBootstrapDownloads } from './src/hooks/useBootstrapDownloads';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
 import { useAuthTokenSync } from './src/hooks/useAuthTokenSync';
 import { useWatcherFilesBridge } from './src/hooks/useWatcherFilesBridge';
+import { useUpdateToast } from './src/hooks/useUpdateToast';
 import {
   MAIN_RECOMMENDED_MODEL,
   LIVE_RECOMMENDED_MODEL,
@@ -114,6 +115,8 @@ const AppInner: React.FC = () => {
   // mounted at app root so it does not double-register when a per-tab hook
   // (e.g. useSessionWatcher) survives a tab switch (Issue #94).
   useWatcherFilesBridge();
+  // Raises the Update/Dismiss toast when main pushes updates:updateAvailable.
+  useUpdateToast();
 
   // Track clientRunning at app level so Sidebar can derive Session status
   const [clientRunning, setClientRunning] = useState(false);
