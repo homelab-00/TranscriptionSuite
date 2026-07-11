@@ -188,12 +188,19 @@ describe('deriveBannerState', () => {
   const now = 1_000_000;
 
   it('returns available when updateAvailable + idle installer + not snoozed', () => {
-    const out = deriveBannerState({ state: 'idle' }, availableStatus('1.3.3'), false, now, 0);
+    const out = deriveBannerState({ state: 'idle' }, availableStatus('1.3.3'), false, now, 0, null);
     expect(out).toEqual({ state: 'available', version: '1.3.3' });
   });
 
   it('returns hidden when snoozed even though update is available', () => {
-    const out = deriveBannerState({ state: 'idle' }, availableStatus(), false, now, now + 1000);
+    const out = deriveBannerState(
+      { state: 'idle' },
+      availableStatus(),
+      false,
+      now,
+      now + 1000,
+      null,
+    );
     expect(out.state).toBe('hidden');
   });
 
@@ -211,47 +218,69 @@ describe('deriveBannerState', () => {
       false,
       now,
       0,
+      null,
     );
     expect(out).toEqual({ state: 'downloading', version: '1.3.3', percent: 43 });
   });
 
   it('maps checking to downloading at 0% using updateStatus.app.latest', () => {
-    const out = deriveBannerState({ state: 'checking' }, availableStatus('1.3.4'), false, now, 0);
+    const out = deriveBannerState(
+      { state: 'checking' },
+      availableStatus('1.3.4'),
+      false,
+      now,
+      0,
+      null,
+    );
     expect(out).toEqual({ state: 'downloading', version: '1.3.4', percent: 0 });
   });
 
   it('maps downloaded + idle app to ready', () => {
-    const out = deriveBannerState({ state: 'downloaded', version: '1.3.3' }, null, false, now, 0);
+    const out = deriveBannerState(
+      { state: 'downloaded', version: '1.3.3' },
+      null,
+      false,
+      now,
+      0,
+      null,
+    );
     expect(out).toEqual({ state: 'ready', version: '1.3.3' });
   });
 
   it('maps downloaded + busy app to ready_blocked', () => {
-    const out = deriveBannerState({ state: 'downloaded', version: '1.3.3' }, null, true, now, 0);
+    const out = deriveBannerState(
+      { state: 'downloaded', version: '1.3.3' },
+      null,
+      true,
+      now,
+      0,
+      null,
+    );
     expect(out).toEqual({ state: 'ready_blocked', version: '1.3.3' });
   });
 
   it('collapses cancelled to hidden when no update available', () => {
-    const out = deriveBannerState({ state: 'cancelled' }, null, false, now, 0);
+    const out = deriveBannerState({ state: 'cancelled' }, null, false, now, 0, null);
     expect(out.state).toBe('hidden');
   });
 
   it('collapses cancelled to available when update still pending', () => {
-    const out = deriveBannerState({ state: 'cancelled' }, availableStatus(), false, now, 0);
+    const out = deriveBannerState({ state: 'cancelled' }, availableStatus(), false, now, 0, null);
     expect(out).toEqual({ state: 'available', version: '1.3.3' });
   });
 
   it('collapses error to hidden', () => {
-    const out = deriveBannerState({ state: 'error', message: 'boom' }, null, false, now, 0);
+    const out = deriveBannerState({ state: 'error', message: 'boom' }, null, false, now, 0, null);
     expect(out.state).toBe('hidden');
   });
 
   it('returns hidden when no installer and no update available', () => {
-    const out = deriveBannerState(null, null, false, now, 0);
+    const out = deriveBannerState(null, null, false, now, 0, null);
     expect(out.state).toBe('hidden');
   });
 
   it('returns available when installer is null but update available', () => {
-    const out = deriveBannerState(null, availableStatus(), false, now, 0);
+    const out = deriveBannerState(null, availableStatus(), false, now, 0, null);
     expect(out).toEqual({ state: 'available', version: '1.3.3' });
   });
 
@@ -273,19 +302,23 @@ describe('deriveBannerState', () => {
         releaseNotes: null,
       },
     };
-    expect(deriveBannerState({ state: 'idle' }, statusNull, false, now, 0).state).toBe('hidden');
+    expect(deriveBannerState({ state: 'idle' }, statusNull, false, now, 0, null).state).toBe(
+      'hidden',
+    );
 
     const statusEmpty: UpdateStatus = {
       ...statusNull,
       app: { ...statusNull.app, latest: '' },
     };
-    expect(deriveBannerState({ state: 'idle' }, statusEmpty, false, now, 0).state).toBe('hidden');
+    expect(deriveBannerState({ state: 'idle' }, statusEmpty, false, now, 0, null).state).toBe(
+      'hidden',
+    );
   });
 
   it('survives a malformed persisted UpdateStatus missing the app field', () => {
     // Legacy / schema-drift payload — .app is absent.
     const malformed = { lastChecked: new Date(now).toISOString() } as unknown as UpdateStatus;
-    const out = deriveBannerState({ state: 'idle' }, malformed, false, now, 0);
+    const out = deriveBannerState({ state: 'idle' }, malformed, false, now, 0, null);
     expect(out.state).toBe('hidden');
   });
 
@@ -300,8 +333,38 @@ describe('deriveBannerState', () => {
       false,
       now,
       0,
+      null,
     );
     expect(out).toEqual({ state: 'downloading', version: '1.3.3' });
+  });
+
+  it('hides the available state when latest matches the dismissed version', () => {
+    const out = deriveBannerState(
+      { state: 'idle' },
+      availableStatus('1.4.0'),
+      false,
+      now,
+      0,
+      '1.4.0',
+    );
+    expect(out.state).not.toBe('available');
+  });
+
+  it('shows the available state when a newer version than the dismissed one appears', () => {
+    const out = deriveBannerState(
+      { state: 'idle' },
+      availableStatus('1.5.0'),
+      false,
+      now,
+      0,
+      '1.4.0',
+    );
+    expect(out.state).toBe('available');
+  });
+
+  it('shows the available state when nothing has been dismissed', () => {
+    const out = deriveBannerState({ state: 'idle' }, availableStatus('1.4.0'), false, now, 0, null);
+    expect(out.state).toBe('available');
   });
 });
 
@@ -999,7 +1062,7 @@ describe('M7: manual-download state', () => {
     const now = 1_000_000;
 
     it('maps manual-download-required to manual-download with version + URL + reason', () => {
-      const out = deriveBannerState(manualDownloadStatus(), null, false, now, 0);
+      const out = deriveBannerState(manualDownloadStatus(), null, false, now, 0, null);
       expect(out).toEqual({
         state: 'manual-download',
         version: '1.3.3',
@@ -1009,7 +1072,7 @@ describe('M7: manual-download state', () => {
     });
 
     it('hides manual-download when snoozed', () => {
-      const out = deriveBannerState(manualDownloadStatus(), null, false, now, now + 1000);
+      const out = deriveBannerState(manualDownloadStatus(), null, false, now, now + 1000, null);
       expect(out.state).toBe('hidden');
     });
 
@@ -1023,6 +1086,7 @@ describe('M7: manual-download state', () => {
         false,
         now,
         0,
+        null,
       );
       expect(out.version).toBeNull();
       expect(out.downloadUrl).toMatch(/releases\/latest$/);
@@ -1221,6 +1285,7 @@ describe('Deferred bug fixes (M1-M7 review)', () => {
       false,
       futureNow,
       clamped,
+      null,
     );
     expect(derived).toEqual({ state: 'available', version: '1.3.3' });
   });
