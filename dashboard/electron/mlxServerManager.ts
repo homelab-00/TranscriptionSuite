@@ -18,6 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ensureServerConfigSeed, getServerConfigDir } from './serverConfigPaths.js';
 import { hfCacheDirName } from './hfRepoAliases.js';
+import { resolveMacDmgAssetName } from './appVariant.js';
 import type { MlxLogSink } from './mlxLogSink.js';
 
 const execFileAsync = promisify(execFile);
@@ -523,13 +524,13 @@ export class MLXServerManager {
    * re-create GH #124 symptom 3. Fall back to a still-actionable name.
    */
   private _metalDmgName(): string {
-    let version = '<version>';
     try {
-      version = app.getVersion();
+      return resolveMacDmgAssetName(app.getVersion(), 'mac-metal');
     } catch {
-      // Keep the actionable "-metal" suffix even without a resolvable version.
+      // app.getVersion() can throw on the damaged bundle this diagnostic
+      // exists to report; keep the actionable "-metal" suffix regardless.
+      return 'TranscriptionSuite-<version>-arm64-mac-metal.dmg';
     }
-    return `TranscriptionSuite-${version}-arm64-mac-metal.dmg`;
   }
 
   private _resolveDataDir(): string {
