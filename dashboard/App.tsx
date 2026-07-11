@@ -419,6 +419,7 @@ const AppInner: React.FC = () => {
         mainTranscriberModel?: string;
         liveTranscriberModel?: string;
         diarizationModel?: string;
+        sensevoiceDiarizationEngine?: string;
         whispercppModel?: string;
       },
     ) => {
@@ -679,6 +680,9 @@ const AppInner: React.FC = () => {
             mainTranscriberModel: selectedMainModel,
             liveTranscriberModel: selectedLiveModel,
             ...(models?.diarizationModel ? { diarizationModel: models.diarizationModel } : {}),
+            ...(models?.sensevoiceDiarizationEngine
+              ? { sensevoiceDiarizationEngine: models.sensevoiceDiarizationEngine }
+              : {}),
             ...(models?.whispercppModel ? { whispercppModel: models.whispercppModel } : {}),
           },
         );

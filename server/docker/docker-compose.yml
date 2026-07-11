@@ -97,6 +97,8 @@ services:
       - MAIN_TRANSCRIBER_MODEL=${MAIN_TRANSCRIBER_MODEL:-}
       - LIVE_TRANSCRIBER_MODEL=${LIVE_TRANSCRIBER_MODEL:-}
       - DIARIZATION_MODEL=${DIARIZATION_MODEL:-}
+      # SenseVoice diarization engine: funasr (CAM++ single-pass) or pyannote (two-pass)
+      - SENSEVOICE_DIARIZATION_ENGINE=${SENSEVOICE_DIARIZATION_ENGINE:-funasr}
       # faster-whisper backend support (optional family install, additive only)
       - INSTALL_WHISPER=${INSTALL_WHISPER:-false}
       # NeMo toolkit for NVIDIA Parakeet ASR models (optional, large dependency)

@@ -5,6 +5,8 @@ import { ChevronDown } from 'lucide-react';
 export interface OptionMeta {
   /** When true, the option is visually dimmed with reduced opacity. */
   dim?: boolean;
+  /** When true, the option is greyed out and cannot be selected. */
+  disabled?: boolean;
   /** Short badge text shown to the right of the option label (e.g. "Requires CUDA"). */
   badge?: string;
 }
@@ -79,11 +81,12 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                 <ListboxOption
                   key={option}
                   value={option}
+                  disabled={meta?.disabled ?? false}
                   title={meta?.badge ? `${option} — ${meta.badge}` : option}
                   className={({ focus, selected }) =>
-                    `flex min-w-0 cursor-pointer items-center justify-between px-4 py-2 text-sm transition-colors ${
-                      meta?.dim && !selected ? 'opacity-40' : ''
-                    } ${
+                    `flex min-w-0 items-center justify-between px-4 py-2 text-sm transition-colors ${
+                      meta?.disabled ? 'cursor-not-allowed' : 'cursor-pointer'
+                    } ${(meta?.dim || meta?.disabled) && !selected ? 'opacity-40' : ''} ${
                       selected
                         ? activeItemClass
                         : focus

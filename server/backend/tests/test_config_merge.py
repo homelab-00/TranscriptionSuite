@@ -93,6 +93,15 @@ def test_env_override_wins_over_merged_overlay(tmp_path: Path, monkeypatch):
     assert cfg.get("main_transcriber", "model") == "from-env"
 
 
+def test_sensevoice_engine_env_override(tmp_path: Path, monkeypatch):
+    (tmp_path / "config.yaml").write_text(
+        "diarization:\n  sensevoice_engine: funasr\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("SENSEVOICE_DIARIZATION_ENGINE", "pyannote")
+    cfg = config.ServerConfig()
+    assert cfg.get("diarization", "sensevoice_engine") == "pyannote"
+
+
 def test_invalid_overlay_degrades_to_defaults(tmp_path: Path):
     (tmp_path / "config.yaml").write_text("foo: [1, 2\n", encoding="utf-8")  # unclosed
     cfg = config.ServerConfig()  # must NOT raise

@@ -133,6 +133,16 @@ describe('MODEL_REGISTRY requiresRuntime field', () => {
 });
 
 // ---------------------------------------------------------------------------
+// MODEL_REGISTRY — SenseVoice entry
+// ---------------------------------------------------------------------------
+describe('MODEL_REGISTRY SenseVoice entry', () => {
+  it('SenseVoice is diarization-capable (CAM++ single-pass)', () => {
+    const sv = getModelById('iic/SenseVoiceSmall');
+    expect(sv?.capabilities.diarization).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // getModelsByFamily
 // ---------------------------------------------------------------------------
 describe('getModelsByFamily', () => {

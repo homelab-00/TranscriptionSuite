@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -105,14 +105,18 @@ vi.mock('../../src/config/store', () => ({
 }));
 
 // modelCapabilities — must export the full surface ServerView imports
-// (isWhisperModel, isWhisperCppModel, isMLXModel, isNemoModel); a missing
-// export throws "No <name> export is defined on the mock" the moment ServerView
-// accesses it during render. The test world treats every model as plain Whisper.
+// (isWhisperModel, isWhisperCppModel, isMLXModel, isNemoModel, isSenseVoiceModel);
+// a missing export throws "No <name> export is defined on the mock" the moment
+// ServerView accesses it during render. The test world treats every model as
+// plain Whisper. `isSenseVoiceModel` is name-based so the merged-diarization
+// tests can drive the SenseVoice-only greying / migration by selecting a main
+// model whose id contains "sensevoice".
 vi.mock('../../src/services/modelCapabilities', () => ({
   isWhisperModel: () => true,
   isWhisperCppModel: () => false,
   isMLXModel: () => false,
   isNemoModel: () => false,
+  isSenseVoiceModel: (m: string) => typeof m === 'string' && m.toLowerCase().includes('sensevoice'),
 }));
 
 // modelRegistry
@@ -132,7 +136,7 @@ vi.mock('../../src/services/modelSelection', () => ({
   MODEL_DISABLED_OPTION: 'Disabled',
   DISABLED_MODEL_SENTINEL: '__disabled__',
   WHISPER_MEDIUM: 'openai/whisper-medium',
-  MAIN_MODEL_PRESETS: ['openai/whisper-large-v3-turbo'],
+  MAIN_MODEL_PRESETS: ['openai/whisper-large-v3-turbo', 'iic/SenseVoiceSmall'],
   LIVE_MODEL_PRESETS: ['openai/whisper-medium'],
   VULKAN_RECOMMENDED_MODEL: 'ggml-large-v3-turbo.bin',
   resolveMainModelSelectionValue: (v: string) => v,
@@ -338,6 +342,7 @@ describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
       expect(screen.queryAllByText(PYANNOTE).length).toBeGreaterThanOrEqual(1);
     });
     // The old auto-migration to Sortformer must NOT fire on Metal anymore.
+    // (ServerView persists the merged control under server.diarizationModelSelection.)
     const sortformerWrites = setSpy.mock.calls.filter(
       ([k, v]) => k === 'server.diarizationModelSelection' && v === SORTFORMER,
     );
@@ -400,5 +405,215 @@ describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
     expect(
       screen.queryByText(/Custom pyannote repos are not supported on Apple Silicon/i),
     ).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Merged Diarization dropdown — CAM++ + engine collapsed into ONE control.
+//
+// The Server tab renders a SINGLE "Diarization Model" dropdown listing CAM++
+// alongside Sortformer, pyannote and Custom. Selecting CAM++ sends
+// SENSEVOICE_DIARIZATION_ENGINE=funasr with an EMPTY DIARIZATION_MODEL; every
+// other pick sends the pyannote engine. The merged value keeps the original
+// server.diarizationModelSelection key (shared with the Model Manager tab and the
+// Metal boot auto-start). The retired server.sensevoiceDiarizationEngine key acts
+// as a one-shot migration marker and is cleared once the fold is applied.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Merged Diarization dropdown (CAM++ + engine)', () => {
+  const CAMPP = 'CAM++ (fast, built-in)';
+  const SORTFORMER = 'Sortformer (Metal; ≤ 4 speakers)';
+  const PYANNOTE = 'pyannote/speaker-diarization-community-1';
+  const SENSEVOICE_MAIN = 'iic/SenseVoiceSmall';
+  const WHISPER_MAIN = 'openai/whisper-large-v3-turbo';
+
+  function setupMergedAPI(configMap: Record<string, unknown>, arch = 'x64') {
+    const setSpy = vi.fn().mockResolvedValue(undefined);
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockImplementation(async (key: string) => configMap[key]),
+        set: setSpy,
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+        checkModelCache: vi.fn().mockResolvedValue({}),
+      },
+      app: {
+        getArch: vi.fn().mockReturnValue(arch),
+        getConfigDir: vi.fn().mockResolvedValue('/mock/config'),
+      },
+      mlx: {
+        getStatus: vi.fn().mockResolvedValue('stopped'),
+        onStatusChanged: vi.fn().mockReturnValue(vi.fn()),
+      },
+      server: {
+        checkFirewallPort: vi.fn().mockResolvedValue(null),
+        checkGpu: vi.fn().mockResolvedValue({ gpu: false, toolkit: false, vulkan: false }),
+      },
+    };
+    return setSpy;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDocker.available = true;
+    mockDocker.images = [];
+    mockDocker.container = { exists: false, running: false, status: 'unknown', health: undefined };
+    mockDocker.operationError = null;
+    mockDocker.operating = false;
+    mockDocker.composeAvailable = true;
+    // Truthy adminStatus so the diarization-hydration effect can settle.
+    mockAdminStatus.status = { models: {} };
+  });
+
+  it('greys the CAM++ option (SenseVoice only) when the main transcriber is not SenseVoice', async () => {
+    setupMergedAPI({ 'server.runtimeProfile': 'cpu', 'server.mainModelSelection': WHISPER_MAIN });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(screen.queryByText('SenseVoice only')).not.toBeNull();
+    });
+    expect(screen.queryAllByText(CAMPP).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('enables the CAM++ option (no SenseVoice-only badge) when the main transcriber is SenseVoice', async () => {
+    setupMergedAPI({
+      'server.runtimeProfile': 'cpu',
+      'server.mainModelSelection': SENSEVOICE_MAIN,
+    });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    // The badge is present transiently before hydration (main is the loading
+    // placeholder), then clears once the SenseVoice main is restored.
+    await waitFor(() => {
+      expect(screen.queryByText('SenseVoice only')).toBeNull();
+    });
+    expect(screen.queryAllByText(CAMPP).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('greys the Sortformer option (Requires Metal) on a non-Metal runtime', async () => {
+    setupMergedAPI({ 'server.runtimeProfile': 'cpu', 'server.mainModelSelection': WHISPER_MAIN });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(screen.queryByText('Requires Metal')).not.toBeNull();
+    });
+    expect(screen.queryAllByText(SORTFORMER).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does NOT grey Sortformer on the Metal runtime', async () => {
+    setupMergedAPI(
+      { 'server.runtimeProfile': 'metal', 'server.mainModelSelection': WHISPER_MAIN },
+      'arm64',
+    );
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(screen.queryAllByText(SORTFORMER).length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.queryByText('Requires Metal')).toBeNull();
+  });
+
+  it('selecting CAM++ sends funasr engine + empty diarization model to onStartServer', async () => {
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    const setSpy = setupMergedAPI({
+      'server.runtimeProfile': 'cpu',
+      'server.mainModelSelection': SENSEVOICE_MAIN,
+      'server.diarizationModelSelection': CAMPP,
+    });
+    render(React.createElement(ServerView, { ...baseProps, onStartServer: onStart }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => {
+      expect(setSpy).toHaveBeenCalledWith('server.diarizationModelSelection', CAMPP);
+    });
+    fireEvent.click(screen.getByText('Start Local'));
+    expect(onStart).toHaveBeenCalledTimes(1);
+    const models = onStart.mock.calls[0][3];
+    expect(models.sensevoiceDiarizationEngine).toBe('funasr');
+    expect(models.diarizationModel).toBe('');
+  });
+
+  it('selecting pyannote sends pyannote engine + pyannote model to onStartServer', async () => {
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    const setSpy = setupMergedAPI({
+      'server.runtimeProfile': 'cpu',
+      'server.mainModelSelection': WHISPER_MAIN,
+      'server.diarizationModelSelection': PYANNOTE,
+    });
+    render(React.createElement(ServerView, { ...baseProps, onStartServer: onStart }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => {
+      expect(setSpy).toHaveBeenCalledWith('server.diarizationModelSelection', PYANNOTE);
+    });
+    fireEvent.click(screen.getByText('Start Local'));
+    const models = onStart.mock.calls[0][3];
+    expect(models.sensevoiceDiarizationEngine).toBe('pyannote');
+    expect(models.diarizationModel).toBe(PYANNOTE);
+  });
+
+  it('migrates legacy {pyannote model, CAM++ engine} + SenseVoice main to CAM++ and consumes the marker', async () => {
+    const setSpy = setupMergedAPI({
+      'server.runtimeProfile': 'cpu',
+      'server.mainModelSelection': SENSEVOICE_MAIN,
+      'server.diarizationModelSelection': PYANNOTE,
+      'server.sensevoiceDiarizationEngine': CAMPP,
+    });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(setSpy).toHaveBeenCalledWith('server.diarizationModelSelection', CAMPP);
+    });
+    // The retired key is cleared so the migration can never re-fire and clobber a
+    // later user choice.
+    expect(setSpy).toHaveBeenCalledWith('server.sensevoiceDiarizationEngine', '');
+    expect(screen.queryAllByText(CAMPP).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('migrates legacy {pyannote model, CAM++ engine} + Whisper main to the pyannote option', async () => {
+    const setSpy = setupMergedAPI({
+      'server.runtimeProfile': 'cpu',
+      'server.mainModelSelection': WHISPER_MAIN,
+      'server.diarizationModelSelection': PYANNOTE,
+      'server.sensevoiceDiarizationEngine': CAMPP,
+    });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(setSpy).toHaveBeenCalledWith('server.diarizationModelSelection', PYANNOTE);
+    });
+    // CAM++ was a no-op under a non-SenseVoice main, so the merged value must be
+    // the legacy pyannote pick, never CAM++.
+    expect(setSpy).not.toHaveBeenCalledWith('server.diarizationModelSelection', CAMPP);
+  });
+
+  it('does not re-fire the migration once the retired engine key is cleared', async () => {
+    // Post-migration store: the marker is an empty string, which getString reports
+    // as null. A user who has since picked pyannote must keep it.
+    const setSpy = setupMergedAPI({
+      'server.runtimeProfile': 'cpu',
+      'server.mainModelSelection': SENSEVOICE_MAIN,
+      'server.diarizationModelSelection': PYANNOTE,
+      'server.sensevoiceDiarizationEngine': '',
+    });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(setSpy).toHaveBeenCalledWith('server.diarizationModelSelection', PYANNOTE);
+    });
+    expect(setSpy).not.toHaveBeenCalledWith('server.diarizationModelSelection', CAMPP);
+  });
+
+  it('does NOT reset a stored CAM++ selection before adminStatus arrives', async () => {
+    // Regression guard. Until adminStatus lands, configuredMainModel is the
+    // DISABLED_MODEL_SENTINEL, so activeTranscriber resolves to a truthy value that
+    // is NOT the loading placeholder. A placeholder-only guard would let the
+    // fallback-to-pyannote reset through and clobber a legitimately stored CAM++.
+    mockAdminStatus.status = null;
+    const setSpy = setupMergedAPI({
+      'server.runtimeProfile': 'cpu',
+      'server.mainModelSelection': WHISPER_MAIN,
+      'server.diarizationModelSelection': CAMPP,
+    });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(setSpy).toHaveBeenCalledWith('server.diarizationModelSelection', CAMPP);
+    });
+    expect(setSpy).not.toHaveBeenCalledWith('server.diarizationModelSelection', PYANNOTE);
+    expect(screen.queryAllByText(CAMPP).length).toBeGreaterThanOrEqual(1);
   });
 });

@@ -28,6 +28,7 @@ from server.core.stt.backends.base import (
     BackendDependencyError,
     BackendSegment,
     BackendTranscriptionInfo,
+    DiarizedTranscriptionResult,
     STTBackend,
 )
 
@@ -69,6 +70,17 @@ def _extract_language(raw_text: str | None) -> str | None:
     return match.group(1).lower() if match else None
 
 
+def _format_spk(spk: Any) -> str:
+    """Map a funasr integer ``spk`` index to the project's ``SPEAKER_NN`` label."""
+    if spk is None:
+        return "UNKNOWN"
+    try:
+        return f"SPEAKER_{int(spk):02d}"
+    except (TypeError, ValueError):
+        raw = str(spk).strip()
+        return raw or "UNKNOWN"
+
+
 def _write_temp_wav(audio: np.ndarray, sample_rate: int) -> str:
     """Write float32 mono audio to a temp 16-bit WAV and return its path."""
     fd, path = tempfile.mkstemp(suffix=".wav", prefix="sensevoice_")
@@ -104,6 +116,7 @@ class SenseVoiceBackend(STTBackend):
         self._model: Any | None = None
         self._model_name: str | None = None
         self._device: str | None = None
+        self._diarization_loaded: bool = False
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -115,18 +128,41 @@ class SenseVoiceBackend(STTBackend):
         hf_repo_id = _resolve_hf_repo_id(model_name)
 
         logger.info(f"Loading SenseVoice model: {model_name} (hf:{hf_repo_id}) on {funasr_device}")
-        # hub="hf": pull weights from HuggingFace, not the CN-hosted ModelScope.
-        # The repo id must be the HF namespace (FunAudioLLM/…), not the ModelScope
-        # "iic/…" id, which 404s on HF — see _resolve_hf_repo_id.
-        # disable_update=True: skip the ModelScope version ping (offline-friendly).
-        self._model = AutoModel(
-            model=hf_repo_id,
-            vad_model="fsmn-vad",
-            vad_kwargs={"max_single_segment_time": 30000},
-            device=funasr_device,
-            hub="hf",
-            disable_update=True,
-        )
+        # CAM++ single-pass diarization is the default for SenseVoice. cam++ is
+        # ~28 MB, so we build it into the model unconditionally (when requested)
+        # rather than reloading on a per-job toggle. Disable via
+        # sensevoice_diarization=False (e.g. cam++ unavailable offline).
+        want_diarization = bool(kwargs.get("sensevoice_diarization", True))
+        model_kwargs: dict[str, Any] = {
+            "model": hf_repo_id,
+            "vad_model": "fsmn-vad",
+            "vad_kwargs": {"max_single_segment_time": 30000},
+            "device": funasr_device,
+            "hub": "hf",
+            "disable_update": True,
+        }
+        if want_diarization:
+            # spk_mode="vad_segment" matches SenseVoice (no token timestamps) and
+            # skips funasr's punc_segment warning + forced fallback.
+            model_kwargs["spk_model"] = "cam++"
+            model_kwargs["spk_mode"] = "vad_segment"
+        try:
+            self._model = AutoModel(**model_kwargs)
+        except Exception:
+            if want_diarization:
+                logger.warning(
+                    "SenseVoice: building with cam++ failed; retrying transcriber-only "
+                    "(diarization will fall back to pyannote).",
+                    exc_info=True,
+                )
+                model_kwargs.pop("spk_model", None)
+                model_kwargs.pop("spk_mode", None)
+                self._model = AutoModel(**model_kwargs)
+                self._diarization_loaded = False
+            else:
+                raise
+        else:
+            self._diarization_loaded = want_diarization
         self._model_name = model_name
         self._device = funasr_device
         logger.info("SenseVoice model loaded")
@@ -135,6 +171,7 @@ class SenseVoiceBackend(STTBackend):
         self._model = None
         self._model_name = None
         self._device = None
+        self._diarization_loaded = False
         clear_gpu_cache()
 
     def is_loaded(self) -> bool:
@@ -199,6 +236,60 @@ class SenseVoiceBackend(STTBackend):
         duration_s = float(len(audio)) / float(audio_sample_rate) if audio_sample_rate else 0.0
         return self._parse_result(result, duration_s, forced_language=lang)
 
+    def transcribe_with_diarization(
+        self,
+        audio: np.ndarray,
+        *,
+        audio_sample_rate: int = SAMPLE_RATE,
+        language: str | None = None,
+        task: str = "transcribe",
+        beam_size: int = 5,
+        initial_prompt: str | None = None,
+        suppress_tokens: list[int] | None = None,
+        vad_filter: bool = True,
+        num_speakers: int | None = None,
+        hf_token: str | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> DiarizedTranscriptionResult | None:
+        # CAM++ single-pass: speakers come from funasr's own generate() call.
+        # Whisper-shaped knobs do not apply.
+        del task, beam_size, initial_prompt, suppress_tokens, vad_filter
+        del num_speakers, hf_token, progress_callback
+
+        if self._model is None:
+            raise RuntimeError("SenseVoice model is not loaded")
+
+        lang = self._resolve_language(language)
+        wav_path = _write_temp_wav(audio, audio_sample_rate)
+        duration_s = float(len(audio)) / float(audio_sample_rate) if audio_sample_rate else 0.0
+        try:
+            try:
+                result = self._model.generate(
+                    input=wav_path,
+                    cache={},
+                    language=lang,
+                    use_itn=True,
+                    batch_size_s=300,
+                    merge_vad=True,
+                    merge_length_s=15,
+                )
+            except Exception:
+                # Known upstream failure modes (distribute_spk TypeError, etc.).
+                # NEVER drop the result — degrade to a plain transcript.
+                logger.warning(
+                    "SenseVoice CAM++ diarization failed; returning plain transcript "
+                    "without speaker labels.",
+                    exc_info=True,
+                )
+                return self._plain_diarized_fallback(audio, audio_sample_rate, lang)
+        finally:
+            try:
+                os.remove(wav_path)
+            except OSError:
+                pass
+
+        return self._parse_diarized_result(result, duration_s, forced_language=lang)
+
     def supports_translation(self) -> bool:
         return False
 
@@ -243,12 +334,101 @@ class SenseVoiceBackend(STTBackend):
         if isinstance(sentence_info, list) and sentence_info:
             segments: list[BackendSegment] = []
             for sentence in sentence_info:
-                text = rich_transcription_postprocess(str(sentence.get("text", "")))
-                start = float(sentence.get("start", 0.0)) / 1000.0
-                end = float(sentence.get("end", 0.0)) / 1000.0
+                text = rich_transcription_postprocess(
+                    str(sentence.get("sentence") or sentence.get("text") or "")
+                )
+                start = float(sentence.get("start") or 0) / 1000.0
+                end = float(sentence.get("end") or 0) / 1000.0
                 segments.append(BackendSegment(text=text, start=start, end=end, words=[]))
             return segments, info
 
         # Fallback: one segment spanning the whole clip (no timestamps available).
         text = rich_transcription_postprocess(raw_text)
         return [BackendSegment(text=text, start=0.0, end=duration_s, words=[])], info
+
+    def _parse_diarized_result(
+        self,
+        result: list[dict[str, Any]],
+        duration_s: float,
+        *,
+        forced_language: str,
+    ) -> DiarizedTranscriptionResult:
+        from funasr.utils.postprocess_utils import rich_transcription_postprocess
+
+        if not result:
+            return DiarizedTranscriptionResult(
+                segments=[], words=[], num_speakers=0, language=None, language_probability=0.0
+            )
+
+        first = result[0]
+        raw_text = str(first.get("text", ""))
+        detected = _extract_language(raw_text)
+        if detected is None and forced_language != "auto":
+            detected = forced_language
+
+        sentence_info = first.get("sentence_info")
+        if isinstance(sentence_info, list) and sentence_info:
+            segments: list[dict[str, Any]] = []
+            speakers: set[str] = set()
+            for sentence in sentence_info:
+                text = rich_transcription_postprocess(
+                    str(sentence.get("sentence") or sentence.get("text") or "")
+                )
+                speaker = _format_spk(sentence.get("spk"))
+                if speaker != "UNKNOWN":
+                    speakers.add(speaker)
+                segments.append(
+                    {
+                        "text": text,
+                        "start": float(sentence.get("start") or 0) / 1000.0,
+                        "end": float(sentence.get("end") or 0) / 1000.0,
+                        "speaker": speaker,
+                        "words": [],
+                    }
+                )
+            return DiarizedTranscriptionResult(
+                segments=segments,
+                words=[],
+                num_speakers=len(speakers),
+                language=detected,
+                language_probability=0.0,
+            )
+
+        # No per-segment speaker info — degrade to one UNKNOWN-speaker segment.
+        return DiarizedTranscriptionResult(
+            segments=[
+                {
+                    "text": rich_transcription_postprocess(raw_text),
+                    "start": 0.0,
+                    "end": duration_s,
+                    "speaker": "UNKNOWN",
+                    "words": [],
+                }
+            ],
+            words=[],
+            num_speakers=0,
+            language=detected,
+            language_probability=0.0,
+        )
+
+    def _plain_diarized_fallback(
+        self, audio: np.ndarray, audio_sample_rate: int, lang: str
+    ) -> DiarizedTranscriptionResult:
+        """Re-transcribe without speaker labels and wrap as UNKNOWN-speaker segments.
+
+        Deliberately does NOT swallow a transcribe() failure: if the model is
+        genuinely broken, the exception propagates so the route can fall through
+        to standard (non-diarized) transcription / surface a real error — rather
+        than silently delivering an empty transcript.
+        """
+        segments, info = self.transcribe(audio, audio_sample_rate=audio_sample_rate, language=lang)
+        return DiarizedTranscriptionResult(
+            segments=[
+                {"text": s.text, "start": s.start, "end": s.end, "speaker": "UNKNOWN", "words": []}
+                for s in segments
+            ],
+            words=[],
+            num_speakers=0,
+            language=info.language,
+            language_probability=info.language_probability,
+        )
