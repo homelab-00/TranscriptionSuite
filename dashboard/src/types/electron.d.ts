@@ -224,6 +224,10 @@ interface ElectronAPI {
     getInstallerStatus: () => Promise<InstallerStatus>;
     onInstallerStatus: (callback: (status: InstallerStatus) => void) => () => void;
     onInstallReady: (callback: () => void) => () => void;
+    /** Fires when a completed check detects a newer app version. */
+    onUpdateAvailable: (
+      callback: (payload: { version: string; releaseNotes: string | null }) => void,
+    ) => () => void;
     openReleasePage: (
       url: string,
     ) => Promise<
