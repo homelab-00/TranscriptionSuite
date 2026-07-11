@@ -31,8 +31,10 @@ import { StartupEventWatcher } from './startupEventWatcher.js';
 import { MLXServerManager, type MLXStartOptions } from './mlxServerManager.js';
 import { createMlxLogSink, type MlxLogSink } from './mlxLogSink.js';
 import { TrayManager, type TrayState } from './trayManager.js';
-import { UpdateManager } from './updateManager.js';
+import { UpdateManager, type InstallerStatus } from './updateManager.js';
 import { UpdateInstaller } from './updateInstaller.js';
+import { detectAppVariant } from './appVariant.js';
+import { downloadMacVariantDmg } from './macVariantUpdater.js';
 import { forceEnableWeeklyUpdatesOnce } from './updateMigration.js';
 import { createAppState, InstallGate } from './appState.js';
 import { CompatGuard } from './compatGuard.js';
@@ -686,13 +688,25 @@ async function resolveStrategyForUpdater(): Promise<{
 // Release URL helpers (buildReleaseUrl, isTrustedReleaseUrl) extracted to
 // `./releaseUrl.ts` so the security guards have direct unit-test coverage.
 
-updateInstaller.on('status', (status) => {
+function broadcastToWindows(channel: string, payload?: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
-      win.webContents.send('updates:installerStatus', status);
+      win.webContents.send(channel, payload);
     }
   }
-});
+}
+
+function broadcastInstallerStatus(status: InstallerStatus): void {
+  broadcastToWindows('updates:installerStatus', status);
+}
+
+updateInstaller.on('status', (status) => broadcastInstallerStatus(status));
+
+// Push a one-shot update-available signal to every window; the renderer's
+// useUpdateToast hook turns it into the Update/Dismiss toast.
+updateManager.on('updateAvailable', (payload) =>
+  broadcastToWindows('updates:updateAvailable', payload),
+);
 
 // ─── App State + Install Gate ──────────────────────────────────────────
 // `isAppIdle()` queries /api/admin/status.models.job_tracker.is_busy (exposed by
@@ -704,11 +718,7 @@ const appState = createAppState(store);
 const installGate = new InstallGate({
   idleCheck: () => appState.isAppIdle(),
   onReady: () => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) {
-        win.webContents.send('updates:installReady');
-      }
-    }
+    broadcastToWindows('updates:installReady');
   },
   doInstall: async () => updateInstaller.install(),
 });
@@ -1566,6 +1576,41 @@ ipcMain.handle('updates:download', async () => {
     strategy = { strategy: 'electron-updater' as const };
   }
   if (strategy.strategy === 'manual-download') {
+    // macOS: download the variant-matched DMG and reveal it (unsigned → no
+    // silent install). Linux read-only-AppImage keeps the existing
+    // manual-download-required broadcast (banner routes to the release page).
+    if (process.platform === 'darwin' && strategy.version) {
+      const result = await downloadMacVariantDmg(strategy.version, {
+        variant: detectAppVariant({
+          platform: process.platform,
+          arch: process.arch,
+          isPackaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+        }),
+        onStatus: (status) => broadcastInstallerStatus(status),
+        revealFile: async (p) => {
+          shell.showItemInFolder(p);
+          const openErr = await shell.openPath(p);
+          if (openErr) {
+            console.warn('[updates:download] shell.openPath failed:', openErr);
+          }
+        },
+        getDownloadsDir: () => app.getPath('downloads'),
+      });
+      if (result.ok) return { ok: true as const };
+      if (result.reason === 'checksum-mismatch') {
+        return {
+          ok: false as const,
+          reason: 'error' as const,
+          message: 'Checksum verification failed',
+        };
+      }
+      return {
+        ok: false as const,
+        reason: 'manual-download-required' as const,
+        downloadUrl: result.downloadUrl,
+      };
+    }
     return updateInstaller.startDownload();
   }
 
