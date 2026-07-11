@@ -2,10 +2,10 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import { toast } from 'sonner';
 import {
-  Box,
   Cpu,
   HardDrive,
   Download,
+  Globe,
   Loader2,
   RefreshCw,
   CheckCircle2,
@@ -17,26 +17,27 @@ import {
   Copy,
   Check,
   FolderOpen,
-  Eye,
-  EyeOff,
-  Users,
   Laptop,
   Radio,
+  SlidersHorizontal,
   Zap,
   MinusCircle,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
-import { CustomSelect } from '../ui/CustomSelect';
 import { ImageTagChips } from '../ui/ImageTagChips';
 import { AppleSwitch } from '../ui/AppleSwitch';
+import { SelectorGroup } from '../ui/SelectorGroup';
+import { SelectorTile } from '../ui/SelectorTile';
 import { NvidiaIcon } from '../ui/icons/NvidiaIcon';
 import { AmdIcon } from '../ui/icons/AmdIcon';
 import { IntelIcon } from '../ui/icons/IntelIcon';
 import { AppleIcon } from '../ui/icons/AppleIcon';
 import { GpuHealthCard } from './GpuHealthCard';
 import { GpuDiagnosticModal, type GpuDiagnosticResultProp } from './GpuDiagnosticModal';
+import { InstanceSettingsSelectors } from './server/InstanceSettingsSelectors';
+import { RemoteConnectionCard } from './server/RemoteConnectionCard';
 
 import { useActivityStore } from '../../src/stores/activityStore';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
@@ -49,14 +50,12 @@ import {
   isWhisperModel,
   isWhisperCppModel,
   isMLXModel,
-  isNemoModel,
   isSenseVoiceModel,
 } from '../../src/services/modelCapabilities';
-import { MODEL_REGISTRY, getModelsByFamily } from '../../src/services/modelRegistry';
+import { getModelsByFamily } from '../../src/services/modelRegistry';
 import {
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   MAIN_MODEL_CUSTOM_OPTION,
-  MAIN_RECOMMENDED_MODEL,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   LIVE_MODEL_CUSTOM_OPTION,
   MODEL_DISABLED_OPTION,
@@ -69,12 +68,17 @@ import {
   resolveLiveModelSelectionValue,
   toBackendModelEnvValue,
 } from '../../src/services/modelSelection';
-import { getModelById } from '../../src/services/modelRegistry';
-import type { OptionMeta } from '../ui/CustomSelect';
-import { DEFAULT_SERVER_PORT } from '../../src/config/store';
+import {
+  DIARIZATION_CAMPP_OPTION,
+  DIARIZATION_DEFAULT_MODEL,
+  DIARIZATION_MODEL_CUSTOM_OPTION,
+  DIARIZATION_SORTFORMER_OPTION,
+  MLX_DEFAULT_MODEL,
+  defaultMainModelFor,
+  familyChoiceForModel,
+  isFamilyChoiceEnabledFor,
+} from '../../src/services/instanceMatrix';
 import { isRuntimeProfile, type RuntimeProfile } from '../../src/types/runtime';
-
-const MLX_DEFAULT_MODEL = 'mlx-community/parakeet-tdt-0.6b-v3';
 
 interface ServerViewProps {
   onStartServer: (
@@ -92,16 +96,11 @@ interface ServerViewProps {
   startupFlowPending: boolean;
 }
 
-const DIARIZATION_SORTFORMER_OPTION = 'Sortformer (Metal; ≤ 4 speakers)';
-const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
-const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
-// CAM++ is SenseVoice's built-in single-pass diarizer, merged into the single
-// Diarization Model dropdown. It is a UI label (not a model id): selecting it
-// sends SENSEVOICE_DIARIZATION_ENGINE=funasr and an EMPTY DIARIZATION_MODEL, so
-// the server keeps its config.yaml pyannote default as the fallback diarizer if
-// cam++ fails to load. Its literal string doubles as the legacy
-// `server.sensevoiceDiarizationEngine` value the one-shot migration recognises.
-const DIARIZATION_CAMPP_OPTION = 'CAM++ (fast, built-in)';
+// The diarization option strings (CAM++, Sortformer, pyannote, Custom) are
+// persisted verbatim in electron-store and now live in instanceMatrix.ts.
+// CAM++ sends SENSEVOICE_DIARIZATION_ENGINE=funasr with an EMPTY
+// DIARIZATION_MODEL, so the server keeps its config.yaml pyannote default as
+// the fallback diarizer if cam++ fails to load.
 // CAM++'s HuggingFace repo (cache dir models--funasr--campplus). Used only for
 // the download badge / cache check, since CAM++ sends an empty DIARIZATION_MODEL.
 const CAMPP_HF_REPO = 'funasr/campplus';
@@ -134,9 +133,6 @@ const DIARIZATION_MODEL_SELECTION_OPTIONS = new Set([
   DIARIZATION_DEFAULT_MODEL,
   DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
-
-// IDs of models that require the Metal/MLX runtime.
-const MLX_MODEL_IDS = new Set(MODEL_REGISTRY.filter((m) => m.family === 'mlx').map((m) => m.id));
 
 const UI_SENTINEL_VALUES = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
@@ -333,55 +329,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     setTimeout(() => setCopiedPath((c) => (c === label ? null : c)), 2000);
   }, []);
 
-  // Derive model option lists filtered by the active runtime profile.
-  // Metal mode:     only MLX models (non-MLX need Docker/ctranslate2).
-  // Non-Metal mode: only non-MLX models (MLX needs Apple Silicon Metal).
+  // Runtime profile shorthands. Valid model families, live options and
+  // diarization engines per runtime are encoded in instanceMatrix.ts and
+  // rendered by InstanceSettingsSelectors.
   const isMetal = runtimeProfile === 'metal';
   const isVulkan = runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2';
-  const mainModelOptions = useMemo(() => {
-    // Vulkan: the Main Transcriber owns the whisper.cpp sidecar's model, so the
-    // dropdown is restricted to GGML models. WHISPERCPP_MODEL is derived from
-    // this pick at start (no separate sidecar selector). Custom is omitted —
-    // only registry GGML files exist on disk for the sidecar to load.
-    if (isVulkan) {
-      return [...GGML_MODELS.map((m) => m.id), MODEL_DISABLED_OPTION];
-    }
-    const presets = MAIN_MODEL_PRESETS.filter((id) =>
-      isMetal ? MLX_MODEL_IDS.has(id) : !MLX_MODEL_IDS.has(id),
-    );
-    return [...presets, MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
-  }, [isMetal, isVulkan]);
-  const liveModelOptions = useMemo(() => {
-    return [
-      LIVE_MODEL_SAME_AS_MAIN_OPTION,
-      ...LIVE_MODEL_PRESETS,
-      MODEL_DISABLED_OPTION,
-      LIVE_MODEL_CUSTOM_OPTION,
-    ];
-  }, []);
-  // Diarization options. Pyannote is offered on Mac Metal too: pyannote.audio 4.x
-  // runs on Apple Silicon GPU (MPS) for *inference* — validated on M2 hardware,
-  // including >4 speakers (beyond Sortformer's 4-cap). The upstream MPS issues
-  // (#1886/#1337/#1091) concern training, not inference. Sortformer stays the
-  // no-token Metal-native default; pyannote is opt-in and needs a HuggingFace token.
-  const diarizationOptions = useMemo(
-    () => [
-      DIARIZATION_CAMPP_OPTION,
-      DIARIZATION_SORTFORMER_OPTION,
-      DIARIZATION_DEFAULT_MODEL,
-      DIARIZATION_MODEL_CUSTOM_OPTION,
-    ],
-    [],
-  );
-
-  // Auth token display in Instance Settings
-  const [showAuthToken, setShowAuthToken] = useState(false);
-  const [authTokenCopied, setAuthTokenCopied] = useState(false);
-  const [authToken, setAuthToken] = useState('');
-
-  // Tailscale hostname auto-detection
-  const [tailscaleHostname, setTailscaleHostname] = useState<string | null>(null);
-  const [tailscaleHostnameCopied, setTailscaleHostnameCopied] = useState(false);
 
   // Clean-all modal state
   const [isCleanAllDialogOpen, setIsCleanAllDialogOpen] = useState(false);
@@ -392,13 +344,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Vulkan sidecar image prompt state
   const [sidecarNeeded, setSidecarNeeded] = useState<boolean | null>(null); // null = not checked
 
-  // Firewall warning state (remote mode)
-  const [firewallWarning, setFirewallWarning] = useState<string | null>(null);
-
   // Server mode badge (local vs remote)
   const [serverMode, setServerMode] = useState<'local' | 'remote' | null>(null);
 
-  // Load persisted runtime profile, auth token, and Tailscale hostname on mount
+  // Load persisted runtime profile and legacy-GPU toggle on mount
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (api?.config) {
@@ -431,27 +380,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           }
         })
         .catch(() => {});
-      api.config
-        .get('connection.authToken')
-        .then((val: unknown) => {
-          if (typeof val === 'string') setAuthToken(val);
-        })
-        .catch(() => {});
     }
     // Issue #83 — load the legacy-GPU toggle through the dedicated IPC.
     if (api?.server?.getUseLegacyGpu) {
       api.server
         .getUseLegacyGpu()
         .then((val: boolean) => setUseLegacyGpu(Boolean(val)))
-        .catch(() => {});
-    }
-    // Detect local Tailscale hostname
-    if (api?.tailscale?.getHostname) {
-      api.tailscale
-        .getHostname()
-        .then((hostname: string | null) => {
-          if (hostname) setTailscaleHostname(hostname);
-        })
         .catch(() => {});
     }
   }, [adminStatus]);
@@ -656,7 +590,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     };
   }, []);
 
-  // Persist runtime profile changes, check sidecar availability for Vulkan, and start/stop MLX for Metal
+  // Persist runtime profile changes, reset selections the new runtime cannot
+  // run, and check sidecar availability for Vulkan. Selecting a runtime never
+  // downloads anything: even Metal only persists the profile — the native MLX
+  // server (whose startup pre-downloads models) starts from the Inference
+  // Server card's Start button.
   const handleRuntimeProfileChange = useCallback(
     async (profile: RuntimeProfile) => {
       setRuntimeProfile(profile);
@@ -664,32 +602,47 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       if (api?.config) {
         api.config.set('server.runtimeProfile', profile);
       }
-      // Leaving Metal: reset any MLX-only model selections back to non-MLX defaults.
-      if (profile !== 'metal') {
-        if (MLX_MODEL_IDS.has(mainModelSelection)) {
-          setMainModelSelection(MAIN_RECOMMENDED_MODEL);
-          api?.config?.set('server.mainModelSelection', MAIN_RECOMMENDED_MODEL);
-        }
-        if (MLX_MODEL_IDS.has(liveModelSelection)) {
+      // Reset a main model the new runtime cannot run to the runtime's
+      // recommended default. Subsumes the old special cases (MLX ids off
+      // Metal, NeMo on CPU — GH-125) and also covers GGML mains left over
+      // from a Vulkan profile, which used to survive the switch.
+      const resolvedMain = resolveMainModelSelectionValue(mainModelSelection, mainCustomModel, '');
+      const mainFamily = familyChoiceForModel(resolvedMain);
+      let mainAfterReset = resolvedMain;
+      if (mainFamily && !isFamilyChoiceEnabledFor(mainFamily, profile)) {
+        const nextDefault = defaultMainModelFor(profile);
+        mainAfterReset = nextDefault;
+        setMainModelSelection(nextDefault);
+        setMainCustomModel('');
+        api?.config?.set('server.mainModelSelection', nextDefault);
+        api?.config?.set('server.mainCustomModel', '');
+      }
+      // Live picks are whisper/whispercpp-only; GGML live models are invalid
+      // off Vulkan and MLX ids are never valid. Fall back to Same-as-main —
+      // the live-compatibility effect below refines that if the main model
+      // cannot serve Live Mode either.
+      if (
+        liveModelSelection !== LIVE_MODEL_SAME_AS_MAIN_OPTION &&
+        liveModelSelection !== MODEL_DISABLED_OPTION
+      ) {
+        const resolvedLive = resolveLiveModelSelectionValue(
+          liveModelSelection,
+          liveCustomModel,
+          mainAfterReset,
+          '',
+        );
+        const liveFamily = familyChoiceForModel(resolvedLive);
+        const liveInvalid =
+          liveFamily !== null &&
+          liveFamily !== 'whisper' &&
+          !(liveFamily === 'whispercpp' && isFamilyChoiceEnabledFor('whispercpp', profile));
+        if (liveInvalid) {
           setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
           api?.config?.set('server.liveModelSelection', LIVE_MODEL_SAME_AS_MAIN_OPTION);
         }
       }
-      // Switching to CPU: NeMo models (Parakeet/Canary) need a GPU to be
-      // practical and pull in the heavy `nemo` extra (GH-125). Reset a NeMo
-      // selection to a CPU-friendly faster-whisper default so CPU hosts skip the
-      // CUDA wheels and the NeMo install entirely.
-      if (profile === 'cpu') {
-        if (isNemoModel(mainModelSelection)) {
-          setMainModelSelection(WHISPER_MEDIUM);
-          api?.config?.set('server.mainModelSelection', WHISPER_MEDIUM);
-        }
-        if (isNemoModel(liveModelSelection)) {
-          setLiveModelSelection(LIVE_MODEL_SAME_AS_MAIN_OPTION);
-          api?.config?.set('server.liveModelSelection', LIVE_MODEL_SAME_AS_MAIN_OPTION);
-        }
-      }
-      // Handle Vulkan sidecar image check
+      // Handle Vulkan sidecar image check (read-only — the actual pull is an
+      // explicit button in the sidecar banner).
       if (profile === 'vulkan') {
         docker
           .hasSidecarImage()
@@ -714,67 +667,27 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         );
       }
 
-      // Handle MLX native server start/stop for Metal
+      // Leaving Metal — stop the native server if it is running or errored.
+      // (Entering Metal deliberately does NOT start it; see the Start button.)
       if (!api?.mlx) return;
       if (profile !== 'metal') {
-        // Leaving Metal — stop the native server if it is running or errored.
         const current = await api.mlx.getStatus().catch(() => 'stopped');
         if (current === 'running' || current === 'starting' || current === 'error') {
           await api.mlx.stop().catch(() => {});
         }
-      } else {
-        // Entering Metal — start the native server if it is not already up.
-        const current = await api.mlx.getStatus().catch(() => 'stopped');
-        if (current === 'stopped' || current === 'error') {
-          try {
-            const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
-            const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
-            const storedModel =
-              (await api.config?.get('server.mainModelSelection').catch(() => '')) ?? '';
-            const storedCustomModel =
-              (await api.config?.get('server.mainCustomModel').catch(() => '')) ?? '';
-            const storedLiveModel =
-              (await api.config?.get('server.liveModelSelection').catch(() => '')) ?? '';
-            const storedLiveCustom =
-              (await api.config?.get('server.liveCustomModel').catch(() => '')) ?? '';
-            const storedDiarizationModel =
-              (await api.config?.get('server.diarizationModelSelection').catch(() => '')) ?? '';
-            const storedDiarizationCustom_auto =
-              (await api.config?.get('server.diarizationCustomModel').catch(() => '')) ?? '';
-            const resolvedDiarization =
-              storedDiarizationModel === DIARIZATION_MODEL_CUSTOM_OPTION
-                ? storedDiarizationCustom_auto.trim()
-                : storedDiarizationModel === DIARIZATION_SORTFORMER_OPTION ||
-                    storedDiarizationModel === DIARIZATION_CAMPP_OPTION ||
-                    storedDiarizationModel === 'Auto (best available)' ||
-                    !storedDiarizationModel
-                  ? ''
-                  : storedDiarizationModel;
-            const resolvedMain =
-              resolveMainModelSelectionValue(storedModel, storedCustomModel, '') ||
-              MLX_DEFAULT_MODEL;
-            const resolvedLive = resolveLiveModelSelectionValue(
-              storedLiveModel,
-              storedLiveCustom,
-              resolvedMain,
-              '',
-            );
-            const normalizedLive = normalizeLiveModelToWhisper(resolvedLive);
-            await api.mlx.start({
-              port: Number(port),
-              hfToken: hfToken || undefined,
-              mainTranscriberModel: sanitizeModelName(resolvedMain) || MLX_DEFAULT_MODEL,
-              liveTranscriberModel: sanitizeModelName(normalizedLive) || undefined,
-              diarizationModel: resolvedDiarization || undefined,
-            });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            toast.error(`Failed to start Metal server: ${msg}`);
-          }
-        }
       }
     },
-    [mainModelSelection, liveModelSelection, docker.hasSidecarImage, docker.cancelSidecarPull],
+    [
+      mainModelSelection,
+      mainCustomModel,
+      liveModelSelection,
+      liveCustomModel,
+      isAppleSilicon,
+      metalSupported,
+      mlxFeature,
+      docker.hasSidecarImage,
+      docker.cancelSidecarPull,
+    ],
   );
   const containerStatus = docker.container;
   const isRunning = containerStatus.running;
@@ -808,41 +721,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const statusLabel = containerStatus.exists
     ? containerStatus.status.charAt(0).toUpperCase() + containerStatus.status.slice(1)
     : 'Not Found';
-
-  // Check firewall when container becomes healthy in remote mode
-  useEffect(() => {
-    if (!isRunningAndHealthy) {
-      setFirewallWarning(null);
-      return;
-    }
-    const api = (window as any).electronAPI;
-    if (!api?.server?.checkFirewallPort || !api?.config?.get) return;
-
-    // Only check if server was started in remote/TLS mode
-    api.config
-      .get('connection.useRemote')
-      .then(async (useRemote: unknown) => {
-        // Also check the compose env to see if TLS was enabled (server-side indicator)
-        const tlsFromCompose = await api.docker
-          ?.readComposeEnvValue?.('TLS_ENABLED')
-          .catch(() => null);
-        const isRemote = useRemote === true || tlsFromCompose === 'true';
-        if (!isRemote) return;
-
-        try {
-          const port = ((await api.config.get('connection.port')) as number) ?? DEFAULT_SERVER_PORT;
-          const result = await api.server.checkFirewallPort(port);
-          if (result.firewallSuspect && result.hint) {
-            setFirewallWarning(result.hint);
-          } else {
-            setFirewallWarning(null);
-          }
-        } catch {
-          // Best effort
-        }
-      })
-      .catch(() => {});
-  }, [isRunningAndHealthy]);
 
   // Track server mode (local vs remote) from compose env
   useEffect(() => {
@@ -990,16 +868,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // DIARIZATION_MODEL, so surface CAM++'s own HuggingFace repo instead.
   const diarizationStatusModelId =
     diarizationModelSelection === DIARIZATION_CAMPP_OPTION ? CAMPP_HF_REPO : activeDiarizationModel;
-
-  // Per-option greying for the merged Diarization Model dropdown. CAM++ requires
-  // a SenseVoice main transcriber; Sortformer requires the Metal runtime.
-  const diarizationOptionMeta = useMemo<Record<string, OptionMeta>>(() => {
-    const meta: Record<string, OptionMeta> = {};
-    if (!isSenseVoiceMain)
-      meta[DIARIZATION_CAMPP_OPTION] = { disabled: true, badge: 'SenseVoice only' };
-    if (!isMetal) meta[DIARIZATION_SORTFORMER_OPTION] = { disabled: true, badge: 'Requires Metal' };
-    return meta;
-  }, [isSenseVoiceMain, isMetal]);
 
   // MLX native-process start/stop handlers (depend on activeTranscriber declared above)
   const handleMLXStart = useCallback(async () => {
@@ -1271,25 +1139,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
     };
   }, [activeTranscriber, normalizedLiveModel, diarizationStatusModelId, isRunning]);
-
-  // Compute per-option metadata for the Main Transcriber dropdown.
-  // Models requiring a different runtime are dimmed with a badge.
-  const mainModelOptionMeta = useMemo<Record<string, OptionMeta>>(() => {
-    const meta: Record<string, OptionMeta> = {};
-    for (const option of MAIN_MODEL_PRESETS) {
-      const info = getModelById(option);
-      if (!info?.requiresRuntime) continue;
-      if (runtimeProfile === 'vulkan' && info.requiresRuntime === 'cuda') {
-        meta[option] = { dim: true, badge: 'Requires CUDA' };
-      } else if (
-        (runtimeProfile === 'gpu' || runtimeProfile === 'cpu') &&
-        info.requiresRuntime === 'vulkan'
-      ) {
-        meta[option] = { dim: true, badge: 'Requires Vulkan' };
-      }
-    }
-    return meta;
-  }, [runtimeProfile]);
 
   // ─── Image tag selection (merged remote + local) ─────────────────────────
 
@@ -2228,129 +2077,133 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             <div
               className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning || mlxStatus === 'running' ? `bg-accent-cyan text-slate-900 ${isRunningAndHealthy || mlxStatus === 'running' ? 'shadow-[0_0_15px_rgba(34,211,238,0.5)]' : ''}` : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
             >
-              <Box size={16} />
+              <SlidersHorizontal size={16} />
             </div>
             <GlassCard
               title="2. Instance Settings"
               className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy || mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
             >
               <div className="space-y-6">
-                {/* Runtime Profile Selector */}
-                <div className="flex items-center gap-4 border-b border-white/5 pb-4">
-                  <label className="text-xs font-medium tracking-wider whitespace-nowrap text-slate-500 uppercase">
-                    Runtime
-                  </label>
-                  {/* GH-101 follow-up: re-run GPU detection without restarting
-                      Electron. Hidden until initial detection completes
-                      (gpuInfo !== null) so it never appears in the loading flicker. */}
-                  {gpuInfo !== null && (
-                    <button
-                      type="button"
-                      onClick={handleRedetectGpu}
-                      disabled={gpuRedetecting || isRunning}
-                      title="Re-run GPU detection (use after toggling Docker Desktop's WSL2/Hyper-V backend)"
-                      className={`text-xs whitespace-nowrap underline ${
-                        gpuRedetecting || isRunning
-                          ? 'cursor-not-allowed text-slate-600'
-                          : 'cursor-pointer text-slate-500 hover:text-slate-200'
-                      }`}
-                    >
-                      {gpuRedetecting ? 'Detecting...' : 'Re-detect'}
-                    </button>
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleRuntimeProfileChange('gpu')}
-                      disabled={isRunning}
-                      className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
-                        runtimeProfile === 'gpu'
-                          ? 'bg-accent-cyan/15 border-accent-cyan/40 text-accent-cyan shadow-[0_0_10px_rgba(34,211,238,0.15)]'
-                          : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
-                      } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-                    >
-                      <NvidiaIcon size={14} />
-                      GPU (CUDA)
-                    </button>
-                    <button
-                      onClick={() => handleRuntimeProfileChange('vulkan')}
-                      disabled={isRunning}
-                      className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
-                        runtimeProfile === 'vulkan'
-                          ? 'bg-accent-rose/15 border-accent-rose/40 text-accent-rose shadow-[0_0_10px_rgba(244,63,94,0.15)]'
-                          : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
-                      } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-                    >
-                      <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
-                        <AmdIcon size={30} />
-                        <IntelIcon size={30} />
-                      </span>
-                      GPU (Vulkan Linux)
-                    </button>
-                    <button
-                      onClick={() => handleRuntimeProfileChange('metal')}
-                      disabled={isRunning}
-                      className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
-                        runtimeProfile === 'metal'
-                          ? 'border-violet-500/40 bg-violet-500/15 text-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.15)]'
-                          : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
-                      } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-                    >
-                      <AppleIcon size={14} />
-                      GPU (Metal)
-                    </button>
-                    <button
-                      onClick={() => handleRuntimeProfileChange('cpu')}
-                      disabled={isRunning}
-                      className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
-                        runtimeProfile === 'cpu'
-                          ? 'bg-accent-orange/15 border-accent-orange/40 text-accent-orange shadow-[0_0_10px_rgba(255,145,0,0.15)]'
-                          : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
-                      } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-                    >
-                      <Cpu size={14} />
-                      CPU Only
-                    </button>
-                    {/* Experimental Vulkan-WSL2 button (GH-101 follow-up) —
-                        only rendered when the dashboard's main-process probe
-                        confirms Docker Desktop is running on the WSL2 backend
-                        AND a tiny container could see /dev/dxg. Sits in-line
-                        with the four-button row to keep selection state
-                        visible at a glance when the profile is active. */}
-                    {gpuInfo?.wslSupport?.gpuPassthroughDetected && hostPlatform === 'win32' && (
-                      <button
-                        onClick={() => handleRuntimeProfileChange('vulkan-wsl2')}
-                        disabled={isRunning}
-                        className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
-                          runtimeProfile === 'vulkan-wsl2'
-                            ? 'bg-accent-rose/15 border-accent-rose/40 text-accent-rose shadow-[0_0_10px_rgba(244,63,94,0.15)]'
-                            : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
-                        } ${isRunning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-                      >
+                {/* Runtime selector — tiles gated per host platform. hostPlatform
+                    stays 'unknown' in jsdom/test mounts, which keeps every tile
+                    enabled there (gating only engages on a known platform). */}
+                <div className="border-b border-white/5 pb-4">
+                  <SelectorGroup
+                    icon={<Zap size={16} className="text-accent-cyan" />}
+                    title="Runtime"
+                    hint="Which hardware runs the inference server"
+                    action={
+                      /* GH-101 follow-up: re-run GPU detection without restarting
+                         Electron. Hidden until initial detection completes
+                         (gpuInfo !== null) so it never appears in the loading flicker. */
+                      gpuInfo !== null ? (
+                        <button
+                          type="button"
+                          onClick={handleRedetectGpu}
+                          disabled={gpuRedetecting || isRunning}
+                          title="Re-run GPU detection (use after toggling Docker Desktop's WSL2/Hyper-V backend)"
+                          className={`text-xs whitespace-nowrap underline ${
+                            gpuRedetecting || isRunning
+                              ? 'cursor-not-allowed text-slate-600'
+                              : 'cursor-pointer text-slate-500 hover:text-slate-200'
+                          }`}
+                        >
+                          {gpuRedetecting ? 'Detecting...' : 'Re-detect'}
+                        </button>
+                      ) : undefined
+                    }
+                  >
+                    <SelectorTile
+                      icon={<NvidiaIcon size={16} />}
+                      label="GPU (CUDA)"
+                      sublabel="NVIDIA"
+                      accent="green"
+                      selected={runtimeProfile === 'gpu'}
+                      disabled={isRunning || hostPlatform === 'darwin'}
+                      badge={hostPlatform === 'darwin' ? 'Requires NVIDIA' : undefined}
+                      onSelect={() => handleRuntimeProfileChange('gpu')}
+                    />
+                    <SelectorTile
+                      icon={
                         <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
                           <AmdIcon size={30} />
                           <IntelIcon size={30} />
                         </span>
-                        GPU (Vulkan Windows)
-                        <span className="bg-accent-orange/20 text-accent-orange ml-1 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
-                          Exp
-                        </span>
-                      </button>
+                      }
+                      label="GPU (Vulkan Linux)"
+                      sublabel="AMD / Intel"
+                      accent="red"
+                      selected={runtimeProfile === 'vulkan'}
+                      disabled={isRunning || hostPlatform === 'win32' || hostPlatform === 'darwin'}
+                      badge={
+                        hostPlatform === 'win32' || hostPlatform === 'darwin'
+                          ? 'Linux only'
+                          : undefined
+                      }
+                      hint="Experimental"
+                      onSelect={() => handleRuntimeProfileChange('vulkan')}
+                    />
+                    {/* Experimental Vulkan-WSL2 tile (GH-101 follow-up) — only
+                        rendered when the main-process probe confirms Docker
+                        Desktop runs on the WSL2 backend AND a tiny container
+                        could see /dev/dxg. */}
+                    {gpuInfo?.wslSupport?.gpuPassthroughDetected && hostPlatform === 'win32' && (
+                      <SelectorTile
+                        icon={
+                          <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                            <AmdIcon size={30} />
+                            <IntelIcon size={30} />
+                          </span>
+                        }
+                        label="GPU (Vulkan Windows)"
+                        sublabel="AMD / Intel · WSL2"
+                        accent="red"
+                        selected={runtimeProfile === 'vulkan-wsl2'}
+                        disabled={isRunning}
+                        hint="Experimental"
+                        onSelect={() => handleRuntimeProfileChange('vulkan-wsl2')}
+                      />
                     )}
-                  </div>
+                    <SelectorTile
+                      icon={<AppleIcon size={16} />}
+                      label="GPU (Metal)"
+                      sublabel="Apple Silicon"
+                      accent="purple"
+                      selected={runtimeProfile === 'metal'}
+                      disabled={
+                        isRunning || (hostPlatform !== 'unknown' && hostPlatform !== 'darwin')
+                      }
+                      badge={
+                        hostPlatform !== 'unknown' && hostPlatform !== 'darwin'
+                          ? 'Requires Apple Silicon'
+                          : undefined
+                      }
+                      onSelect={() => handleRuntimeProfileChange('metal')}
+                    />
+                    <SelectorTile
+                      icon={<Cpu size={16} />}
+                      label="CPU Only"
+                      sublabel="Universal"
+                      accent="orange"
+                      selected={runtimeProfile === 'cpu'}
+                      disabled={isRunning}
+                      onSelect={() => handleRuntimeProfileChange('cpu')}
+                    />
+                  </SelectorGroup>
                   {runtimeProfile === 'vulkan' && !isRunning && (
-                    <span className="text-xs text-slate-500 italic">
-                      AMD/Intel GPU via whisper.cpp — no diarization or live mode
-                    </span>
+                    <p className="mt-2 text-xs text-slate-500 italic">
+                      AMD/Intel GPU via whisper.cpp — no diarization; live mode via GGML models
+                    </p>
                   )}
                   {runtimeProfile === 'vulkan-wsl2' && !isRunning && (
-                    <span className="text-accent-orange text-xs italic">
+                    <p className="text-accent-orange mt-2 text-xs italic">
                       Experimental: AMD/Intel GPU via WSL2 + Mesa dzn — see README §2.5.2
-                    </span>
+                    </p>
                   )}
                   {runtimeProfile === 'cpu' && !isRunning && (
-                    <span className="text-xs text-slate-500 italic">
+                    <p className="mt-2 text-xs text-slate-500 italic">
                       Slower transcription, no NVIDIA GPU required
-                    </span>
+                    </p>
                   )}
                 </div>
 
@@ -2464,286 +2317,58 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   </div>
                 )}
 
-                {/* Auth Token (read-only) */}
-                {authToken && (
-                  <div className="border-t border-white/5 pt-4">
-                    <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
-                      Auth Token
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showAuthToken ? 'text' : 'password'}
-                        value={authToken}
-                        readOnly
-                        className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 pr-20 font-mono text-sm text-white focus:outline-none"
-                      />
-                      <div className="absolute top-2 right-2 flex items-center gap-1">
-                        <button
-                          onClick={() => {
-                            writeToClipboard(authToken).catch(() => {});
-                            setAuthTokenCopied(true);
-                            setTimeout(() => setAuthTokenCopied(false), 2000);
-                          }}
-                          className="p-1 text-slate-500 transition-colors hover:text-white"
-                          title="Copy token"
-                        >
-                          {authTokenCopied ? (
-                            <Check size={14} className="text-green-400" />
-                          ) : (
-                            <Copy size={14} />
-                          )}
-                        </button>
-                        <button
-                          onClick={() => setShowAuthToken(!showAuthToken)}
-                          className="p-1 text-slate-500 transition-colors hover:text-white"
-                        >
-                          {showAuthToken ? <EyeOff size={14} /> : <Eye size={14} />}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Tailscale Hostname (for remote mode configuration) */}
-                {tailscaleHostname && (
-                  <div className="border-t border-white/5 pt-4">
-                    <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
-                      Tailscale Hostname
-                    </label>
-                    <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-                      <span className="flex-1 truncate font-mono text-sm text-slate-300">
-                        {tailscaleHostname}
-                      </span>
-                      <button
-                        onClick={() => {
-                          writeToClipboard(tailscaleHostname).catch(() => {});
-                          setTailscaleHostnameCopied(true);
-                          setTimeout(() => setTailscaleHostnameCopied(false), 2000);
-                        }}
-                        className="shrink-0 p-1 text-slate-500 transition-colors hover:text-white"
-                        title="Copy Tailscale hostname"
-                      >
-                        {tailscaleHostnameCopied ? (
-                          <Check size={14} className="text-green-400" />
-                        ) : (
-                          <Copy size={14} />
-                        )}
-                      </button>
-                    </div>
-                    <p className="mt-1.5 text-xs text-slate-500">
-                      Use this hostname when configuring remote clients to connect via Tailscale.
-                    </p>
-                  </div>
-                )}
-
-                {/* Firewall warning (remote mode) */}
-                {firewallWarning && isRunningAndHealthy && (
-                  <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
-                    <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-400" />
-                    <div className="text-xs text-amber-200">
-                      <p className="font-medium">Firewall may block remote connections</p>
-                      <p className="mt-0.5 text-amber-300/80">{firewallWarning}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </GlassCard>
-          </div>
-
-          {/* 3. ASR Models Card */}
-          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-            <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
-              <Cpu size={14} />
-            </div>
-            <GlassCard title="3. ASR Models Configuration">
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-slate-300">Main Transcriber</label>
-                      {isRunning &&
-                        activeTranscriber &&
-                        activeTranscriber !== MODEL_DEFAULT_LOADING_PLACEHOLDER &&
-                        activeTranscriber !== DISABLED_MODEL_SENTINEL && (
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[activeTranscriber]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
-                            />
-                            <span
-                              className={`font-mono text-[10px] ${modelCacheStatus[activeTranscriber]?.exists ? 'text-green-400' : 'text-slate-500'}`}
-                            >
-                              {modelCacheStatus[activeTranscriber]?.exists
-                                ? 'Downloaded'
-                                : 'Missing'}
-                            </span>
-                          </div>
-                        )}
-                    </div>
-                    <CustomSelect
-                      value={mainModelSelection}
-                      onChange={setMainModelSelection}
-                      options={mainModelOptions}
-                      optionMeta={mainModelOptionMeta}
-                      accentColor="magenta"
-                      className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-                      disabled={isRunning}
-                    />
-                    {isVulkan && (
-                      <p className="text-xs text-slate-500 italic">
-                        This GGML model runs on the AMD/Intel GPU via the whisper.cpp sidecar.
-                        Switching models requires a server restart.
-                      </p>
-                    )}
-                    {MLX_MODEL_IDS.has(mainModelSelection) && (
-                      <p className="flex items-center gap-1 text-xs text-violet-400">
-                        <Zap size={10} />
-                        Metal / MLX accelerated
-                      </p>
-                    )}
-                    {mainModelSelection === MAIN_MODEL_CUSTOM_OPTION && (
-                      <input
-                        type="text"
-                        value={mainCustomModel}
-                        onChange={(e) => setMainCustomModel(e.target.value)}
-                        placeholder="owner/model-name"
-                        disabled={isRunning}
-                        className={`focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-                      />
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-slate-300">Live Mode Model</label>
-                      {isRunning &&
-                        activeLiveModel &&
-                        activeLiveModel !== MODEL_DEFAULT_LOADING_PLACEHOLDER &&
-                        activeLiveModel !== DISABLED_MODEL_SENTINEL &&
-                        (() => {
-                          const liveKey =
-                            liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION
-                              ? activeTranscriber
-                              : activeLiveModel;
-                          const liveExists = modelCacheStatus[liveKey ?? '']?.exists;
-                          return (
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className={`inline-block h-2 w-2 rounded-full ${liveExists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
-                              />
-                              <span
-                                className={`font-mono text-[10px] ${liveExists ? 'text-green-400' : 'text-slate-500'}`}
-                              >
-                                {liveExists ? 'Downloaded' : 'Missing'}
-                              </span>
-                            </div>
-                          );
-                        })()}
-                    </div>
-                    <CustomSelect
-                      value={liveModelSelection}
-                      onChange={setLiveModelSelection}
-                      options={liveModelOptions}
-                      className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-                      disabled={isRunning}
-                    />
-                    {liveModelSelection === LIVE_MODEL_CUSTOM_OPTION && (
-                      <input
-                        type="text"
-                        value={liveCustomModel}
-                        onChange={(e) => setLiveCustomModel(e.target.value)}
-                        placeholder="owner/model-name"
-                        disabled={isRunning}
-                        className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-                      />
-                    )}
-                    {!liveModelWhisperOnlyCompatible && (
-                      <p className="text-accent-orange text-xs">{liveModeModelConstraintMessage}</p>
-                    )}
-                  </div>
-                </div>
-                <div className="flex gap-2 border-t border-white/5 pt-2">
-                  <Button
-                    variant={adminStatus?.models_loaded === false ? 'secondary' : 'danger'}
-                    className="h-9 px-4 whitespace-nowrap"
-                    onClick={
-                      adminStatus?.models_loaded === false ? handleLoadModels : handleUnloadModels
-                    }
-                    disabled={modelsLoading || !isRunning}
-                  >
-                    {modelsLoading ? (
-                      <>
-                        <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
-                      </>
-                    ) : adminStatus?.models_loaded === false ? (
-                      'Load Models'
-                    ) : (
-                      'Unload Models'
-                    )}
-                  </Button>
-                  {adminStatus?.models_loaded !== undefined && (
-                    <span
-                      className={`ml-auto self-center font-mono text-xs ${adminStatus.models_loaded ? 'text-green-400' : 'text-slate-500'}`}
-                    >
-                      {adminStatus.models_loaded ? 'Models Loaded' : 'Models Not Loaded'}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </GlassCard>
-          </div>
-
-          {/* 4. Diarization Models Card */}
-          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-            <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
-              <Users size={14} />
-            </div>
-            <GlassCard title="4. Diarization Models Configuration">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-slate-300">Diarization Model</label>
-                  {isRunning && diarizationStatusModelId && (
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={`inline-block h-2 w-2 rounded-full ${modelCacheStatus[diarizationStatusModelId]?.exists ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' : 'bg-slate-500'}`}
-                      />
-                      <span
-                        className={`font-mono text-[10px] ${modelCacheStatus[diarizationStatusModelId]?.exists ? 'text-green-400' : 'text-slate-500'}`}
-                      >
-                        {modelCacheStatus[diarizationStatusModelId]?.exists
-                          ? 'Downloaded'
-                          : 'Missing'}
-                      </span>
-                    </div>
-                  )}
-                </div>
-                <CustomSelect
-                  value={diarizationModelSelection}
-                  onChange={setDiarizationModelSelection}
-                  options={diarizationOptions}
-                  optionMeta={diarizationOptionMeta}
-                  className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-                  disabled={isRunning}
+                {/* Model / live / diarization selectors — all valid combinations
+                    come from src/services/instanceMatrix.ts */}
+                <InstanceSettingsSelectors
+                  runtimeProfile={runtimeProfile}
+                  isRunning={isRunning}
+                  mainModelSelection={mainModelSelection}
+                  onMainModelSelectionChange={setMainModelSelection}
+                  mainCustomModel={mainCustomModel}
+                  onMainCustomModelChange={setMainCustomModel}
+                  liveModelSelection={liveModelSelection}
+                  onLiveModelSelectionChange={setLiveModelSelection}
+                  liveCustomModel={liveCustomModel}
+                  onLiveCustomModelChange={setLiveCustomModel}
+                  diarizationModelSelection={diarizationModelSelection}
+                  onDiarizationModelSelectionChange={setDiarizationModelSelection}
+                  diarizationCustomModel={diarizationCustomModel}
+                  onDiarizationCustomModelChange={setDiarizationCustomModel}
+                  activeTranscriber={activeTranscriber}
+                  activeLiveModel={activeLiveModel}
+                  diarizationStatusModelId={diarizationStatusModelId}
+                  modelCacheStatus={modelCacheStatus}
+                  liveModelWhisperOnlyCompatible={liveModelWhisperOnlyCompatible}
+                  liveModeModelConstraintMessage={liveModeModelConstraintMessage}
+                  modelsLoaded={adminStatus?.models_loaded}
+                  modelsLoading={modelsLoading}
+                  onLoadModels={handleLoadModels}
+                  onUnloadModels={handleUnloadModels}
                 />
-                {diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION && (
-                  <input
-                    type="text"
-                    value={diarizationCustomModel}
-                    onChange={(e) => setDiarizationCustomModel(e.target.value)}
-                    placeholder="owner/model-name"
-                    disabled={isRunning}
-                    className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-                  />
-                )}
               </div>
             </GlassCard>
           </div>
 
-          {/* 5. Volumes Card */}
+          {/* 3. Remote Connection Card */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+            <div
+              className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunningAndHealthy && serverMode === 'remote' ? 'bg-accent-magenta text-slate-900 shadow-[0_0_15px_rgba(232,121,249,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+            >
+              <Globe size={14} />
+            </div>
+            <RemoteConnectionCard
+              title="3. Remote Connection"
+              isRunningAndHealthy={isRunningAndHealthy}
+            />
+          </div>
+
+          {/* 4. Volumes Card */}
           <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
             <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
               <HardDrive size={14} />
             </div>
             <GlassCard
-              title="5. Persistent Volumes"
+              title="4. Persistent Volumes"
               action={
                 !isMetal ? (
                   <Button
@@ -2863,12 +2488,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             </GlassCard>
           </div>
 
-          {/* 6. Clean Up */}
+          {/* 5. Clean Up */}
           <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
             <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
               <AlertTriangle size={14} />
             </div>
-            <GlassCard title="6. Clean Up">
+            <GlassCard title="5. Clean Up">
               <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">

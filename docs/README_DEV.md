@@ -358,7 +358,7 @@ TranscriptionSuite uses a **client-server architecture**:
 - **SQLite + FTS5**: Lightweight full-text search without external dependencies
 - **Dual VAD**: Real-time engine uses both Silero (neural) and WebRTC (algorithmic) VAD
 - **Multi-device support**: Multiple clients can connect, but only one transcription runs at a time
-- **Multi-backend STT**: Pluggable backend architecture - Whisper, NeMo Parakeet/Canary, WhisperX, VibeVoice-ASR, whisper.cpp (Vulkan), MLX (Apple Silicon: Whisper, Parakeet, Canary, VibeVoice) - auto-detected from the model name
+- **Multi-backend STT**: Pluggable backend architecture - Whisper, NeMo Parakeet/Canary, WhisperX, VibeVoice-ASR, SenseVoice (FunASR), whisper.cpp (Vulkan), MLX (Apple Silicon: Whisper, Parakeet, Canary, VibeVoice) - auto-detected from the model name
 - **Live Mode**: Continuous sentence-by-sentence transcription with automatic model swapping to manage VRAM; Whisper and whisper.cpp/GGML backends supported
 - **AI Assistant (OpenAI-compatible)**: Supports any OpenAI-compatible endpoint - LM Studio, Ollama, OpenAI, Groq, OpenRouter, and others. Configurable via Settings → AI tab with API key support, model selection, and endpoint URL. Per-conversation model overrides are available in the Notebook AI sidebar. Uses standard `/v1/chat/completions` with full conversation history
 

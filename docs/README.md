@@ -16,9 +16,9 @@ AI assistant (OpenAI-compatible), and
 both longform and live transcription. Electron
 dashboard + Python backend with
 multi-backend STT (Whisper, NVIDIA NeMo,
-VibeVoice-ASR, whisper.cpp), NVIDIA GPU
-acceleration, AMD/Intel Vulkan support,
-or CPU mode. Dockerized for fast setup.
+VibeVoice-ASR, SenseVoice, whisper.cpp),
+NVIDIA GPU acceleration, AMD/Intel Vulkan
+support, or CPU mode. Dockerized for fast setup.
 </pre>
           </td>
         </tr>
@@ -52,8 +52,9 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 
 - [1. Introduction](#1-introduction)
   - [1.1 Features](#11-features)
-  - [1.2 Screenshots](#12-screenshots)
-  - [1.3 Short Tour](#13-short-tour)
+  - [1.2 Compatibility Matrix](#12-compatibility-matrix)
+  - [1.3 Screenshots](#13-screenshots)
+  - [1.4 Short Tour](#14-short-tour)
 - [2. Installation](#2-installation)
   - [2.1 macOS Apple Silicon](#21-macos-apple-silicon)
   - [2.2 macOS Intel](#22-macos-intel)
@@ -84,10 +85,10 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 ### 1.1 Features
 
 - **100% Local**: *Everything* runs on your own computer, the app doesn't need internet beyond the initial setup*
-- **Multiple Models available**: On **Docker/Linux/Windows**: *WhisperX* ([`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU via Vulkan — Linux via Docker sidecar; Windows via native `whisper-server.exe` auto-downloaded by the app, see §2.7). On **Apple Silicon (Metal)**: [*MLX Whisper*](https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16) (tiny → large-v3-turbo), [*MLX Parakeet v3*](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3), [*MLX Canary v2*](https://huggingface.co/mlx-community/canary-1b-v2), and [*MLX VibeVoice-ASR*](https://huggingface.co/mlx-community/VibeVoice-ASR-bf16) - all running natively without Docker
-- **Speaker Diarization**: Speaker identification & diarization (subtitling) for Whisper, NeMo, and VibeVoice models; Whisper and NeMo use PyAnnote for diarization while VibeVoice does it by itself (not available for whisper.cpp models). On Apple Silicon, [*Sortformer*](https://huggingface.co/mlx-community/diar_sortformer_4spk-v1-fp32) provides Metal-native diarization for up to 4 speakers - no HuggingFace token required
+- **Multiple Models available**: On **Docker/Linux/Windows**: *WhisperX* ([`faster-whisper`](https://huggingface.co/Systran/faster-whisper-large-v3) models), NVIDIA NeMo [*Parakeet v3*](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)/[*Canary v2*](https://huggingface.co/nvidia/canary-1b-v2), [*VibeVoice-ASR*](https://huggingface.co/microsoft/VibeVoice-ASR), [*SenseVoice*](https://huggingface.co/FunAudioLLM/SenseVoiceSmall) (FunASR), and [*whisper.cpp*](https://github.com/ggerganov/whisper.cpp) (GGML models for AMD/Intel GPU via Vulkan — Linux via Docker sidecar; Windows via native `whisper-server.exe` auto-downloaded by the app, see §2.7). On **Apple Silicon (Metal)**: [*MLX Whisper*](https://huggingface.co/mlx-community/whisper-large-v3-turbo-asr-fp16) (tiny → large-v3-turbo), [*MLX Parakeet v3*](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3), [*MLX Canary v2*](https://huggingface.co/mlx-community/canary-1b-v2), and [*MLX VibeVoice-ASR*](https://huggingface.co/mlx-community/VibeVoice-ASR-bf16) - all running natively without Docker
+- **Speaker Diarization**: Speaker identification & diarization (subtitling) for Whisper, NeMo, SenseVoice, and VibeVoice models; Whisper and NeMo use PyAnnote (HuggingFace token required), SenseVoice ships a built-in CAM++ single-pass diarizer (no token needed, with PyAnnote as an optional override), and VibeVoice does it by itself (not available for whisper.cpp models). On Apple Silicon, [*Sortformer*](https://huggingface.co/mlx-community/diar_sortformer_4spk-v1-fp32) provides Metal-native diarization for up to 4 speakers - no HuggingFace token required
 - **Parallel Processing**: If your VRAM budget allows it, transcribe & diarize a recording at the same time - speeding up processing time significantly
-- **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [51 languages](https://huggingface.co/microsoft/VibeVoice-ASR)
+- **Truly Multilingual**: Whisper supports [90+ languages](https://github.com/openai/whisper/blob/main/whisper/tokenizer.py); NeMo Parakeet/Canary support [25 European languages](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3); VibeVoice supports [51 languages](https://huggingface.co/microsoft/VibeVoice-ASR); SenseVoice supports 5 languages (Chinese, English, Cantonese, Japanese, Korean)
 - **Longform Transcription**: Record as long as you want and have it transcribed in seconds; either using your mic or the system audio
 - **Session File Import**: Import existing audio files from the Session tab; transcription results are saved directly as `.txt` or `.srt` to a folder of your choice - no Notebook entry created
 - **Live Mode**: Real-time sentence-by-sentence transcription for continuous dictation workflows (available for Whisper and whisper.cpp/GGML models; not available for NeMo or VibeVoice models)
@@ -100,7 +101,44 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 
 **All transcription processing runs entirely on your own computer - your audio never leaves your machine. Internet is only needed to download model weights on first use (STT models, PyAnnote diarization, and wav2vec2 alignment models); all weights are cached locally in a Docker volume and no further internet access is required after that.*
 
-### 1.2 Screenshots
+### 1.2 Compatibility Matrix
+
+Not every model runs on every machine. The tables below show which **runtime** fits your hardware, and what each **model family** can do on it. The Server tab's Instance Settings selectors enforce the same rules — incompatible choices are greyed out with the reason.
+
+**Where each runtime runs:**
+
+| Runtime | Linux NVIDIA | Linux AMD/Intel | Windows NVIDIA | Windows AMD/Intel | macOS Apple Silicon | macOS Intel |
+|---------|--------------|-----------------|----------------|-------------------|---------------------|-------------|
+| **NVIDIA CUDA** (Docker) | Yes | No | Yes | No | No | No |
+| **CPU** (Docker) | Yes | Yes | Yes | Yes | No | Yes |
+| **Vulkan Linux** (Docker + sidecar, experimental) | Yes | Yes | No | No | No | No |
+| **Vulkan Windows** (WSL2 + native whisper-server) | No | No | Yes | Yes | No | No |
+| **Apple Metal** (native, no Docker) | No | No | No | No | Yes | No |
+
+**Models × runtimes × features:**
+
+| Model family | Runtime(s) | Live Mode | Translation | Diarization |
+|--------------|------------|-----------|-------------|-------------|
+| **Faster-Whisper** (WhisperX) | CUDA, CPU | Yes | To English (not turbo/`.en` variants) | PyAnnote (token) |
+| **Parakeet v3** (NeMo) | CUDA | No | No | PyAnnote (token) |
+| **Canary v2** (NeMo) | CUDA | No | Yes — bidirectional, 25 languages | PyAnnote (token) |
+| **SenseVoice** (FunASR) | CUDA, CPU (slow) | No | No | CAM++ built-in (no token) or PyAnnote |
+| **VibeVoice-ASR** | CUDA, CPU (very slow) | No | No | Built-in |
+| **Whisper.cpp** (GGML) | Vulkan Linux/Windows | Yes | To English (not turbo/`.en` variants) | No |
+| **MLX Whisper** | Metal | Via faster-whisper (CPU) | To English | Sortformer (≤ 4 speakers) or PyAnnote |
+| **MLX Parakeet v3** | Metal | Via faster-whisper (CPU) | No | Sortformer or PyAnnote |
+| **MLX Canary v2** | Metal | Via faster-whisper (CPU) | No (MLX port) | Sortformer or PyAnnote |
+| **MLX VibeVoice-ASR** | Metal | Via faster-whisper (CPU) | No | Built-in |
+
+> **Notes:**
+>
+> - **Live Mode** always runs on faster-whisper or whisper.cpp models. On Apple Silicon the Metal server bundles faster-whisper for exactly this — Live Mode works, but decodes on the CPU rather than the GPU.
+> - **PyAnnote** diarization needs a free HuggingFace token and accepting the [model's terms](https://huggingface.co/pyannote/speaker-diarization-community-1). **CAM++** (SenseVoice), **Sortformer** (Apple Silicon) and VibeVoice's **built-in** diarization need no token.
+> - **Sortformer** handles up to 4 speakers; pick PyAnnote on Apple Silicon for larger groups.
+> - NeMo models (Parakeet/Canary) are unavailable on the CPU runtime — the app substitutes a faster-whisper model instead.
+> - Older NVIDIA cards (GTX 10-series and earlier) use the same CUDA runtime with the legacy image toggle — see [§2.6](#26-setting-up-the-server).
+
+### 1.3 Screenshots
 
 <div align="center">
 
@@ -114,7 +152,7 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
 
 </div>
 
-### 1.3 Short Tour
+### 1.4 Short Tour
 
 <div align="center">
 
@@ -288,8 +326,8 @@ Setting up the server has two parts: downloading the Docker image, then starting
 > **Windows:** make sure Docker Desktop is **already running** before you start — server setup fails if it isn't started first.
 
 1. **Download the image.** In the left sidebar, open the **Server** tab and click **Fetch Fresh Image**.
-2. **Start the container.** Scroll down and click **Start Local** in the **#2** box.
-3. **Pick models & diarization.** Prompts ask which models to download to begin with, and whether to enable diarization. For diarization you'll need a free HuggingFace token and to accept the [model's terms](https://huggingface.co/pyannote/speaker-diarization-community-1). To create a token, go to your [HuggingFace token settings](https://huggingface.co/settings/tokens), click *Create new token*, and choose **Read** as the access type (Write / Fine-grained aren't needed).
+2. **Pick your runtime, models & diarization.** The **Instance Settings** card (box **#2**) holds the selectors — runtime, main model, Live Mode model, diarization engine. Incompatible combinations are greyed out with the reason (see the [Compatibility Matrix](#12-compatibility-matrix)).
+3. **Start the container.** Click **Start Local** in the **#1** box. Prompts confirm which models to download and whether to enable diarization. A free HuggingFace token is needed only for **PyAnnote** diarization (plus accepting the [model's terms](https://huggingface.co/pyannote/speaker-diarization-community-1)) — SenseVoice's CAM++ and Apple Silicon's Sortformer diarizers need no token. To create a token, go to your [HuggingFace token settings](https://huggingface.co/settings/tokens), click *Create new token*, and choose **Read** as the access type (Write / Fine-grained aren't needed).
 4. **Wait.** The first startup can take a while, even on newer hardware and fast internet — think **10–20 minutes** with reasonable specs, not hours. You'll know it's done when the server status light turns **green**.
 5. **Start the client.** Go to the **Session** tab and click **Start Local** in the **Client Link** box — when it turns green, you're ready to roll!
 
@@ -391,6 +429,8 @@ Either way, you use **GGML models** (not the CUDA models) — see the [model tab
 | `ggml-small.en.bin` | ~465 MB | English | No | Smallest English-only |
 
 #### What works on Vulkan
+
+> **Note:** the full picture across all runtimes and models lives in the [Compatibility Matrix](#12-compatibility-matrix) (§1.2).
 
 | Feature | Vulkan (AMD/Intel) | NVIDIA (CUDA) |
 |---------|-------------------|---------------|
@@ -741,7 +781,7 @@ Transcribe **and translate** an audio or video file to English. Identical to `/t
 
 **Error codes:** Same as `/transcriptions`.
 
-> **Backend note:** Translation requires a Whisper-family model with translation capability. Parakeet/Canary backends that don't support `task="translate"` will return a `400` or `500` from the engine layer.
+> **Backend note:** Translation requires a model with translation capability — a multilingual Whisper model (to English) or Canary v2 (bidirectional). Backends without `task="translate"` support (Parakeet, SenseVoice, VibeVoice, turbo/`.en` Whisper variants) will return a `400` or `500` from the engine layer.
 
 **Example (curl):**
 ```bash

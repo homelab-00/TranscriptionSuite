@@ -74,12 +74,15 @@ vi.mock('../../src/hooks/useAdminStatus', () => ({
   useAdminStatus: () => mockAdminStatus,
 }));
 
-vi.mock('../../src/stores/activityStore', () => ({
-  useActivityStore: (selector: (s: Record<string, unknown>) => unknown) => {
-    const state = { items: [], addActivity: vi.fn(), updateActivity: vi.fn() };
-    return typeof selector === 'function' ? selector(state) : state;
-  },
-}));
+vi.mock('../../src/stores/activityStore', () => {
+  // zustand-style store mock: callable as a hook AND exposing getState()
+  // (handleRuntimeProfileChange calls useActivityStore.getState() directly).
+  const state = { items: [], addActivity: vi.fn(), updateActivity: vi.fn() };
+  const useActivityStore = (selector?: (s: Record<string, unknown>) => unknown) =>
+    typeof selector === 'function' ? selector(state) : state;
+  useActivityStore.getState = () => state;
+  return { useActivityStore };
+});
 
 // apiClient
 vi.mock('../../src/api/client', () => ({
@@ -104,18 +107,23 @@ vi.mock('../../src/config/store', () => ({
   DEFAULT_SERVER_PORT: 7239,
 }));
 
-// modelCapabilities — must export the full surface ServerView imports
-// (isWhisperModel, isWhisperCppModel, isMLXModel, isNemoModel, isSenseVoiceModel);
-// a missing export throws "No <name> export is defined on the mock" the moment
-// ServerView accesses it during render. The test world treats every model as
-// plain Whisper. `isSenseVoiceModel` is name-based so the merged-diarization
-// tests can drive the SenseVoice-only greying / migration by selecting a main
-// model whose id contains "sensevoice".
+// modelCapabilities — must export the full surface ServerView AND
+// instanceMatrix import (a missing export throws "No <name> export is defined
+// on the mock" the moment it is accessed during render). The test world treats
+// every model as plain Whisper; `isSenseVoiceModel`, `isWhisperCppModel` and
+// `isMLXModel` are name-based so the selector tests can drive family-specific
+// greying / resets by choosing an appropriately named main model.
 vi.mock('../../src/services/modelCapabilities', () => ({
   isWhisperModel: () => true,
-  isWhisperCppModel: () => false,
-  isMLXModel: () => false,
+  isWhisperCppModel: (m: string) =>
+    typeof m === 'string' && /(?:^|\/)ggml-.*\.bin$|\.gguf$/i.test(m),
+  isMLXModel: (m: string) => typeof m === 'string' && m.toLowerCase().startsWith('mlx-community/'),
   isNemoModel: () => false,
+  isParakeetModel: () => false,
+  isCanaryModel: () => false,
+  isMLXParakeetModel: () => false,
+  isMLXCanaryModel: () => false,
+  isVibeVoiceASRModel: () => false,
   isSenseVoiceModel: (m: string) => typeof m === 'string' && m.toLowerCase().includes('sensevoice'),
 }));
 
@@ -136,6 +144,7 @@ vi.mock('../../src/services/modelSelection', () => ({
   MODEL_DISABLED_OPTION: 'Disabled',
   DISABLED_MODEL_SENTINEL: '__disabled__',
   WHISPER_MEDIUM: 'openai/whisper-medium',
+  LIVE_RECOMMENDED_MODEL: 'openai/whisper-medium',
   MAIN_MODEL_PRESETS: ['openai/whisper-large-v3-turbo', 'iic/SenseVoiceSmall'],
   LIVE_MODEL_PRESETS: ['openai/whisper-medium'],
   VULKAN_RECOMMENDED_MODEL: 'ggml-large-v3-turbo.bin',
@@ -285,9 +294,14 @@ describe('[P2] ServerView', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
+  // Persisted electron-store values (must never change) …
   const SORTFORMER = 'Sortformer (Metal; ≤ 4 speakers)';
   const PYANNOTE = 'pyannote/speaker-diarization-community-1';
   const CUSTOM = 'Custom (HuggingFace repo)';
+  // … and the short labels the diarization selector tiles display for them.
+  const SORTFORMER_TILE = 'Sortformer';
+  const PYANNOTE_TILE = 'PyAnnote';
+  const CUSTOM_TILE = 'Custom';
 
   function setupElectronAPI(configMap: Record<string, unknown>) {
     const setSpy = vi.fn().mockResolvedValue(undefined);
@@ -337,9 +351,11 @@ describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
 
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
 
-    // Pyannote stays selected (appears in the ListboxButton and/or an option).
+    // Pyannote stays selected (its tile is pressed).
     await waitFor(() => {
-      expect(screen.queryAllByText(PYANNOTE).length).toBeGreaterThanOrEqual(1);
+      expect(
+        screen.getByRole('button', { name: new RegExp(PYANNOTE_TILE, 'i'), pressed: true }),
+      ).toBeDefined();
     });
     // The old auto-migration to Sortformer must NOT fire on Metal anymore.
     // (ServerView persists the merged control under server.diarizationModelSelection.)
@@ -358,12 +374,14 @@ describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
 
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
 
-    // Sortformer is the default selection; pyannote is now a selectable option.
+    // Sortformer is the stored selection; pyannote is a selectable tile.
     await waitFor(() => {
-      expect(screen.queryAllByText(SORTFORMER).length).toBeGreaterThanOrEqual(1);
+      expect(
+        screen.getByRole('button', { name: new RegExp(SORTFORMER_TILE, 'i'), pressed: true }),
+      ).toBeDefined();
     });
-    expect(screen.queryAllByText(PYANNOTE).length).toBeGreaterThanOrEqual(1);
-    expect(screen.queryAllByText(CUSTOM).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryAllByText(PYANNOTE_TILE).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryAllByText(CUSTOM_TILE).length).toBeGreaterThanOrEqual(1);
     // The "not supported on Apple Silicon" inline reason is gone.
     expect(screen.queryByText(/pyannote\.audio MPS path/i)).toBeNull();
   });
@@ -378,15 +396,19 @@ describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
 
     await waitFor(() => {
-      expect(screen.queryAllByText(PYANNOTE).length).toBeGreaterThanOrEqual(1);
+      expect(
+        screen.getByRole('button', { name: new RegExp(PYANNOTE_TILE, 'i'), pressed: true }),
+      ).toBeDefined();
     });
     const sortformerSet = setSpy.mock.calls.some(
       ([k, v]) => k === 'server.diarizationModelSelection' && v === SORTFORMER,
     );
     expect(sortformerSet).toBe(false);
     expect(screen.queryByText(/pyannote\.audio MPS path/i)).toBeNull();
-    expect(screen.queryAllByText(SORTFORMER).length).toBeGreaterThanOrEqual(1);
-    expect(screen.queryAllByText(CUSTOM).length).toBeGreaterThanOrEqual(1);
+    // Sortformer stays visible on non-Metal, greyed with its reason badge.
+    expect(screen.queryAllByText(SORTFORMER_TILE).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('Requires Metal')).not.toBeNull();
+    expect(screen.queryAllByText(CUSTOM_TILE).length).toBeGreaterThanOrEqual(1);
   });
 
   it('on Mac Metal with Custom + pyannote-prefixed value, shows NO unsupported warning', async () => {
@@ -400,7 +422,7 @@ describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
 
     // The custom-repo input renders; the old amber "not supported" warning is gone.
     await waitFor(() => {
-      expect(screen.queryAllByText(CUSTOM).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByDisplayValue('pyannote/some-fork')).toBeDefined();
     });
     expect(
       screen.queryByText(/Custom pyannote repos are not supported on Apple Silicon/i),
@@ -409,21 +431,26 @@ describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Merged Diarization dropdown — CAM++ + engine collapsed into ONE control.
+// Merged Diarization control — CAM++ + engine collapsed into ONE selector.
 //
-// The Server tab renders a SINGLE "Diarization Model" dropdown listing CAM++
-// alongside Sortformer, pyannote and Custom. Selecting CAM++ sends
+// The Server tab renders a single Diarization selector (tile grid) listing
+// CAM++ alongside Sortformer, PyAnnote and Custom. Selecting CAM++ sends
 // SENSEVOICE_DIARIZATION_ENGINE=funasr with an EMPTY DIARIZATION_MODEL; every
 // other pick sends the pyannote engine. The merged value keeps the original
 // server.diarizationModelSelection key (shared with the Model Manager tab and the
-// Metal boot auto-start). The retired server.sensevoiceDiarizationEngine key acts
-// as a one-shot migration marker and is cleared once the fold is applied.
+// Metal boot auto-start), storing the SAME literal strings as the pre-tile
+// dropdown. The retired server.sensevoiceDiarizationEngine key acts as a
+// one-shot migration marker and is cleared once the fold is applied.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Merged Diarization dropdown (CAM++ + engine)', () => {
+describe('Merged Diarization control (CAM++ + engine)', () => {
+  // Persisted electron-store values (must never change) …
   const CAMPP = 'CAM++ (fast, built-in)';
   const SORTFORMER = 'Sortformer (Metal; ≤ 4 speakers)';
   const PYANNOTE = 'pyannote/speaker-diarization-community-1';
+  // … and the short labels their tiles display.
+  const CAMPP_TILE = 'CAM++';
+  const SORTFORMER_TILE = 'Sortformer';
   const SENSEVOICE_MAIN = 'iic/SenseVoiceSmall';
   const WHISPER_MAIN = 'openai/whisper-large-v3-turbo';
 
@@ -466,16 +493,16 @@ describe('Merged Diarization dropdown (CAM++ + engine)', () => {
     mockAdminStatus.status = { models: {} };
   });
 
-  it('greys the CAM++ option (SenseVoice only) when the main transcriber is not SenseVoice', async () => {
+  it('greys the CAM++ tile (SenseVoice only) when the main transcriber is not SenseVoice', async () => {
     setupMergedAPI({ 'server.runtimeProfile': 'cpu', 'server.mainModelSelection': WHISPER_MAIN });
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
     await waitFor(() => {
       expect(screen.queryByText('SenseVoice only')).not.toBeNull();
     });
-    expect(screen.queryAllByText(CAMPP).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryAllByText(CAMPP_TILE).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('enables the CAM++ option (no SenseVoice-only badge) when the main transcriber is SenseVoice', async () => {
+  it('enables the CAM++ tile (no SenseVoice-only badge) when the main transcriber is SenseVoice', async () => {
     setupMergedAPI({
       'server.runtimeProfile': 'cpu',
       'server.mainModelSelection': SENSEVOICE_MAIN,
@@ -486,16 +513,16 @@ describe('Merged Diarization dropdown (CAM++ + engine)', () => {
     await waitFor(() => {
       expect(screen.queryByText('SenseVoice only')).toBeNull();
     });
-    expect(screen.queryAllByText(CAMPP).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryAllByText(CAMPP_TILE).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('greys the Sortformer option (Requires Metal) on a non-Metal runtime', async () => {
+  it('greys the Sortformer tile (Requires Metal) on a non-Metal runtime', async () => {
     setupMergedAPI({ 'server.runtimeProfile': 'cpu', 'server.mainModelSelection': WHISPER_MAIN });
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
     await waitFor(() => {
       expect(screen.queryByText('Requires Metal')).not.toBeNull();
     });
-    expect(screen.queryAllByText(SORTFORMER).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryAllByText(SORTFORMER_TILE).length).toBeGreaterThanOrEqual(1);
   });
 
   it('does NOT grey Sortformer on the Metal runtime', async () => {
@@ -505,7 +532,7 @@ describe('Merged Diarization dropdown (CAM++ + engine)', () => {
     );
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
     await waitFor(() => {
-      expect(screen.queryAllByText(SORTFORMER).length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryAllByText(SORTFORMER_TILE).length).toBeGreaterThanOrEqual(1);
     });
     expect(screen.queryByText('Requires Metal')).toBeNull();
   });
@@ -563,7 +590,7 @@ describe('Merged Diarization dropdown (CAM++ + engine)', () => {
     // The retired key is cleared so the migration can never re-fire and clobber a
     // later user choice.
     expect(setSpy).toHaveBeenCalledWith('server.sensevoiceDiarizationEngine', '');
-    expect(screen.queryAllByText(CAMPP).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryAllByText(CAMPP_TILE).length).toBeGreaterThanOrEqual(1);
   });
 
   it('migrates legacy {pyannote model, CAM++ engine} + Whisper main to the pyannote option', async () => {
@@ -614,6 +641,132 @@ describe('Merged Diarization dropdown (CAM++ + engine)', () => {
       expect(setSpy).toHaveBeenCalledWith('server.diarizationModelSelection', CAMPP);
     });
     expect(setSpy).not.toHaveBeenCalledWith('server.diarizationModelSelection', PYANNOTE);
-    expect(screen.queryAllByText(CAMPP).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryAllByText(CAMPP_TILE).length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Server tab matrix redesign — card layout + deferred runtime downloads.
+//
+// The tab is five numbered cards: Docker Image → Instance Settings (runtime +
+// model + live + diarization selectors) → Remote Connection (auth token +
+// Tailscale hostname) → Persistent Volumes → Clean Up. Selecting a runtime
+// must never start downloads: in particular, picking Metal only persists the
+// profile — the native MLX server (whose startup pre-downloads models) starts
+// exclusively from the explicit Start button.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Server tab matrix redesign', () => {
+  function setupRedesignAPI(configMap: Record<string, unknown>, arch = 'x64') {
+    const setSpy = vi.fn().mockResolvedValue(undefined);
+    const mlxStart = vi.fn().mockResolvedValue(undefined);
+    const mlxStop = vi.fn().mockResolvedValue(undefined);
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockImplementation(async (key: string) => configMap[key]),
+        set: setSpy,
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+        checkModelCache: vi.fn().mockResolvedValue({}),
+      },
+      app: {
+        getArch: vi.fn().mockReturnValue(arch),
+        getConfigDir: vi.fn().mockResolvedValue('/mock/config'),
+      },
+      mlx: {
+        getStatus: vi.fn().mockResolvedValue('stopped'),
+        onStatusChanged: vi.fn().mockReturnValue(vi.fn()),
+        start: mlxStart,
+        stop: mlxStop,
+      },
+      tailscale: {
+        getHostname: vi.fn().mockResolvedValue('my-server.tail1234.ts.net'),
+      },
+      server: {
+        checkFirewallPort: vi.fn().mockResolvedValue(null),
+        checkGpu: vi.fn().mockResolvedValue({ gpu: false, toolkit: false, vulkan: false }),
+      },
+    };
+    return { setSpy, mlxStart, mlxStop };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDocker.available = true;
+    mockDocker.images = [];
+    mockDocker.container = { exists: false, running: false, status: 'unknown', health: undefined };
+    mockDocker.operationError = null;
+    mockDocker.operating = false;
+    mockDocker.composeAvailable = true;
+    mockAdminStatus.status = { models: {} };
+  });
+
+  it('renders the five renumbered cards and drops the old standalone model cards', async () => {
+    setupRedesignAPI({ 'server.runtimeProfile': 'cpu' });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    expect(screen.getByText('1. Docker Image')).toBeDefined();
+    expect(screen.getByText('2. Instance Settings')).toBeDefined();
+    expect(screen.getByText('3. Remote Connection')).toBeDefined();
+    expect(screen.getByText('4. Persistent Volumes')).toBeDefined();
+    expect(screen.getByText('5. Clean Up')).toBeDefined();
+    expect(screen.queryByText(/ASR Models Configuration/)).toBeNull();
+    expect(screen.queryByText(/Diarization Models Configuration/)).toBeNull();
+  });
+
+  it('shows the Tailscale hostname inside the Remote Connection card', async () => {
+    setupRedesignAPI({ 'server.runtimeProfile': 'cpu' });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(screen.getByText('my-server.tail1234.ts.net')).toBeDefined();
+    });
+    expect(screen.getByText('Tailscale Hostname')).toBeDefined();
+  });
+
+  it('selecting the Metal runtime does NOT start the MLX server (deferred downloads)', async () => {
+    const { setSpy, mlxStart } = setupRedesignAPI({ 'server.runtimeProfile': 'cpu' }, 'arm64');
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    fireEvent.click(screen.getByRole('button', { name: /GPU \(Metal\)/i }));
+    await waitFor(() => {
+      expect(setSpy).toHaveBeenCalledWith('server.runtimeProfile', 'metal');
+    });
+    expect(mlxStart).not.toHaveBeenCalled();
+  });
+
+  it('leaving the Metal runtime still stops a running MLX server', async () => {
+    const { setSpy, mlxStop } = setupRedesignAPI({ 'server.runtimeProfile': 'metal' }, 'arm64');
+    ((window as any).electronAPI.mlx.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue(
+      'running',
+    );
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    fireEvent.click(screen.getByRole('button', { name: /CPU Only/i }));
+    await waitFor(() => {
+      expect(setSpy).toHaveBeenCalledWith('server.runtimeProfile', 'cpu');
+    });
+    await waitFor(() => {
+      expect(mlxStop).toHaveBeenCalled();
+    });
+  });
+
+  it('switching runtimes resets a main model the new runtime cannot run', async () => {
+    // A GGML main persisted under a Vulkan profile must not survive a switch
+    // to CUDA — the redesign resets it to the runtime default (previously the
+    // stale GGML pick leaked into a CUDA start).
+    const { setSpy } = setupRedesignAPI({
+      'server.runtimeProfile': 'vulkan',
+      'server.mainModelSelection': 'ggml-large-v3-turbo.bin',
+    });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(setSpy).toHaveBeenCalledWith('server.mainModelSelection', 'ggml-large-v3-turbo.bin');
+    });
+    fireEvent.click(screen.getByRole('button', { name: /GPU \(CUDA\)/i }));
+    await waitFor(() => {
+      // Runtime default for gpu in the mocked world = MAIN_RECOMMENDED_MODEL.
+      expect(setSpy).toHaveBeenCalledWith(
+        'server.mainModelSelection',
+        'openai/whisper-large-v3-turbo',
+      );
+    });
   });
 });
