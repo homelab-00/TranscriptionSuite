@@ -7,8 +7,10 @@
  * • Notification deduplication: a version is only notified once (persisted
  *   in electron-store under `updates.lastNotified.*`).
  * • No download or auto-install — notification-only.
+ * • Emits `updateAvailable` (see on()) when a fresh check finds a newer app version.
  */
 
+import { EventEmitter } from 'node:events';
 import { Notification, app } from 'electron';
 import type Store from 'electron-store';
 import { dockerManager, buildGhcrUrlsForRepo, resolveImageRepo } from './dockerManager.js';
@@ -90,6 +92,12 @@ export interface UpdateStatus {
   installer?: InstallerStatus;
 }
 
+/** Payload of the `updateAvailable` event (see UpdateManager.on()). */
+export interface UpdateAvailablePayload {
+  version: string;
+  releaseNotes: string | null;
+}
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const GITHUB_RELEASES_URL =
@@ -161,12 +169,22 @@ function highestSemVer(tags: string[]): string | null {
 
 export class UpdateManager {
   private store: AnyStore;
+  private readonly emitter = new EventEmitter();
   private timer: ReturnType<typeof setInterval> | null = null;
   private failureRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
 
   constructor(store: AnyStore) {
     this.store = store;
+  }
+
+  /**
+   * Subscribe to `updateAvailable`, emitted when a completed check finds a
+   * newer app version. Returns an unsubscribe function.
+   */
+  on(event: 'updateAvailable', listener: (payload: UpdateAvailablePayload) => void): () => void {
+    this.emitter.on(event, listener);
+    return () => this.emitter.off(event, listener);
   }
 
   /**
@@ -260,6 +278,18 @@ export class UpdateManager {
     this.store.set('updates.lastStatus', status);
     this.maybeNotify(status);
 
+    // Push a one-shot signal so the renderer can raise the update toast.
+    // Fires whenever the completed check reports an available app update;
+    // per-version de-dup lives in the renderer (updates.dismissedAppVersion)
+    // and sonner's stable toast id, so repeat fires are harmless.
+    if (status.app.updateAvailable && status.app.latest) {
+      const payload: UpdateAvailablePayload = {
+        version: status.app.latest,
+        releaseNotes: status.app.releaseNotes,
+      };
+      this.emitter.emit('updateAvailable', payload);
+    }
+
     // M6: single-shot retry in 1 h when either component errored, cleared
     // on the next fully-green check. The regular setInterval is untouched
     // so this only shortens the next probe — it never extends it.
@@ -312,10 +342,12 @@ export class UpdateManager {
   // ─── Private ────────────────────────────────────────────────────────────
 
   private isEnabled(): boolean {
+    // Unreachable in prod: main.ts electron-store defaults always seed this key; fallback is test-only.
     return (this.store.get('app.updateChecksEnabled') as boolean) ?? false;
   }
 
   private getIntervalMs(): number {
+    // Unreachable in prod: main.ts electron-store defaults always seed this key; fallback is test-only.
     const mode = (this.store.get('app.updateCheckIntervalMode') as string) ?? '24h';
     if (mode === 'custom') {
       const hours = (this.store.get('app.updateCheckCustomHours') as number) ?? 24;

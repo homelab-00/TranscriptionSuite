@@ -479,3 +479,88 @@ describe('UpdateManager.getStatus — re-derives app status against runtime vers
     });
   });
 });
+
+// ─── updateAvailable event: fresh-detection push signal for the renderer ───
+
+describe('UpdateManager updateAvailable event', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  const managers: UpdateManager[] = [];
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch');
+  });
+
+  afterEach(() => {
+    for (const m of managers) m.destroy();
+    managers.length = 0;
+    fetchSpy.mockRestore();
+  });
+
+  // Reuse the file's existing fetch-mock arrangement: the app channel matches
+  // on `api.github.com` and returns { tag_name, body }; the server channel
+  // returns a token then tags. Running app version is versionRef.value ('1.0.0'),
+  // so a v1.4.0 release yields an available app update.
+  function buildManagerWithAppUpdate(latest: string, notes: string): { manager: UpdateManager } {
+    fetchSpy.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes('api.github.com')) {
+        return new Response(JSON.stringify({ tag_name: `v${latest}`, body: notes }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('ghcr.io/token')) {
+        return new Response(JSON.stringify({ token: 'fake' }), { status: 200 });
+      }
+      if (url.includes('ghcr.io/v2')) {
+        return new Response(JSON.stringify({ tags: ['1.0.0'] }), { status: 200 });
+      }
+      throw new Error(`unexpected fetch url: ${url}`);
+    });
+    const store = makeFakeStore();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const manager = new UpdateManager(store as any);
+    managers.push(manager);
+    return { manager };
+  }
+
+  function buildManagerWithoutAppUpdate(): { manager: UpdateManager } {
+    fetchSpy.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = input instanceof URL ? input.href : String(input);
+      if (url.includes('api.github.com')) {
+        // Same as the running version (1.0.0) → no update available.
+        return new Response(JSON.stringify({ tag_name: 'v1.0.0', body: '' }), { status: 200 });
+      }
+      if (url.includes('ghcr.io/token')) {
+        return new Response(JSON.stringify({ token: 'fake' }), { status: 200 });
+      }
+      if (url.includes('ghcr.io/v2')) {
+        return new Response(JSON.stringify({ tags: ['1.0.0'] }), { status: 200 });
+      }
+      throw new Error(`unexpected fetch url: ${url}`);
+    });
+    const store = makeFakeStore();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const manager = new UpdateManager(store as any);
+    managers.push(manager);
+    return { manager };
+  }
+
+  it('emits updateAvailable when a check finds a newer app version', async () => {
+    const { manager } = buildManagerWithAppUpdate('1.4.0', 'Release notes here');
+    const events: Array<{ version: string; releaseNotes: string | null }> = [];
+    manager.on('updateAvailable', (p) => events.push(p));
+    await manager.check();
+    expect(events).toHaveLength(1);
+    expect(events[0].version).toBe('1.4.0');
+    expect(events[0].releaseNotes).toBe('Release notes here');
+  });
+
+  it('does not emit when no app update is available', async () => {
+    const { manager } = buildManagerWithoutAppUpdate();
+    const events: unknown[] = [];
+    manager.on('updateAvailable', (p) => events.push(p));
+    await manager.check();
+    expect(events).toHaveLength(0);
+  });
+});
