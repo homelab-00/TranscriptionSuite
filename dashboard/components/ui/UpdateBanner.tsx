@@ -213,14 +213,24 @@ export function deriveBannerState(
   isBusy: boolean,
   now: number,
   snoozedUntil: number,
+  dismissedVersion: string | null,
 ): DerivedBanner {
   const snoozed = snoozedUntil > now;
   // Optional-chain .app as well — a persisted UpdateStatus from an older app
   // version may be missing .app entirely, and unguarded access would crash.
   const latestVersion = updateStatus?.app?.latest ?? null;
   const updateAvailable = updateStatus?.app?.updateAvailable === true;
+  // Per-version dismissal (updates.dismissedAppVersion) is independent of the
+  // time-based snooze above — BOTH guards must clear before the available
+  // state shows. Exact-match is intentional because latest always reflects the
+  // newest available version, so a newer release differs from the dismissed
+  // one and re-surfaces the banner.
   const availableFromPoll: DerivedBanner =
-    !snoozed && updateAvailable && latestVersion != null && latestVersion !== ''
+    !snoozed &&
+    updateAvailable &&
+    latestVersion != null &&
+    latestVersion !== '' &&
+    latestVersion !== dismissedVersion
       ? { state: 'available', version: latestVersion }
       : { state: 'hidden', version: null };
 
@@ -277,6 +287,7 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
   const [installer, setInstaller] = useState<InstallerStatus | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [snoozedUntil, setSnoozedUntil] = useState<number>(0);
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
   const [now, setNow] = useState<number>(() => Date.now());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
@@ -352,6 +363,19 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
       })
       .catch((err: unknown) => {
         console.error('UpdateBanner: getConfig snooze failed', err);
+      });
+
+    // Read the per-version dismissal recorded by the update toast Dismiss
+    // button. When the latest available version equals this value the banner
+    // stays hidden until a newer release supersedes it. Independent of the
+    // time-based snooze above — both guards gate the available state.
+    getConfig<string>('updates.dismissedAppVersion')
+      .then((v) => {
+        if (cancelled) return;
+        setDismissedVersion(typeof v === 'string' && v ? v : null);
+      })
+      .catch((err: unknown) => {
+        console.error('UpdateBanner: getConfig dismissed version failed', err);
       });
 
     // Live installer transitions.
@@ -564,7 +588,14 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
     }
   }, []);
 
-  const derived = deriveBannerState(installer, updateStatus, isBusy, now, snoozedUntil);
+  const derived = deriveBannerState(
+    installer,
+    updateStatus,
+    isBusy,
+    now,
+    snoozedUntil,
+    dismissedVersion,
+  );
 
   // Reset modal-open flag when state leaves `available`. Without this, the
   // flag leaks across state transitions (available → downloading → available

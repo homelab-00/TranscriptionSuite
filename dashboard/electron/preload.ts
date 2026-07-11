@@ -330,6 +330,10 @@ export interface ElectronAPI {
     onInstallerStatus: (callback: (status: InstallerStatus) => void) => () => void;
     /** Fires when a deferred install transitions to actionable (server idle). */
     onInstallReady: (callback: () => void) => () => void;
+    /** Fires when a completed check detects a newer app version. */
+    onUpdateAvailable: (
+      callback: (payload: { version: string; releaseNotes: string | null }) => void,
+    ) => () => void;
     /**
      * M7: open the GitHub release page in the user's default browser. Used
      * by the manual-download banner state (read-only AppImage on Linux,
@@ -695,6 +699,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = () => callback();
       ipcRenderer.on('updates:installReady', handler);
       return () => ipcRenderer.removeListener('updates:installReady', handler);
+    },
+    onUpdateAvailable: (
+      callback: (payload: { version: string; releaseNotes: string | null }) => void,
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        payload: { version: string; releaseNotes: string | null },
+      ) => callback(payload);
+      ipcRenderer.on('updates:updateAvailable', handler);
+      return () => ipcRenderer.removeListener('updates:updateAvailable', handler);
     },
     openReleasePage: (url: string) => ipcRenderer.invoke('updates:openReleasePage', url),
   },
