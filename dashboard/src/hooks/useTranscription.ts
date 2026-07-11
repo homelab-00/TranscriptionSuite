@@ -238,11 +238,13 @@ export function useTranscription(): TranscriptionState {
           break;
 
         case 'result_ready': {
-          // Result was too large to stream over WebSocket — fetch it via HTTP
+          // Result was too large to stream over WebSocket — fetch it via HTTP.
+          // Must go through apiClient (absolute base URL): a relative fetch
+          // resolves against the packaged renderer file:// origin and never
+          // reaches the backend (GH-202).
           const job_id = msg.data?.job_id as string;
-          const token = apiClient.getAuthToken();
-          const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
-          fetch(`/api/transcribe/result/${job_id}`, { headers: authHeader })
+          apiClient
+            .fetchTranscriptionResult(job_id)
             .then(async (resp) => {
               if (resp.status === 200) {
                 const data = await resp.json();
@@ -365,11 +367,9 @@ export function useTranscription(): TranscriptionState {
             const poll = async () => {
               if (pollCancelledRef.current || jobIdRef.current !== currentJobId) return;
               try {
-                const pollToken = apiClient.getAuthToken();
-                const pollAuthHeader = pollToken ? { Authorization: `Bearer ${pollToken}` } : {};
-                const resp = await fetch(`/api/transcribe/result/${currentJobId}`, {
-                  headers: pollAuthHeader,
-                });
+                // Absolute base URL via apiClient — a relative fetch fails in
+                // the packaged (file://) renderer (GH-202).
+                const resp = await apiClient.fetchTranscriptionResult(currentJobId);
                 if (pollCancelledRef.current || jobIdRef.current !== currentJobId) return;
                 if (resp.status === 200) {
                   const data = await resp.json();

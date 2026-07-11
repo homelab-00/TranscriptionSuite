@@ -658,3 +658,69 @@ describe('initApiClient — bootstrap diagnostic for unconfigured gate', () => {
     expect(bootstrapWarnings).toHaveLength(1);
   });
 });
+
+// GH-202: the large-result recovery fetches (result_ready handler, onClose
+// poll, and the SessionView recovery notification) previously used bare
+// RELATIVE URLs. In a packaged Electron build the renderer origin is file://,
+// so a relative '/api/...' resolves to file:///api/... and never reaches the
+// backend. These methods MUST build an absolute URL from the configured base.
+describe('APIClient — transcription-result recovery uses absolute URLs (GH-202)', () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('fetchTranscriptionResult targets the configured base URL, not a relative path', async () => {
+    const client = new APIClient('http://localhost:9786');
+    await client.fetchTranscriptionResult('job-abc');
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const url = String(fetchSpy.mock.calls[0][0]);
+    expect(url).toBe('http://localhost:9786/api/transcribe/result/job-abc');
+    expect(url.startsWith('/')).toBe(false);
+  });
+
+  it('honors a remote base URL (would 404 the wrong origin if left relative)', async () => {
+    const client = new APIClient('https://box.example:9786');
+    await client.fetchTranscriptionResult('job-abc');
+
+    expect(String(fetchSpy.mock.calls[0][0])).toBe(
+      'https://box.example:9786/api/transcribe/result/job-abc',
+    );
+  });
+
+  it('fetchRecentUndelivered and dismissTranscriptionResult also use absolute URLs', async () => {
+    const client = new APIClient('http://localhost:9786');
+
+    await client.fetchRecentUndelivered();
+    expect(String(fetchSpy.mock.calls[0][0])).toBe('http://localhost:9786/api/transcribe/recent');
+
+    await client.dismissTranscriptionResult('job-xyz');
+    expect(String(fetchSpy.mock.calls[1][0])).toBe(
+      'http://localhost:9786/api/transcribe/result/job-xyz/dismiss',
+    );
+    expect((fetchSpy.mock.calls[1][1] as RequestInit)?.method).toBe('POST');
+  });
+
+  it('attaches the bearer token when one is set, and omits it otherwise', async () => {
+    const client = new APIClient('http://localhost:9786');
+
+    await client.fetchTranscriptionResult('job-1');
+    expect(
+      (fetchSpy.mock.calls[0][1] as RequestInit).headers as Record<string, string>,
+    ).not.toHaveProperty('Authorization');
+
+    client.setAuthToken('tok123');
+    await client.fetchTranscriptionResult('job-2');
+    expect(
+      ((fetchSpy.mock.calls[1][1] as RequestInit).headers as Record<string, string>).Authorization,
+    ).toBe('Bearer tok123');
+  });
+});

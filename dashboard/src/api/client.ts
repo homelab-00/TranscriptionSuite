@@ -300,6 +300,36 @@ export class APIClient {
     return this.get('/api/status');
   }
 
+  // ─── Transcription result recovery (GH-202) ───────────────────────────────
+  // Return the raw Response so callers can branch on status (200 ready,
+  // 202 processing, 410 failed). These MUST build an absolute URL from the
+  // configured base: a bare relative '/api/...' fetch resolves against the
+  // packaged renderer file:// origin and never reaches the backend, so a
+  // large (>1 MB) result served as a `result_ready` reference can never be
+  // retrieved.
+
+  /** GET /api/transcribe/result/{jobId} — fetch a persisted (possibly >1 MB) result. */
+  async fetchTranscriptionResult(jobId: string): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/transcribe/result/${jobId}`, {
+      headers: this.authHeaders(),
+    });
+  }
+
+  /** GET /api/transcribe/recent — recently completed but undelivered results for this caller. */
+  async fetchRecentUndelivered(): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/transcribe/recent`, {
+      headers: this.authHeaders(),
+    });
+  }
+
+  /** POST /api/transcribe/result/{jobId}/dismiss — mark a recovered result dismissed. */
+  async dismissTranscriptionResult(jobId: string): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/transcribe/result/${jobId}/dismiss`, {
+      method: 'POST',
+      headers: this.authHeaders(),
+    });
+  }
+
   /**
    * Combined connectivity check — returns a summary of server state.
    * Uses a single GET /api/status request whose ``ready`` field

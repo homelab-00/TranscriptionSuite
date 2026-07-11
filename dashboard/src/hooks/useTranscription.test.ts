@@ -2,6 +2,7 @@ import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 
 import { useTranscription } from './useTranscription';
+import { apiClient } from '../api/client';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 
@@ -79,6 +80,9 @@ vi.mock('../api/client', () => ({
   apiClient: {
     getAuthToken: vi.fn().mockReturnValue('test-token'),
     getBaseUrl: vi.fn().mockReturnValue('http://localhost:9786'),
+    // GH-202: the large-result recovery path must go through apiClient (which
+    // builds an absolute URL), never a bare relative fetch().
+    fetchTranscriptionResult: vi.fn(),
     isBaseUrlConfigured: vi.fn(() => mockGateConfigured),
     onConfigChanged: vi.fn((listener: () => void) => {
       configChangedListeners.add(listener);
@@ -208,6 +212,35 @@ describe('[P1] useTranscription', () => {
         language: 'en',
         duration: 1.5,
       });
+      expect(lastSocket.disconnect).toHaveBeenCalled();
+    });
+
+    // GH-202: a >1 MB result arrives as a `result_ready` reference; the hook
+    // must retrieve it through apiClient (absolute URL), not a relative fetch()
+    // that would resolve to file:// in a packaged build and always fail.
+    it('completes via apiClient on result_ready (large-result recovery)', async () => {
+      (apiClient.fetchTranscriptionResult as Mock).mockResolvedValue({
+        status: 200,
+        json: async () => ({
+          result: { text: 'big transcript', words: [], language: 'en', duration: 42 },
+        }),
+      });
+
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      act(() => {
+        result.current.stop();
+      });
+
+      await act(async () => {
+        lastSocketCbs.onMessage!({ type: 'result_ready', data: { job_id: 'job-1' } });
+      });
+      // Flush the fetch().then(async → json()) → setState microtask chain.
+      await act(async () => {});
+
+      expect(apiClient.fetchTranscriptionResult).toHaveBeenCalledWith('job-1');
+      expect(result.current.status).toBe('complete');
+      expect(result.current.result?.text).toBe('big transcript');
       expect(lastSocket.disconnect).toHaveBeenCalled();
     });
 

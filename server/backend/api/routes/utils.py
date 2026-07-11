@@ -293,8 +293,21 @@ def get_client_name(request: Request) -> str:
     """
     Extract the client name from the request's authentication token.
 
+    On a local, non-TLS deployment the localhost auth bypass takes precedence
+    over any token — mirroring ``authenticate_websocket_*`` above, which stamp
+    jobs with ``client_name="localhost-user"`` without consulting a token. This
+    keeps HTTP identity consistent with the WebSocket, so the local owner can
+    retrieve a persisted (>1 MB) result via ``GET /result/{job_id}`` and see it
+    in ``GET /recent``. Without the bypass those endpoints would 403 the
+    legitimate owner because the job is owned by ``localhost-user`` while the
+    token (or absence of one) resolves to a different name (GH #202).
+
     Returns the client_name from the token, or a default value if not found.
     """
+    client_host = request.client.host if request.client else None
+    if not TLS_MODE and is_local_auth_bypass_host(client_host):
+        return "localhost-user"
+
     stored_token = validate_auth_token(get_request_auth_token(request))
     if stored_token:
         return stored_token.client_name
