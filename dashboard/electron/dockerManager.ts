@@ -3612,7 +3612,16 @@ async function downloadWhisperServerExe(): Promise<void> {
     );
   }
 
-  // 3. Download the blob by digest and write it to the .tmp sidecar.
+  // 3. Download the blob by digest, verify its content hash matches that
+  //    digest, then write it to the .tmp sidecar. OCI blobs are content-
+  //    addressed, so the manifest's `sha256:...` digest is the authoritative
+  //    integrity check: verifying it before touching disk means the bytes we
+  //    write (and later execute) are exactly what the manifest promised, not
+  //    a corrupted or tampered payload.
+  const [digestAlgo, expectedHash] = digest.split(':', 2);
+  if (digestAlgo !== 'sha256' || !expectedHash) {
+    throw new Error(`Unsupported blob digest '${digest}' in whisper-server manifest`);
+  }
   try {
     const blobResp = await fetch(`${registryBase}/blobs/${digest}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -3621,6 +3630,12 @@ async function downloadWhisperServerExe(): Promise<void> {
       throw new Error(`HTTP ${blobResp.status} downloading whisper-server.exe blob ${digest}`);
     }
     const buffer = Buffer.from(await blobResp.arrayBuffer());
+    const actualHash = crypto.createHash('sha256').update(buffer).digest('hex');
+    if (actualHash !== expectedHash) {
+      throw new Error(
+        `whisper-server.exe blob integrity check failed: expected sha256:${expectedHash}, got sha256:${actualHash}`,
+      );
+    }
     fs.writeFileSync(tmp, buffer);
   } catch (err) {
     try {
