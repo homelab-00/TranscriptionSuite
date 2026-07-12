@@ -3533,10 +3533,35 @@ function ensureWhisperDirectories(): void {
 }
 
 /**
- * Download whisper-server.exe from GitHub LFS into the whisper-server AppData
- * directory. The binary is stored in the repo under
- * `server/whisper-server/whisper-server.exe` via Git LFS; GitHub raw URLs
- * automatically redirect to the LFS object for public repos.
+ * GHCR OCI repo that hosts the whisper-server.exe Windows binary as a package
+ * blob, pushed with:
+ *
+ *   oras push ghcr.io/homelab-00/whisper-server:latest \
+ *     --artifact-type application/vnd.transcriptionsuite.whisper-server \
+ *     --annotation "org.opencontainers.image.source=https://github.com/homelab-00/TranscriptionSuite" \
+ *     whisper-server/whisper-server.exe:application/vnd.microsoft.portable-executable
+ *
+ * The blob is linked to the homelab-00/TranscriptionSuite repo via the
+ * image-source annotation and must be a *public* package so the app can pull
+ * it anonymously.
+ */
+const WHISPER_SERVER_BLOB_REPO = 'ghcr.io/homelab-00/whisper-server';
+/**
+ * Tag to pull. Each release is pushed as both `latest` and `vX.Y.Z`, so
+ * `latest` always resolves to the newest binary.
+ */
+const WHISPER_SERVER_BLOB_TAG = 'latest';
+/** Media type oras stamps on the whisper-server.exe layer. */
+const WHISPER_SERVER_BLOB_MEDIA_TYPE = 'application/vnd.microsoft.portable-executable';
+
+/**
+ * Download whisper-server.exe from a GHCR package blob into the whisper-server
+ * AppData directory. The binary is published as an OCI artifact via `oras push`
+ * (see {@link WHISPER_SERVER_BLOB_REPO}); GHCR requires the same anonymous
+ * two-step auth flow as image pulls even for public packages:
+ *   1. GET a pull token from the ghcr.io token endpoint.
+ *   2. GET the OCI manifest for the tag and locate the .exe layer digest.
+ *   3. GET the blob by digest and stream it to disk.
  *
  * Downloads to a `.tmp` sidecar first and renames on success so a partial
  * download never leaves a corrupt executable behind.
@@ -3544,47 +3569,87 @@ function ensureWhisperDirectories(): void {
 async function downloadWhisperServerExe(): Promise<void> {
   const exePath = getWhisperServerExePath();
   const tmp = `${exePath}.tmp`;
-  // TODO: change ref to `v${app.getVersion()}` once whisper-server.exe is
-  // committed at each release tag (currently lives on fix-vulcan-on-windows).
-  const url = `https://github.com/homelab-00/TranscriptionSuite/raw/refs/heads/main/whisper-server/whisper-server.exe`;
   fs.mkdirSync(path.dirname(exePath), { recursive: true });
 
-  const { net } = await import('electron');
+  const pkgPath = WHISPER_SERVER_BLOB_REPO.replace(/^ghcr\.io\//, '');
+  const tokenUrl = `https://ghcr.io/token?scope=repository:${pkgPath}:pull&service=ghcr.io`;
+  const registryBase = `https://ghcr.io/v2/${pkgPath}`;
 
-  await new Promise<void>((resolve, reject) => {
-    const request = net.request({ url, redirect: 'follow' });
-    const file = fs.createWriteStream(tmp);
+  // 1. Anonymous pull token (required even for public packages).
+  const tokenResp = await fetch(tokenUrl);
+  if (!tokenResp.ok) {
+    throw new Error(`HTTP ${tokenResp.status} fetching GHCR pull token for ${pkgPath}`);
+  }
+  const { token } = (await tokenResp.json()) as { token?: string };
+  if (!token) {
+    throw new Error(`GHCR returned no pull token for ${pkgPath}`);
+  }
 
-    request.on('response', (response) => {
-      if (response.statusCode >= 400) {
-        file.destroy();
-        reject(new Error(`HTTP ${response.statusCode} downloading whisper-server.exe from ${url}`));
-        return;
-      }
-      response.on('data', (chunk) => file.write(chunk));
-      response.on('end', () => file.close(() => resolve()));
-      response.on('error', (err) => {
-        file.destroy();
-        reject(err);
-      });
+  // 2. Fetch the OCI manifest and locate the whisper-server.exe layer digest.
+  const manifestResp = await fetch(`${registryBase}/manifests/${WHISPER_SERVER_BLOB_TAG}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.oci.image.manifest.v1+json',
+    },
+  });
+  if (!manifestResp.ok) {
+    throw new Error(
+      `HTTP ${manifestResp.status} fetching whisper-server manifest ${pkgPath}:${WHISPER_SERVER_BLOB_TAG}`,
+    );
+  }
+  const manifest = (await manifestResp.json()) as {
+    layers?: Array<{ digest?: string; mediaType?: string }>;
+  };
+  const layers = manifest.layers ?? [];
+  // Prefer the PE-typed layer; fall back to the last layer (oras pushes the
+  // file as the final layer, after the empty config blob).
+  const layer =
+    layers.find((l) => l.mediaType === WHISPER_SERVER_BLOB_MEDIA_TYPE) ?? layers[layers.length - 1];
+  const digest = layer?.digest;
+  if (!digest) {
+    throw new Error(
+      `No blob layer found in whisper-server manifest ${pkgPath}:${WHISPER_SERVER_BLOB_TAG}`,
+    );
+  }
+
+  // 3. Download the blob by digest, verify its content hash matches that
+  //    digest, then write it to the .tmp sidecar. OCI blobs are content-
+  //    addressed, so the manifest's `sha256:...` digest is the authoritative
+  //    integrity check: verifying it before touching disk means the bytes we
+  //    write (and later execute) are exactly what the manifest promised, not
+  //    a corrupted or tampered payload.
+  const [digestAlgo, expectedHash] = digest.split(':', 2);
+  if (digestAlgo !== 'sha256' || !expectedHash) {
+    throw new Error(`Unsupported blob digest '${digest}' in whisper-server manifest`);
+  }
+  try {
+    const blobResp = await fetch(`${registryBase}/blobs/${digest}`, {
+      headers: { Authorization: `Bearer ${token}` },
     });
-
-    request.on('error', (err) => {
-      file.destroy();
-      reject(err);
-    });
-    request.end();
-  }).catch((err) => {
+    if (!blobResp.ok) {
+      throw new Error(`HTTP ${blobResp.status} downloading whisper-server.exe blob ${digest}`);
+    }
+    const buffer = Buffer.from(await blobResp.arrayBuffer());
+    const actualHash = crypto.createHash('sha256').update(buffer).digest('hex');
+    if (actualHash !== expectedHash) {
+      throw new Error(
+        `whisper-server.exe blob integrity check failed: expected sha256:${expectedHash}, got sha256:${actualHash}`,
+      );
+    }
+    fs.writeFileSync(tmp, buffer);
+  } catch (err) {
     try {
       fs.unlinkSync(tmp);
     } catch {
       /* best-effort */
     }
     throw err;
-  });
+  }
 
   fs.renameSync(tmp, exePath);
-  console.log(`[DockerManager] whisper-server.exe downloaded to ${exePath}`);
+  console.log(
+    `[DockerManager] whisper-server.exe downloaded from ${WHISPER_SERVER_BLOB_REPO}:${WHISPER_SERVER_BLOB_TAG} to ${exePath}`,
+  );
 }
 
 // ─── Model Cache Inspection ─────────────────────────────────────────────────
