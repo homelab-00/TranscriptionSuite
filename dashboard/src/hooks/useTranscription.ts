@@ -40,6 +40,8 @@ export interface TranscriptionState {
     translationTarget?: string;
     systemAudio?: boolean;
     monitorDeviceLabel?: string;
+    /** Save the finished recording to the Audio Notebook (GH-199). */
+    autoAddToNotebook?: boolean;
   }) => void;
   /** Stop recording and wait for the final result */
   stop: () => void;
@@ -119,6 +121,8 @@ export function useTranscription(): TranscriptionState {
     monitorDeviceLabel?: string;
     /** Active recording-profile id (FR18). Snapshotted server-side at job start. */
     profileId?: number | null;
+    /** Save the finished recording to the Audio Notebook (GH-199). */
+    autoAddToNotebook?: boolean;
   }>({});
 
   // Cleanup on unmount — skip disconnect if actively recording/processing
@@ -161,6 +165,8 @@ export function useTranscription(): TranscriptionState {
               translation_target_language: startOptsRef.current.translationTarget ?? 'en',
               // Story 1.3 — server snapshots the profile at job start when present.
               profile_id: startOptsRef.current.profileId ?? null,
+              // GH-199: server promotes the finished recording into the Notebook.
+              auto_add_to_notebook: startOptsRef.current.autoAddToNotebook ?? false,
             },
           });
           break;
@@ -320,7 +326,9 @@ export function useTranscription(): TranscriptionState {
       translate?: boolean;
       translationTarget?: string;
       systemAudio?: boolean;
+      monitorDeviceLabel?: string;
       profileId?: number | null;
+      autoAddToNotebook?: boolean;
     }) => {
       // Reset previous state
       setResult(null);

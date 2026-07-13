@@ -2966,7 +2966,7 @@ on Linux). Settings are managed through the **Settings** modal in the UI.
 | `audio.gracePeriod` | `0.5` | Seconds of silence before finalising a recording chunk |
 | `diarization.constrainSpeakers` | `false` | Constrain speaker count for diarization |
 | `diarization.numSpeakers` | `2` | Number of speakers when constrained |
-| `notebook.autoAdd` | `true` | Auto-add longform transcriptions to Notebook |
+| `notebook.autoAdd` | `false` | Auto-add finished session recordings to the Audio Notebook |
 | `server.hfToken` | `""` | HuggingFace token for PyAnnote diarization models |
 | `server.runtimeProfile` | `gpu` | `"gpu"` or `"cpu"` - controls Docker GPU reservation |
 | `app.autoCopy` | `true` | Copy transcription to clipboard on completion |

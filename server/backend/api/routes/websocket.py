@@ -12,10 +12,12 @@ Handles:
 
 import asyncio
 import json
+import os
 import shutil
 import struct
 import tempfile
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +81,95 @@ def _build_longform_result_payload(result: Any) -> dict[str, Any]:
     return sanitize_for_json(result.to_dict())
 
 
+def _warn_notebook_autoadd_failed(message: str) -> None:
+    """Surface a failed notebook auto-add in the dashboard (GH #199).
+
+    Cannot be a WebSocket message: the client disconnects the moment it receives
+    the `final` result, so anything sent afterwards is dropped. The startup-event
+    channel is independent of the socket, so the warning still lands.
+    """
+    from server.core.startup_events import emit_event
+
+    try:
+        emit_event("warn-notebook-autoadd", "warning", message, status="error")
+    except Exception:
+        logger.warning("emit_event failed for warn-notebook-autoadd", exc_info=True)
+
+
+def _save_session_to_notebook(
+    *,
+    audio_path: Path,
+    duration_seconds: float,
+    result: Any,
+    model_name: str | None,
+) -> int | None:
+    """Promote a finished session recording into the Audio Notebook (GH #199).
+
+    Blocking (MP3 encode + DB write): call via ``asyncio.to_thread``.
+
+    The session already wrote its audio to disk and already has a transcript, so
+    the recording is promoted in place: no re-upload and no second transcription
+    pass. Deliberately mirrors the manual-import route (notebook.py) step for
+    step, including its ffmpeg fallback. ``database.save_longform_recording()``
+    looks like the natural helper here but caps ffmpeg at 60s (a long lecture
+    would silently produce no entry) and returns None when ffmpeg is absent.
+
+    Returns the new recording id, or None when no entry was written.
+    """
+    # Lazy imports: these pull in the audio/ML stack.
+    from server.config import get_config
+    from server.core.audio_utils import convert_to_mp3
+    from server.core.stt.backends.factory import detect_backend_type
+    from server.database.database import save_longform_to_database
+
+    if audio_path is None or not Path(audio_path).exists():
+        logger.warning("Notebook auto-add skipped: session audio is missing")
+        return None
+    if not duration_seconds or duration_seconds <= 0:
+        logger.warning("Notebook auto-add skipped: recording has no duration")
+        return None
+
+    cfg = get_config()
+    data_dir = os.environ.get("DATA_DIR", "/data")
+    audio_dir = Path(cfg.get("audio_notebook", "audio_dir", default=f"{data_dir}/audio"))
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    stem = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    def _free_path(suffix: str) -> Path:
+        candidate = audio_dir / f"{stem}{suffix}"
+        counter = 2
+        while candidate.exists():
+            candidate = audio_dir / f"{stem}-{counter}{suffix}"
+            counter += 1
+        return candidate
+
+    # ffmpeg is not guaranteed (a stock macOS install has none). Storing the
+    # audio verbatim beats dropping a completed recording on the floor.
+    dest_path = _free_path(".mp3")
+    try:
+        convert_to_mp3(str(audio_path), str(dest_path))
+    except Exception as mp3_err:
+        logger.warning("MP3 conversion failed (%s); storing the session audio verbatim.", mp3_err)
+        dest_path = _free_path(Path(audio_path).suffix or ".wav")
+        shutil.copyfile(str(audio_path), str(dest_path))
+
+    # Lift word timestamps out of the segments so the entry carries real
+    # word-level timing rather than a wall of text.
+    word_timestamps: list[dict[str, Any]] | None = None
+    segments = getattr(result, "segments", None) or []
+    if segments and "words" in segments[0]:
+        word_timestamps = [w for seg in segments for w in seg.get("words", [])]
+
+    return save_longform_to_database(
+        audio_path=dest_path,
+        duration_seconds=duration_seconds,
+        transcription_text=getattr(result, "text", "") or "",
+        word_timestamps=word_timestamps,
+        transcription_backend=detect_backend_type(model_name or ""),
+    )
+
+
 class TranscriptionSession:
     """
     Manages a single transcription session.
@@ -115,6 +206,11 @@ class TranscriptionSession:
         # Preview transcription (ephemeral "last N seconds" reminder — never persisted)
         self._preview_in_progress = False
         self._preview_task: asyncio.Task[None] | None = None
+
+        # Auto-add the finished recording to the Audio Notebook (GH #199).
+        # Resolved per-session at `start` from the client toggle OR the
+        # server-wide config key.
+        self.auto_add_to_notebook = False
 
         # Job tracking for transcription
         self._current_job_id: str | None = None
@@ -455,6 +551,31 @@ class TranscriptionSession:
 
             logger.info(f"Transcription complete for {self.client_name}")
 
+            # Auto-add to the Audio Notebook (GH #199). Runs AFTER the result is
+            # persisted and delivered: the notebook entry is a derived artifact,
+            # so a failure here must never cost the user their transcript. Runs
+            # in a thread, since the MP3 encode would otherwise block the event loop.
+            if self.auto_add_to_notebook:
+                try:
+                    recording_id = await asyncio.to_thread(
+                        _save_session_to_notebook,
+                        audio_path=self.temp_file,
+                        duration_seconds=result.duration,
+                        result=result,
+                        model_name=getattr(engine, "model_name", None),
+                    )
+                    if recording_id:
+                        logger.info("Saved session recording to notebook: id=%s", recording_id)
+                    else:
+                        _warn_notebook_autoadd_failed(
+                            "Could not save the recording to the Audio Notebook."
+                        )
+                except Exception as nb_err:
+                    logger.error("Failed to add recording to notebook: %s", nb_err, exc_info=True)
+                    _warn_notebook_autoadd_failed(
+                        f"Could not save the recording to the Audio Notebook: {nb_err}"
+                    )
+
             # Fire outgoing webhook (separate guard so failures don't
             # trigger a "transcription failed" error message to the client)
             try:
@@ -532,6 +653,7 @@ class TranscriptionSession:
         use_vad: bool = False,
         translation_enabled: bool = False,
         translation_target_language: str = "en",
+        auto_add_to_notebook: bool = False,
     ) -> None:
         """
         Start a recording session.
@@ -541,11 +663,13 @@ class TranscriptionSession:
             use_vad: Use VAD for automatic start/stop detection
             translation_enabled: Enable source→target translation
             translation_target_language: Translation target (v1: "en" only)
+            auto_add_to_notebook: Save the finished recording to the Audio Notebook
         """
         self.is_recording = True
         self.language = language
         self.translation_enabled = translation_enabled
         self.translation_target_language = translation_target_language
+        self.auto_add_to_notebook = auto_add_to_notebook
         self.audio_chunks = []
         self._sample_rate_mismatch_reported = False
         self._use_realtime_engine = use_vad and self.capabilities.supports_vad_events
@@ -750,8 +874,29 @@ async def handle_client_message(session: TranscriptionSession, message: dict[str
         use_vad = _msg_data.get("use_vad", False)
         translation_enabled = _msg_data.get("translation_enabled", False)
         translation_target_language = _msg_data.get("translation_target_language", "en")
+
+        # GH #199: "Auto-add recordings to Audio Notebook". Two toggles reach
+        # this: the per-client one in the dashboard's Client tab, and the
+        # server-wide key (rendered in the Server tab). Either one enables it,
+        # so both checkboxes do what they say. Untrusted input: bool only.
+        _raw_auto_add = _msg_data.get("auto_add_to_notebook")
+        _client_auto_add = _raw_auto_add if isinstance(_raw_auto_add, bool) else False
+        _server_auto_add = False
+        try:
+            from server.config import get_config as _get_config
+
+            _server_auto_add = bool(
+                _get_config().get("longform_recording", "auto_add_to_audio_notebook", default=False)
+            )
+        except Exception as _cfg_err:
+            logger.debug("Could not read auto_add_to_audio_notebook: %s", repr(_cfg_err))
+
         await session.start_recording(
-            language, use_vad, translation_enabled, translation_target_language
+            language,
+            use_vad,
+            translation_enabled,
+            translation_target_language,
+            auto_add_to_notebook=_client_auto_add or _server_auto_add,
         )
 
     elif msg_type == "stop":
