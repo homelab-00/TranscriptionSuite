@@ -3,8 +3,9 @@
 #
 # This script runs as root to:
 # 1) handle TLS certificate permissions,
-# 2) bootstrap runtime dependencies into /runtime/.venv,
-# 3) drop privileges to appuser and launch the Python server.
+# 2) install operator-supplied CA certificates into the container trust store,
+# 3) bootstrap runtime dependencies into /runtime/.venv,
+# 4) drop privileges to appuser and launch the Python server.
 
 set -e
 
@@ -52,6 +53,31 @@ if [ "${TLS_ENABLED:-false}" = "true" ]; then
     export TLS_KEY_FILE="$KEY_DST"
     
     log "TLS certificates prepared successfully"
+fi
+
+# Install operator-supplied CA certificates (GH #200). Must happen here: this is the
+# only root context in the container, and it must precede bootstrap_runtime.py, which
+# makes the first HTTPS request. On a TLS-intercepting network (corporate proxy or
+# antivirus HTTPS scanning) nothing downstream can succeed without this.
+/usr/bin/python3.13 docker/install_ca_certs.py || true
+
+# Point every HTTPS client at the combined bundle whenever the container carries any
+# locally trusted CA — whether bind-mounted just now, or baked into a derived image at
+# build time. update-ca-certificates writes system roots AND local CAs into this one
+# file, so this adds trust anchors without ever removing the public ones.
+#
+# These four vars exist because the install path spans three trust stores: uv reads
+# SSL_CERT_FILE (and switches itself to native certs when it is set), the git subprocess
+# uv shells out to reads GIT_SSL_CAINFO, and the requests client huggingface_hub uses
+# for model downloads reads REQUESTS_CA_BUNDLE/CURL_CA_BUNDLE — it honors neither of the
+# others. Exporting here covers bootstrap, its child processes, and the server alike.
+if compgen -G "/usr/local/share/ca-certificates/*.crt" > /dev/null; then
+    SYSTEM_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
+    export SSL_CERT_FILE="${SSL_CERT_FILE:-$SYSTEM_CA_BUNDLE}"
+    export GIT_SSL_CAINFO="${GIT_SSL_CAINFO:-$SYSTEM_CA_BUNDLE}"
+    export REQUESTS_CA_BUNDLE="${REQUESTS_CA_BUNDLE:-$SYSTEM_CA_BUNDLE}"
+    export CURL_CA_BUNDLE="${CURL_CA_BUNDLE:-$SYSTEM_CA_BUNDLE}"
+    log "Locally trusted CA detected — HTTPS clients pointed at $SYSTEM_CA_BUNDLE"
 fi
 
 # Ensure runtime directories are writable by appuser.

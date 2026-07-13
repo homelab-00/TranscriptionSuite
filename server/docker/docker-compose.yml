@@ -90,9 +90,17 @@ services:
       - PYTORCH_VARIANT=${PYTORCH_VARIANT:-cu129}
       # GH #125: opt-in for TLS-intercepting networks (corporate proxy / antivirus
       # HTTPS scanning). true makes uv trust the system/container CA store instead
-      # of its bundled roots — mount your corporate root CA so it is honored.
+      # of its bundled roots. Since GH #200 you rarely need this: put your root CA
+      # in EXTRA_CA_CERTS_DIR (see volumes) and the entrypoint sets SSL_CERT_FILE,
+      # which flips uv to the system store by itself.
       # Certificate verification stays ON. See docs/deployment-guide.md.
       - UV_NATIVE_TLS=${UV_NATIVE_TLS:-false}
+      # GH #200: corporate proxies need these to reach the network at all. Compose
+      # only injects variables listed here, so an unlisted host var is silently
+      # dropped — which is exactly why the documented remedy used to do nothing.
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-}
       # ASR model overrides (set by dashboard, empty = use config.yaml defaults)
       - MAIN_TRANSCRIBER_MODEL=${MAIN_TRANSCRIBER_MODEL:-}
       - LIVE_TRANSCRIBER_MODEL=${LIVE_TRANSCRIBER_MODEL:-}
@@ -132,9 +140,19 @@ services:
       #   Windows: USER_CONFIG_DIR=$HOME/Documents/TranscriptionSuite
       #   macOS: USER_CONFIG_DIR=~/Library/Application Support/TranscriptionSuite
       - ${USER_CONFIG_DIR:-./.empty}:/user-config
-      # TLS certificates (bind-mounted from host when TLS_CERT_PATH/TLS_KEY_PATH are set)
+      # TLS certificates the server PRESENTS for remote access (its own HTTPS listener).
+      # This is not a trust anchor — see EXTRA_CA_CERTS_DIR below for that.
       - ${TLS_CERT_PATH:-./.empty}:/certs/cert.crt:ro
       - ${TLS_KEY_PATH:-./.empty}:/certs/cert.key:ro
+      # CA certificates the container TRUSTS (GH #200). Point EXTRA_CA_CERTS_DIR at a
+      # directory holding your root CA(s) when a corporate proxy or antivirus HTTPS
+      # scanner re-signs traffic; the entrypoint installs every *.crt/*.pem/*.cer found
+      # here into the container trust store. Docker does not propagate the host's trust
+      # store into containers, so without this the re-signed cert is always rejected.
+      #   Windows: EXTRA_CA_CERTS_DIR=%APPDATA%\TranscriptionSuite\ca
+      #   Linux/macOS: EXTRA_CA_CERTS_DIR=~/.config/TranscriptionSuite/ca
+      # Unset mounts an empty placeholder, which is a no-op.
+      - ${EXTRA_CA_CERTS_DIR:-./.empty}:/ca-trust:ro
       # Startup events file (bind-mounted for Electron fs.watch access)
       - ${STARTUP_EVENTS_DIR:-./.empty}:/startup-events
     

@@ -89,36 +89,80 @@ On first container start, the server installs Python dependencies into `/runtime
 
 If first-run `uv sync` fails with `invalid peer certificate: UnknownIssuer`,
 `certificate verify failed`, or `server certificate verification failed.
-CAfile: none` (a git clone), your network is intercepting HTTPS — a corporate
-proxy or antivirus "HTTPS scanning" feature presents a re-signed certificate
-whose root CA is trusted on your host but **not** inside the container. Each
-client ships/uses its own trust store and rejects the re-signed cert. The
-bootstrap detects all of these signatures and prints an actionable hint instead
-of a bare traceback.
+CAfile: none` (a git clone), something is intercepting HTTPS and re-signing it
+with a certificate the container does not trust.
 
-Fix (certificate verification stays ON — never disable it):
+**Why it works in your browser but not here.** The interceptor's root CA is
+installed in your *host's* trust store. Docker does not copy the host trust store
+into containers, so every HTTPS client inside the container rejects the re-signed
+certificate. Nothing is wrong with your Docker install or your image.
 
-1. **Trust the system CA store:** set `UV_NATIVE_TLS=true` (already wired into
-   `docker-compose.yml`). uv then reads the container's CA trust store instead
-   of its bundled roots.
-2. **Add your corporate root CA** so that store actually contains it. Easiest is
-   a small derived image:
-   ```dockerfile
-   FROM ghcr.io/homelab-00/transcriptionsuite-server:latest
-   COPY corp-root-ca.crt /usr/local/share/ca-certificates/corp-root-ca.crt
-   RUN update-ca-certificates
-   ```
-   Point `IMAGE_REPO`/`TAG` at your derived image and run with
-   `UV_NATIVE_TLS=true`. Alternatively, mount the CA and set
-   `SSL_CERT_FILE=/path/to/corp-root-ca.pem` in your own compose override.
+Certificate verification stays ON throughout. Never disable it.
 
-> **Why both steps matter.** `UV_NATIVE_TLS` only covers uv's own HTTPS client.
-> The `git` subprocess uv uses for git-sourced dependencies, and the `requests`
-> client HuggingFace uses to download models, ignore it — they read
-> `GIT_SSL_CAINFO` and `REQUESTS_CA_BUNDLE`/`CURL_CA_BUNDLE`. When you set
-> `UV_NATIVE_TLS=true` (or `SSL_CERT_FILE`), the bootstrap now propagates the CA
-> bundle to those clients automatically, so once your root CA is in the container
-> store (step 2) **git clones and model downloads trust it too**.
+#### 1. First, rule out your antivirus (most home users stop here)
+
+Consumer security suites ship an HTTPS-scanning feature that is **on by default**
+and does exactly this interception. Turn it off and start the server again:
+
+| Product | Setting to disable |
+|---|---|
+| ESET | Web and email → SSL/TLS → *Enable SSL/TLS protocol filtering* |
+| Kaspersky | Settings → Network → *Do not scan encrypted connections* |
+| Avast / AVG | Protection → Core Shields → *Enable HTTPS scanning* |
+| Bitdefender | Protection → Online Threat Prevention → *Encrypted Web Scan* |
+| Avira | Web Protection → *Scan HTTPS connections* |
+
+Corporate laptops with a managed proxy (Zscaler, Netskope, Fortinet, a company
+CA) cannot do this. Use step 2.
+
+#### 2. Give the container the intercepting root CA
+
+Export the root CA, put it in a folder **of its own**, and point
+`EXTRA_CA_CERTS_DIR` at that folder. The entrypoint installs everything it finds
+there into the container trust store at startup, before any download runs.
+
+Export it on Windows with PowerShell (no admin rights needed):
+
+```powershell
+$dir = "$env:APPDATA\TranscriptionSuite\ca"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root | ForEach-Object {
+  "-----BEGIN CERTIFICATE-----"
+  [Convert]::ToBase64String($_.RawData, [Base64FormattingOptions]::InsertLineBreaks)
+  "-----END CERTIFICATE-----"
+} | Set-Content -Encoding ascii "$dir\host-roots.crt"
+```
+
+Then set `EXTRA_CA_CERTS_DIR=%APPDATA%\TranscriptionSuite\ca` and restart the
+server. (This exports every root your OS already trusts, which necessarily
+includes the interceptor's. If you prefer to trust only that one CA, export it
+alone from `certmgr.msc` → Trusted Root Certification Authorities → right-click
+→ All Tasks → Export → **Base-64 encoded X.509** and drop the file in that
+folder instead.)
+
+On Linux/macOS the equivalent is any directory containing your CA:
+`EXTRA_CA_CERTS_DIR=~/.config/TranscriptionSuite/ca`.
+
+Accepted file extensions are `.crt`, `.pem` and `.cer`; PEM bundles holding many
+certificates are split automatically. Files that are not PEM (a DER export) are
+skipped with a warning rather than corrupting the trust store.
+
+Behind a corporate proxy you likely also need `HTTP_PROXY`, `HTTPS_PROXY` and
+`NO_PROXY`, which are passed through to the container.
+
+> **Why one folder covers everything.** The install path spans three trust
+> stores: uv reads `SSL_CERT_FILE`, the `git` subprocess uv uses for git-sourced
+> dependencies reads `GIT_SSL_CAINFO`, and the `requests` client HuggingFace uses
+> for model downloads reads `REQUESTS_CA_BUNDLE`/`CURL_CA_BUNDLE` and honors
+> neither of the others. Once a CA is installed, the entrypoint points all of them
+> at the combined bundle (`/etc/ssl/certs/ca-certificates.crt`), which holds the
+> public roots **and** yours — so package installs, git clones and model downloads
+> all trust it, and non-intercepted hosts keep working. Setting `SSL_CERT_FILE` to
+> a bare root CA by hand does *not* do this: it **replaces** the trust store rather
+> than adding to it, and breaks every host your interceptor does not touch.
+
+`UV_NATIVE_TLS=true` remains available but is no longer something you need to
+set: once a CA is installed, uv switches to the system trust store on its own.
 
 CPU-only hosts hit this most often because the default install pulls multi-GB
 CUDA wheels. Selecting the **CPU profile** in the dashboard (or

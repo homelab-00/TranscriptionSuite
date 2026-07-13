@@ -87,6 +87,9 @@ COPY --chown=appuser:appuser server/backend/ ./server/
 COPY --chown=appuser:appuser server/docker/entrypoint.py ./docker/
 COPY --chown=appuser:appuser server/docker/bootstrap_runtime.py ./docker/
 COPY server/docker/docker-entrypoint.sh ./docker/
+# Root-owned on purpose: it runs as root (before the gosu drop) to write the
+# container trust store, so appuser must not be able to modify it (GH #200).
+COPY server/docker/install_ca_certs.py ./docker/
 RUN chmod 700 ./docker/docker-entrypoint.sh
 
 # Copy default configuration (users can override via mounted /user-config/config.yaml)

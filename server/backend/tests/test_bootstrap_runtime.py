@@ -1740,7 +1740,10 @@ def test_raise_dependency_sync_failure_emits_tls_hint(
     with pytest.raises(RuntimeError) as excinfo:
         module._raise_dependency_sync_failure(RuntimeError(long_cert_error), "rebuild-sync")
 
-    assert any("UV_NATIVE_TLS" in line for line in logs), "TLS hint must be logged in full"
+    # The hint must name a remedy the container can actually perform (GH #200): the
+    # CA mount, and the antivirus HTTPS-scanning setting that is the likelier cause.
+    assert any("EXTRA_CA_CERTS_DIR" in line for line in logs), "TLS hint must be logged in full"
+    assert any("HTTPS scanning" in line for line in logs)
     assert any(kwargs.get("status") == "error" for _, kwargs in events)
     assert "Dependency sync failed for mode=rebuild-sync" in str(excinfo.value)
 

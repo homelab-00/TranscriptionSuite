@@ -823,7 +823,11 @@ function sanitizeEnvValue(value: string): string {
   return value.replace(/[\r\n]+/g, '').trim();
 }
 
-function upsertComposeEnvValues(values: Record<string, string>): void {
+// Exported for tests: preserving keys we do not own is load-bearing. It is the only
+// way a packaged-app user can set EXTRA_CA_CERTS_DIR to escape a TLS-intercepting
+// network (GH #200), and a refactor that stripped unknown keys would silently
+// re-break them on the next server start.
+export function upsertComposeEnvValues(values: Record<string, string>): void {
   const composeEnvPath = path.join(getComposeDir(), '.env');
   const entries = Object.entries(values);
   if (entries.length === 0) return;
