@@ -933,7 +933,7 @@ sudo systemctl enable --now nvidia-persistence.service
 **Steps:**
 
 1. **Use the CPU profile.** In **Settings > Server**, select the **CPU** profile before starting. CPU-only hosts no longer download the multi-GB NVIDIA CUDA wheels and default to a lighter faster-whisper model instead of the GPU-only NeMo model.
-2. **`UnknownIssuer` / certificate errors** mean your network (a corporate proxy or antivirus HTTPS scanning) is intercepting HTTPS, so the container can't verify the package index. Set `UV_NATIVE_TLS=true` and add your organization's root CA — see the [deployment guide](deployment-guide.md#tls-interception--corporate-network-unknownissuer).
+2. **`UnknownIssuer` / certificate errors** mean something (antivirus HTTPS scanning, or a corporate proxy) is intercepting HTTPS and re-signing it, so the container can't verify the package index. Turn off your antivirus's HTTPS-scanning setting, or point `EXTRA_CA_CERTS_DIR` at a folder holding the intercepting root CA — see the [deployment guide](deployment-guide.md#tls-interception--corporate-network-unknownissuer).
 3. **`UnicodeEncodeError` on model load** means a HuggingFace token containing a non-ASCII character was provided. Clear the token (most models don't need one); the server now also ignores non-ASCII tokens automatically and downloads anonymously.
 
 ### Advanced Troubleshooting

@@ -534,14 +534,20 @@ _TLS_INTERCEPTION_MARKERS: tuple[str, ...] = (
 )
 
 _TLS_INTERCEPTION_HINT = (
-    "TLS certificate verification failed while downloading dependencies. Your "
-    "network appears to intercept HTTPS (corporate proxy or antivirus HTTPS "
-    "scanning), so the certificate is not trusted inside the container. Fix: "
-    "(1) set UV_NATIVE_TLS=true so uv trusts the container CA store, and "
-    "(2) mount your organization's root CA into the container and run "
-    "update-ca-certificates so git (git-sourced deps) and HuggingFace model "
-    "downloads trust it too — UV_NATIVE_TLS alone does not cover them. See "
-    "docs/deployment-guide.md (TLS interception / corporate network)."
+    "TLS certificate verification failed while downloading dependencies. Something on "
+    "your machine or network is intercepting HTTPS and re-signing it with a "
+    "certificate the container does not trust. Docker never copies the host's trust "
+    "store into a container, so this fails even though your browser works. "
+    "Two fixes, easiest first: "
+    "(1) If you run an antivirus/security suite (ESET, Kaspersky, Avast, Bitdefender, "
+    "Avira...), turn OFF its 'HTTPS scanning' / 'SSL protocol filtering' / 'encrypted "
+    "connection scanning' setting and start the server again. That is the whole fix "
+    "for most home users. "
+    "(2) Otherwise (corporate proxy, or you want to keep the scanner on), export the "
+    "intercepting root CA and put it in a folder of its own, then set "
+    "EXTRA_CA_CERTS_DIR to that folder — the container installs it at startup and "
+    "trusts it. Certificate verification stays ON either way. "
+    "Full instructions: https://github.com/homelab-00/TranscriptionSuite/blob/main/docs/deployment-guide.md#tls-interception--corporate-network-unknownissuer"
 )
 
 
