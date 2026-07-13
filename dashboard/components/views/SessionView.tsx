@@ -799,6 +799,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
           await window.electronAPI?.audio?.enableSystemAudioLoopback?.();
         }
       }
+      // GH-199: read at start so the server knows whether to promote this
+      // recording into the Audio Notebook when it finishes.
+      const autoAddToNotebook = (await getConfig<boolean>('notebook.autoAdd')) ?? false;
+
       transcription.start({
         language: resolvedLang,
         deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
@@ -806,6 +810,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         translationTarget: mainTranslateTarget,
         systemAudio: isSystemAudio,
         monitorDeviceLabel: monitorLabel,
+        autoAddToNotebook,
       });
       // Apply persisted capture gain after capture starts
       if (isSystemAudio) {

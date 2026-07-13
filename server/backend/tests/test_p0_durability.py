@@ -53,6 +53,7 @@ def _make_session(
     session._use_realtime_engine = False
     session._current_job_id = job_id
     session._client_disconnected = False
+    session.auto_add_to_notebook = False
     session.capabilities = SimpleNamespace(
         supports_binary_audio=True,
         preferred_sample_rate=sample_rate,

@@ -20,8 +20,11 @@ longform_recording:
     # Translation output target language. Faster-whisper only offers English translation.
     translation_target_language: "en"
 
-    # Automatically add longform recordings to Audio Notebook.
-    # When enabled, recordings are sent to the notebook instead of just the clipboard.
+    # Automatically add finished longform recordings to the Audio Notebook.
+    # Server-wide: applies to every client, on top of the dashboard's own
+    # per-client "Auto-add recordings to Audio Notebook" toggle (either one
+    # enables it). The transcript is still shown and copied as usual; the
+    # notebook entry is added in addition, not instead.
     auto_add_to_audio_notebook: false
 
 # ----------------------------------------------------------------------------

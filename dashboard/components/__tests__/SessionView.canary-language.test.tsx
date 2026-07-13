@@ -15,7 +15,7 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -353,7 +353,9 @@ describe('SessionView — Canary language guards (gh-102)', () => {
     fireEvent.click(startButton);
 
     expect(mockToastError).not.toHaveBeenCalled();
-    expect(mockTranscription.start).toHaveBeenCalledTimes(1);
+    // start() is dispatched from an async chain (it reads `notebook.autoAdd`
+    // first (GH-199), so it lands a microtask after the click.
+    await waitFor(() => expect(mockTranscription.start).toHaveBeenCalledTimes(1));
     const startArgs = mockTranscription.start.mock.calls[0][0] as { language?: string };
     expect(startArgs.language).toBe('es');
   });
@@ -467,7 +469,9 @@ describe('SessionView — Canary language guards (gh-102)', () => {
     });
 
     expect(mockToastError).not.toHaveBeenCalled();
-    expect(mockTranscription.start).toHaveBeenCalledTimes(1);
+    // start() is dispatched from an async chain (it reads `notebook.autoAdd`
+    // first (GH-199), so it lands a microtask after the click.
+    await waitFor(() => expect(mockTranscription.start).toHaveBeenCalledTimes(1));
     const startArgs = mockTranscription.start.mock.calls[0][0] as { language?: string };
     expect(startArgs.language).toBe('es');
   });
