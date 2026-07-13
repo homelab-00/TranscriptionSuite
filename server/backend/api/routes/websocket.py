@@ -456,7 +456,13 @@ class TranscriptionSession:
                     task=task,
                     translation_target_language=translation_target,
                     progress_callback=_on_progress,
-                    cancellation_check=lambda: self._client_disconnected,
+                    # Two independent stop signals, both of which must reach the
+                    # backend: the client vanished, or the user pressed Cancel
+                    # (POST /cancel -> job_tracker). Binding only the former left
+                    # Cancel a no-op on this, the main longform path.
+                    cancellation_check=lambda: (
+                        self._client_disconnected or model_manager.job_tracker.is_cancelled()
+                    ),
                 ),
             )
 

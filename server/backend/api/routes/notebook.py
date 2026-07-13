@@ -1037,6 +1037,7 @@ def _run_transcription(
                     ),
                     word_timestamps=need_word_timestamps,
                     progress_callback=on_progress,
+                    cancellation_check=model_manager.job_tracker.is_cancelled,
                 )
 
         # Determine recorded_at timestamp
