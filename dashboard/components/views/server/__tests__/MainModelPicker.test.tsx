@@ -117,4 +117,20 @@ describe('MainModelPicker', () => {
     expect(screen.getByRole('radio', { name: /custom/i })).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: /Parakeet/ })).not.toBeInTheDocument();
   });
+
+  it('shows the current custom repo in the input', () => {
+    setup({ mainModelSelection: MAIN_MODEL_CUSTOM_OPTION, mainCustomModel: 'me/my-model' });
+
+    expect(screen.getByDisplayValue('me/my-model')).toBeInTheDocument();
+  });
+
+  it('locks the custom repo input too while the server is running', () => {
+    setup({
+      mainModelSelection: MAIN_MODEL_CUSTOM_OPTION,
+      mainCustomModel: 'me/my-model',
+      isRunning: true,
+    });
+
+    expect(screen.getByPlaceholderText('owner/model-name')).toBeDisabled();
+  });
 });

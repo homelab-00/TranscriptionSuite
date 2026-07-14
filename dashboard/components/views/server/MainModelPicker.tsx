@@ -103,7 +103,7 @@ export function MainModelPicker({
               onChange={(e) => onMainCustomModelChange(e.target.value)}
               placeholder="owner/model-name"
               disabled={isRunning}
-              className={`focus:ring-accent-magenta mt-2 h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
+              className={`focus:ring-accent-magenta mt-2 h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1 ${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
             />
           )}
         </div>
