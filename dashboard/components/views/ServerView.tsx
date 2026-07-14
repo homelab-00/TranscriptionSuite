@@ -38,6 +38,7 @@ import { GpuHealthCard } from './GpuHealthCard';
 import { GpuDiagnosticModal, type GpuDiagnosticResultProp } from './GpuDiagnosticModal';
 import { InstanceSettingsSelectors } from './server/InstanceSettingsSelectors';
 import { RemoteConnectionCard } from './server/RemoteConnectionCard';
+import { StartupActivityInline } from './server/StartupActivityInline';
 
 import { useActivityStore } from '../../src/stores/activityStore';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
@@ -2049,6 +2050,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     {docker.operationError}
                   </div>
                 )}
+                {/* Active model downloads while the server is starting (GH-207) */}
+                {isRunning && !isRunningAndHealthy && <StartupActivityInline />}
                 {containerStatus.startedAt && isRunning && (
                   <div className="mt-2 font-mono text-xs text-slate-500">
                     Started: {new Date(containerStatus.startedAt).toLocaleString()}
