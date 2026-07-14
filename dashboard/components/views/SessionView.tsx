@@ -36,6 +36,7 @@ import { FindReplaceTextEditor } from '../editor/FindReplaceTextEditor';
 import { LiveTranscriptView } from './LiveTranscriptView';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLanguages } from '../../src/hooks/useLanguages';
+import { formatClock } from '../../src/services/jobProgress';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { useTranscription } from '../../src/hooks/useTranscription';
 import type { LiveModeState } from '../../src/hooks/useLiveMode';
@@ -1756,7 +1757,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                             >
                               {isProcessing
                                 ? transcription.processingProgress?.total
-                                  ? `Processing... ${transcription.processingProgress.current}/${transcription.processingProgress.total}`
+                                  ? `Processing... ${formatClock(transcription.processingProgress.current)} / ${formatClock(transcription.processingProgress.total)}`
                                   : 'Processing...'
                                 : 'Stop Recording'}
                             </Button>

@@ -376,9 +376,11 @@ class TestMLXCanaryBackendTranscribe:
         backend.transcribe(audio, language="en", progress_callback=callback)
 
         assert callback.call_count >= 1
-        # Final call reports completion: progress_callback(audio_len, audio_len)
+        # Final call reports completion in audio seconds (GH-211):
+        # progress_callback(total_seconds, total_seconds)
+        total_seconds = len(audio) // 16000
         final_call = callback.call_args_list[-1]
-        assert final_call == call(len(audio), len(audio))
+        assert final_call == call(total_seconds, total_seconds)
 
 
 # ---------------------------------------------------------------------------

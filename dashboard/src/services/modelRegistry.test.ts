@@ -143,6 +143,27 @@ describe('MODEL_REGISTRY SenseVoice entry', () => {
 });
 
 // ---------------------------------------------------------------------------
+// MODEL_REGISTRY — approxSize shape (GH-213)
+// ---------------------------------------------------------------------------
+describe('MODEL_REGISTRY approxSize field', () => {
+  it('every approxSize, when present, is a human-readable ~N MB/GB string', () => {
+    for (const m of MODEL_REGISTRY) {
+      if (m.approxSize !== undefined) {
+        expect(m.approxSize, `approxSize of ${m.id}`).toMatch(/^~?\d+(\.\d+)?\s?(MB|GB)$/);
+      }
+    }
+  });
+
+  it('models whose description quotes a size carry a structured approxSize', () => {
+    for (const m of MODEL_REGISTRY) {
+      if (/\(~[\d.]+\s?(MB|GB)\)/.test(m.description)) {
+        expect(m.approxSize, `approxSize of ${m.id}`).toBeDefined();
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // getModelsByFamily
 // ---------------------------------------------------------------------------
 describe('getModelsByFamily', () => {

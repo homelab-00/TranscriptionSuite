@@ -70,6 +70,9 @@ interface BootstrapDownloadEvent {
   type: DownloadEventType;
   label: string;
   error?: string;
+  progress?: number; // 0-100 (GH-207)
+  downloadedSize?: string; // human-readable, e.g. "312 MB"
+  totalSize?: string;
 }
 
 interface StartupActivityEvent {
@@ -163,6 +166,9 @@ interface ElectronAPI {
       Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>
     >;
     checkModelsCached: (
+      modelIds: string[],
+    ) => Promise<Record<string, { exists: boolean; size?: string }>>;
+    checkModelsCachedOffline: (
       modelIds: string[],
     ) => Promise<Record<string, { exists: boolean; size?: string }>>;
     removeModelCache: (modelId: string) => Promise<void>;

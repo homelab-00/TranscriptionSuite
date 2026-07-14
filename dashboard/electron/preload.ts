@@ -218,6 +218,9 @@ export interface ElectronAPI {
     checkModelsCached: (
       modelIds: string[],
     ) => Promise<Record<string, { exists: boolean; size?: string }>>;
+    checkModelsCachedOffline: (
+      modelIds: string[],
+    ) => Promise<Record<string, { exists: boolean; size?: string }>>;
     removeModelCache: (modelId: string) => Promise<void>;
     downloadModelToCache: (modelId: string) => Promise<void>;
     isGgmlModelDownloadedOnHost: (fileName: string) => Promise<boolean>;
@@ -570,6 +573,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getVolumes: () => ipcRenderer.invoke('docker:getVolumes'),
     checkModelsCached: (modelIds: string[]) =>
       ipcRenderer.invoke('docker:checkModelsCached', modelIds) as Promise<
+        Record<string, { exists: boolean; size?: string }>
+      >,
+    checkModelsCachedOffline: (modelIds: string[]) =>
+      ipcRenderer.invoke('docker:checkModelsCachedOffline', modelIds) as Promise<
         Record<string, { exists: boolean; size?: string }>
       >,
     removeModelCache: (modelId: string) =>

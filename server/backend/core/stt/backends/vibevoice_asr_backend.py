@@ -452,7 +452,10 @@ class VibeVoiceASRBackend(STTBackend):
                 time_offset + chunk_duration,
             )
             if progress_callback is not None:
-                progress_callback(i + 1, num_chunks)
+                progress_callback(
+                    int(min((i + 1) * chunk_samples, total_samples) / max(audio_sample_rate, 1)),
+                    int(total_samples / max(audio_sample_rate, 1)),
+                )
 
             chunk_start_t = time.monotonic()
             raw_segments = self._generate_segments(
@@ -519,7 +522,10 @@ class VibeVoiceASRBackend(STTBackend):
                 time_offset + chunk_duration,
             )
             if progress_callback is not None:
-                progress_callback(i + 1, num_chunks)
+                progress_callback(
+                    int(min((i + 1) * chunk_samples, total_samples) / max(audio_sample_rate, 1)),
+                    int(total_samples / max(audio_sample_rate, 1)),
+                )
 
             chunk_start_t = time.monotonic()
             segments = self._generate_segments(

@@ -23,7 +23,10 @@ export interface UseModelCacheResult {
  * The probe differs by runtime. On Metal there is no container: the cache is a
  * plain host-filesystem check that works whether or not the server runs, and
  * docker.container.running is permanently false there (GH-136). On Docker the
- * cache lives inside the container, so it can only be read while it runs.
+ * cache lives inside the container while it runs; when stopped, a throwaway
+ * container mounts the models volume read-only instead (GH-213), so downloaded
+ * state stays visible exactly when models are selectable. Offline results are
+ * partial (no sizes) and merge into - never replace - known state.
  */
 export function useModelCache({ isRunning, isMetal }: UseModelCacheOptions): UseModelCacheResult {
   const [modelCacheStatus, setModelCacheStatus] = useState<ModelCacheStatus>({});
@@ -47,9 +50,11 @@ export function useModelCache({ isRunning, isMetal }: UseModelCacheOptions): Use
         return;
       }
 
-      if (!api?.docker?.checkModelsCached || !isRunning) return;
-      api.docker
-        .checkModelsCached(ids)
+      const check = isRunning
+        ? api?.docker?.checkModelsCached
+        : api?.docker?.checkModelsCachedOffline;
+      if (!check) return;
+      check(ids)
         .then(apply)
         .catch(() => {});
     },

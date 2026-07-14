@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.4.0
+  spec_version: 1.5.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -7,17 +7,24 @@ meta:
     repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
     source_files:
       - App.tsx
+      - components/__tests__/ActivityNotifications.test.tsx
       - components/__tests__/AddNoteModal.canary-language.test.tsx
       - components/__tests__/AddNoteModal.initialFiles.test.tsx
       - components/__tests__/AudioVisualizer.test.tsx
+      - components/__tests__/CustomSelect.test.tsx
+      - components/__tests__/HfTokenExplainer.test.tsx
       - components/__tests__/LogsView.test.tsx
       - components/__tests__/NotebookView.canary-language.test.tsx
       - components/__tests__/NotebookView.profile-id.test.tsx
       - components/__tests__/NotebookView.test.tsx
       - components/__tests__/ServerView.test.tsx
       - components/__tests__/SessionImportTab.canary-language.test.tsx
+      - components/__tests__/SessionImportTab.diarization-gate.test.tsx
+      - components/__tests__/SessionImportTab.drop-feedback.test.tsx
+      - components/__tests__/SessionImportTab.output-format.test.tsx
       - components/__tests__/SessionView.canary-language.test.tsx
       - components/__tests__/SessionView.test.tsx
+      - components/__tests__/StartupActivityInline.test.tsx
       - components/AriaLiveRegion.tsx
       - components/AudioVisualizer.tsx
       - components/editor/FindReplaceTextEditor.test.tsx
@@ -65,6 +72,7 @@ meta:
       - components/ui/CustomSelect.tsx
       - components/ui/ErrorFallback.tsx
       - components/ui/GlassCard.tsx
+      - components/ui/HfTokenExplainer.tsx
       - components/ui/icons/AmdIcon.tsx
       - components/ui/icons/AppleIcon.tsx
       - components/ui/icons/IntelIcon.tsx
@@ -101,6 +109,7 @@ meta:
       - components/views/server/InstanceSettingsSelectors.tsx
       - components/views/server/MainModelPicker.tsx
       - components/views/server/RemoteConnectionCard.tsx
+      - components/views/server/StartupActivityInline.tsx
       - components/views/ServerConfigEditor.tsx
       - components/views/ServerView.tsx
       - components/views/SessionImportTab.tsx
@@ -111,7 +120,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-07-14T18:47:16.413Z
+    generated_at: 2026-07-14T19:05:46.969Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -196,6 +205,9 @@ foundation:
         - hsla(339, 49%, 30%, 1)
         - hsla(339,49%,30%,1)
         - rgb(230,230,230)
+        - rgb(255 255 255 / 0.2)
+        - rgb(34 211 238 / 0.12)
+        - rgb(34 211 238 / 0.9)
         - rgba(${r}, ${g}, ${b}, ${alpha})
         - rgba(0, 0, 0, 0.3)
         - rgba(0, 0, 0, 0.4)
@@ -339,6 +351,7 @@ foundation:
         - ease-in-out
       keyframes:
         - dropdown-appear
+        - dropzone-flash
         - idle-wave-cyan
         - idle-wave-magenta
         - idle-wave-orange
@@ -516,6 +529,7 @@ utility_allowlist:
     - animate-ping
     - animate-pulse
     - aria-activedescendant
+    - aria-checked
     - aria-invalid
     - aria-label
     - aria-labels
@@ -1324,6 +1338,7 @@ inline_style_allowlist:
     - visible
   keyframes:
     - dropdown-appear
+    - dropzone-flash
     - idle-wave-cyan
     - idle-wave-magenta
     - idle-wave-orange
@@ -2093,6 +2108,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   Harness:
     file: components/editor/FindReplaceTextEditor.test.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  HfTokenExplainer:
+    file: components/ui/HfTokenExplainer.tsx
     required_tokens:
       - colors
       - motion
@@ -2882,6 +2914,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   StarPopupModal:
     file: components/views/StarPopupModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  StartupActivityInline:
+    file: components/views/server/StartupActivityInline.tsx
     required_tokens:
       - colors
       - motion

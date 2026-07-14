@@ -298,6 +298,28 @@ body {
   }
 }
 
+/* Dropzone flash: brief confirmation pulse when files are added to the
+ * session import queue (GH-210). Colors mirror the drag-over state
+ * (accent-cyan border/tint) decaying back to the resting border. */
+@keyframes dropzone-flash {
+  0% {
+    border-color: rgb(34 211 238 / 0.9);
+    background-color: rgb(34 211 238 / 0.12);
+  }
+  100% {
+    border-color: rgb(255 255 255 / 0.2);
+    background-color: transparent;
+  }
+}
+.dropzone-flash {
+  animation: dropzone-flash 700ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dropzone-flash {
+    animation: none;
+  }
+}
+
 /* ── Capture gain slider (System Audio card) ──────────────────────────── */
 .ts-gain-slider {
   -webkit-appearance: none;

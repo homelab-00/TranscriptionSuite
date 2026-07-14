@@ -29,6 +29,7 @@ import { useImportQueueStore, selectIsUploading } from './src/stores/importQueue
 import { QueuePausedBanner } from './components/ui/QueuePausedBanner';
 import { UpdateBanner } from './components/ui/UpdateBanner';
 import { ActivityNotifications } from './components/ui/ActivityNotifications';
+import { HfTokenExplainer } from './components/ui/HfTokenExplainer';
 import { useStarPopup } from './src/hooks/useStarPopup';
 import { useBootstrapDownloads } from './src/hooks/useBootstrapDownloads';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
@@ -55,8 +56,6 @@ import { isRuntimeProfile, type RuntimeProfile } from './src/types/runtime';
 
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 type MissingFamily = 'whisper' | 'nemo' | 'vibevoice' | 'sensevoice';
-
-const HF_TERMS_URL = 'https://huggingface.co/pyannote/speaker-diarization-community-1';
 
 function normalizeHfDecision(value: unknown): HfTokenDecision {
   if (value === 'provided' || value === 'skipped' || value === 'unset') {
@@ -960,16 +959,7 @@ const AppInner: React.FC = () => {
                 <p className="text-slate-400">
                   If skipped, diarization stays disabled until you add a token.
                 </p>
-                <p className="text-slate-400">
-                  Accept model terms first:{' '}
-                  <button
-                    type="button"
-                    onClick={() => void openExternal(HF_TERMS_URL)}
-                    className="text-accent-cyan hover:underline"
-                  >
-                    {HF_TERMS_URL}
-                  </button>
-                </p>
+                <HfTokenExplainer onOpenLink={(url) => void openExternal(url)} />
                 <div className="relative pt-1">
                   <input
                     type={showHfTokenDraft ? 'text' : 'password'}

@@ -3039,6 +3039,24 @@ export interface BootstrapDownloadEvent {
   type: DownloadEventType;
   label: string;
   error?: string;
+  progress?: number; // 0-100 (GH-207)
+  downloadedSize?: string; // human-readable, e.g. "312 MB"
+  totalSize?: string;
+}
+
+/**
+ * Human-readable byte size matching the server-side `_format_bytes` in
+ * `download_progress.py`, so both download pipelines render consistently
+ * in the dashboard (GH-207).
+ */
+function formatBytes(num: number): string {
+  for (const unit of ['B', 'KB', 'MB', 'GB']) {
+    if (num < 1024) {
+      return unit === 'B' ? `${Math.trunc(num)} ${unit}` : `${num.toFixed(1)} ${unit}`;
+    }
+    num /= 1024;
+  }
+  return `${num.toFixed(1)} TB`;
 }
 
 interface BootstrapPattern {
@@ -3183,10 +3201,15 @@ function bootstrapLogParser(line: string): void {
       event.error = line.slice(idx).trim() || 'Unknown error';
     }
 
-    for (const cb of downloadEventSubscribers) {
-      cb(event);
-    }
+    emitBootstrapDownloadEvent(event);
     return; // First match wins per line
+  }
+}
+
+/** Fan a download event out to all registered subscribers. */
+function emitBootstrapDownloadEvent(event: BootstrapDownloadEvent): void {
+  for (const cb of downloadEventSubscribers) {
+    cb(event);
   }
 }
 
@@ -3469,6 +3492,14 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
 
   const { net } = await import('electron');
 
+  const eventId = `ggml-download-${sanitized}`;
+  emitBootstrapDownloadEvent({
+    action: 'start',
+    id: eventId,
+    type: 'model-preload',
+    label: `Downloading ${sanitized}...`,
+  });
+
   await new Promise<void>((resolve, reject) => {
     const request = net.request({ url, redirect: 'follow' });
     const file = fs.createWriteStream(tmp);
@@ -3479,7 +3510,27 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
         reject(new Error(`HTTP ${response.statusCode} downloading ${sanitized}`));
         return;
       }
-      response.on('data', (chunk) => file.write(chunk));
+      const rawLength = response.headers['content-length'];
+      const totalBytes = Number(Array.isArray(rawLength) ? rawLength[0] : (rawLength ?? 0));
+      let downloadedBytes = 0;
+      let lastEmit = 0;
+      response.on('data', (chunk) => {
+        file.write(chunk);
+        downloadedBytes += chunk.length;
+        const now = Date.now();
+        if (totalBytes > 0 && now - lastEmit >= 1000) {
+          lastEmit = now;
+          emitBootstrapDownloadEvent({
+            action: 'start',
+            id: eventId,
+            type: 'model-preload',
+            label: `Downloading ${sanitized}...`,
+            progress: Math.min(100, Math.round((downloadedBytes / totalBytes) * 100)),
+            downloadedSize: formatBytes(downloadedBytes),
+            totalSize: formatBytes(totalBytes),
+          });
+        }
+      });
       response.on('end', () => file.close(() => resolve()));
       response.on('error', (err) => {
         file.destroy();
@@ -3498,10 +3549,23 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
     } catch {
       /* best-effort */
     }
+    emitBootstrapDownloadEvent({
+      action: 'fail',
+      id: eventId,
+      type: 'model-preload',
+      label: `Downloading ${sanitized}...`,
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   });
 
   fs.renameSync(tmp, dest);
+  emitBootstrapDownloadEvent({
+    action: 'complete',
+    id: eventId,
+    type: 'model-preload',
+    label: `${sanitized} downloaded`,
+  });
 }
 
 /**
@@ -3772,6 +3836,77 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, Mod
   return result;
 }
 
+/**
+ * Check model cache state while the app container is stopped (GH-213), by
+ * mounting the models volume read-only into a throwaway container running the
+ * locally-present server image (one cheap `ls`, no `du`; sizes appear once
+ * the container runs). Image resolution mirrors the start-container path:
+ * persisted TAG from the compose .env, falling back to the newest local image.
+ * Returns {} on any failure; callers must treat missing entries as UNKNOWN,
+ * not as "not downloaded".
+ */
+async function checkModelsCachedOffline(
+  modelIds: string[],
+): Promise<Record<string, ModelCacheEntry>> {
+  try {
+    const bin = await runtimeBin();
+    const result: Record<string, ModelCacheEntry> = {};
+
+    const ggmlIds = modelIds.filter((id) => isGgmlFileName(id));
+    const hubIds = modelIds.filter((id) => !isGgmlFileName(id));
+
+    // On vulkan-wsl2 the GGML models live on the Windows host, not in the
+    // Docker volume, same branch as checkModelsCached above.
+    if (readRuntimeProfileFromStore() === 'vulkan-wsl2') {
+      for (const id of ggmlIds) {
+        const exists = await isGgmlModelDownloadedOnHost(id).catch(() => false);
+        result[id] = { exists };
+      }
+      ggmlIds.length = 0;
+    }
+
+    if (ggmlIds.length > 0 || hubIds.length > 0) {
+      const repo = resolveImageRepo(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
+      const tag = readComposeEnvValue('TAG') || (await listImages())[0]?.tag;
+      if (!tag) return result; // no local image to inspect with; leave state unknown
+      const image = `${repo}:${tag}`;
+      const output = await exec(bin, [
+        'run',
+        '--rm',
+        '-v',
+        `${VOLUME_NAMES.models}:/models:ro`,
+        '--entrypoint',
+        '/bin/sh',
+        image,
+        '-c',
+        'ls -1 /models 2>/dev/null; echo "---HUB---"; ls -1 /models/hub 2>/dev/null',
+      ]);
+      const [flatPart, hubPart] = output.split('---HUB---');
+      const flatEntries = new Set(
+        (flatPart ?? '')
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean),
+      );
+      const hubEntries = new Set(
+        hubPart
+          ?.split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean) ?? [],
+      );
+      for (const id of ggmlIds) {
+        result[id] = { exists: flatEntries.has(path.basename(id.trim())) };
+      }
+      for (const id of hubIds) {
+        result[id] = { exists: hubEntries.has(hfCacheDirName(id)) };
+      }
+    }
+    return result;
+  } catch {
+    return {}; // unknown, not "missing"
+  }
+}
+
 // ─── Model Cache Operations ─────────────────────────────────────────────────
 
 /**
@@ -3824,6 +3959,16 @@ async function downloadGgmlModel(fileName: string): Promise<void> {
   const tmp = `${dest}.tmp`;
   const bin = await runtimeBin();
 
+  // Coarse events only: byte counting is not available through docker exec
+  // + curl, but the card still shows start/complete/fail (GH-207).
+  const eventId = `ggml-download-${sanitized}`;
+  emitBootstrapDownloadEvent({
+    action: 'start',
+    id: eventId,
+    type: 'model-preload',
+    label: `Downloading ${sanitized}...`,
+  });
+
   try {
     await execFileAsync(bin, ['exec', CONTAINER_NAME, 'curl', '-fsSL', '-o', tmp, url], {
       maxBuffer: 1 * 1024 * 1024,
@@ -3831,6 +3976,12 @@ async function downloadGgmlModel(fileName: string): Promise<void> {
     });
     // Atomically rename temp file to final destination
     await exec(bin, ['exec', CONTAINER_NAME, 'mv', tmp, dest]);
+    emitBootstrapDownloadEvent({
+      action: 'complete',
+      id: eventId,
+      type: 'model-preload',
+      label: `${sanitized} downloaded`,
+    });
   } catch (err) {
     // Best-effort cleanup of partial download — ignore cleanup errors
     try {
@@ -3838,6 +3989,13 @@ async function downloadGgmlModel(fileName: string): Promise<void> {
     } catch {
       /* ignore */
     }
+    emitBootstrapDownloadEvent({
+      action: 'fail',
+      id: eventId,
+      type: 'model-preload',
+      label: `Downloading ${sanitized}...`,
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   }
 }
@@ -4150,6 +4308,7 @@ export const dockerManager = {
   stopBackgroundLogStream,
   getLogs,
   checkModelsCached,
+  checkModelsCachedOffline,
   removeModelCache,
   downloadModelToCache,
   isGgmlModelDownloaded,

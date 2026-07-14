@@ -413,7 +413,7 @@ class MLXCanaryBackend(MLXThreadAffinityMixin, STTBackend):
             chunk_end_s = end_sample / SAMPLE_RATE
 
             if progress_callback is not None:
-                progress_callback(start_sample, audio_len)
+                progress_callback(int(start_sample / SAMPLE_RATE), int(audio_len / SAMPLE_RATE))
 
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 sf.write(tmp.name, chunk, SAMPLE_RATE)
@@ -446,7 +446,7 @@ class MLXCanaryBackend(MLXThreadAffinityMixin, STTBackend):
                 )
 
         if progress_callback is not None:
-            progress_callback(audio_len, audio_len)
+            progress_callback(int(audio_len / SAMPLE_RATE), int(audio_len / SAMPLE_RATE))
 
         info = BackendTranscriptionInfo(
             language=lang_code,

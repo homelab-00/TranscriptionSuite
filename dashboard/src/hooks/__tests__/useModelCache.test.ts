@@ -3,13 +3,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useModelCache } from '../useModelCache';
 
 const dockerCheck = vi.fn();
+const dockerCheckOffline = vi.fn();
 const mlxCheck = vi.fn();
 
 beforeEach(() => {
   dockerCheck.mockReset().mockResolvedValue({ 'a/b': { exists: true, size: '1 GB' } });
+  dockerCheckOffline.mockReset().mockResolvedValue({ 'a/b': { exists: true } });
   mlxCheck.mockReset().mockResolvedValue({ 'c/d': { exists: true, size: '2 GB' } });
   (window as any).electronAPI = {
-    docker: { checkModelsCached: dockerCheck },
+    docker: { checkModelsCached: dockerCheck, checkModelsCachedOffline: dockerCheckOffline },
     mlx: { checkModelsCached: mlxCheck },
   };
 });
@@ -24,12 +26,28 @@ describe('useModelCache', () => {
     expect(result.current.modelCacheStatus).toEqual({});
   });
 
-  it('does not probe Docker while the container is stopped', () => {
+  // GH-213: while the container is stopped the cache is probed via a throwaway
+  // container on the models volume instead of the running container.
+  it('probes the offline checker instead of the running container while stopped', async () => {
+    const { result } = renderHook(() => useModelCache({ isRunning: false, isMetal: false }));
+
+    act(() => result.current.refreshCacheStatus(['a/b']));
+
+    await waitFor(() => {
+      expect(result.current.modelCacheStatus['a/b']).toEqual({ exists: true });
+    });
+    expect(dockerCheckOffline).toHaveBeenCalledWith(['a/b']);
+    expect(dockerCheck).not.toHaveBeenCalled();
+  });
+
+  it('stays inert while stopped when the offline checker is unavailable', () => {
+    (window as any).electronAPI = { docker: { checkModelsCached: dockerCheck } };
     const { result } = renderHook(() => useModelCache({ isRunning: false, isMetal: false }));
 
     act(() => result.current.refreshCacheStatus(['a/b']));
 
     expect(dockerCheck).not.toHaveBeenCalled();
+    expect(result.current.modelCacheStatus).toEqual({});
   });
 
   it('merges Docker results once the container is running', async () => {

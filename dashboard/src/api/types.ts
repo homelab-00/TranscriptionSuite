@@ -238,14 +238,30 @@ export interface JobTrackerResult {
   error?: string;
 }
 
+/** In-flight job progress from the server tracker (GH-211) */
+export interface JobTrackerProgress {
+  current: number; // processed audio seconds (when a unit-reporting backend)
+  total: number; // total audio seconds
+  message: string;
+  phase?: 'loading_model' | 'transcribing' | 'diarizing' | 'transcribing_diarizing' | string | null;
+}
+
 /** Typed status from job_tracker exposed via /api/admin/status */
 export interface JobTrackerStatus {
   is_busy: boolean;
   active_user: string | null;
   active_job_id: string | null;
   cancellation_requested: boolean;
-  progress: { current: number; total: number; message: string } | null;
+  progress: JobTrackerProgress | null;
+  started_at?: number | null; // epoch seconds
   result: JobTrackerResult | null;
+}
+
+/** Narrow accessor for the loosely-typed AdminStatus.models blob (GH-211). */
+export function jobTrackerFromAdminStatus(
+  status: AdminStatus | null,
+): JobTrackerStatus | undefined {
+  return (status?.models as { job_tracker?: JobTrackerStatus } | undefined)?.job_tracker;
 }
 
 export interface CalendarResponse {

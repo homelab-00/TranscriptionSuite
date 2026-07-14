@@ -17,6 +17,10 @@ interface CustomSelectProps {
   options: string[];
   /** Per-option display metadata (dim / badge). Keyed by option value. */
   optionMeta?: Record<string, OptionMeta>;
+  /** Per-option display label; falls back to the raw option value. Keyed by option value. */
+  optionLabel?: Record<string, string>;
+  /** Per-option secondary line (e.g. a repo id) shown under the label. Keyed by option value. */
+  optionDescription?: Record<string, string>;
   className?: string;
   placeholder?: string;
   accentColor?: 'cyan' | 'magenta';
@@ -28,6 +32,8 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   onChange,
   options,
   optionMeta,
+  optionLabel,
+  optionDescription,
   className = '',
   placeholder = 'Select...',
   accentColor = 'cyan',
@@ -61,7 +67,9 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         >
           {({ open }) => (
             <>
-              <span className="mr-2 truncate">{value || placeholder}</span>
+              <span className="mr-2 truncate">
+                {value ? (optionLabel?.[value] ?? value) : placeholder}
+              </span>
               <ChevronDown
                 size={14}
                 className={`shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''} opacity-50`}
@@ -97,7 +105,15 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                 >
                   {({ selected }) => (
                     <>
-                      <span className="mr-2 truncate">{option}</span>
+                      <div className="mr-2 min-w-0 flex-1">
+                        <span className="block truncate">{optionLabel?.[option] ?? option}</span>
+                        {optionDescription?.[option] &&
+                          optionDescription[option] !== (optionLabel?.[option] ?? option) && (
+                            <span className="block truncate font-mono text-[10px] text-slate-500">
+                              {optionDescription[option]}
+                            </span>
+                          )}
+                      </div>
                       <div className="flex shrink-0 items-center gap-1.5">
                         {meta?.badge && (
                           <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">

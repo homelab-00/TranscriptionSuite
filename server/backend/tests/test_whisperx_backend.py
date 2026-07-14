@@ -561,7 +561,9 @@ def test_whisperx_diarization_progress_callback_failure_does_not_discard_result(
     assert result is not None
     assert result.num_speakers == 1
     # All three phase emits were attempted (each raised and was swallowed).
-    assert calls == [(60, 100), (80, 100), (100, 100)]
+    # 1s audio -> the 60/80/100 phase percents map onto (processed_seconds,
+    # total_seconds) under the GH-211 seconds contract.
+    assert calls == [(0, 1), (0, 1), (1, 1)]
 
 
 def test_configure_decode_options_creates_instance_copy() -> None:

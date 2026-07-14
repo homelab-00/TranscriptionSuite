@@ -39,6 +39,7 @@ import { GpuDiagnosticModal, type GpuDiagnosticResultProp } from './GpuDiagnosti
 import { ModelManagerModal } from './ModelManagerModal';
 import { InstanceSettingsSelectors } from './server/InstanceSettingsSelectors';
 import { RemoteConnectionCard } from './server/RemoteConnectionCard';
+import { StartupActivityInline } from './server/StartupActivityInline';
 
 import { useActivityStore } from '../../src/stores/activityStore';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
@@ -80,6 +81,7 @@ import {
   defaultMainModelFor,
   familyChoiceForModel,
   isFamilyChoiceEnabledFor,
+  liveModelsFor,
   modelsForFamilyChoice,
 } from '../../src/services/instanceMatrix';
 import { isRuntimeProfile, type RuntimeProfile } from '../../src/types/runtime';
@@ -1150,11 +1152,22 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     void api.config.set('server.diarizationCustomModel', diarizationCustomModel).catch(() => {});
   }, [localSelectionsHydrated, diarizationCustomModel]);
 
-  // Check model download cache whenever the active model names or container state change
+  // Check model download cache whenever the active model names or container state
+  // change. GH-213: covers every option the selectors can show (not just the 3
+  // active ids), and keeps working while the container is STOPPED, exactly when
+  // the selectors are editable, via the offline volume check. Metal has no
+  // container at all, so it routes through the MLX host-filesystem checker.
   useEffect(() => {
-    // Collect unique model IDs to check
+    // Every model id the Main picker rows and the Live dropdown can currently
+    // offer, mirroring the option builders in InstanceSettingsSelectors, so
+    // each entry can show its own downloaded state (GH-213).
+    const familyForMain = familyChoiceForModel(activeTranscriber);
+    const optionIds = [
+      ...(familyForMain ? modelsForFamilyChoice(familyForMain).map((m) => m.id) : []),
+      ...liveModelsFor(isWhisperCppModel(activeLiveModel) ? 'vulkan' : 'gpu').map((m) => m.id),
+    ];
     const modelIds = [
-      ...new Set([activeTranscriber, normalizedLiveModel, diarizationStatusModelId]),
+      ...new Set([activeTranscriber, normalizedLiveModel, diarizationStatusModelId, ...optionIds]),
     ].filter(
       (id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER && id !== DISABLED_MODEL_SENTINEL,
     );
@@ -1169,19 +1182,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     return () => {
       if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
     };
-  }, [activeTranscriber, normalizedLiveModel, diarizationStatusModelId, refreshCacheStatus]);
-
-  // Probe the cache for every model in the selected family (not just the
-  // active one) so each row in MainModelPicker can show its own download
-  // state instead of only the model currently chosen.
-  const selectedFamily = useMemo(
-    () => familyChoiceForModel(activeTranscriber),
-    [activeTranscriber],
-  );
-  useEffect(() => {
-    if (!selectedFamily) return;
-    refreshCacheStatus(modelsForFamilyChoice(selectedFamily).map((m) => m.id));
-  }, [selectedFamily, refreshCacheStatus]);
+  }, [
+    activeTranscriber,
+    activeLiveModel,
+    normalizedLiveModel,
+    diarizationStatusModelId,
+    refreshCacheStatus,
+  ]);
 
   // ─── Image tag selection (merged remote + local) ─────────────────────────
 
@@ -2092,6 +2099,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     {docker.operationError}
                   </div>
                 )}
+                {/* Active model downloads while the server is starting (GH-207) */}
+                {isRunning && !isRunningAndHealthy && <StartupActivityInline />}
                 {containerStatus.startedAt && isRunning && (
                   <div className="mt-2 font-mono text-xs text-slate-500">
                     Started: {new Date(containerStatus.startedAt).toLocaleString()}
