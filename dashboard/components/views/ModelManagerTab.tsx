@@ -26,6 +26,7 @@ import {
   LIVE_MODEL_CUSTOM_OPTION,
   MODEL_DISABLED_OPTION,
 } from '../../src/services/modelSelection';
+import { ModelRowDetails } from '../models/ModelRowDetails';
 
 // ─── Sentinel constants (must match ServerView) ─────────────────────────────
 
@@ -125,17 +126,6 @@ const FAMILY_SECTIONS: FamilySectionConfig[] = [
     headerTextClass: 'text-accent-magenta',
   },
 ];
-
-// ─── Capability badge helper ────────────────────────────────────────────────
-
-function CapBadge({ label, active }: { label: string; active: boolean }) {
-  if (!active) return null;
-  return (
-    <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-slate-400">
-      {label}
-    </span>
-  );
-}
 
 // ─── Off-screen paint-skip styles (Issue #87) ───────────────────────────────
 //
@@ -325,35 +315,12 @@ const ModelRow = React.memo(function ModelRow({
         </div>
       </div>
 
-      {/* Detail line */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-5 text-xs text-slate-500">
-        <span className="font-mono">{model.id}</span>
-        {cached && cacheSize && (
-          <>
-            <span className="text-slate-600">&middot;</span>
-            <span className="text-green-400">Downloaded {cacheSize}</span>
-          </>
-        )}
-        {model.parameterCount && (
-          <>
-            <span className="text-slate-600">&middot;</span>
-            <span>{model.parameterCount} params</span>
-          </>
-        )}
-        <span className="text-slate-600">&middot;</span>
-        <CapBadge label="Translation" active={model.capabilities.translation} />
-        <CapBadge label="Live Mode" active={model.capabilities.liveMode} />
-        <CapBadge label="Diarization" active={model.capabilities.diarization} />
-        {model.capabilities.languageCount > 0 && (
-          <span className="text-slate-500">
-            {model.capabilities.languageCount} language
-            {model.capabilities.languageCount !== 1 ? 's' : ''}
-          </span>
-        )}
-      </div>
-
-      {/* Description */}
-      <p className="mt-1 pl-5 text-xs text-slate-500">{model.description}</p>
+      <ModelRowDetails
+        model={model}
+        cached={cached}
+        cacheSize={cacheSize}
+        className="mt-1.5 pl-5"
+      />
     </div>
   );
 });
