@@ -56,6 +56,7 @@ meta:
       - components/recording/SpeakerRenameInput.tsx
       - components/Sidebar.tsx
       - components/ui/__tests__/PersistentInfoBanner.test.tsx
+      - components/ui/__tests__/ScrollFadeOverlay.test.tsx
       - components/ui/__tests__/UpdateBanner.test.tsx
       - components/ui/__tests__/UpdateModal.test.tsx
       - components/ui/ActivityNotifications.tsx
@@ -72,6 +73,7 @@ meta:
       - components/ui/LogTerminal.tsx
       - components/ui/PersistentInfoBanner.tsx
       - components/ui/QueuePausedBanner.tsx
+      - components/ui/ScrollFadeOverlay.tsx
       - components/ui/SelectorGroup.tsx
       - components/ui/SelectorTile.tsx
       - components/ui/ShortcutCapture.tsx
@@ -925,6 +927,7 @@ utility_allowlist:
     - my-4
     - opacity-0
     - opacity-10
+    - opacity-100
     - opacity-30
     - opacity-40
     - opacity-45
@@ -2567,6 +2570,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   RemoteConnectionCard:
     file: components/views/server/RemoteConnectionCard.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  ScrollFadeOverlay:
+    file: components/ui/ScrollFadeOverlay.tsx
     required_tokens:
       - colors
       - motion
