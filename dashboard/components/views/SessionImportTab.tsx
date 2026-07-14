@@ -37,6 +37,7 @@ import { apiClient } from '../../src/api/client';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
 import { getConfig, setConfig } from '../../src/config/store';
 import { useSessionWatcher } from '../../src/hooks/useSessionWatcher';
+import { useAriaAnnouncerStore } from '../../src/stores/ariaAnnouncerStore';
 import {
   supportsAutoDetect,
   supportsTranslation,
@@ -98,6 +99,21 @@ export const SessionImportTab: React.FC = () => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isDragOverWatch, setIsDragOverWatch] = useState(false);
   const [logExpanded, setLogExpanded] = useState(false);
+
+  // GH-210: brief dropzone flash after files are added.
+  const [justAdded, setJustAdded] = useState(false);
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    },
+    [],
+  );
+
+  // GH-210: scroll the Import Queue into view when a NEW job appears. Diff
+  // job ids, not array length (clearFinished/removeJob also change length).
+  const queueRef = useRef<HTMLDivElement | null>(null);
+  const prevJobIdsRef = useRef<Set<string>>(new Set());
 
   // 4.6 — first-run hint state
   const manualImportCountRef = useRef(0);
@@ -289,6 +305,18 @@ export const SessionImportTab: React.FC = () => {
     }
   }, [sessionWatchPath, showWatchHint]);
 
+  useEffect(() => {
+    const ids = new Set(jobs.map((j) => j.id));
+    const hasNew = jobs.some((j) => !prevJobIdsRef.current.has(j.id));
+    prevJobIdsRef.current = ids;
+    if (hasNew) {
+      // rAF: the queue card may be mounting in this very commit on the first drop
+      requestAnimationFrame(() => {
+        queueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+  }, [jobs]);
+
   const handleDiarizationChange = useCallback((enabled: boolean) => {
     setDiarization(enabled);
     if (enabled) {
@@ -355,7 +383,8 @@ export const SessionImportTab: React.FC = () => {
         ? (resolveLanguage(mainBidiTarget) ?? 'en')
         : 'en';
 
-      addFiles(Array.from(files), 'session-normal', {
+      const fileArray = Array.from(files);
+      addFiles(fileArray, 'session-normal', {
         language: resolvedLang,
         translation_enabled: mainTranslateActive ? true : undefined,
         translation_target_language: mainTranslateActive ? mainTranslateTarget : undefined,
@@ -364,6 +393,27 @@ export const SessionImportTab: React.FC = () => {
         parallel_diarization: effectiveDiarization && !multitrack ? parallelDiarization : undefined,
         multitrack: multitrack || undefined,
       });
+
+      // GH-210: immediate feedback on manual add. The Folder-Watch path
+      // already toasts in handleFilesDetected; this mirrors it for drops and
+      // file-picker selections. Only fires after addFiles (the guard above
+      // early-returns without enqueueing).
+      toast.success(
+        fileArray.length === 1
+          ? `Added "${fileArray[0].name}" to the Import Queue`
+          : `${fileArray.length} files added to the Import Queue`,
+      );
+      useAriaAnnouncerStore
+        .getState()
+        .announce(
+          fileArray.length === 1
+            ? `${fileArray[0].name} added to import queue`
+            : `${fileArray.length} files added to import queue`,
+          'polite',
+        );
+      setJustAdded(true);
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = setTimeout(() => setJustAdded(false), 700);
 
       // 4.6 — track manual import count and possibly show hint
       const newCount = manualImportCountRef.current + files.length;
@@ -526,7 +576,7 @@ export const SessionImportTab: React.FC = () => {
           isDragOver
             ? 'border-accent-cyan bg-accent-cyan/10 scale-[1.02]'
             : 'hover:border-accent-cyan/50 hover:bg-accent-cyan/5 border-white/20'
-        }`}
+        } ${justAdded ? 'dropzone-flash' : ''}`}
       >
         <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/5 transition-transform group-hover:scale-110">
           <Upload size={32} className="group-hover:text-accent-cyan text-slate-300" />
@@ -553,6 +603,103 @@ export const SessionImportTab: React.FC = () => {
           >
             <XCircle size={14} />
           </button>
+        </div>
+      )}
+
+      {/* Queue List: directly under the dropzone so a fresh drop is visible
+          without scrolling (GH-210) */}
+      {jobs.length > 0 && (
+        <div ref={queueRef}>
+          <GlassCard
+            title={`Import Queue${isProcessing ? ' — Processing' : ''}`}
+            action={
+              <div className="flex items-center gap-3 text-xs text-slate-400">
+                {completedCount > 0 && (
+                  <span className="text-green-400">{completedCount} done</span>
+                )}
+                {pendingCount > 0 && (
+                  <span>
+                    {pendingCount} pending
+                    {/* 4.5 — time estimate */}
+                    {avgProcessingMs > 0 && (
+                      <span className="ml-1 text-slate-500">
+                        (~{formatTimeEst(pendingCount * avgProcessingMs)})
+                      </span>
+                    )}
+                  </span>
+                )}
+                {errorCount > 0 && <span className="text-red-400">{errorCount} failed</span>}
+                <button
+                  onClick={isPaused ? resumeQueue : pauseQueue}
+                  className="ml-1 text-slate-500 transition-colors hover:text-white"
+                  title={isPaused ? 'Resume queue' : 'Pause queue'}
+                >
+                  {isPaused ? <Play size={18} /> : <Pause size={18} />}
+                </button>
+                {(completedCount > 0 || errorCount > 0) && (
+                  <button
+                    onClick={clearFinished}
+                    className="ml-1 text-slate-500 transition-colors hover:text-white"
+                    title="Clear finished"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                )}
+              </div>
+            }
+          >
+            <div className="max-h-60 space-y-2 overflow-y-auto">
+              {jobs.map((job) => (
+                <div
+                  key={job.id}
+                  className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 transition-colors hover:bg-white/8"
+                >
+                  {statusIcon(job)}
+                  {(job.type === 'session-auto' || job.type === 'notebook-auto') && (
+                    <span title="Auto-watch">
+                      <Eye size={14} className="shrink-0 text-slate-500" />
+                    </span>
+                  )}
+                  <span className="flex-1 truncate text-sm text-white">
+                    {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
+                  </span>
+                  <span
+                    className={`text-xs whitespace-nowrap ${
+                      job.status === 'success' && job.outputPath
+                        ? 'cursor-pointer text-green-400 hover:text-green-300'
+                        : 'text-slate-400'
+                    }`}
+                    onClick={
+                      job.status === 'success' && job.outputPath
+                        ? () => handleOpenOutputPath(job.outputPath!)
+                        : undefined
+                    }
+                    title={job.status === 'success' && job.outputPath ? 'Open folder' : undefined}
+                  >
+                    {statusLabel(job)}
+                  </span>
+                  {job.status === 'error' && (
+                    <button
+                      onClick={() => retryJob(job.id)}
+                      className="hover:text-accent-cyan p-1 text-slate-400 transition-colors"
+                      title="Retry"
+                    >
+                      <RotateCcw size={18} />
+                    </button>
+                  )}
+                  {job.status !== 'processing' && job.status !== 'writing' && (
+                    <button
+                      onClick={() => removeJob(job.id)}
+                      className="p-1 text-slate-500 transition-colors hover:text-red-400"
+                      title="Remove"
+                    >
+                      <XCircle size={18} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </GlassCard>
         </div>
       )}
 
@@ -692,98 +839,6 @@ export const SessionImportTab: React.FC = () => {
                 )}
               </div>
             )}
-          </div>
-        </GlassCard>
-      )}
-
-      {/* Queue List */}
-      {jobs.length > 0 && (
-        <GlassCard
-          title={`Import Queue${isProcessing ? ' — Processing' : ''}`}
-          action={
-            <div className="flex items-center gap-3 text-xs text-slate-400">
-              {completedCount > 0 && <span className="text-green-400">{completedCount} done</span>}
-              {pendingCount > 0 && (
-                <span>
-                  {pendingCount} pending
-                  {/* 4.5 — time estimate */}
-                  {avgProcessingMs > 0 && (
-                    <span className="ml-1 text-slate-500">
-                      (~{formatTimeEst(pendingCount * avgProcessingMs)})
-                    </span>
-                  )}
-                </span>
-              )}
-              {errorCount > 0 && <span className="text-red-400">{errorCount} failed</span>}
-              <button
-                onClick={isPaused ? resumeQueue : pauseQueue}
-                className="ml-1 text-slate-500 transition-colors hover:text-white"
-                title={isPaused ? 'Resume queue' : 'Pause queue'}
-              >
-                {isPaused ? <Play size={18} /> : <Pause size={18} />}
-              </button>
-              {(completedCount > 0 || errorCount > 0) && (
-                <button
-                  onClick={clearFinished}
-                  className="ml-1 text-slate-500 transition-colors hover:text-white"
-                  title="Clear finished"
-                >
-                  <Trash2 size={18} />
-                </button>
-              )}
-            </div>
-          }
-        >
-          <div className="max-h-60 space-y-2 overflow-y-auto">
-            {jobs.map((job) => (
-              <div
-                key={job.id}
-                className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 transition-colors hover:bg-white/8"
-              >
-                {statusIcon(job)}
-                {(job.type === 'session-auto' || job.type === 'notebook-auto') && (
-                  <span title="Auto-watch">
-                    <Eye size={14} className="shrink-0 text-slate-500" />
-                  </span>
-                )}
-                <span className="flex-1 truncate text-sm text-white">
-                  {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
-                </span>
-                <span
-                  className={`text-xs whitespace-nowrap ${
-                    job.status === 'success' && job.outputPath
-                      ? 'cursor-pointer text-green-400 hover:text-green-300'
-                      : 'text-slate-400'
-                  }`}
-                  onClick={
-                    job.status === 'success' && job.outputPath
-                      ? () => handleOpenOutputPath(job.outputPath!)
-                      : undefined
-                  }
-                  title={job.status === 'success' && job.outputPath ? 'Open folder' : undefined}
-                >
-                  {statusLabel(job)}
-                </span>
-                {job.status === 'error' && (
-                  <button
-                    onClick={() => retryJob(job.id)}
-                    className="hover:text-accent-cyan p-1 text-slate-400 transition-colors"
-                    title="Retry"
-                  >
-                    <RotateCcw size={18} />
-                  </button>
-                )}
-                {job.status !== 'processing' && job.status !== 'writing' && (
-                  <button
-                    onClick={() => removeJob(job.id)}
-                    className="p-1 text-slate-500 transition-colors hover:text-red-400"
-                    title="Remove"
-                  >
-                    <XCircle size={18} />
-                  </button>
-                )}
-              </div>
-            ))}
           </div>
         </GlassCard>
       )}
