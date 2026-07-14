@@ -37,6 +37,15 @@ _thread_local = threading.local()
 _MIN_TRACKABLE_BYTES = 1024
 
 
+def _format_bytes(num: float) -> str:
+    """Human-readable byte size for dashboard display (GH-207)."""
+    for unit in ("B", "KB", "MB", "GB"):
+        if num < 1024:
+            return f"{int(num)} {unit}" if unit == "B" else f"{num:.1f} {unit}"
+        num /= 1024
+    return f"{num:.1f} TB"
+
+
 def _get_tracker() -> _DownloadTracker | None:
     return getattr(_thread_local, "tracker", None)
 
@@ -55,6 +64,7 @@ class _DownloadTracker:
         self.total_bytes = 0
         self.downloaded_bytes = 0
         self._last_emit_time = 0.0
+        self._load_phase_emitted = False
 
     def on_tqdm_created(self, total: int | float | None) -> None:
         """Register a new download file's total size."""
@@ -70,6 +80,23 @@ class _DownloadTracker:
         if now - self._last_emit_time >= 1.0:
             self._emit_progress()
             self._last_emit_time = now
+        # total_bytes grows as snapshot_download opens per-file tqdms, so
+        # downloaded >= total only holds once every file finished — the point
+        # where the (possibly long, CPU-bound) weight-instantiation phase
+        # begins (GH-207).
+        if (
+            self.total_bytes > 0
+            and self.downloaded_bytes >= self.total_bytes
+            and not self._load_phase_emitted
+        ):
+            self._load_phase_emitted = True
+            emit_event(
+                self.event_id,
+                "download",
+                f"Loading {self.label} into memory...",
+                status="active",
+                progress=100,
+            )
 
     def _emit_progress(self) -> None:
         progress = (
@@ -83,8 +110,8 @@ class _DownloadTracker:
             f"Downloading {self.label}...",
             status="active",
             progress=progress,
-            downloadedSize=self.downloaded_bytes,
-            totalSize=self.total_bytes,
+            downloadedSize=_format_bytes(self.downloaded_bytes),
+            totalSize=_format_bytes(self.total_bytes),
         )
 
 
@@ -277,8 +304,8 @@ def track_model_download(model_name: str) -> Generator[None]:
                 f"{label} ready",
                 status="complete",
                 durationMs=elapsed_ms,
-                downloadedSize=tracker.downloaded_bytes,
-                totalSize=tracker.total_bytes,
+                downloadedSize=_format_bytes(tracker.downloaded_bytes),
+                totalSize=_format_bytes(tracker.total_bytes),
             )
         else:
             emit_event(

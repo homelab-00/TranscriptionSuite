@@ -643,6 +643,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 )
                 logger.warning(warning_message, exc_info=True)
                 _log_time(timing_label)
+                # Surface the failure in the dashboard (GH-207): without this
+                # a failed preload looks like an infinite server start.
+                emit_event(
+                    "model-preload-error",
+                    "download",
+                    warning_message,
+                    status="error",
+                    severity="warning",
+                    persistent=True,
+                )
             else:
                 # A non-dependency model-load failure (bad model id, corrupt
                 # cache, OOM, ...) must not brick the whole server: the dashboard,
@@ -660,6 +670,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                     exc_info=True,
                 )
                 _log_time("model preload failed (continuing without model)")
+                emit_event(
+                    "model-preload-error",
+                    "download",
+                    f"Model preload failed for {selected_main_model}. The server started without a loaded model - fix the model selection in the dashboard and restart.",
+                    status="error",
+                    severity="error",
+                    persistent=True,
+                )
         else:
             _log_time("model preload complete")
 
