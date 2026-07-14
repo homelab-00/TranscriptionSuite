@@ -16,7 +16,10 @@ import type {
   UploadResponse,
   DedupMatch,
 } from '../api/types';
-import { resolveTranscriptionOutput } from '../services/transcriptionFormatters';
+import {
+  resolveTranscriptionOutputs,
+  type SessionOutputFormat,
+} from '../services/transcriptionFormatters';
 import { supportsAutoDetect } from '../services/modelCapabilities';
 import { getConfig } from '../config/store';
 import { useDedupChoiceStore } from './dedupChoiceStore';
@@ -44,12 +47,18 @@ export interface UnifiedImportJob {
   result?: UploadResponse;
   /** Diarization outcome from the server result (GH-209): shown when requested but not performed. */
   diarizationOutcome?: { requested: boolean; performed: boolean; reason: string | null };
+  /** Display-only: the output format chosen at enqueue time, e.g. ".srt" or ".txt + .srt" (GH-212) */
+  plannedFormat?: string;
   error?: string;
 }
 
 export interface SessionConfig {
   outputDir: string;
+  /** Subtitle flavor for subtitle output (GH-212: no longer coupled to diarization) */
   diarizedFormat: 'srt' | 'ass';
+  /** Explicit output selection for session imports (GH-212) */
+  outputFormat: SessionOutputFormat;
+  /** Retained for the non-format consumers (LiveTranscriptView, notebook flows, ...) */
   hideTimestamps: boolean;
   /** Toggles bridged from SessionImportTab so Folder Watch jobs honor them (Issue #93) */
   enableDiarization: boolean;
@@ -217,6 +226,21 @@ function filenameFromPath(filePath: string): string {
   return parts[parts.length - 1] || filePath;
 }
 
+/** Human-readable planned-format label stamped on queued session jobs (GH-212). */
+export function describePlannedFormat(
+  cfg: Pick<SessionConfig, 'outputFormat' | 'diarizedFormat'>,
+): string {
+  const sub = `.${cfg.diarizedFormat ?? 'srt'}`;
+  switch (cfg.outputFormat ?? 'subtitles') {
+    case 'txt':
+      return '.txt';
+    case 'both':
+      return `.txt + ${sub}`;
+    default:
+      return sub;
+  }
+}
+
 // ─── Duplicate resolution (GH-120) ───────────────────────────────────────────
 
 /** How Folder Watch (session-auto) jobs resolve a server-detected duplicate
@@ -382,14 +406,18 @@ async function processSessionJob(
   if (result.error) throw new Error(result.error);
   if (!result.transcription) throw new Error('Server returned no transcription data');
 
-  // Read hideTimestamps from the authoritative config store at write time,
-  // not from a value captured at enqueue time, so mid-queue setting changes
-  // are respected (see Issue #67).
+  // Read the format from the authoritative config store at WRITE time, not
+  // from a value captured at enqueue time, so mid-queue setting changes are
+  // respected (mirrors the Issue #67 convention it replaces). The
+  // hideTimestamps fallback preserves pre-GH-212 behavior for users who never
+  // touched the explicit selector.
+  const storedFormat = await getConfig<SessionOutputFormat>('sessionImport.outputFormat');
   const hideTimestamps = (await getConfig<boolean>('output.hideTimestamps')) ?? false;
+  const outputFormat: SessionOutputFormat = storedFormat ?? (hideTimestamps ? 'txt' : 'subtitles');
   const { sessionConfig } = store.getState();
-  const { outputFilename, content } = resolveTranscriptionOutput(filename, result.transcription, {
-    hideTimestamps,
-    diarizedFormat: sessionConfig.diarizedFormat ?? 'srt',
+  const outputs = resolveTranscriptionOutputs(filename, result.transcription, {
+    outputFormat,
+    subtitleFormat: sessionConfig.diarizedFormat ?? 'srt',
   });
 
   // Update status to 'writing'
@@ -402,11 +430,17 @@ async function processSessionJob(
 
   if (electronAPI?.fileIO) {
     const dir = sessionConfig.outputDir;
-    outputPath = `${dir}/${outputFilename}`;
-    await electronAPI.fileIO.writeText(outputPath, content);
+    for (const out of outputs) {
+      await electronAPI.fileIO.writeText(`${dir}/${out.outputFilename}`, out.content);
+    }
+    outputPath = `${dir}/${outputs[outputs.length - 1].outputFilename}`;
   } else {
-    browserDownload(outputFilename, content);
+    for (const out of outputs) {
+      browserDownload(out.outputFilename, out.content);
+    }
   }
+
+  const outputFilename = outputs.map((o) => o.outputFilename).join(', ');
 
   store.setState((s) => ({
     jobs: s.jobs.map((j) =>
@@ -547,6 +581,7 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
   sessionConfig: {
     outputDir: '',
     diarizedFormat: 'srt',
+    outputFormat: 'subtitles',
     hideTimestamps: false,
     enableDiarization: true,
     enableWordTimestamps: true,
@@ -582,14 +617,22 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
 
   addFiles: (files, type, options) => {
     const capturedOptions = options ? { ...options } : undefined;
-    const newJobs: UnifiedImportJob[] = files.map((file) => ({
-      id: nextJobId(type),
-      file,
-      type,
-      options: capturedOptions,
-      status: 'pending' as const,
-    }));
-    set((s) => ({ jobs: [...s.jobs, ...newJobs] }));
+    // The store creator only has `set` in scope, so sessionConfig is read
+    // inside the callback to stamp the planned format at enqueue time (GH-212).
+    set((s) => {
+      const plannedFormat = type.startsWith('session')
+        ? describePlannedFormat(s.sessionConfig)
+        : undefined;
+      const newJobs: UnifiedImportJob[] = files.map((file) => ({
+        id: nextJobId(type),
+        file,
+        type,
+        options: capturedOptions,
+        status: 'pending' as const,
+        ...(plannedFormat ? { plannedFormat } : {}),
+      }));
+      return { jobs: [...s.jobs, ...newJobs] };
+    });
     setTimeout(() => processQueue(), 0);
   },
 
