@@ -69,9 +69,16 @@ export const ModelPickerRow: React.FC<ModelPickerRowProps> = ({
           {model.displayName}
         </span>
 
-        {model.capabilities.translation && (
-          <span className="shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-slate-400">
-            A⇄B
+        {model.capabilities.translation !== 'none' && (
+          <span
+            className="shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-slate-400"
+            title={
+              model.capabilities.translation === 'multilingual'
+                ? 'Translates between languages'
+                : 'Translates to English'
+            }
+          >
+            {model.capabilities.translation === 'multilingual' ? 'A⇄B' : '→EN'}
           </span>
         )}
         {model.parameterCount && (

@@ -10,7 +10,12 @@ const MODEL: ModelInfo = {
   description: 'NVIDIA multitask ASR and translation model.',
   parameterCount: '1B',
   huggingfaceUrl: 'https://huggingface.co/nvidia/canary-1b-v2',
-  capabilities: { translation: true, liveMode: false, diarization: true, languageCount: 25 },
+  capabilities: {
+    translation: 'multilingual',
+    liveMode: false,
+    diarization: true,
+    languageCount: 25,
+  },
   roles: ['main'],
 };
 

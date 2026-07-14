@@ -48,7 +48,16 @@ export const ModelRowDetails: React.FC<ModelRowDetailsProps> = ({
         </>
       )}
       <span className="text-slate-600">&middot;</span>
-      <CapBadge label="Translation" active={model.capabilities.translation} />
+      <CapBadge
+        label={
+          model.capabilities.translation === 'multilingual'
+            ? 'Translation (between languages)'
+            : model.capabilities.translation === 'toEnglish'
+              ? 'Translation (to English)'
+              : 'Translation'
+        }
+        active={model.capabilities.translation !== 'none'}
+      />
       <CapBadge label="Live Mode" active={model.capabilities.liveMode} />
       <CapBadge label="Diarization" active={model.capabilities.diarization} />
       {model.capabilities.languageCount > 0 && (

@@ -10,7 +10,12 @@ const MODEL: ModelInfo = {
   description: 'NVIDIA multitask ASR and translation model.',
   parameterCount: '1B',
   huggingfaceUrl: 'https://huggingface.co/nvidia/canary-1b-v2',
-  capabilities: { translation: true, liveMode: false, diarization: true, languageCount: 25 },
+  capabilities: {
+    translation: 'multilingual',
+    liveMode: false,
+    diarization: true,
+    languageCount: 25,
+  },
   roles: ['main'],
 };
 
@@ -27,7 +32,7 @@ describe('ModelRowDetails', () => {
   it('renders only the capability badges the model actually has', () => {
     render(<ModelRowDetails model={MODEL} cached={false} />);
 
-    expect(screen.getByText('Translation')).toBeInTheDocument();
+    expect(screen.getByText('Translation (between languages)')).toBeInTheDocument();
     expect(screen.getByText('Diarization')).toBeInTheDocument();
     expect(screen.queryByText('Live Mode')).not.toBeInTheDocument();
   });
