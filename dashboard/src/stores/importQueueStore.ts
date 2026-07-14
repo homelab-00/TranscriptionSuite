@@ -42,6 +42,8 @@ export interface UnifiedImportJob {
   outputFilename?: string;
   /** Notebook jobs: server result */
   result?: UploadResponse;
+  /** Diarization outcome from the server result (GH-209): shown when requested but not performed. */
+  diarizationOutcome?: { requested: boolean; performed: boolean; reason: string | null };
   error?: string;
 }
 
@@ -408,7 +410,15 @@ async function processSessionJob(
 
   store.setState((s) => ({
     jobs: s.jobs.map((j) =>
-      j.id === job.id ? { ...j, status: 'success' as const, outputPath, outputFilename } : j,
+      j.id === job.id
+        ? {
+            ...j,
+            status: 'success' as const,
+            outputPath,
+            outputFilename,
+            ...(result.diarization ? { diarizationOutcome: result.diarization } : {}),
+          }
+        : j,
     ),
   }));
 }
@@ -446,7 +456,14 @@ async function processNotebookJob(
 
   store.setState((s) => ({
     jobs: s.jobs.map((j) =>
-      j.id === job.id ? { ...j, status: 'success' as const, result: uploadResult } : j,
+      j.id === job.id
+        ? {
+            ...j,
+            status: 'success' as const,
+            result: uploadResult,
+            diarizationOutcome: result.diarization ?? undefined,
+          }
+        : j,
     ),
   }));
 

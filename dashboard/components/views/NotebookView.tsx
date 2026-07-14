@@ -1567,6 +1567,15 @@ const ImportTab = ({
     adminStatus?.config?.main_transcriber?.model ??
     adminStatus?.config?.transcription?.model ??
     null;
+
+  // GH-209: gate the diarization toggle on the server-side feature flag
+  // (computed once at container startup — adding a token needs a restart).
+  const diarizationFeature = (adminStatus?.models as any)?.features?.diarization as
+    | { available: boolean; reason: string }
+    | undefined;
+  const diarizationUnavailable = diarizationFeature?.available === false;
+  const effectiveDiarization = diarizationUnavailable ? false : diarization;
+
   const { languages, loading: languagesLoading } = useLanguages(activeModel);
   const isCanaryMainBidi = isCanaryModel(activeModel) && mainLanguage === 'English';
   const canTranslate = supportsTranslation(activeModel);
@@ -1629,12 +1638,18 @@ const ImportTab = ({
   // handleFiles.
   useEffect(() => {
     updateNotebookConfig({
-      enableDiarization: diarization,
+      enableDiarization: effectiveDiarization,
       enableWordTimestamps: wordTimestamps,
       parallelDiarization,
       language: mainLanguage,
     });
-  }, [diarization, wordTimestamps, parallelDiarization, mainLanguage, updateNotebookConfig]);
+  }, [
+    effectiveDiarization,
+    wordTimestamps,
+    parallelDiarization,
+    mainLanguage,
+    updateNotebookConfig,
+  ]);
 
   // gh-102 #3 — push useLanguages() results into the global languagesCache so
   // handleFilesDetected (a non-React store action) can resolve display name →
@@ -1702,9 +1717,9 @@ const ImportTab = ({
         language: resolvedLang,
         translation_enabled: mainTranslateActive ? true : undefined,
         translation_target_language: mainTranslateActive ? mainTranslateTarget : undefined,
-        enable_diarization: diarization,
+        enable_diarization: effectiveDiarization,
         enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
-        parallel_diarization: diarization ? parallelDiarization : undefined,
+        parallel_diarization: effectiveDiarization ? parallelDiarization : undefined,
         // Sprint 4 deferred-work no. 2 — pass undefined (not null) when no
         // active profile is set so apiClient.uploadAndTranscribe's `!= null`
         // guard correctly omits the FormData field.
@@ -1724,7 +1739,7 @@ const ImportTab = ({
     [
       addFiles,
       activeProfileId,
-      diarization,
+      effectiveDiarization,
       parallelDiarization,
       supportsExplicitWordTimestampToggle,
       wordTimestamps,
@@ -1778,8 +1793,15 @@ const ImportTab = ({
       }
       case 'writing':
         return 'Saving file...';
-      case 'success':
-        return `Done — ID ${job.result?.recording_id}`;
+      case 'success': {
+        const diar = job.diarizationOutcome;
+        const skipped = !!diar?.requested && !diar?.performed;
+        const base = `Done — ID ${job.result?.recording_id}`;
+        if (!skipped) return base;
+        const why =
+          diar?.reason === 'token_missing' ? 'no HF token' : (diar?.reason ?? 'unavailable');
+        return `${base} (diarization skipped: ${why})`;
+      }
       case 'error':
         return job.error ?? 'Failed';
     }
@@ -2054,12 +2076,19 @@ const ImportTab = ({
       <GlassCard title="Import Options">
         <div className="space-y-4">
           <AppleSwitch
-            checked={diarization}
+            checked={effectiveDiarization}
             onChange={handleDiarizationChange}
+            disabled={diarizationUnavailable}
             label="Speaker Diarization"
-            description="Identify distinct speakers in the audio"
+            description={
+              diarizationUnavailable
+                ? diarizationFeature?.reason === 'token_missing'
+                  ? 'Unavailable: no HuggingFace token configured. Add one in Settings, then restart the server.'
+                  : 'Unavailable on this server.'
+                : 'Identify distinct speakers in the audio'
+            }
           />
-          {diarization && (
+          {effectiveDiarization && (
             <>
               <div className="h-px bg-white/5"></div>
               <div className="pl-1">

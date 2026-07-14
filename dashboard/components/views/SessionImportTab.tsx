@@ -104,6 +104,17 @@ export const SessionImportTab: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const admin = useAdminStatus();
+
+  // GH-209: gate the diarization toggle on the server-side feature flag.
+  // Computed ONCE at container startup (ModelManager._initialize_diarization_
+  // feature_status) — adding a token in Settings requires a server restart.
+  const diarizationFeature = (admin.status?.models as any)?.features?.diarization as
+    | { available: boolean; reason: string }
+    | undefined;
+  const diarizationUnavailable = diarizationFeature?.available === false;
+  // Effective value: forced OFF when the server says the feature is unavailable.
+  const effectiveDiarization = diarizationUnavailable ? false : diarization;
+
   const activeModel: string | null =
     admin.status?.config?.main_transcriber?.model ??
     admin.status?.config?.transcription?.model ??
@@ -219,7 +230,7 @@ export const SessionImportTab: React.FC = () => {
       outputDir,
       diarizedFormat,
       hideTimestamps,
-      enableDiarization: diarization,
+      enableDiarization: effectiveDiarization,
       enableWordTimestamps: wordTimestamps,
       parallelDiarization,
       multitrack,
@@ -229,7 +240,7 @@ export const SessionImportTab: React.FC = () => {
     outputDir,
     diarizedFormat,
     hideTimestamps,
-    diarization,
+    effectiveDiarization,
     wordTimestamps,
     parallelDiarization,
     multitrack,
@@ -333,9 +344,9 @@ export const SessionImportTab: React.FC = () => {
         language: resolvedLang,
         translation_enabled: mainTranslateActive ? true : undefined,
         translation_target_language: mainTranslateActive ? mainTranslateTarget : undefined,
-        enable_diarization: multitrack ? false : diarization,
+        enable_diarization: multitrack ? false : effectiveDiarization,
         enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
-        parallel_diarization: diarization && !multitrack ? parallelDiarization : undefined,
+        parallel_diarization: effectiveDiarization && !multitrack ? parallelDiarization : undefined,
         multitrack: multitrack || undefined,
       });
 
@@ -351,7 +362,7 @@ export const SessionImportTab: React.FC = () => {
     },
     [
       addFiles,
-      diarization,
+      effectiveDiarization,
       multitrack,
       parallelDiarization,
       supportsExplicitWordTimestampToggle,
@@ -456,8 +467,15 @@ export const SessionImportTab: React.FC = () => {
       }
       case 'writing':
         return 'Saving file...';
-      case 'success':
-        return job.outputFilename ? `Done — ${job.outputFilename}` : 'Done';
+      case 'success': {
+        const diar = job.diarizationOutcome;
+        const skipped = !!diar?.requested && !diar?.performed;
+        const base = job.outputFilename ? `Done — ${job.outputFilename}` : 'Done';
+        if (!skipped) return base;
+        const why =
+          diar?.reason === 'token_missing' ? 'no HF token' : (diar?.reason ?? 'unavailable');
+        return `${base} (diarization skipped: ${why})`;
+      }
       case 'error':
         return job.error ?? 'Failed';
     }
@@ -769,16 +787,21 @@ export const SessionImportTab: React.FC = () => {
       <GlassCard title="Import Options">
         <div className="space-y-4">
           <AppleSwitch
-            checked={diarization}
+            checked={effectiveDiarization}
             onChange={handleDiarizationChange}
+            disabled={diarizationUnavailable}
             label="Speaker Diarization"
             description={
-              hideTimestamps
-                ? 'Identify distinct speakers — output saved as .txt (timestamps disabled in Settings)'
-                : 'Identify distinct speakers — output saved as a subtitle file with speaker labels'
+              diarizationUnavailable
+                ? diarizationFeature?.reason === 'token_missing'
+                  ? 'Unavailable: no HuggingFace token configured. Add one in Settings, then restart the server.'
+                  : 'Unavailable on this server.'
+                : hideTimestamps
+                  ? 'Identify distinct speakers — output saved as .txt (timestamps disabled in Settings)'
+                  : 'Identify distinct speakers — output saved as a subtitle file with speaker labels'
             }
           />
-          {diarization && (
+          {effectiveDiarization && (
             <>
               <div className="h-px bg-white/5"></div>
               <div className="flex items-center justify-between gap-4 pl-1">
