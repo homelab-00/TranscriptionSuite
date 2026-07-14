@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.4.3
+  spec_version: 1.4.4
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -11,6 +11,7 @@ meta:
       - components/__tests__/AddNoteModal.canary-language.test.tsx
       - components/__tests__/AddNoteModal.initialFiles.test.tsx
       - components/__tests__/AudioVisualizer.test.tsx
+      - components/__tests__/CustomSelect.test.tsx
       - components/__tests__/HfTokenExplainer.test.tsx
       - components/__tests__/LogsView.test.tsx
       - components/__tests__/NotebookView.canary-language.test.tsx
@@ -110,7 +111,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-07-14T16:50:51.018Z
+    generated_at: 2026-07-14T18:45:34.913Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:

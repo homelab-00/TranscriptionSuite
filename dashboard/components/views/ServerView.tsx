@@ -78,6 +78,8 @@ import {
   defaultMainModelFor,
   familyChoiceForModel,
   isFamilyChoiceEnabledFor,
+  liveModelsFor,
+  modelsForFamilyChoice,
 } from '../../src/services/instanceMatrix';
 import { isRuntimeProfile, type RuntimeProfile } from '../../src/types/runtime';
 
@@ -1112,14 +1114,24 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     void api.config.set('server.diarizationCustomModel', diarizationCustomModel).catch(() => {});
   }, [localSelectionsHydrated, diarizationCustomModel]);
 
-  // Check model download cache whenever the active model names or container state change
+  // Check model download cache whenever the active model names or container state
+  // change. GH-213: covers every option the selectors can show (not just the 3
+  // active ids), and keeps working while the container is STOPPED, exactly when
+  // the selectors are editable, via the offline volume check. Metal has no
+  // container at all, so it routes through the MLX host-filesystem checker.
   useEffect(() => {
     const api = (window as any).electronAPI;
-    if (!api?.docker?.checkModelsCached || !isRunning) return;
+    if (!api?.docker && !api?.mlx) return;
 
-    // Collect unique model IDs to check
+    // Every model id the Main/Live dropdowns can currently offer, mirroring
+    // the option builders in InstanceSettingsSelectors.
+    const familyForMain = familyChoiceForModel(activeTranscriber);
+    const optionIds = [
+      ...(familyForMain ? modelsForFamilyChoice(familyForMain).map((m) => m.id) : []),
+      ...liveModelsFor(isWhisperCppModel(activeLiveModel) ? 'vulkan' : 'gpu').map((m) => m.id),
+    ];
     const modelIds = [
-      ...new Set([activeTranscriber, normalizedLiveModel, diarizationStatusModelId]),
+      ...new Set([activeTranscriber, normalizedLiveModel, diarizationStatusModelId, ...optionIds]),
     ].filter(
       (id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER && id !== DISABLED_MODEL_SENTINEL,
     );
@@ -1128,9 +1140,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     // Debounce the check
     if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
     modelCacheCheckRef.current = setTimeout(() => {
-      api.docker
-        .checkModelsCached(modelIds)
+      const check = isMetal
+        ? api.mlx?.checkModelsCached
+        : isRunning
+          ? api.docker?.checkModelsCached
+          : api.docker?.checkModelsCachedOffline;
+      if (!check) return;
+      check(modelIds)
         .then((result: Record<string, { exists: boolean; size?: string }>) => {
+          // Merge, never replace: an offline {} (unknown) result must not wipe
+          // known state.
           setModelCacheStatus((prev) => ({ ...prev, ...result }));
         })
         .catch(() => {});
@@ -1139,7 +1158,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     return () => {
       if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
     };
-  }, [activeTranscriber, normalizedLiveModel, diarizationStatusModelId, isRunning]);
+  }, [
+    activeTranscriber,
+    activeLiveModel,
+    normalizedLiveModel,
+    diarizationStatusModelId,
+    isRunning,
+    isMetal,
+  ]);
 
   // ─── Image tag selection (merged remote + local) ─────────────────────────
 
