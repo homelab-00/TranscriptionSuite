@@ -48,6 +48,7 @@ import {
   VULKAN_RECOMMENDED_MODEL,
 } from '../../../src/services/modelSelection';
 import { isWhisperCppModel } from '../../../src/services/modelCapabilities';
+import { buildModelOptionPresentation } from '../../../src/services/modelOptionPresentation';
 import type { RuntimeProfile } from '../../../src/types/runtime';
 
 interface ModelCacheStatus {
@@ -188,16 +189,22 @@ export function InstanceSettingsSelectors({
     return familyChoiceForModel(mainModelSelection);
   }, [mainModelSelection, mainCustomModel]);
 
-  const mainDropdownOptions = useMemo(() => {
-    if (!selectedFamily) return [MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
-    const ids = modelsForFamilyChoice(selectedFamily).map((m) => m.id);
+  const mainPresentation = useMemo(() => {
+    if (!selectedFamily) {
+      return buildModelOptionPresentation([], {}, [
+        MODEL_DISABLED_OPTION,
+        MAIN_MODEL_CUSTOM_OPTION,
+      ]);
+    }
+    const models = modelsForFamilyChoice(selectedFamily);
     // Vulkan GGML: Custom is omitted — only registry GGML files exist on disk
     // for the sidecar to load (matches the pre-redesign dropdown).
-    if (selectedFamily === 'whispercpp') {
-      return [...ids, MODEL_DISABLED_OPTION];
-    }
-    return [...ids, MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
-  }, [selectedFamily]);
+    const tail =
+      selectedFamily === 'whispercpp'
+        ? [MODEL_DISABLED_OPTION]
+        : [MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
+    return buildModelOptionPresentation(models, modelCacheStatus, tail);
+  }, [selectedFamily, modelCacheStatus]);
 
   const liveTiles = useMemo(
     () => liveTilesFor(runtimeProfile, activeTranscriber),
@@ -211,12 +218,14 @@ export function InstanceSettingsSelectors({
     return 'whisper';
   }, [liveModelSelection]);
 
-  const liveDropdownOptions = useMemo(() => {
-    if (activeLiveTile === 'same-as-main' || activeLiveTile === 'disabled') return [];
-    const ids = liveModelsFor(activeLiveTile === 'whispercpp' ? 'vulkan' : 'gpu').map((m) => m.id);
-    if (activeLiveTile === 'whispercpp') return ids;
-    return [...ids, LIVE_MODEL_CUSTOM_OPTION];
-  }, [activeLiveTile]);
+  const livePresentation = useMemo(() => {
+    if (activeLiveTile === 'same-as-main' || activeLiveTile === 'disabled') {
+      return buildModelOptionPresentation([], {}, []);
+    }
+    const models = liveModelsFor(activeLiveTile === 'whispercpp' ? 'vulkan' : 'gpu');
+    const tail = activeLiveTile === 'whispercpp' ? [] : [LIVE_MODEL_CUSTOM_OPTION];
+    return buildModelOptionPresentation(models, modelCacheStatus, tail);
+  }, [activeLiveTile, modelCacheStatus]);
 
   const diarizationTiles = useMemo(
     () => diarizationTilesFor(runtimeProfile, activeTranscriber),
@@ -309,7 +318,10 @@ export function InstanceSettingsSelectors({
           <CustomSelect
             value={mainModelSelection}
             onChange={onMainModelSelectionChange}
-            options={mainDropdownOptions}
+            options={mainPresentation.options}
+            optionLabel={mainPresentation.optionLabel}
+            optionDescription={mainPresentation.optionDescription}
+            optionMeta={mainPresentation.optionMeta}
             accentColor="magenta"
             className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
             disabled={isRunning}
@@ -365,13 +377,16 @@ export function InstanceSettingsSelectors({
           />
         ))}
       </SelectorGroup>
-      {liveDropdownOptions.length > 0 && (
+      {livePresentation.options.length > 0 && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <CustomSelect
               value={liveModelSelection}
               onChange={onLiveModelSelectionChange}
-              options={liveDropdownOptions}
+              options={livePresentation.options}
+              optionLabel={livePresentation.optionLabel}
+              optionDescription={livePresentation.optionDescription}
+              optionMeta={livePresentation.optionMeta}
               className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
               disabled={isRunning}
             />
