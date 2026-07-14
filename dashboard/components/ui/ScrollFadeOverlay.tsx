@@ -7,13 +7,26 @@ interface ScrollFadeOverlayProps {
   edge: ScrollFadeEdge;
   /** True when the container is clipping content past this edge. */
   visible: boolean;
+  /**
+   * How far the bar stops short of the right edge. 'scrollbar' (default) clears the
+   * 8px `.custom-scrollbar` track of a scroller the bar sits inside; 'flush' runs to
+   * the frame edge, for bars framed to a content column whose scrollbar lives outside.
+   */
+  rightInset?: 'scrollbar' | 'flush';
   /** Extra classes, e.g. a container-query variant that disables the bar in a layout. */
   className?: string;
 }
 
+// The corners are rounded to the same 1rem radius as the rounded-2xl cards the bar
+// washes over, so the bar hugs the card silhouette instead of drawing a square band.
 const EDGE_ANCHOR: Record<ScrollFadeEdge, string> = {
-  top: 'top-0',
-  bottom: 'bottom-0',
+  top: 'top-0 rounded-t-2xl',
+  bottom: 'bottom-0 rounded-b-2xl',
+};
+
+const RIGHT_INSET: Record<NonNullable<ScrollFadeOverlayProps['rightInset']>, string> = {
+  scrollbar: 'right-3',
+  flush: 'right-0',
 };
 
 // The gradient and the mask both point away from the edge, so the bar is densest where
@@ -37,15 +50,17 @@ const EDGE_MASK: Record<ScrollFadeEdge, string> = {
  * content, since an absolutely positioned child is laid out against the scrolled box.
  *
  * The right inset clears the 8px `.custom-scrollbar` track so the bar does not wash over
- * the scrollbar thumb.
+ * the scrollbar thumb; pass `rightInset="flush"` when the scrollbar sits outside the
+ * frame the bar is positioned in.
  */
 export const ScrollFadeOverlay: React.FC<ScrollFadeOverlayProps> = ({
   edge,
   visible,
+  rightInset = 'scrollbar',
   className = '',
 }) => (
   <div
-    className={`pointer-events-none absolute right-3 left-0 z-20 h-6 overflow-hidden transition-opacity duration-300 ${EDGE_ANCHOR[edge]} ${visible ? 'opacity-100' : 'opacity-0'} ${className}`}
+    className={`pointer-events-none absolute left-0 z-20 h-6 overflow-hidden transition-opacity duration-300 ${RIGHT_INSET[rightInset]} ${EDGE_ANCHOR[edge]} ${visible ? 'opacity-100' : 'opacity-0'} ${className}`}
   >
     <div
       className={`h-full w-full from-white/10 to-transparent backdrop-blur-sm ${EDGE_GRADIENT[edge]}`}
