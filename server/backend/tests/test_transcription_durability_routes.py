@@ -505,3 +505,82 @@ class TestTranscribeDecodeErrorRouting:
         # The user-facing detail must never carry the server-side temp path.
         assert "/tmp" not in exc.value.detail
         assert "/var/folders" not in exc.value.detail
+
+
+# ── Partial transcripts must be retryable ────────────────────────────────────
+
+
+class TestRetryPartialResult:
+    """A partial transcript is stored with status='completed' + result_json.partial.
+
+    It is deliberately NOT given its own status value: a new status would have to
+    be retrofitted into get_recent_undelivered and get_jobs_for_cleanup, and the
+    failure mode of forgetting either is silent data loss. But an incomplete
+    transcript MUST be retryable, otherwise the user is stuck with a truncated
+    transcript and no recourse.
+    """
+
+    @staticmethod
+    def _job(*, partial: bool, audio_path: str) -> dict:
+        return {
+            "id": "job-partial",
+            "status": "completed",
+            "client_name": "test-client",
+            "audio_path": audio_path,
+            "result_json": json.dumps({"text": "half a transcript", "partial": partial}),
+        }
+
+    def test_retry_accepts_a_partial_completed_job(self, repo, monkeypatch, tmp_path):
+        audio = tmp_path / "saved.wav"
+        audio.write_bytes(b"RIFF")
+        resets: list[str] = []
+        monkeypatch.setattr(
+            repo, "get_job", lambda _: self._job(partial=True, audio_path=str(audio))
+        )
+        monkeypatch.setattr(repo, "reset_for_retry", lambda job_id: resets.append(job_id))
+
+        bg = _BgTasksMock()
+        resp = asyncio.run(
+            transcription.retry_transcription("job-partial", _request_with_state(), bg)
+        )
+
+        assert resp.status_code == 202
+        assert resets == ["job-partial"], "a partial retry must actually reset the job"
+
+    def test_retry_still_refuses_a_fully_complete_job(self, repo, monkeypatch, tmp_path):
+        """The guard must key on `partial`, not merely on having a result_json."""
+        audio = tmp_path / "saved.wav"
+        audio.write_bytes(b"RIFF")
+        monkeypatch.setattr(
+            repo, "get_job", lambda _: self._job(partial=False, audio_path=str(audio))
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                transcription.retry_transcription(
+                    "job-partial", _request_with_state(), _BgTasksMock()
+                )
+            )
+        assert exc.value.status_code == 409
+
+    def test_malformed_result_json_is_not_treated_as_partial(self, repo, monkeypatch, tmp_path):
+        """A corrupt result_json must not accidentally unlock retry on a completed job."""
+        audio = tmp_path / "saved.wav"
+        audio.write_bytes(b"RIFF")
+        monkeypatch.setattr(
+            repo,
+            "get_job",
+            lambda _: {
+                "id": "job-bad",
+                "status": "completed",
+                "client_name": "test-client",
+                "audio_path": str(audio),
+                "result_json": "{not json",
+            },
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                transcription.retry_transcription("job-bad", _request_with_state(), _BgTasksMock())
+            )
+        assert exc.value.status_code == 409

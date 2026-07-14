@@ -24,6 +24,16 @@ export interface TranscriptionResult {
   words: Array<{ word: string; start: number; end: number; probability?: number }>;
   language?: string;
   duration?: number;
+  /**
+   * True when the backend salvaged an INCOMPLETE transcript — the sidecar failed
+   * partway through long audio, or the user cancelled mid-file. The text stops
+   * early, so this must be surfaced: the job is stored as 'completed', and
+   * without a visible banner the user cannot tell a truncated transcript from a
+   * whole one.
+   */
+  partial?: boolean;
+  /** Human-readable reason the transcript is incomplete. */
+  partialReason?: string | null;
 }
 
 export interface TranscriptionState {
@@ -235,6 +245,8 @@ export function useTranscription(): TranscriptionState {
             words: (msg.data?.words as TranscriptionResult['words']) ?? [],
             language: msg.data?.language as string | undefined,
             duration: msg.data?.duration as number | undefined,
+            partial: (msg.data?.partial as boolean | undefined) ?? false,
+            partialReason: (msg.data?.partial_reason as string | null | undefined) ?? null,
           });
           setProcessingProgress(null);
           setStatusTracked('complete');
@@ -260,6 +272,8 @@ export function useTranscription(): TranscriptionState {
                   words: r.words ?? [],
                   language: r.language,
                   duration: r.duration,
+                  partial: r.partial ?? false,
+                  partialReason: r.partial_reason ?? null,
                 });
                 setProcessingProgress(null);
                 setStatusTracked('complete');
@@ -387,6 +401,8 @@ export function useTranscription(): TranscriptionState {
                     words: r.words ?? [],
                     language: r.language,
                     duration: r.duration,
+                    partial: r.partial ?? false,
+                    partialReason: r.partial_reason ?? null,
                   });
                   setProcessingProgress(null);
                   setStatusTracked('complete');

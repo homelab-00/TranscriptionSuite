@@ -172,6 +172,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Session main-result editing (client-only): hand-corrections flow into
   // Copy/Download. Reset whenever a new transcription replaces the text.
   const [editedResultText, setEditedResultText] = useState('');
+  // A partial transcript is persisted as a 'completed' job, so without this the
+  // user cannot tell a truncated transcript from a whole one. Retry is their only
+  // recourse.
+  const [retryingPartial, setRetryingPartial] = useState(false);
   useEffect(() => {
     setEditedResultText(transcription.result?.text ?? '');
   }, [transcription.result?.text]);
@@ -877,6 +881,26 @@ export const SessionView: React.FC<SessionViewProps> = ({
     const seconds = Math.min(60, Math.max(10, raw ?? 20));
     transcription.preview(seconds);
   }, [transcription]);
+
+  // Re-transcribe a truncated result from the job's saved audio. The server
+  // accepts /retry for a partial job even though its status is 'completed'.
+  const handleRetryPartial = useCallback(async () => {
+    const jobId = transcription.jobId;
+    if (!jobId || retryingPartial) return;
+    setRetryingPartial(true);
+    try {
+      await apiClient.retryTranscription(jobId);
+      toast.success('Retrying transcription', {
+        description: 'Re-transcribing from the saved audio.',
+      });
+    } catch (err) {
+      toast.error('Could not retry the transcription', {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setRetryingPartial(false);
+    }
+  }, [transcription.jobId, retryingPartial]);
 
   // Copy transcription result to clipboard (prefers the edited text)
   const handleCopyTranscription = useCallback(() => {
@@ -1775,6 +1799,33 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   {/* Transcription Result */}
                   {transcription.result && (
                     <div className="space-y-2">
+                      {/* Incomplete transcript: the sidecar failed partway through
+                          long audio, or the user cancelled mid-file. The job is
+                          stored as 'completed', so this banner is the only signal
+                          that the text stops early. Warning tone, not error — the
+                          transcript is usable, just truncated. */}
+                      {transcription.result.partial && (
+                        <div
+                          role="alert"
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-300"
+                        >
+                          <span>
+                            This transcript is incomplete and may be missing the end of the
+                            recording
+                            {transcription.result.partialReason
+                              ? ` (${transcription.result.partialReason})`
+                              : ''}
+                            .
+                          </span>
+                          <Button
+                            variant="secondary"
+                            disabled={retryingPartial || !transcription.jobId}
+                            onClick={handleRetryPartial}
+                          >
+                            {retryingPartial ? 'Retrying…' : 'Retry'}
+                          </Button>
+                        </div>
+                      )}
                       <FindReplaceTextEditor
                         value={editedResultText}
                         onChange={setEditedResultText}
