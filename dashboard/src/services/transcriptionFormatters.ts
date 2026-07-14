@@ -173,3 +173,36 @@ export function resolveTranscriptionOutput(
 
   return { outputFilename: `${stem}.txt`, content: renderTxt(transcription) };
 }
+
+export type SessionOutputFormat = 'txt' | 'subtitles' | 'both';
+
+export interface ResolvedOutput {
+  outputFilename: string;
+  content: string;
+}
+
+/**
+ * Resolve one or more output files from an explicit, user-chosen format
+ * (GH-212). Replaces the implicit hideTimestamps/hasSegments inference for
+ * the Session import path. Falls back to .txt when the response carries no
+ * usable segments (nothing to build subtitle cues from).
+ */
+export function resolveTranscriptionOutputs(
+  filename: string,
+  transcription: TranscriptionResponse,
+  options: { outputFormat: SessionOutputFormat; subtitleFormat: 'srt' | 'ass' },
+): ResolvedOutput[] {
+  const stem = filename.replace(/\.[^.]+$/, '');
+  const txt: ResolvedOutput = { outputFilename: `${stem}.txt`, content: renderTxt(transcription) };
+
+  const hasSegments =
+    transcription.segments && transcription.segments.some((s) => s.text.trim().length > 0);
+  if (options.outputFormat === 'txt' || !hasSegments) return [txt];
+
+  const sub: ResolvedOutput = {
+    outputFilename: `${stem}.${options.subtitleFormat}`,
+    content:
+      options.subtitleFormat === 'ass' ? renderAss(transcription, stem) : renderSrt(transcription),
+  };
+  return options.outputFormat === 'both' ? [txt, sub] : [sub];
+}
