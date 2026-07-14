@@ -1292,6 +1292,10 @@ ipcMain.handle('docker:checkModelsCached', async (_event, modelIds: string[]) =>
   return dockerManager.checkModelsCached(modelIds);
 });
 
+ipcMain.handle('docker:checkModelsCachedOffline', async (_event, modelIds: string[]) => {
+  return dockerManager.checkModelsCachedOffline(modelIds);
+});
+
 ipcMain.handle('docker:removeModelCache', async (_event, modelId: string) => {
   return dockerManager.removeModelCache(modelId);
 });

@@ -168,6 +168,9 @@ interface ElectronAPI {
     checkModelsCached: (
       modelIds: string[],
     ) => Promise<Record<string, { exists: boolean; size?: string }>>;
+    checkModelsCachedOffline: (
+      modelIds: string[],
+    ) => Promise<Record<string, { exists: boolean; size?: string }>>;
     removeModelCache: (modelId: string) => Promise<void>;
     downloadModelToCache: (modelId: string) => Promise<void>;
     removeVolume: (name: string) => Promise<string>;

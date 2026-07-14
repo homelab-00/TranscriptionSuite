@@ -3836,6 +3836,77 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, Mod
   return result;
 }
 
+/**
+ * Check model cache state while the app container is stopped (GH-213), by
+ * mounting the models volume read-only into a throwaway container running the
+ * locally-present server image (one cheap `ls`, no `du` — sizes appear once
+ * the container runs). Image resolution mirrors the start-container path:
+ * persisted TAG from the compose .env, falling back to the newest local image.
+ * Returns {} on any failure — callers must treat missing entries as UNKNOWN,
+ * not as "not downloaded".
+ */
+async function checkModelsCachedOffline(
+  modelIds: string[],
+): Promise<Record<string, ModelCacheEntry>> {
+  try {
+    const bin = await runtimeBin();
+    const result: Record<string, ModelCacheEntry> = {};
+
+    const ggmlIds = modelIds.filter((id) => isGgmlFileName(id));
+    const hubIds = modelIds.filter((id) => !isGgmlFileName(id));
+
+    // On vulkan-wsl2 the GGML models live on the Windows host, not in the
+    // Docker volume — same branch as checkModelsCached above.
+    if (readRuntimeProfileFromStore() === 'vulkan-wsl2') {
+      for (const id of ggmlIds) {
+        const exists = await isGgmlModelDownloadedOnHost(id).catch(() => false);
+        result[id] = { exists };
+      }
+      ggmlIds.length = 0;
+    }
+
+    if (ggmlIds.length > 0 || hubIds.length > 0) {
+      const repo = resolveImageRepo(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
+      const tag = readComposeEnvValue('TAG') || (await listImages())[0]?.tag;
+      if (!tag) return result; // no local image to inspect with — leave state unknown
+      const image = `${repo}:${tag}`;
+      const output = await exec(bin, [
+        'run',
+        '--rm',
+        '-v',
+        `${VOLUME_NAMES.models}:/models:ro`,
+        '--entrypoint',
+        '/bin/sh',
+        image,
+        '-c',
+        'ls -1 /models 2>/dev/null; echo "---HUB---"; ls -1 /models/hub 2>/dev/null',
+      ]);
+      const [flatPart, hubPart] = output.split('---HUB---');
+      const flatEntries = new Set(
+        (flatPart ?? '')
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean),
+      );
+      const hubEntries = new Set(
+        hubPart
+          ?.split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean) ?? [],
+      );
+      for (const id of ggmlIds) {
+        result[id] = { exists: flatEntries.has(path.basename(id.trim())) };
+      }
+      for (const id of hubIds) {
+        result[id] = { exists: hubEntries.has(hfCacheDirName(id)) };
+      }
+    }
+    return result;
+  } catch {
+    return {}; // unknown — not "missing"
+  }
+}
+
 // ─── Model Cache Operations ─────────────────────────────────────────────────
 
 /**
@@ -4237,6 +4308,7 @@ export const dockerManager = {
   stopBackgroundLogStream,
   getLogs,
   checkModelsCached,
+  checkModelsCachedOffline,
   removeModelCache,
   downloadModelToCache,
   isGgmlModelDownloaded,
