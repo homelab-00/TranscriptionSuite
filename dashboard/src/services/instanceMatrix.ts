@@ -97,9 +97,13 @@ const FAMILY_META: Record<FamilyChoiceId, FamilyMeta> = {
       requiresToken: true,
     },
   },
-  // One tile covers both Parakeet (ASR-only) and Canary (translating). The tile
-  // advertises the family maximum, so it shows the translation badge; the model
-  // rows below disambiguate which of the two the user actually has selected.
+  // The two NeMo tiles each cover a Parakeet + a Canary; the model rows below
+  // disambiguate which one is actually selected. A merged tile advertises the
+  // family MAXIMUM, so that maximum must be read off the real models rather
+  // than assumed symmetric between the two tiles: the CUDA Canary translates,
+  // but the MLX port of it is ASR-only (backend capabilities.py
+  // supports_english_translation returns False for it). Hence 'multilingual'
+  // here and 'none' on mlx-nemo.
   nemo: {
     label: 'NeMo Models',
     sublabel: 'NVIDIA Parakeet / Canary',
@@ -160,13 +164,15 @@ const FAMILY_META: Record<FamilyChoiceId, FamilyMeta> = {
       requiresToken: false,
     },
   },
+  // Both models behind this tile are ASR-only: the MLX Canary port does not
+  // ship the translation task. See the family-maximum note on nemo above.
   'mlx-nemo': {
     label: 'MLX NeMo',
     sublabel: 'Apple Silicon',
     accent: 'green',
     capabilities: {
       languages: '25',
-      translation: 'multilingual',
+      translation: 'none',
       live: false,
       diarization: 'sortformer',
       requiresToken: false,

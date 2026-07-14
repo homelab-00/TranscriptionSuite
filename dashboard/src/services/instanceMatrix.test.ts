@@ -316,4 +316,16 @@ describe('instanceMatrix: NeMo family merge', () => {
       expect(same.enabled, model).toBe(false);
     }
   });
+
+  // The tile advertises the family maximum, so the maximum has to be real.
+  // The MLX Canary port ships ASR only (backend capabilities.py
+  // supports_english_translation returns False for it), so the MLX tile must
+  // NOT claim translation, even though the CUDA Canary genuinely does.
+  it('advertises translation on the CUDA NeMo tile but not the MLX one', () => {
+    const byId = (runtime: RuntimeProfile) =>
+      new Map(familyChoicesFor(runtime).map((c) => [c.id, c]));
+
+    expect(byId('gpu').get('nemo')!.capabilities.translation).toBe('multilingual');
+    expect(byId('metal').get('mlx-nemo')!.capabilities.translation).toBe('none');
+  });
 });
