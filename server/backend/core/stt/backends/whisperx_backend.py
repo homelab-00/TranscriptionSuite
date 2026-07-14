@@ -211,6 +211,7 @@ class WhisperXBackend(STTBackend):
         translation_target_language: str | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
+        # whisperx.transcribe is a single opaque call; phase-level progress only (GH-211)
         del audio_sample_rate, progress_callback
         if self._model is None:
             raise RuntimeError("WhisperX model is not loaded")
@@ -291,7 +292,6 @@ class WhisperXBackend(STTBackend):
         phase-level progress (transcribe → align → diarize) rather than per-chunk,
         since WhisperX processes the whole file in one pass.
         """
-        del audio_sample_rate
         whisperx, diarize_module = _import_whisperx_modules(include_diarize=True)
         if diarize_module is None:
             raise RuntimeError("WhisperX diarization module failed to import")
@@ -308,13 +308,17 @@ class WhisperXBackend(STTBackend):
                 "Set HUGGINGFACE_TOKEN or HF_TOKEN environment variable."
             )
 
+        # Map coarse phase percentages onto audio seconds so the callback
+        # matches the (processed_seconds, total_seconds) contract (GH-211).
+        total_seconds = int(len(audio) / audio_sample_rate) if audio_sample_rate else 0
+
         def _report(pct: int) -> None:
             # Progress reporting must never be able to discard a completed,
             # irreplaceable transcription result — isolate callback failures.
             if progress_callback is None:
                 return
             try:
-                progress_callback(pct, 100)
+                progress_callback(int(total_seconds * pct / 100), total_seconds)
             except Exception:
                 logger.debug("WhisperX progress_callback raised; ignoring", exc_info=True)
 

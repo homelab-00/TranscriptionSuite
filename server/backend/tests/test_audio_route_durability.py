@@ -753,6 +753,9 @@ class TestIntegratedDiarizationFallback:
             def update_progress(self, current, total):
                 pass
 
+            def set_phase(self, phase):
+                pass
+
             def is_cancelled(self):
                 return False  # the check via callback is irrelevant; backend raises directly
 
