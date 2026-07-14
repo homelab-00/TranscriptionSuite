@@ -12,7 +12,7 @@
  * open" test below is the regression guard for that.
  */
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { ModelManagerModal, type ModelManagerModalProps } from '../ModelManagerModal';
@@ -98,7 +98,7 @@ describe('ModelManagerModal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('never writes to electron-store merely by opening (state-ownership guard)', () => {
+  it('never writes to electron-store merely by opening (state-ownership guard)', async () => {
     const configSet = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).electronAPI = {
@@ -110,10 +110,22 @@ describe('ModelManagerModal', () => {
 
     render(<ModelManagerModal isOpen={true} onClose={vi.fn()} {...baseTabProps()} />);
 
-    // ModelManagerTab must be purely prop-driven: it may read persisted
-    // custom models via config.get, but it must never call config.set on its
-    // own - that would mean it (re)gained a second copy of state that writes
-    // the same keys ServerView owns, exactly the bug this task removed.
+    // The bug this guards against is an ASYNC hydrate-then-persist: the old
+    // ModelManagerView called config.get(key).then(val => ...) and the write
+    // back landed on a microtask. A synchronous assertion runs before that
+    // microtask drains and would sail straight past the bug, so settle every
+    // pending promise first. Several rounds, so a write chained behind more
+    // than one await still lands before the assertion below.
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+
+    // ModelManagerTab may READ persisted custom models via config.get, but it
+    // must never call config.set on its own - a call here means a second copy
+    // of state writing the same keys ServerView owns, exactly the bug this
+    // task removed.
     expect(configSet).not.toHaveBeenCalled();
   });
 });
