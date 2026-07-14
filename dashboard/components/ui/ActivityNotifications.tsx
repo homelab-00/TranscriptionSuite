@@ -6,6 +6,7 @@
  */
 
 import React, { useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import {
   X,
   Container,
@@ -82,7 +83,7 @@ function ActivityCard({ item }: { item: ActivityItem }) {
   const dismiss = useActivityStore((s) => s.dismissActivity);
   const isActive = item.status === 'active';
   const isDownload = item.category === 'download';
-  const showProgress = isActive && isDownload && item.legacyType !== 'model-preload';
+  const showProgress = isActive && isDownload && item.progress !== undefined;
 
   // Auto-dismiss completed notifications. Persistent items are never auto-dismissed.
   useEffect(() => {
@@ -153,7 +154,7 @@ function ActivityCard({ item }: { item: ActivityItem }) {
 // ─── Main widget ─────────────────────────────────────────────────────────────
 
 export const ActivityNotifications: React.FC = () => {
-  const items = useActivityStore(selectVisibleNotifications);
+  const items = useActivityStore(useShallow(selectVisibleNotifications));
 
   if (items.length === 0) return null;
 

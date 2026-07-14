@@ -70,6 +70,9 @@ interface BootstrapDownloadEvent {
   type: DownloadEventType;
   label: string;
   error?: string;
+  progress?: number; // 0-100 (GH-207)
+  downloadedSize?: string; // human-readable, e.g. "312 MB"
+  totalSize?: string;
 }
 
 interface StartupActivityEvent {
