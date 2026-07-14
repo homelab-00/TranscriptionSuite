@@ -4,7 +4,6 @@ import {
   Mic2,
   Book,
   Server,
-  Library,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -182,11 +181,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Server',
       icon: <Server size={20} />,
       status: serverSidebarStatus as 'active' | 'warning' | 'inactive' | 'error',
-    },
-    {
-      id: View.MODEL_MANAGER,
-      label: 'Models',
-      icon: <Library size={20} />,
     },
     {
       id: View.LOGS,

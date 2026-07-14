@@ -9,6 +9,7 @@ import {
   FAMILY_CHOICE_IDS,
   type FamilyChoiceId,
   defaultMainModelFor,
+  defaultModelForFamilyChoice,
   diarizationTilesFor,
   familyChoiceForModel,
   familyChoicesFor,
@@ -27,27 +28,23 @@ const RUNTIMES: RuntimeProfile[] = ['gpu', 'cpu', 'vulkan', 'vulkan-wsl2', 'meta
  */
 const EXPECTED_FAMILY_MATRIX: Record<FamilyChoiceId, Record<RuntimeProfile, boolean>> = {
   whisper: { gpu: true, cpu: true, vulkan: false, 'vulkan-wsl2': false, metal: false },
-  parakeet: { gpu: true, cpu: false, vulkan: false, 'vulkan-wsl2': false, metal: false },
-  canary: { gpu: true, cpu: false, vulkan: false, 'vulkan-wsl2': false, metal: false },
+  nemo: { gpu: true, cpu: false, vulkan: false, 'vulkan-wsl2': false, metal: false },
   sensevoice: { gpu: true, cpu: true, vulkan: false, 'vulkan-wsl2': false, metal: false },
   vibevoice: { gpu: true, cpu: true, vulkan: false, 'vulkan-wsl2': false, metal: false },
   whispercpp: { gpu: false, cpu: false, vulkan: true, 'vulkan-wsl2': true, metal: false },
   'mlx-whisper': { gpu: false, cpu: false, vulkan: false, 'vulkan-wsl2': false, metal: true },
-  'mlx-parakeet': { gpu: false, cpu: false, vulkan: false, 'vulkan-wsl2': false, metal: true },
-  'mlx-canary': { gpu: false, cpu: false, vulkan: false, 'vulkan-wsl2': false, metal: true },
+  'mlx-nemo': { gpu: false, cpu: false, vulkan: false, 'vulkan-wsl2': false, metal: true },
   'mlx-vibevoice': { gpu: false, cpu: false, vulkan: false, 'vulkan-wsl2': false, metal: true },
 };
 
 const REPRESENTATIVE_MODEL: Record<FamilyChoiceId, string> = {
   whisper: 'Systran/faster-whisper-large-v3',
-  parakeet: 'nvidia/parakeet-tdt-0.6b-v3',
-  canary: 'nvidia/canary-1b-v2',
+  nemo: 'nvidia/parakeet-tdt-0.6b-v3',
   sensevoice: 'iic/SenseVoiceSmall',
   vibevoice: 'microsoft/VibeVoice-ASR',
   whispercpp: 'ggml-large-v3-turbo-q8_0.bin',
   'mlx-whisper': 'mlx-community/whisper-large-v3-turbo-asr-fp16',
-  'mlx-parakeet': 'mlx-community/parakeet-tdt-0.6b-v3',
-  'mlx-canary': 'eelcor/canary-1b-v2-mlx',
+  'mlx-nemo': 'mlx-community/parakeet-tdt-0.6b-v3',
   'mlx-vibevoice': 'mlx-community/VibeVoice-ASR-4bit',
 };
 
@@ -71,11 +68,9 @@ describe('instanceMatrix: familyChoicesFor', () => {
     }
   }
 
-  it('NeMo families on cpu carry an NVIDIA reason (mirrors applyCpuModelDefaults)', () => {
+  it('the NeMo family on cpu carries an NVIDIA reason (mirrors applyCpuModelDefaults)', () => {
     const choices = familyChoicesFor('cpu');
-    for (const id of ['parakeet', 'canary'] as const) {
-      expect(choices.find((c) => c.id === id)?.reason).toMatch(/NVIDIA/i);
-    }
+    expect(choices.find((c) => c.id === 'nemo')?.reason).toMatch(/NVIDIA/i);
   });
 
   it('sensevoice/vibevoice on cpu warn about speed but stay selectable', () => {
@@ -176,7 +171,7 @@ describe('instanceMatrix: liveTilesFor (full cross-product)', () => {
   }
 
   it('same-as-main explains why it is unavailable for non-live mains', () => {
-    const tiles = liveTilesFor('gpu', REPRESENTATIVE_MODEL.parakeet);
+    const tiles = liveTilesFor('gpu', REPRESENTATIVE_MODEL.nemo);
     const same = tiles.find((t) => t.id === 'same-as-main')!;
     expect(same.enabled).toBe(false);
     expect(same.reason).toBeTruthy();
@@ -269,5 +264,68 @@ describe('instanceMatrix: defaultMainModelFor', () => {
       const choice = familyChoiceForModel(model)!;
       expect(EXPECTED_FAMILY_MATRIX[choice][runtime], `${runtime} → ${model}`).toBe(true);
     }
+  });
+});
+
+describe('instanceMatrix: NeMo family merge', () => {
+  const PARAKEET = 'nvidia/parakeet-tdt-0.6b-v3';
+  const CANARY = 'nvidia/canary-1b-v2';
+  const MLX_PARAKEET = 'mlx-community/parakeet-tdt-0.6b-v3';
+  const MLX_CANARY = 'eelcor/canary-1b-v2-mlx';
+
+  it('classifies both NVIDIA NeMo models into the single nemo family', () => {
+    expect(familyChoiceForModel(PARAKEET)).toBe('nemo');
+    expect(familyChoiceForModel(CANARY)).toBe('nemo');
+  });
+
+  it('classifies both MLX NeMo ports into the single mlx-nemo family', () => {
+    expect(familyChoiceForModel(MLX_PARAKEET)).toBe('mlx-nemo');
+    expect(familyChoiceForModel(MLX_CANARY)).toBe('mlx-nemo');
+  });
+
+  it('offers both concrete NeMo models behind the merged tile', () => {
+    const ids = modelsForFamilyChoice('nemo').map((m) => m.id);
+    expect(ids).toContain(PARAKEET);
+    expect(ids).toContain(CANARY);
+  });
+
+  it('defaults the merged tiles to Parakeet, not Canary', () => {
+    expect(defaultModelForFamilyChoice('nemo')).toBe(MAIN_RECOMMENDED_MODEL);
+    expect(defaultModelForFamilyChoice('mlx-nemo')).toBe('mlx-community/parakeet-tdt-0.6b-v3');
+  });
+
+  // The merge is only safe because Parakeet and Canary are matrix-identical.
+  // If a future change makes them diverge on live or diarization, these fail.
+  it('gives Parakeet and Canary mains identical live tiles', () => {
+    expect(liveTilesFor('gpu', PARAKEET)).toEqual(liveTilesFor('gpu', CANARY));
+  });
+
+  it('gives Parakeet and Canary mains identical diarization tiles', () => {
+    expect(diarizationTilesFor('gpu', PARAKEET)).toEqual(diarizationTilesFor('gpu', CANARY));
+  });
+
+  it('gives MLX Parakeet and MLX Canary mains identical diarization tiles', () => {
+    expect(diarizationTilesFor('metal', MLX_PARAKEET)).toEqual(
+      diarizationTilesFor('metal', MLX_CANARY),
+    );
+  });
+
+  it('keeps neither NeMo model live-capable (backend live.py gate)', () => {
+    for (const model of [PARAKEET, CANARY, MLX_PARAKEET, MLX_CANARY]) {
+      const same = liveTilesFor('gpu', model).find((t) => t.id === 'same-as-main')!;
+      expect(same.enabled, model).toBe(false);
+    }
+  });
+
+  // The tile advertises the family maximum, so the maximum has to be real.
+  // The MLX Canary port ships ASR only (backend capabilities.py
+  // supports_english_translation returns False for it), so the MLX tile must
+  // NOT claim translation, even though the CUDA Canary genuinely does.
+  it('advertises translation on the CUDA NeMo tile but not the MLX one', () => {
+    const byId = (runtime: RuntimeProfile) =>
+      new Map(familyChoicesFor(runtime).map((c) => [c.id, c]));
+
+    expect(byId('gpu').get('nemo')!.capabilities.translation).toBe('multilingual');
+    expect(byId('metal').get('mlx-nemo')!.capabilities.translation).toBe('none');
   });
 });
