@@ -4,7 +4,6 @@ import {
   DIARIZATION_BUILTIN_LABEL,
   DIARIZATION_CAMPP_OPTION,
   DIARIZATION_DEFAULT_MODEL,
-  DIARIZATION_MODEL_CUSTOM_OPTION,
   DIARIZATION_SORTFORMER_OPTION,
   FAMILY_CHOICE_IDS,
   type FamilyChoiceId,
@@ -216,8 +215,8 @@ describe('instanceMatrix: diarizationTilesFor (full cross-product)', () => {
         expect(sortformer.storedValue).toBe(DIARIZATION_SORTFORMER_OPTION);
         if (runtime !== 'metal') expect(sortformer.reason).toBe('Requires Metal');
 
-        expect(byId.get('custom')!.enabled).toBe(true);
-        expect(byId.get('custom')!.storedValue).toBe(DIARIZATION_MODEL_CUSTOM_OPTION);
+        // The custom-repo tile was removed entirely.
+        expect(tiles.some((t) => t.label === 'Custom')).toBe(false);
 
         // Exactly one default, and it matches the engine hierarchy.
         const defaults = tiles.filter((t) => t.isDefault);
@@ -233,7 +232,6 @@ describe('instanceMatrix: diarizationTilesFor (full cross-product)', () => {
     expect(DIARIZATION_CAMPP_OPTION).toBe('CAM++ (fast, built-in)');
     expect(DIARIZATION_SORTFORMER_OPTION).toBe('Sortformer (Metal; ≤ 4 speakers)');
     expect(DIARIZATION_DEFAULT_MODEL).toBe('pyannote/speaker-diarization-community-1');
-    expect(DIARIZATION_MODEL_CUSTOM_OPTION).toBe('Custom (HuggingFace repo)');
     expect(DIARIZATION_BUILTIN_LABEL).toBeTruthy();
   });
 

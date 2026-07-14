@@ -1,24 +1,13 @@
 import React, { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { Button } from '../ui/Button';
 import { ModelPickerRow } from './ModelPickerRow';
 import type { ModelCacheStatus } from '../../src/hooks/useModelCache';
 import type { ModelInfo } from '../../src/services/modelRegistry';
 
-interface CustomOptionConfig {
-  /** Sentinel stored in the selection when the custom card is chosen. */
-  value: string;
-  /** Current free-text repo (e.g. "owner/model-name"). */
-  text: string;
-  onTextChange: (value: string) => void;
-}
-
 interface ModelCardPickerProps {
   models: ModelInfo[];
-  /** Currently selected value: a model id or the custom sentinel. */
+  /** Currently selected model id. */
   selection: string;
-  /** When set, a "Custom (HuggingFace repo)" card closes the list. */
-  custom?: CustomOptionConfig;
   /** Badge on the selected card, naming its role (e.g. "Main", "Live"). */
   badgeLabel: string;
   isRunning: boolean;
@@ -33,12 +22,11 @@ interface ModelCardPickerProps {
 /**
  * A collapsible list of model cards. Collapsed (the default) it shows only a
  * summary of the current selection; clicking it reveals one ModelPickerRow
- * card per model plus, optionally, a custom HuggingFace repo card.
+ * card per model.
  */
 export function ModelCardPicker({
   models,
   selection,
-  custom,
   badgeLabel,
   isRunning,
   canManage,
@@ -50,15 +38,8 @@ export function ModelCardPicker({
 }: ModelCardPickerProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const isCustomSelected = custom !== undefined && selection === custom.value;
   const selectedModel = models.find((model) => model.id === selection);
-  const summaryName = selectedModel
-    ? selectedModel.displayName
-    : isCustomSelected
-      ? custom.text
-        ? `Custom: ${custom.text}`
-        : 'Custom (HuggingFace repo)'
-      : 'Select a model';
+  const summaryName = selectedModel ? selectedModel.displayName : 'Select a model';
 
   const summaryDotClass = downloadingIds.has(selection)
     ? 'animate-pulse bg-blue-400 shadow-[0_0_6px_rgba(96,165,250,0.6)]'
@@ -78,7 +59,7 @@ export function ModelCardPicker({
         <div className="flex min-w-0 items-center gap-2.5">
           <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${summaryDotClass}`} />
           <span className="truncate text-sm font-medium text-white">{summaryName}</span>
-          {(selectedModel || isCustomSelected) && (
+          {selectedModel && (
             <span className="bg-accent-cyan/15 text-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-semibold">
               {badgeLabel}
             </span>
@@ -111,51 +92,6 @@ export function ModelCardPicker({
               onRemove={onRemove}
             />
           ))}
-
-          {custom && (
-            <div
-              className={`rounded-lg border px-4 py-3 transition-colors duration-200 ${
-                isCustomSelected
-                  ? 'border-accent-magenta/60 bg-white/10'
-                  : 'border-white/10 bg-white/5 hover:bg-white/10'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="truncate text-sm font-medium text-white">
-                    Custom (HuggingFace repo)
-                  </span>
-                  {isCustomSelected && (
-                    <span className="bg-accent-cyan/15 text-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-semibold">
-                      {badgeLabel}
-                    </span>
-                  )}
-                </div>
-                {!isCustomSelected && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    aria-label="Select custom HuggingFace repo"
-                    onClick={() => onSelectionChange(custom.value)}
-                    disabled={isRunning}
-                  >
-                    Select
-                  </Button>
-                )}
-              </div>
-
-              {isCustomSelected && (
-                <input
-                  type="text"
-                  value={custom.text}
-                  onChange={(e) => custom.onTextChange(e.target.value)}
-                  placeholder="owner/model-name"
-                  disabled={isRunning}
-                  className={`focus:ring-accent-magenta mt-2 h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1 ${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-                />
-              )}
-            </div>
-          )}
         </div>
       )}
     </div>
