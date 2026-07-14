@@ -215,6 +215,7 @@ class TestProgress:
             "current": 3,
             "total": 10,
             "message": "processing chunk 3",
+            "phase": None,
         }
 
     def test_clear_progress(self):
@@ -237,6 +238,46 @@ class TestProgress:
         assert status["progress"]["message"] == ""
 
 
+# ── set_phase / started_at ────────────────────────────────────────────────
+
+
+class TestPhaseAndStartedAt:
+    def test_set_phase_is_sticky_across_progress_updates(self):
+        tracker = TranscriptionJobTracker()
+        ok, job_id, _ = tracker.try_start_job("alice")
+        assert ok
+
+        tracker.set_phase("transcribing")
+        tracker.update_progress(30, 300)
+
+        status = tracker.get_status()
+        assert status["progress"]["phase"] == "transcribing"
+        assert status["progress"]["current"] == 30
+
+        tracker.set_phase("diarizing")
+        assert tracker.get_status()["progress"]["phase"] == "diarizing"
+
+    def test_started_at_set_on_start_and_cleared_on_end(self):
+        tracker = TranscriptionJobTracker()
+        ok, job_id, _ = tracker.try_start_job("alice")
+        assert ok
+
+        started = tracker.get_status()["started_at"]
+        assert isinstance(started, float) and started > 0
+
+        tracker.end_job(job_id)
+        assert tracker.get_status()["started_at"] is None
+        assert tracker.get_status()["progress"] is None
+
+    def test_update_progress_before_set_phase_has_null_phase(self):
+        tracker = TranscriptionJobTracker()
+        tracker.try_start_job("alice")
+
+        tracker.update_progress(1, 10)
+
+        assert tracker.get_status()["progress"]["phase"] is None
+
+
 # ── get_status ────────────────────────────────────────────────────────────
 
 
@@ -252,6 +293,7 @@ class TestGetStatus:
             "active_job_id": None,
             "cancellation_requested": False,
             "progress": None,
+            "started_at": None,
             "result": None,
         }
 
