@@ -2,7 +2,7 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
-// headlessui — same mock convention as ServerView.test.tsx: render-prop
+// headlessui: same mock convention as ServerView.test.tsx: render-prop
 // children are invoked with neutral defaults so option text lands in the DOM.
 vi.mock('@headlessui/react', () => {
   const renderChildren = (

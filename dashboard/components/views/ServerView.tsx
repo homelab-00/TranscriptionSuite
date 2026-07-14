@@ -1116,8 +1116,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   // Check model download cache whenever the active model names or container state
   // change. GH-213: covers every option the selectors can show (not just the 3
-  // active ids), and keeps working while the container is STOPPED — exactly when
-  // the selectors are editable — via the offline volume check. Metal has no
+  // active ids), and keeps working while the container is STOPPED, exactly when
+  // the selectors are editable, via the offline volume check. Metal has no
   // container at all, so it routes through the MLX host-filesystem checker.
   useEffect(() => {
     const api = (window as any).electronAPI;

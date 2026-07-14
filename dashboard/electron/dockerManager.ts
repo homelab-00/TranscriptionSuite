@@ -3839,10 +3839,10 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, Mod
 /**
  * Check model cache state while the app container is stopped (GH-213), by
  * mounting the models volume read-only into a throwaway container running the
- * locally-present server image (one cheap `ls`, no `du` — sizes appear once
+ * locally-present server image (one cheap `ls`, no `du`; sizes appear once
  * the container runs). Image resolution mirrors the start-container path:
  * persisted TAG from the compose .env, falling back to the newest local image.
- * Returns {} on any failure — callers must treat missing entries as UNKNOWN,
+ * Returns {} on any failure; callers must treat missing entries as UNKNOWN,
  * not as "not downloaded".
  */
 async function checkModelsCachedOffline(
@@ -3856,7 +3856,7 @@ async function checkModelsCachedOffline(
     const hubIds = modelIds.filter((id) => !isGgmlFileName(id));
 
     // On vulkan-wsl2 the GGML models live on the Windows host, not in the
-    // Docker volume — same branch as checkModelsCached above.
+    // Docker volume, same branch as checkModelsCached above.
     if (readRuntimeProfileFromStore() === 'vulkan-wsl2') {
       for (const id of ggmlIds) {
         const exists = await isGgmlModelDownloadedOnHost(id).catch(() => false);
@@ -3868,7 +3868,7 @@ async function checkModelsCachedOffline(
     if (ggmlIds.length > 0 || hubIds.length > 0) {
       const repo = resolveImageRepo(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
       const tag = readComposeEnvValue('TAG') || (await listImages())[0]?.tag;
-      if (!tag) return result; // no local image to inspect with — leave state unknown
+      if (!tag) return result; // no local image to inspect with; leave state unknown
       const image = `${repo}:${tag}`;
       const output = await exec(bin, [
         'run',
@@ -3903,7 +3903,7 @@ async function checkModelsCachedOffline(
     }
     return result;
   } catch {
-    return {}; // unknown — not "missing"
+    return {}; // unknown, not "missing"
   }
 }
 

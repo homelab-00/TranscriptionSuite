@@ -31,7 +31,7 @@ describe('buildModelOptionPresentation (GH-213)', () => {
   it('exists:false → "Not downloaded" with size hint; unknown (no entry) → size hint only', () => {
     const p = buildModelOptionPresentation(models, { 'a/model-big': { exists: false } }, []);
     expect(p.optionMeta['a/model-big'].badge).toBe('Not downloaded (~3 GB)');
-    // cache state unknown — never claim "Not downloaded"
+    // cache state unknown, never claim "Not downloaded"
     expect(p.optionMeta['b/model-small'].badge).toBe('~500 MB');
   });
 
