@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.4.1
+  spec_version: 1.4.2
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -19,6 +19,7 @@ meta:
       - components/__tests__/ServerView.test.tsx
       - components/__tests__/SessionImportTab.canary-language.test.tsx
       - components/__tests__/SessionImportTab.diarization-gate.test.tsx
+      - components/__tests__/SessionImportTab.output-format.test.tsx
       - components/__tests__/SessionView.canary-language.test.tsx
       - components/__tests__/SessionView.test.tsx
       - components/__tests__/StartupActivityInline.test.tsx
@@ -108,7 +109,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-07-14T13:47:48.029Z
+    generated_at: 2026-07-14T14:09:56.454Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:

@@ -30,6 +30,7 @@ import {
   selectIsProcessing,
 } from '../../src/stores/importQueueStore';
 import type { UnifiedImportJob } from '../../src/stores/importQueueStore';
+import type { SessionOutputFormat } from '../../src/services/transcriptionFormatters';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useLanguages } from '../../src/hooks/useLanguages';
 import { apiClient } from '../../src/api/client';
@@ -88,6 +89,7 @@ export const SessionImportTab: React.FC = () => {
   const [outputDir, setOutputDir] = useState('');
   const [diarization, setDiarization] = useState(true);
   const [diarizedFormat, setDiarizedFormat] = useState<'srt' | 'ass'>('srt');
+  const [outputFormat, setOutputFormat] = useState<SessionOutputFormat>('subtitles');
   const [wordTimestamps, setWordTimestamps] = useState(true);
   const [hideTimestamps, setHideTimestamps] = useState(false);
   const [parallelDiarization, setParallelDiarization] = useState<boolean>(false);
@@ -147,6 +149,17 @@ export const SessionImportTab: React.FC = () => {
       const electronAPI = (window as any).electronAPI;
 
       getConfig<boolean>('output.hideTimestamps').then((v) => setHideTimestamps(v ?? false));
+
+      // GH-212: explicit output format. Default preserves pre-selector
+      // behavior: txt when the global hideTimestamps was on, else subtitles.
+      getConfig<SessionOutputFormat>('sessionImport.outputFormat').then(async (v) => {
+        if (v) {
+          setOutputFormat(v);
+          return;
+        }
+        const hide = (await getConfig<boolean>('output.hideTimestamps')) ?? false;
+        setOutputFormat(hide ? 'txt' : 'subtitles');
+      });
 
       // Try to load persisted output dir from config
       const savedDir = await getConfig('sessionImport.outputDir');
@@ -229,6 +242,7 @@ export const SessionImportTab: React.FC = () => {
     updateSessionConfig({
       outputDir,
       diarizedFormat,
+      outputFormat,
       hideTimestamps,
       enableDiarization: effectiveDiarization,
       enableWordTimestamps: wordTimestamps,
@@ -239,6 +253,7 @@ export const SessionImportTab: React.FC = () => {
   }, [
     outputDir,
     diarizedFormat,
+    outputFormat,
     hideTimestamps,
     effectiveDiarization,
     wordTimestamps,
@@ -457,7 +472,7 @@ export const SessionImportTab: React.FC = () => {
   const statusLabel = (job: UnifiedImportJob) => {
     switch (job.status) {
       case 'pending':
-        return 'Queued';
+        return job.plannedFormat ? `Queued (${job.plannedFormat})` : 'Queued';
       case 'processing': {
         const progress = (admin.status?.models as any)?.job_tracker?.progress;
         if (progress?.total > 0) {
@@ -777,15 +792,55 @@ export const SessionImportTab: React.FC = () => {
       <div className="flex items-start gap-2 rounded-lg bg-white/5 px-3 py-2.5">
         <Info size={14} className="mt-0.5 shrink-0 text-slate-500" />
         <p className="text-xs leading-relaxed text-slate-500">
-          {hideTimestamps
-            ? 'Transcriptions are saved as .txt (plain text) to the output folder. Timestamp output is disabled in Settings.'
-            : 'Transcriptions are saved as .txt (plain text) or .srt/.ass (subtitles with speaker labels when diarization is enabled) to the output folder.'}
+          {outputFormat === 'txt'
+            ? 'Transcriptions are saved as .txt (plain text) to the output folder.'
+            : outputFormat === 'both'
+              ? `Transcriptions are saved as .txt plus .${diarizedFormat} to the output folder.`
+              : `Transcriptions are saved as .${diarizedFormat} subtitles to the output folder.`}
         </p>
       </div>
 
       {/* Import Options */}
       <GlassCard title="Import Options">
         <div className="space-y-4">
+          <div className="flex items-center justify-between gap-4 pl-1">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white">Output Format</p>
+              <p className="text-xs text-slate-400">Applies to every imported file</p>
+            </div>
+            <select
+              aria-label="Output Format"
+              value={outputFormat}
+              onChange={(e) => {
+                const v = e.target.value as SessionOutputFormat;
+                setOutputFormat(v);
+                void setConfig('sessionImport.outputFormat', v);
+              }}
+              className="focus:border-accent-cyan/50 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white scheme-dark outline-none"
+            >
+              <option value="txt">Plain text (.txt)</option>
+              <option value="subtitles">Subtitles (.srt/.ass)</option>
+              <option value="both">Both</option>
+            </select>
+          </div>
+          {outputFormat !== 'txt' && (
+            <div className="flex items-center justify-between gap-4 pl-1">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-white">Subtitle format</p>
+                <p className="text-xs text-slate-400">File type for subtitle output</p>
+              </div>
+              <select
+                aria-label="Subtitle format"
+                value={diarizedFormat}
+                onChange={(e) => setDiarizedFormat(e.target.value as 'srt' | 'ass')}
+                className="focus:border-accent-cyan/50 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white scheme-dark outline-none"
+              >
+                <option value="srt">.srt</option>
+                <option value="ass">.ass</option>
+              </select>
+            </div>
+          )}
+          <div className="h-px bg-white/5"></div>
           <AppleSwitch
             checked={effectiveDiarization}
             onChange={handleDiarizationChange}
@@ -796,28 +851,11 @@ export const SessionImportTab: React.FC = () => {
                 ? diarizationFeature?.reason === 'token_missing'
                   ? 'Unavailable: no HuggingFace token configured. Add one in Settings, then restart the server.'
                   : 'Unavailable on this server.'
-                : hideTimestamps
-                  ? 'Identify distinct speakers — output saved as .txt (timestamps disabled in Settings)'
-                  : 'Identify distinct speakers — output saved as a subtitle file with speaker labels'
+                : 'Identify distinct speakers. Speaker labels appear in subtitle output; plain text output is unaffected.'
             }
           />
           {effectiveDiarization && (
             <>
-              <div className="h-px bg-white/5"></div>
-              <div className="flex items-center justify-between gap-4 pl-1">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-white">Output Format</p>
-                  <p className="text-xs text-slate-400">Subtitle format for diarized output</p>
-                </div>
-                <select
-                  value={diarizedFormat}
-                  onChange={(e) => setDiarizedFormat(e.target.value as 'srt' | 'ass')}
-                  className="focus:border-accent-cyan/50 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white scheme-dark outline-none"
-                >
-                  <option value="srt">.srt</option>
-                  <option value="ass">.ass</option>
-                </select>
-              </div>
               <div className="h-px bg-white/5"></div>
               <div className="pl-1">
                 <AppleSwitch
