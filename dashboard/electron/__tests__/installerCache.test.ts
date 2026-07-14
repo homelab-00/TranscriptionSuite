@@ -24,6 +24,25 @@ import {
 // expect the happy-path return must therefore write at least 1 MB of bytes.
 const HEALTHY_BYTES = Buffer.alloc(MIN_CACHED_INSTALLER_BYTES, 'a');
 
+/**
+ * Assert two Buffers hold identical bytes.
+ *
+ * Do NOT use `expect(buf).toEqual(otherBuf)` on the 1 MB fixtures above. Vitest's
+ * deep-equal walks a Buffer element by element, so a single such assertion costs
+ * ~3 s for 1,000,000 bytes — enough to push a test that does nothing else to
+ * ~4.3 s, against vitest's 5 s default `testTimeout`. Those tests then passed in
+ * isolation but failed roughly one full-suite run in three, whenever parallel load
+ * starved the worker for a few hundred ms.
+ *
+ * `Buffer.equals()` is a memcmp: the same comparison in ~1 ms. The byteLength check
+ * runs first so a size mismatch still reports concrete numbers rather than
+ * "expected false to be true".
+ */
+function expectBytesEqual(actual: Buffer, expected: Buffer): void {
+  expect(actual.byteLength).toBe(expected.byteLength);
+  expect(actual.equals(expected)).toBe(true);
+}
+
 describe('cachePreviousInstaller', () => {
   let tmp: string;
 
@@ -49,7 +68,7 @@ describe('cachePreviousInstaller', () => {
 
     expect(result.ok).toBe(true);
     expect(result.cachedPath).toBeDefined();
-    expect(readFileSync(result.cachedPath as string)).toEqual(HEALTHY_BYTES);
+    expectBytesEqual(readFileSync(result.cachedPath as string), HEALTHY_BYTES);
     expect(readdirSync(path.join(userData, 'previous-installer'))).toHaveLength(1);
   });
 
@@ -312,7 +331,7 @@ describe('cachePreviousInstaller symlink-collision defense', () => {
     // No filesystem mutation: source dir contents unchanged.
     expect(readdirSync(sourceDir)).toEqual(sourceContentsBefore);
     // Source AppImage still intact.
-    expect(readFileSync(src)).toEqual(HEALTHY_BYTES);
+    expectBytesEqual(readFileSync(src), HEALTHY_BYTES);
   });
 
   it('proceeds normally when previous-installer is a regular dir (not a symlink to source)', async () => {
