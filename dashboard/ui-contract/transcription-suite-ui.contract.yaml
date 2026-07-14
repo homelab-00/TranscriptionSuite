@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.3.3
+  spec_version: 1.4.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -84,6 +84,7 @@ meta:
       - components/views/__tests__/AudioNoteModal.auto-actions.test.tsx
       - components/views/__tests__/GpuDiagnosticModal.test.tsx
       - components/views/__tests__/GpuHealthCard.test.tsx
+      - components/views/__tests__/ModelManagerModal.test.tsx
       - components/views/AboutModal.tsx
       - components/views/AddNoteModal.tsx
       - components/views/AudioNoteModal.tsx
@@ -93,8 +94,8 @@ meta:
       - components/views/GpuHealthCard.tsx
       - components/views/LiveTranscriptView.tsx
       - components/views/LogsView.tsx
+      - components/views/ModelManagerModal.tsx
       - components/views/ModelManagerTab.tsx
-      - components/views/ModelManagerView.tsx
       - components/views/NotebookView.tsx
       - components/views/server/__tests__/MainModelPicker.test.tsx
       - components/views/server/InstanceSettingsSelectors.tsx
@@ -110,7 +111,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-07-14T13:54:52.384Z
+    generated_at: 2026-07-14T14:25:21.542Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -381,6 +382,7 @@ foundation:
         - h-[85%]
         - h-[85vh]
         - max-h-[80vh]
+        - max-h-[85vh]
         - max-h-[90vh]
         - min-h-[20rem]
         - min-h-[38px]
@@ -500,6 +502,7 @@ utility_allowlist:
   exact_classes:
     - -bottom-1
     - -left-4.25
+    - -mt-0.5
     - -mt-1
     - -mt-12
     - -right-1
@@ -1050,7 +1053,6 @@ utility_allowlist:
     - slide-in-from-bottom-4
     - slide-in-from-right-4
     - slide-in-from-right-8
-    - slide-in-from-top-2
     - slide-in-from-top-4
     - sm:block
     - sm:grid-cols-3
@@ -1219,6 +1221,7 @@ utility_allowlist:
     - h-[85%]
     - h-[85vh]
     - max-h-[80vh]
+    - max-h-[85vh]
     - max-h-[90vh]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[20rem]
@@ -2314,8 +2317,8 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  ModelManagerTab:
-    file: components/views/ModelManagerTab.tsx
+  ModelManagerModal:
+    file: components/views/ModelManagerModal.tsx
     required_tokens:
       - colors
       - motion
@@ -2331,8 +2334,8 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  ModelManagerView:
-    file: components/views/ModelManagerView.tsx
+  ModelManagerTab:
+    file: components/views/ModelManagerTab.tsx
     required_tokens:
       - colors
       - motion

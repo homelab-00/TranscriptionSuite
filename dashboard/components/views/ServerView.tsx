@@ -36,6 +36,7 @@ import { IntelIcon } from '../ui/icons/IntelIcon';
 import { AppleIcon } from '../ui/icons/AppleIcon';
 import { GpuHealthCard } from './GpuHealthCard';
 import { GpuDiagnosticModal, type GpuDiagnosticResultProp } from './GpuDiagnosticModal';
+import { ModelManagerModal } from './ModelManagerModal';
 import { InstanceSettingsSelectors } from './server/InstanceSettingsSelectors';
 import { RemoteConnectionCard } from './server/RemoteConnectionCard';
 
@@ -43,6 +44,8 @@ import { useActivityStore } from '../../src/stores/activityStore';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useServerStatus } from '../../src/hooks/useServerStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
+import { useModelCache } from '../../src/hooks/useModelCache';
+import { useModelDownloads } from '../../src/hooks/useModelDownloads';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { formatDateDMY, compareVersionTags } from '../../src/services/versionUtils';
@@ -77,6 +80,7 @@ import {
   defaultMainModelFor,
   familyChoiceForModel,
   isFamilyChoiceEnabledFor,
+  modelsForFamilyChoice,
 } from '../../src/services/instanceMatrix';
 import { isRuntimeProfile, type RuntimeProfile } from '../../src/types/runtime';
 
@@ -257,10 +261,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [diarizationHydrated, setDiarizationHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
 
-  // Model download cache state (checks Docker volume for HF model dirs)
-  const [modelCacheStatus, setModelCacheStatus] = useState<
-    Record<string, { exists: boolean; size?: string }>
-  >({});
+  // Model download cache check debounce timer. The cache state itself lives
+  // in useModelCache (wired below, once isRunning/isMetal are defined) so it
+  // has exactly one owner shared with the Model Manager modal.
   const modelCacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Runtime profile (persisted in electron-store)
@@ -693,6 +696,42 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const isRunning = containerStatus.running;
   const isRunningAndHealthy = isRunning && containerStatus.health === 'healthy';
 
+  // Single owner of the model-download cache and in-flight-download state,
+  // shared between the Instance Settings selectors and the Model Manager
+  // modal so the two surfaces never disagree about what is downloading.
+  const { modelCacheStatus, refreshCacheStatus } = useModelCache({ isRunning, isMetal });
+
+  // Host-side GGML cache status (vulkan-wsl2 only - models live on the
+  // Windows filesystem, outside the Docker volume).
+  const [hostCacheStatus, setHostCacheStatus] = useState<Record<string, { exists: boolean }>>({});
+  const isVulkanWsl2 = runtimeProfile === 'vulkan-wsl2';
+
+  const refreshHostCacheStatus = useCallback(async (ids: readonly string[]) => {
+    const api = (window as any).electronAPI;
+    if (!api?.docker?.isGgmlModelDownloadedOnHost) return;
+    const entries = await Promise.all(
+      ids.map(async (id) => {
+        const exists = await api.docker.isGgmlModelDownloadedOnHost(id).catch(() => false);
+        return [id, { exists }] as const;
+      }),
+    );
+    setHostCacheStatus((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+  }, []);
+
+  useEffect(() => {
+    if (!isVulkanWsl2) return;
+    void refreshHostCacheStatus(GGML_MODELS.map((m) => m.id));
+  }, [isVulkanWsl2, refreshHostCacheStatus]);
+
+  const { downloadingIds, downloadModel, removeModel } = useModelDownloads({
+    isMetal,
+    runtimeProfile,
+    refreshCacheStatus,
+    refreshHostCacheStatus,
+  });
+
+  const [isModelManagerOpen, setIsModelManagerOpen] = useState(false);
+
   // MLX (native process) server state
   type MLXStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
   const [mlxStatus, setMlxStatus] = useState<MLXStatus>('stopped');
@@ -1113,9 +1152,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   // Check model download cache whenever the active model names or container state change
   useEffect(() => {
-    const api = (window as any).electronAPI;
-    if (!api?.docker?.checkModelsCached || !isRunning) return;
-
     // Collect unique model IDs to check
     const modelIds = [
       ...new Set([activeTranscriber, normalizedLiveModel, diarizationStatusModelId]),
@@ -1127,18 +1163,25 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     // Debounce the check
     if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
     modelCacheCheckRef.current = setTimeout(() => {
-      api.docker
-        .checkModelsCached(modelIds)
-        .then((result: Record<string, { exists: boolean; size?: string }>) => {
-          setModelCacheStatus((prev) => ({ ...prev, ...result }));
-        })
-        .catch(() => {});
+      refreshCacheStatus(modelIds);
     }, 500);
 
     return () => {
       if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
     };
-  }, [activeTranscriber, normalizedLiveModel, diarizationStatusModelId, isRunning]);
+  }, [activeTranscriber, normalizedLiveModel, diarizationStatusModelId, refreshCacheStatus]);
+
+  // Probe the cache for every model in the selected family (not just the
+  // active one) so each row in MainModelPicker can show its own download
+  // state instead of only the model currently chosen.
+  const selectedFamily = useMemo(
+    () => familyChoiceForModel(activeTranscriber),
+    [activeTranscriber],
+  );
+  useEffect(() => {
+    if (!selectedFamily) return;
+    refreshCacheStatus(modelsForFamilyChoice(selectedFamily).map((m) => m.id));
+  }, [selectedFamily, refreshCacheStatus]);
 
   // ─── Image tag selection (merged remote + local) ─────────────────────────
 
@@ -2344,6 +2387,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   modelsLoading={modelsLoading}
                   onLoadModels={handleLoadModels}
                   onUnloadModels={handleUnloadModels}
+                  canManage={isMetal || isRunning}
+                  downloadingIds={downloadingIds}
+                  onDownloadModel={downloadModel}
+                  onRemoveModel={removeModel}
+                  onOpenModelManager={() => setIsModelManagerOpen(true)}
                 />
               </div>
             </GlassCard>
@@ -2738,6 +2786,32 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           </DialogPanel>
         </div>
       </Dialog>
+
+      <ModelManagerModal
+        isOpen={isModelManagerOpen}
+        onClose={() => setIsModelManagerOpen(false)}
+        mainModelSelection={mainModelSelection}
+        setMainModelSelection={setMainModelSelection}
+        mainCustomModel={mainCustomModel}
+        setMainCustomModel={setMainCustomModel}
+        liveModelSelection={liveModelSelection}
+        setLiveModelSelection={setLiveModelSelection}
+        liveCustomModel={liveCustomModel}
+        setLiveCustomModel={setLiveCustomModel}
+        diarizationModelSelection={diarizationModelSelection}
+        setDiarizationModelSelection={setDiarizationModelSelection}
+        diarizationCustomModel={diarizationCustomModel}
+        setDiarizationCustomModel={setDiarizationCustomModel}
+        modelCacheStatus={modelCacheStatus}
+        isRunning={isRunning}
+        refreshCacheStatus={refreshCacheStatus}
+        isMetal={isMetal}
+        runtimeProfile={runtimeProfile}
+        downloadingIds={downloadingIds}
+        hostCacheStatus={hostCacheStatus}
+        onDownload={downloadModel}
+        onRemove={removeModel}
+      />
     </>
   );
 };

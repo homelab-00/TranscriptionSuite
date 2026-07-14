@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 import {
   Download,
   Trash2,
@@ -61,8 +62,14 @@ export interface ModelManagerTabProps {
   refreshCacheStatus: (extraIds?: string[]) => void;
   /** When true, hide families that require Docker (nemo, whisper, vibevoice). */
   isMetal?: boolean;
-  /** Current runtime profile — drives host-side GGML model management for vulkan-wsl2. */
+  /** Current runtime profile - drives host-side GGML model management for vulkan-wsl2. */
   runtimeProfile?: string;
+  /** IDs currently downloading - owned by ServerView (useModelDownloads), not this component. */
+  downloadingIds: ReadonlySet<string>;
+  /** Host-side GGML cache status (vulkan-wsl2 only) - owned by ServerView, not this component. */
+  hostCacheStatus: Record<string, { exists: boolean }>;
+  onDownload: (id: string) => void;
+  onRemove: (id: string) => void;
 }
 
 // ─── Family section configuration ───────────────────────────────────────────
@@ -507,18 +514,18 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
   refreshCacheStatus,
   isMetal = false,
   runtimeProfile,
+  downloadingIds,
+  hostCacheStatus,
+  onDownload,
+  onRemove,
 }) => {
-  // On Metal there is no Docker container — model download/remove are host-local
+  // On Metal there is no Docker container - model download/remove are host-local
   // operations that work whether or not the server is running (GH-136).
   const canManage = isMetal || isRunning;
   const isVulkanWsl2 = runtimeProfile === 'vulkan-wsl2';
-  const [downloadingModels, setDownloadingModels] = useState<Set<string>>(new Set());
-  // Host-side GGML cache status (vulkan-wsl2 only — models live on the Windows filesystem)
-  const [hostCacheStatus, setHostCacheStatus] = useState<Record<string, { exists: boolean }>>({});
   const [customModels, setCustomModels] = useState<string[]>([]);
   const [customModelInput, setCustomModelInput] = useState('');
   const [customSectionExpanded, setCustomSectionExpanded] = useState(true);
-  const [toast, setToast] = useState<string | null>(null);
 
   // Load custom models from electron store
   useEffect(() => {
@@ -537,12 +544,6 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
   const persistCustomModels = useCallback((models: string[]) => {
     const api = (window as any).electronAPI;
     api?.config?.set('modelManager.customModels', models);
-  }, []);
-
-  // Toast helper
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2500);
   }, []);
 
   // Resolve which model IDs are currently selected for each role
@@ -569,85 +570,6 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
   const activeLive = resolveActiveLive();
   const activeDiarization = resolveActiveDiarization();
 
-  // Refresh host-side GGML cache status for vulkan-wsl2
-  const refreshHostCacheStatus = useCallback(async (ids?: string[]) => {
-    const api = (window as any).electronAPI;
-    if (!api?.docker?.isGgmlModelDownloadedOnHost) return;
-    const ggmlModels = getModelsByFamily('whispercpp');
-    const toCheck = ids ?? ggmlModels.map((m) => m.id);
-    const entries = await Promise.all(
-      toCheck.map(async (id) => {
-        const exists = await api.docker.isGgmlModelDownloadedOnHost(id).catch(() => false);
-        return [id, { exists }] as const;
-      }),
-    );
-    setHostCacheStatus((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
-  }, []);
-
-  useEffect(() => {
-    if (!isVulkanWsl2) return;
-    void refreshHostCacheStatus();
-  }, [isVulkanWsl2, refreshHostCacheStatus]);
-
-  // ── Actions ─────────────────────────────────────────────────────────────
-
-  const handleDownload = useCallback(
-    async (modelId: string) => {
-      const api = (window as any).electronAPI;
-      const isWhisperCpp = !!getModelsByFamily('whispercpp').find((m) => m.id === modelId);
-      // Metal has no container — use the native (host-local) cache path.
-      const download = isMetal ? api?.mlx?.downloadModelToCache : api?.docker?.downloadModelToCache;
-      if (!download) return;
-
-      setDownloadingModels((prev) => new Set(prev).add(modelId));
-      try {
-        if (isVulkanWsl2 && isWhisperCpp) {
-          if (!api?.docker?.downloadGgmlModelToHost) return;
-          await api.docker.downloadGgmlModelToHost(modelId);
-          showToast(`Downloaded ${modelId}`);
-          await refreshHostCacheStatus([modelId]);
-        } else {
-          if (!api?.docker?.downloadModelToCache) return;
-          await download(modelId);
-          showToast(`Downloaded ${modelId}`);
-          refreshCacheStatus([modelId]);
-        }
-      } catch (err: any) {
-        showToast(`Download failed: ${err?.message || 'Unknown error'}`);
-      } finally {
-        setDownloadingModels((prev) => {
-          const next = new Set(prev);
-          next.delete(modelId);
-          return next;
-        });
-      }
-    },
-    [isVulkanWsl2, refreshCacheStatus, refreshHostCacheStatus, showToast, isMetal],
-  );
-
-  const handleRemove = useCallback(
-    async (modelId: string) => {
-      const api = (window as any).electronAPI;
-      const isWhisperCpp = !!getModelsByFamily('whispercpp').find((m) => m.id === modelId);
-
-      try {
-        if (isVulkanWsl2 && isWhisperCpp) {
-          // Host-side removal: not yet supported via IPC; show guidance instead
-          showToast(`Delete manually from %APPDATA%\\TranscriptionSuite\\whisper-models\\`);
-          return;
-        }
-        const remove = isMetal ? api?.mlx?.removeModelCache : api?.docker?.removeModelCache;
-        if (!remove) return;
-        await remove(modelId);
-        showToast(`Removed cache for ${modelId}`);
-        refreshCacheStatus([modelId]);
-      } catch (err: any) {
-        showToast(`Remove failed: ${err?.message || 'Unknown error'}`);
-      }
-    },
-    [isVulkanWsl2, refreshCacheStatus, showToast, isMetal],
-  );
-
   const handleSelectAs = useCallback(
     (modelId: string, role: ModelRole) => {
       const registryModel = getModelById(modelId);
@@ -662,11 +584,11 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
             setMainModelSelection(MAIN_MODEL_CUSTOM_OPTION);
             setMainCustomModel(modelId);
           }
-          showToast(`Set ${modelId} as Main Transcriber`);
+          toast.success(`Set ${modelId} as Main Transcriber`);
           break;
         case 'live':
           if (!isWhisperModel(modelId) && !isWhisperCppModel(modelId)) {
-            showToast('Live Mode supports faster-whisper and whisper.cpp (GGML) models.');
+            toast.error('Live Mode supports faster-whisper and whisper.cpp (GGML) models.');
             break;
           }
           if (
@@ -680,7 +602,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
             setLiveModelSelection(LIVE_MODEL_CUSTOM_OPTION);
             setLiveCustomModel(modelId);
           }
-          showToast(`Set ${modelId} as Live Model`);
+          toast.success(`Set ${modelId} as Live Model`);
           break;
         case 'diarization':
           if (modelId === DIARIZATION_DEFAULT_MODEL) {
@@ -690,7 +612,7 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
             setDiarizationModelSelection(DIARIZATION_MODEL_CUSTOM_OPTION);
             setDiarizationCustomModel(modelId);
           }
-          showToast(`Set ${modelId} as Diarization Model`);
+          toast.success(`Set ${modelId} as Diarization Model`);
           break;
       }
     },
@@ -701,7 +623,6 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
       setLiveCustomModel,
       setDiarizationModelSelection,
       setDiarizationCustomModel,
-      showToast,
     ],
   );
 
@@ -712,14 +633,14 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
     if (!id || !id.includes('/')) return;
     // Don't add if already in registry or custom list
     if (getModelById(id) || customModels.includes(id)) {
-      showToast('Model already exists');
+      toast.error('Model already exists');
       return;
     }
     const updated = [...customModels, id];
     setCustomModels(updated);
     persistCustomModels(updated);
     setCustomModelInput('');
-  }, [customModelInput, customModels, persistCustomModels, showToast]);
+  }, [customModelInput, customModels, persistCustomModels]);
 
   const handleDeleteCustomModel = useCallback(
     (id: string) => {
@@ -755,13 +676,6 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Toast notification */}
-      {toast && (
-        <div className="animate-in fade-in slide-in-from-top-2 fixed top-4 right-4 z-50 rounded-lg border border-white/10 bg-slate-800 px-4 py-2.5 text-sm text-white shadow-xl duration-200">
-          {toast}
-        </div>
-      )}
-
       {!isRunning &&
         (isMetal ? (
           <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-400">
@@ -813,14 +727,14 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
                     model={model}
                     cached={cached}
                     cacheSize={useHostCache ? undefined : modelCacheStatus[model.id]?.size}
-                    downloading={downloadingModels.has(model.id)}
+                    downloading={downloadingIds.has(model.id)}
                     isRunning={canAct}
                     canManage={canManage}
                     isActiveMain={activeMain.toLowerCase() === model.id.toLowerCase()}
                     isActiveLive={activeLive.toLowerCase() === model.id.toLowerCase()}
                     isActiveDiarization={activeDiarization.toLowerCase() === model.id.toLowerCase()}
-                    onDownload={handleDownload}
-                    onRemove={handleRemove}
+                    onDownload={onDownload}
+                    onRemove={onRemove}
                     onSelectAs={handleSelectAs}
                   />
                 );
@@ -880,14 +794,14 @@ export const ModelManagerTab: React.FC<ModelManagerTabProps> = ({
                     modelId={id}
                     cached={modelCacheStatus[id]?.exists ?? false}
                     cacheSize={modelCacheStatus[id]?.size}
-                    downloading={downloadingModels.has(id)}
+                    downloading={downloadingIds.has(id)}
                     isRunning={isRunning}
                     canManage={canManage}
                     isActiveMain={activeMain.toLowerCase() === id.toLowerCase()}
                     isActiveLive={activeLive.toLowerCase() === id.toLowerCase()}
                     isActiveDiarization={activeDiarization.toLowerCase() === id.toLowerCase()}
-                    onDownload={handleDownload}
-                    onRemove={handleRemove}
+                    onDownload={onDownload}
+                    onRemove={onRemove}
                     onSelectAs={handleSelectAs}
                     onDelete={handleDeleteCustomModel}
                   />
