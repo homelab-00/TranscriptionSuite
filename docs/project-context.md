@@ -150,8 +150,8 @@ durability:
 - **Model passthrough**: `POST /load {"model": model_name}` — `load()` tolerates HTTP failure (sidecar may pre-load)
 - **Diarization**: `transcribe_with_diarization()` returns `None` — falls back to legacy two-step pipeline
 - **Device parameter ignored**: Sidecar container manages Vulkan device via `/dev/dri`
-- **Long-audio chunking**: Audio longer than `_MAX_CHUNK_DURATION_S` (10 min) is split into chunks, each POSTed to `/inference` separately with timestamp-offset stitching (mirrors the NeMo backends; GH #168). Bounds per-request size/time and emits per-chunk progress.
-- **Timeouts**: Inference timeout scales with chunk duration via `_inference_timeout_for` (floored at 300s, ~2×-realtime headroom); load 60s
+- **Long-audio chunking**: Audio longer than `_MAX_CHUNK_DURATION_S` (10 min) is split into chunks, each POSTed to `/inference` separately with timestamp-offset stitching (mirrors the NeMo backends; GH #168). Bounds per-request MEMORY (never time) and emits per-chunk progress.
+- **Timeouts**: Inference has NO time limit — a slow machine takes as long as it needs, and Cancel is the only interrupt. `/inference` goes through `whispercpp_transport.post_inference()`, which uses an abortable async request (`read=None`) whenever a `cancellation_check` is supplied. Callers with no abort path (warmup, live, preview — all seconds of audio) keep a finite `_UNCANCELLABLE_READ_TIMEOUT_S` (300s). Connect/write/pool stay bounded. `/load` is 60s.
 - **Warmup**: Sends 1s of silence (16kHz zeros) to prime Vulkan pipeline
 - **Docker**: `docker-compose.vulkan.yml` adds `whisper-server` sidecar with health check; main container depends on it
 

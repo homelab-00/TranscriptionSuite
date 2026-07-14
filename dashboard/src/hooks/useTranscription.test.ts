@@ -211,6 +211,12 @@ describe('[P1] useTranscription', () => {
         words: [{ word: 'Hello', start: 0, end: 0.5, probability: 0.99 }],
         language: 'en',
         duration: 1.5,
+        // A whole transcript. The server omits these on a complete result, and the
+        // hook must normalise them rather than leave them undefined — the partial
+        // banner keys off `partial`, so an undefined here would be indistinguishable
+        // from false at the type level but noisier to reason about.
+        partial: false,
+        partialReason: null,
       });
       expect(lastSocket.disconnect).toHaveBeenCalled();
     });

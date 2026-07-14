@@ -322,6 +322,17 @@ export class APIClient {
     });
   }
 
+  /**
+   * POST /api/transcribe/retry/{jobId} — re-transcribe from the job's saved audio.
+   *
+   * Accepted for jobs that failed, and for jobs that completed only PARTIALLY
+   * (an incomplete transcript is stored as 'completed' with `partial: true`, so
+   * retry is the user's only recourse for a truncated result).
+   */
+  async retryTranscription(jobId: string): Promise<{ job_id: string; status: string }> {
+    return this.post(`/api/transcribe/retry/${jobId}`);
+  }
+
   /** POST /api/transcribe/result/{jobId}/dismiss — mark a recovered result dismissed. */
   async dismissTranscriptionResult(jobId: string): Promise<Response> {
     return fetch(`${this.baseUrl}/api/transcribe/result/${jobId}/dismiss`, {

@@ -247,11 +247,6 @@ class ServerConfig:
         ("SENSEVOICE_DIARIZATION_ENGINE", ("diarization", "sensevoice_engine")),
         ("WHISPERCPP_SERVER_URL", ("whisper_cpp", "server_url")),
         ("WHISPERCPP_CHUNK_DURATION_S", ("whisper_cpp", "chunk_duration_s")),
-        ("WHISPERCPP_INFERENCE_TIMEOUT_S", ("whisper_cpp", "inference_timeout_s")),
-        (
-            "WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND",
-            ("whisper_cpp", "timeout_seconds_per_audio_second"),
-        ),
     )
 
     _ENV_LOGGING_OVERRIDES = (

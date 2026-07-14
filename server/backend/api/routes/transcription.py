@@ -1109,6 +1109,7 @@ def _run_file_import(
                     ),
                     word_timestamps=need_word_timestamps,
                     progress_callback=on_progress,
+                    cancellation_check=model_manager.job_tracker.is_cancelled,
                 )
 
         # Store successful result for client polling
@@ -1462,10 +1463,23 @@ async def retry_transcription(
     if job["status"] == "processing":
         raise HTTPException(status_code=409, detail="Job is already processing")
 
-    if job["status"] != "failed":
+    # A partial transcript is stored with status='completed' (so it is still
+    # delivered, and its audio still garbage-collected) but with
+    # result_json.partial = true. It is an INCOMPLETE transcription, so it must be
+    # retryable — otherwise the user is left with a truncated transcript and no
+    # recourse. A malformed result_json is treated as not-partial: it must never
+    # accidentally unlock retry on a genuinely complete job.
+    is_partial = False
+    if job.get("result_json"):
+        try:
+            is_partial = bool(_json.loads(job["result_json"]).get("partial"))
+        except (_json.JSONDecodeError, AttributeError):
+            is_partial = False
+
+    if job["status"] != "failed" and not is_partial:
         raise HTTPException(
             status_code=409,
-            detail=f"Only failed jobs can be retried (current status: {job['status']})",
+            detail=f"Only failed or partial jobs can be retried (current status: {job['status']})",
         )
 
     # Pre-check model availability so we don't reset the job to 'processing'
