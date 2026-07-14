@@ -234,6 +234,11 @@ git commit -m "fix(server): make the Cancel button actually stop a running trans
 
 The read timeout is `None` (no time limit) whenever a `cancellation_check` is supplied, and finite otherwise. Tested against a **real** localhost server that stalls before sending headers — the exact shape of a wedged whisper-server — because a MagicMock cannot prove an abort actually interrupts a blocked read.
 
+**Lint constraints (verified — do not trip these):**
+- ruff TID251 bans `httpx.Client`, `httpx.AsyncClient`, `time.sleep`, and `datetime.now` **in `tests/` only**. It is suppressed for `core/**/*.py` (`pyproject.toml:132`), so the transport module may use `httpx.AsyncClient` freely.
+- The **test** file must therefore avoid `time.sleep` (use `threading.Event().wait(...)`) and must not construct `httpx.Client` / `httpx.AsyncClient`. Referencing httpx *exception classes* (`httpx.ConnectError`, `httpx.ReadTimeout`) is fine — only the two client constructors are banned.
+- `time.monotonic()` is not banned.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `server/backend/tests/test_whispercpp_transport.py`:
@@ -294,7 +299,9 @@ class StallingSidecar:
                 pass
         except OSError:
             pass
-        time.sleep(self._stall)
+        # NOT time.sleep(): ruff TID251 bans it in tests/ (pyproject.toml:149).
+        # Event.wait() is the sanctioned equivalent and blocks this thread the same way.
+        threading.Event().wait(self._stall)
         if self._reply is not None:
             body = json.dumps(self._reply).encode()
             try:
