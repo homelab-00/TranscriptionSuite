@@ -150,14 +150,40 @@ Three new components, one extraction, one new hook (§2.3):
 Extracting `ModelCard` is what keeps the expanded row and the modal rendering the
 **same** component rather than two copies that drift apart.
 
-### 2.3 Shared download/cache state
+### 2.3 Shared download/cache state, and the dual-write bug to avoid
 
-`ModelManagerView` currently owns `modelCacheStatus`, download progress, and the
-MLX status probe. The Server tab now needs the same signals.
+**`ModelManagerView` must be deleted, not wrapped in the modal.**
 
-Extract that into `src/hooks/useModelCache.ts`, consumed by both the Server tab's
-picker and the modal. Without this, the Server tab would have no way to show
-"downloaded" state and the two surfaces could disagree about what is cached.
+`ServerView` already owns a **superset** of `ModelManagerView`'s state:
+`mainModelSelection`, `mainCustomModel`, `liveModelSelection`, `liveCustomModel`,
+`diarizationModelSelection`, `diarizationCustomModel`, `runtimeProfile`,
+`isMetal`, `isRunning`, and `modelCacheStatus` (`ServerView.tsx:247-267`). Both
+components independently hydrate from **and persist to the same electron-store
+keys** — each has its own set of `config.set` effects.
+
+Today that is safe only because they are separate routes and are never mounted at
+the same time. Mounting `ModelManagerView` inside a Server-tab modal would put
+**two independent state containers on the same keys simultaneously**: a model
+changed in the modal would be clobbered the next time `ServerView`'s persist
+effect fired with its stale value. Last-writer-wins data loss on user config.
+
+Therefore:
+
+- `ModelManagerModal` renders **`ModelManagerTab` directly**, fed by `ServerView`'s
+  existing state and setters. One owner, one writer.
+- `ModelManagerView` is **removed** (it exists only to own that duplicate state).
+
+**`useModelCache` hook.** `ServerView`'s existing cache check
+(`ServerView.tsx:1115-1141`) is Docker-only, requires `isRunning`, and only
+probes the three *active* models. The picker and the modal need cache status for
+*arbitrary* model ids, and on Metal (where `checkModelsCached` lives on
+`api.mlx`, works without a running server, and `docker.container.running` is
+permanently false — GH-136).
+
+Extract `src/hooks/useModelCache.ts` exposing
+`{ modelCacheStatus, refreshCacheStatus(ids: string[]) }`, porting
+`ModelManagerView`'s Metal/Docker branching (`ModelManagerView.tsx:151-178`).
+`ServerView` consumes it and passes both values down to the picker and the modal.
 
 ### 2.4 Selection semantics
 
@@ -175,9 +201,33 @@ picker and the modal. Without this, the Server tab would have no way to show
 
 - `App.tsx:726` — remove the `<ModelManagerView />` route.
 - `Sidebar.tsx:188` — remove the `Models` entry.
-- `ModelManagerView` itself is **kept** and becomes the modal body. It already
-  owns every piece of state the full manager needs, so the modal is a shell, not
-  a rewrite.
+- `ModelManagerView.tsx` — **deleted**, per §2.3. Its only job was owning state
+  that `ServerView` already owns.
+- `ModelManagerTab` — **kept, but loses its internal download state.** It already
+  takes `modelCacheStatus` and `refreshCacheStatus` as props, which is why the
+  modal can drive it from `ServerView`. It does however still own
+  `downloadingModels`, the WSL2 `hostCacheStatus`, and a bespoke toast. Those
+  move out (§2.6), because the Server tab picker needs the same download actions
+  and two owners would disagree about what is in flight.
+
+### 2.6 Download is three storage paths, not one
+
+`ModelManagerTab.handleDownload` branches three ways, and the third is easy to
+miss:
+
+- **Metal** → `api.mlx.downloadModelToCache` (host cache; no container exists)
+- **Docker** → `api.docker.downloadModelToCache` (inside the container)
+- **vulkan-wsl2 + a whisper.cpp model** → `api.docker.downloadGgmlModelToHost`,
+  into a **separate Windows-host cache** tracked by its own `refreshHostCacheStatus`
+  probe — because GGML weights on WSL2 cannot live in the container.
+
+Removal mirrors this, and on the WSL2/GGML path is **not wired through IPC at
+all**: it surfaces a "delete manually from `%APPDATA%`" message.
+
+Reimplementing download in `ServerView` would silently drop the WSL2 path on a
+supported platform. Instead extract `src/hooks/useModelDownloads.ts`
+(`{ downloadingIds, downloadModel, removeModel }`), owned once by `ServerView`
+and passed to both the picker and the modal.
 - The modal retains all 7 family sections including `diarization`, which is what
   preserves cross-family pre-downloads and the pyannote download UI. Losing those
   was the specific risk that made a modal necessary rather than simply deleting
