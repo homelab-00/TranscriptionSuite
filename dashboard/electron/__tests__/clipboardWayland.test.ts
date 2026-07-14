@@ -83,9 +83,7 @@ function installExecFileRouter() {
         return state.wlCopyAvailable ? cb(null, { stdout: 'wl-copy 1.0' }) : cb(enoent());
       }
       if (cmd === 'wl-paste') {
-        return state.wlPasteAvailable
-          ? cb(null, { stdout: state.realClipboard })
-          : cb(enoent());
+        return state.wlPasteAvailable ? cb(null, { stdout: state.realClipboard }) : cb(enoent());
       }
       return cb(null, { stdout: '' });
     },
