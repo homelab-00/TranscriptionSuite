@@ -4,7 +4,6 @@ import {
   Bird,
   Boxes,
   Ear,
-  Feather,
   KeyRound,
   Languages,
   Link2,
@@ -25,6 +24,7 @@ import { CustomSelect } from '../../ui/CustomSelect';
 import { SelectorGroup } from '../../ui/SelectorGroup';
 import { SelectorTile } from '../../ui/SelectorTile';
 import type { TileAccent } from '../../ui/SelectorTile';
+import { MainModelPicker } from './MainModelPicker';
 import {
   DIARIZATION_MODEL_CUSTOM_OPTION,
   type FamilyChoiceId,
@@ -35,7 +35,6 @@ import {
   liveModelsFor,
   liveTilesFor,
   type LiveTileId,
-  modelsForFamilyChoice,
 } from '../../../src/services/instanceMatrix';
 import {
   DISABLED_MODEL_SENTINEL,
@@ -81,18 +80,21 @@ interface InstanceSettingsSelectorsProps {
   modelsLoading: boolean;
   onLoadModels: () => void;
   onUnloadModels: () => void;
+  canManage: boolean;
+  downloadingIds: ReadonlySet<string>;
+  onDownloadModel: (id: string) => void;
+  onRemoveModel: (id: string) => void;
+  onOpenModelManager: () => void;
 }
 
 const FAMILY_ICONS: Record<FamilyChoiceId, React.ReactNode> = {
   whisper: <AudioLines size={16} />,
-  parakeet: <Bird size={16} />,
-  canary: <Feather size={16} />,
+  nemo: <Bird size={16} />,
   sensevoice: <Ear size={16} />,
   vibevoice: <Speech size={16} />,
   whispercpp: <Boxes size={16} />,
   'mlx-whisper': <AudioLines size={16} />,
-  'mlx-parakeet': <Bird size={16} />,
-  'mlx-canary': <Feather size={16} />,
+  'mlx-nemo': <Bird size={16} />,
   'mlx-vibevoice': <Speech size={16} />,
 };
 
@@ -177,6 +179,11 @@ export function InstanceSettingsSelectors({
   modelsLoading,
   onLoadModels,
   onUnloadModels,
+  canManage,
+  downloadingIds,
+  onDownloadModel,
+  onRemoveModel,
+  onOpenModelManager,
 }: InstanceSettingsSelectorsProps) {
   const familyChoices = useMemo(() => familyChoicesFor(runtimeProfile), [runtimeProfile]);
 
@@ -188,23 +195,6 @@ export function InstanceSettingsSelectors({
     }
     return familyChoiceForModel(mainModelSelection);
   }, [mainModelSelection, mainCustomModel]);
-
-  const mainPresentation = useMemo(() => {
-    if (!selectedFamily) {
-      return buildModelOptionPresentation([], {}, [
-        MODEL_DISABLED_OPTION,
-        MAIN_MODEL_CUSTOM_OPTION,
-      ]);
-    }
-    const models = modelsForFamilyChoice(selectedFamily);
-    // Vulkan GGML: Custom is omitted — only registry GGML files exist on disk
-    // for the sidecar to load (matches the pre-redesign dropdown).
-    const tail =
-      selectedFamily === 'whispercpp'
-        ? [MODEL_DISABLED_OPTION]
-        : [MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
-    return buildModelOptionPresentation(models, modelCacheStatus, tail);
-  }, [selectedFamily, modelCacheStatus]);
 
   const liveTiles = useMemo(
     () => liveTilesFor(runtimeProfile, activeTranscriber),
@@ -310,46 +300,20 @@ export function InstanceSettingsSelectors({
         ))}
       </SelectorGroup>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <label className="text-xs font-medium tracking-wider text-slate-500 uppercase">
-            Model Variant
-          </label>
-          <CustomSelect
-            value={mainModelSelection}
-            onChange={onMainModelSelectionChange}
-            options={mainPresentation.options}
-            optionLabel={mainPresentation.optionLabel}
-            optionDescription={mainPresentation.optionDescription}
-            optionMeta={mainPresentation.optionMeta}
-            accentColor="magenta"
-            className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-            disabled={isRunning}
-          />
-          {mainModelSelection === MAIN_MODEL_CUSTOM_OPTION && (
-            <input
-              type="text"
-              value={mainCustomModel}
-              onChange={(e) => onMainCustomModelChange(e.target.value)}
-              placeholder="owner/model-name"
-              disabled={isRunning}
-              className={`focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-            />
-          )}
-          {selectedFamily === 'whispercpp' && (
-            <p className="text-xs text-slate-500 italic">
-              This GGML model runs on the AMD/Intel GPU via the whisper.cpp sidecar. Switching
-              models requires a server restart.
-            </p>
-          )}
-          {selectedFamily?.startsWith('mlx') && (
-            <p className="flex items-center gap-1 text-xs text-violet-400">
-              <Zap size={10} />
-              Metal / MLX accelerated
-            </p>
-          )}
-        </div>
-      </div>
+      <MainModelPicker
+        selectedFamily={selectedFamily}
+        mainModelSelection={mainModelSelection}
+        mainCustomModel={mainCustomModel}
+        isRunning={isRunning}
+        canManage={canManage}
+        modelCacheStatus={modelCacheStatus}
+        downloadingIds={downloadingIds}
+        onMainModelSelectionChange={onMainModelSelectionChange}
+        onMainCustomModelChange={onMainCustomModelChange}
+        onDownload={onDownloadModel}
+        onRemove={onRemoveModel}
+        onOpenManager={onOpenModelManager}
+      />
 
       {/* Live Mode model */}
       <SelectorGroup
