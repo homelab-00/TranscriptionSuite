@@ -873,12 +873,15 @@ def _run_file_import(
 
         # Get transcription engine, lazily reloading the model if a prior
         # Live-Mode restore left it detached (Issue #76).
+        tracker = model_manager.job_tracker
+        tracker.set_phase("loading_model")
         engine = model_manager.ensure_transcription_loaded()
 
         # --- Multitrack path: split channels, transcribe each, merge ---
         if multitrack:
             from server.core.multitrack import transcribe_multitrack
 
+            tracker.set_phase("transcribing")
             result = transcribe_multitrack(
                 engine,
                 str(tmp_path),
@@ -966,6 +969,7 @@ def _run_file_import(
                     str(tmp_path), target_sample_rate=preferred_rate
                 )
 
+                tracker.set_phase("transcribing")
                 diar_result = backend.transcribe_with_diarization(
                     audio_data,
                     audio_sample_rate=audio_sample_rate,
@@ -1042,6 +1046,7 @@ def _run_file_import(
 
                     diarize_fn = transcribe_then_diarize
 
+                tracker.set_phase("transcribing")
                 result, diar_result = diarize_fn(
                     engine=engine,
                     model_manager=model_manager,
@@ -1100,6 +1105,7 @@ def _run_file_import(
             else:
                 # Transcribe without diarization
                 logger.info("File import: transcribing uploaded file: %s", filename)
+                tracker.set_phase("transcribing")
                 result = engine.transcribe_file(
                     str(tmp_path),
                     language=language,

@@ -575,7 +575,10 @@ class ParakeetBackend(STTBackend):
                 f"({time_offset:.0f}s - {time_offset + len(chunk) / SAMPLE_RATE:.0f}s)"
             )
             if progress_callback is not None:
-                progress_callback(i + 1, num_chunks)
+                progress_callback(
+                    int(min((i + 1) * chunk_samples, total_samples) / SAMPLE_RATE),
+                    int(total_samples / SAMPLE_RATE),
+                )
 
             output = transcribe_fn(chunk, timestamps=word_timestamps)
             chunk_segments = self._parse_output(output, word_timestamps=word_timestamps)

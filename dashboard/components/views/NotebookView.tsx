@@ -50,6 +50,8 @@ import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useNotebookWatcher } from '../../src/hooks/useNotebookWatcher';
 import { apiClient } from '../../src/api/client';
 import type { AdminStatus, Recording } from '../../src/api/types';
+import { jobTrackerFromAdminStatus } from '../../src/api/types';
+import { describeJobProgress } from '../../src/services/jobProgress';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
 import {
   isCanaryModel,
@@ -1785,11 +1787,15 @@ const ImportTab = ({
       case 'pending':
         return 'Queued';
       case 'processing': {
-        const progress = (adminStatus?.models as any)?.job_tracker?.progress;
-        if (progress?.total > 0) {
-          return `Chunk ${progress.current}/${progress.total}`;
-        }
-        return 'Processing...';
+        // GH-211: phase/position label computed from the parent's polled prop.
+        // Do NOT call useJobProgress here — it would open a second admin poll
+        // that bypasses the parent's 403 circuit breaker.
+        const tracker = jobTrackerFromAdminStatus(adminStatus);
+        return describeJobProgress(
+          tracker?.progress ?? null,
+          tracker?.started_at ?? null,
+          Date.now() / 1000,
+        );
       }
       case 'writing':
         return 'Saving file...';

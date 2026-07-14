@@ -15,6 +15,7 @@ inside methods to avoid loading them at module import time.
 import logging
 import os
 import threading
+import time
 import uuid
 import warnings
 from collections.abc import Callable
@@ -65,6 +66,7 @@ class TranscriptionJobTracker:
         self._active_user: str | None = None
         self._cancelled: bool = False
         self._progress: dict[str, Any] | None = None
+        self._started_at: float | None = None
         self._result: dict[str, Any] | None = None
         self._lock = threading.Lock()
 
@@ -88,6 +90,7 @@ class TranscriptionJobTracker:
             self._active_job_id = job_id
             self._active_user = user
             self._cancelled = False
+            self._started_at = time.time()
             self._result = None  # Clear previous job result
             logger.info(f"Started transcription job {job_id[:8]} for user '{user}'")
             return (True, job_id, None)
@@ -112,6 +115,7 @@ class TranscriptionJobTracker:
                 self._active_user = None
                 self._cancelled = False
                 self._progress = None
+                self._started_at = None
                 self._result = result
                 return True
             return False
@@ -161,9 +165,26 @@ class TranscriptionJobTracker:
             return (False, None)
 
     def update_progress(self, current: int, total: int, message: str = "") -> None:
-        """Update the progress of the current transcription job."""
+        """Update the progress of the current transcription job.
+
+        ``current``/``total`` are processed/total audio seconds for backends
+        that report duration-based progress. The phase set via ``set_phase``
+        survives progress ticks (backends never know the phase).
+        """
         with self._lock:
-            self._progress = {"current": current, "total": total, "message": message}
+            prev_phase = (self._progress or {}).get("phase")
+            self._progress = {
+                "current": current,
+                "total": total,
+                "message": message,
+                "phase": prev_phase,
+            }
+
+    def set_phase(self, phase: str) -> None:
+        """Set the current processing phase without touching numeric progress."""
+        with self._lock:
+            prev = self._progress or {"current": 0, "total": 0, "message": ""}
+            self._progress = {**prev, "phase": phase}
 
     def clear_progress(self) -> None:
         """Clear the current progress information."""
@@ -179,6 +200,7 @@ class TranscriptionJobTracker:
                 "active_job_id": self._active_job_id[:8] if self._active_job_id else None,
                 "cancellation_requested": self._cancelled,
                 "progress": self._progress,
+                "started_at": self._started_at,
                 "result": self._result,
             }
 
