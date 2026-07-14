@@ -230,6 +230,64 @@ describe('[P1] StartupEventWatcher', () => {
     expect(received.filter((e) => e.id === 'after-stop')).toHaveLength(0);
   });
 
+  it('warns once after 90s when no events were ever observed (GH-207 silent-channel diagnostic)', () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      fs.writeFileSync(eventsFile, '');
+      const watcher = new StartupEventWatcher();
+      watcher.start(eventsFile, () => {});
+
+      vi.advanceTimersByTime(90_000);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(String(warnSpy.mock.calls[0][0])).toContain('no startup events observed');
+
+      watcher.stop();
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not warn when at least one event was observed', () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // Event present before start — the initial synchronous read sees it.
+      fs.writeFileSync(eventsFile, makeEvent({ id: 'x', category: 'c', label: 'l' }) + '\n');
+      const watcher = new StartupEventWatcher();
+      watcher.start(eventsFile, () => {});
+
+      vi.advanceTimersByTime(90_000);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+
+      watcher.stop();
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not warn after stop()', () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      fs.writeFileSync(eventsFile, '');
+      const watcher = new StartupEventWatcher();
+      watcher.start(eventsFile, () => {});
+      watcher.stop();
+
+      vi.advanceTimersByTime(90_000);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('retries when file does not exist yet', async () => {
     // Don't create the file yet
     const received: StartupEvent[] = [];
