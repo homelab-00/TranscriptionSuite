@@ -28,6 +28,7 @@ import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { CustomSelect } from '../ui/CustomSelect';
 import { ShortcutCapture } from '../ui/ShortcutCapture';
+import { HfTokenExplainer } from '../ui/HfTokenExplainer';
 import { useQueryClient } from '@tanstack/react-query';
 import { useBackups } from '../../src/hooks/useBackups';
 import { apiClient } from '../../src/api/client';
@@ -102,6 +103,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     | { available: boolean; reason: string }
     | undefined;
   const metalSupported = mlxFeature?.available ?? false;
+  const diarizationFeature = (adminStatus?.models as any)?.features?.diarization as
+    | { available: boolean; reason: string }
+    | undefined;
   const [activeTab, setActiveTab] = useState('App');
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [showAuthToken, setShowAuthToken] = useState(false);
@@ -1399,18 +1403,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       </Section>
 
       <Section title="HuggingFace Token">
-        <p className="mb-3 text-xs text-slate-400">
-          Required for speaker diarization. Accept the{' '}
-          <a
-            href="https://huggingface.co/pyannote/speaker-diarization-3.1"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent-cyan hover:underline"
-          >
-            PyAnnote model terms
-          </a>{' '}
-          on HuggingFace, then paste your token here.
-        </p>
+        <div className="mb-3">
+          <HfTokenExplainer
+            onOpenLink={(url) => {
+              if (window.electronAPI?.app?.openExternal) {
+                void window.electronAPI.app.openExternal(url);
+              } else {
+                window.open(url, '_blank', 'noopener');
+              }
+            }}
+          />
+        </div>
         <div className="relative">
           <input
             type={showHfToken ? 'text' : 'password'}
@@ -1430,6 +1433,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         {clientSettings.hfToken && (
           <p className="mt-1.5 text-xs text-green-400/70">
             Token will be passed to the container on next start.
+          </p>
+        )}
+        {diarizationFeature && (
+          <p
+            className={`mt-1.5 text-xs ${diarizationFeature.available ? 'text-green-400/70' : 'text-amber-400/70'}`}
+          >
+            {diarizationFeature.available
+              ? 'Diarization is available on the running server.'
+              : diarizationFeature.reason === 'token_missing'
+                ? 'Diarization is currently unavailable: the running server has no token. Changes here apply on the next server start.'
+                : 'Diarization is currently unavailable on the running server.'}
           </p>
         )}
       </Section>
