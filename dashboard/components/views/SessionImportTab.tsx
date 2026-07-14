@@ -32,6 +32,7 @@ import {
 import type { UnifiedImportJob } from '../../src/stores/importQueueStore';
 import type { SessionOutputFormat } from '../../src/services/transcriptionFormatters';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
+import { useJobProgress } from '../../src/hooks/useJobProgress';
 import { useLanguages } from '../../src/hooks/useLanguages';
 import { apiClient } from '../../src/api/client';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
@@ -122,6 +123,12 @@ export const SessionImportTab: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const admin = useAdminStatus();
+
+  // GH-211: live phase/position/ETA label for the active job. This hook owns
+  // the fast (3s) poll while a job runs; the useAdminStatus call above stays
+  // on the default interval (TanStack Query dedupes by queryKey, shortest
+  // refetchInterval wins).
+  const { label: progressLabel, stalled } = useJobProgress(isProcessing);
 
   // GH-209: gate the diarization toggle on the server-side feature flag.
   // Computed ONCE at container startup (ModelManager._initialize_diarization_
@@ -523,13 +530,10 @@ export const SessionImportTab: React.FC = () => {
     switch (job.status) {
       case 'pending':
         return job.plannedFormat ? `Queued (${job.plannedFormat})` : 'Queued';
-      case 'processing': {
-        const progress = (admin.status?.models as any)?.job_tracker?.progress;
-        if (progress?.total > 0) {
-          return `Chunk ${progress.current}/${progress.total}`;
-        }
-        return 'Processing...';
-      }
+      case 'processing':
+        return stalled
+          ? `${progressLabel} — no recent progress, the job may be stalled`
+          : progressLabel;
       case 'writing':
         return 'Saving file...';
       case 'success': {
