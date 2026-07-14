@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.6.0
+  spec_version: 1.7.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -34,8 +34,10 @@ meta:
       - components/import/__tests__/DedupPromptModal.test.tsx
       - components/import/DedupChoiceContainer.tsx
       - components/import/DedupPromptModal.tsx
+      - components/models/__tests__/ModelCardPicker.test.tsx
       - components/models/__tests__/ModelPickerRow.test.tsx
       - components/models/__tests__/ModelRowDetails.test.tsx
+      - components/models/ModelCardPicker.tsx
       - components/models/ModelPickerRow.tsx
       - components/models/ModelRowDetails.tsx
       - components/PopOutWindow.tsx
@@ -117,7 +119,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-07-14T22:01:07.003Z
+    generated_at: 2026-07-14T22:21:51.057Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -315,6 +317,8 @@ foundation:
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_6px_rgba(34,197,94,0.5)]
+        - shadow-[0_0_6px_rgba(96,165,250,0.6)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
         - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - shadow-2xl
@@ -421,6 +425,8 @@ foundation:
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_6px_rgba(34,197,94,0.5)]
+        - shadow-[0_0_6px_rgba(96,165,250,0.6)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
         - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - text-[10px]
@@ -525,6 +531,7 @@ utility_allowlist:
     - animate-pulse
     - aria-activedescendant
     - aria-checked
+    - aria-expanded
     - aria-invalid
     - aria-label
     - aria-labels
@@ -1248,6 +1255,8 @@ utility_allowlist:
     - shadow-[0_0_5px_rgba(239,22,238,0.5)]
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
+    - shadow-[0_0_6px_rgba(34,197,94,0.5)]
+    - shadow-[0_0_6px_rgba(96,165,250,0.6)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
     - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
     - text-[10px]
@@ -2293,6 +2302,23 @@ component_contracts:
         rule: Info/success/warning/error message coloring remains bound to approved text tokens.
   MainModelPicker:
     file: components/views/server/MainModelPicker.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  ModelCardPicker:
+    file: components/models/ModelCardPicker.tsx
     required_tokens:
       - colors
       - motion

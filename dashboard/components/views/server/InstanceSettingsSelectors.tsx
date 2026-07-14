@@ -20,11 +20,11 @@ import {
 
 import { AppleIcon } from '../../ui/icons/AppleIcon';
 import { Button } from '../../ui/Button';
-import { CustomSelect } from '../../ui/CustomSelect';
 import { SelectorGroup } from '../../ui/SelectorGroup';
 import { SelectorTile } from '../../ui/SelectorTile';
 import type { TileAccent } from '../../ui/SelectorTile';
 import { MainModelPicker } from './MainModelPicker';
+import { ModelCardPicker } from '../../models/ModelCardPicker';
 import {
   DIARIZATION_MODEL_CUSTOM_OPTION,
   type FamilyChoiceId,
@@ -47,7 +47,6 @@ import {
   VULKAN_RECOMMENDED_MODEL,
 } from '../../../src/services/modelSelection';
 import { isWhisperCppModel } from '../../../src/services/modelCapabilities';
-import { buildModelOptionPresentation } from '../../../src/services/modelOptionPresentation';
 import type { RuntimeProfile } from '../../../src/types/runtime';
 
 interface ModelCacheStatus {
@@ -206,14 +205,10 @@ export function InstanceSettingsSelectors({
     return 'whisper';
   }, [liveModelSelection]);
 
-  const livePresentation = useMemo(() => {
-    if (activeLiveTile === 'same-as-main' || activeLiveTile === 'disabled') {
-      return buildModelOptionPresentation([], {}, []);
-    }
-    const models = liveModelsFor(activeLiveTile === 'whispercpp' ? 'vulkan' : 'gpu');
-    const tail = activeLiveTile === 'whispercpp' ? [] : [LIVE_MODEL_CUSTOM_OPTION];
-    return buildModelOptionPresentation(models, modelCacheStatus, tail);
-  }, [activeLiveTile, modelCacheStatus]);
+  const liveModels = useMemo(() => {
+    if (activeLiveTile === 'same-as-main' || activeLiveTile === 'disabled') return [];
+    return liveModelsFor(activeLiveTile === 'whispercpp' ? 'vulkan' : 'gpu');
+  }, [activeLiveTile]);
 
   const diarizationTiles = useMemo(
     () => diarizationTilesFor(runtimeProfile, activeTranscriber),
@@ -338,31 +333,30 @@ export function InstanceSettingsSelectors({
           />
         ))}
       </SelectorGroup>
-      {livePresentation.options.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <CustomSelect
-              value={liveModelSelection}
-              onChange={onLiveModelSelectionChange}
-              options={livePresentation.options}
-              optionLabel={livePresentation.optionLabel}
-              optionDescription={livePresentation.optionDescription}
-              optionMeta={livePresentation.optionMeta}
-              className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-              disabled={isRunning}
-            />
-            {liveModelSelection === LIVE_MODEL_CUSTOM_OPTION && (
-              <input
-                type="text"
-                value={liveCustomModel}
-                onChange={(e) => onLiveCustomModelChange(e.target.value)}
-                placeholder="owner/model-name"
-                disabled={isRunning}
-                className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-              />
-            )}
-          </div>
-        </div>
+      {liveModels.length > 0 && (
+        <ModelCardPicker
+          models={liveModels}
+          selection={liveModelSelection}
+          custom={
+            // whisper.cpp live models are a fixed GGML list; only the
+            // faster-whisper tile accepts a custom HuggingFace repo.
+            activeLiveTile === 'whispercpp'
+              ? undefined
+              : {
+                  value: LIVE_MODEL_CUSTOM_OPTION,
+                  text: liveCustomModel,
+                  onTextChange: onLiveCustomModelChange,
+                }
+          }
+          badgeLabel="Live"
+          isRunning={isRunning}
+          canManage={canManage}
+          modelCacheStatus={modelCacheStatus}
+          downloadingIds={downloadingIds}
+          onSelectionChange={onLiveModelSelectionChange}
+          onDownload={onDownloadModel}
+          onRemove={onRemoveModel}
+        />
       )}
       {!liveModelWhisperOnlyCompatible && (
         <p className="text-accent-orange text-xs">{liveModeModelConstraintMessage}</p>

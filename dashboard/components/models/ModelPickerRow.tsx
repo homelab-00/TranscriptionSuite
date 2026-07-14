@@ -7,6 +7,8 @@ import type { ModelInfo } from '../../src/services/modelRegistry';
 interface ModelPickerRowProps {
   model: ModelInfo;
   selected: boolean;
+  /** Badge on the selected card, naming its role. Defaults to "Main". */
+  badgeLabel?: string;
   cached: boolean;
   cacheSize?: string;
   downloading: boolean;
@@ -20,14 +22,15 @@ interface ModelPickerRowProps {
 }
 
 /**
- * One model in the Server tab picker, rendered as a full card: status dot,
- * name, a Main badge on the active model, cache actions, a HuggingFace link,
- * and the always-visible detail block (repo id, params, capabilities,
- * description).
+ * One model in the Server tab pickers, rendered as a full card: status dot,
+ * name, a role badge (Main/Live) on the active model, cache actions, a
+ * HuggingFace link, and the always-visible detail block (repo id, params,
+ * capabilities, description).
  */
 export const ModelPickerRow: React.FC<ModelPickerRowProps> = ({
   model,
   selected,
+  badgeLabel = 'Main',
   cached,
   cacheSize,
   downloading,
@@ -66,7 +69,7 @@ export const ModelPickerRow: React.FC<ModelPickerRowProps> = ({
           <span className="truncate text-sm font-medium text-white">{model.displayName}</span>
           {selected && (
             <span className="bg-accent-cyan/15 text-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-semibold">
-              Main
+              {badgeLabel}
             </span>
           )}
         </div>
