@@ -254,6 +254,85 @@ class TestProgressTqdm:
         bar.set_postfix({"speed": "10MB/s"}, refresh=True)  # should not raise
 
 
+# ── Loading phase + byte formatting (GH-207) ──────────────────────────
+
+
+class TestLoadingPhase:
+    def test_emits_loading_phase_when_download_bytes_complete(self, mock_emit):
+        from server.core.download_progress import _DownloadTracker
+
+        tracker = _DownloadTracker("model-load-test", "test-model")
+        tracker.on_tqdm_created(2_000_000)
+        tracker.on_tqdm_update(2_000_000)  # bytes complete
+
+        labels = [e["label"] for e in mock_emit]
+        assert any("Loading test-model into memory" in label for label in labels)
+        # and it fires exactly once even if more updates arrive
+        tracker.on_tqdm_update(0)
+        assert sum("into memory" in e["label"] for e in mock_emit) == 1
+
+    def test_no_loading_phase_before_bytes_complete(self, mock_emit):
+        from server.core.download_progress import _DownloadTracker
+
+        tracker = _DownloadTracker("model-load-test", "test-model")
+        tracker.on_tqdm_created(2_000_000)
+        tracker.on_tqdm_update(1_000_000)  # halfway
+
+        assert not any("into memory" in e["label"] for e in mock_emit)
+
+    def test_no_loading_phase_without_tracked_total(self, mock_emit):
+        from server.core.download_progress import _DownloadTracker
+
+        tracker = _DownloadTracker("model-load-test", "test-model")
+        tracker.on_tqdm_update(500)  # no on_tqdm_created — total_bytes stays 0
+
+        assert not any("into memory" in e["label"] for e in mock_emit)
+
+
+class TestByteFormatting:
+    SIZE_PATTERN = r"^\d+(\.\d)? (B|KB|MB|GB|TB)$"
+
+    def test_format_bytes_units(self, mock_emit):
+        from server.core.download_progress import _format_bytes
+
+        assert _format_bytes(0) == "0 B"
+        assert _format_bytes(512) == "512 B"
+        assert _format_bytes(2048) == "2.0 KB"
+        assert _format_bytes(31_457_280) == "30.0 MB"
+        assert _format_bytes(2 * 1024**3) == "2.0 GB"
+        assert _format_bytes(3 * 1024**4) == "3.0 TB"
+
+    def test_progress_events_carry_human_readable_sizes(self, mock_emit):
+        import re
+
+        from server.core.download_progress import _DownloadTracker
+
+        tracker = _DownloadTracker("test-id", "test-model")
+        tracker.on_tqdm_created(2_000_000)
+        tracker.on_tqdm_update(1_000_000)
+
+        size_events = [e for e in mock_emit if "downloadedSize" in e]
+        assert size_events
+        for event in size_events:
+            assert re.match(self.SIZE_PATTERN, event["downloadedSize"])
+            assert re.match(self.SIZE_PATTERN, event["totalSize"])
+
+    def test_completion_event_carries_human_readable_sizes(self, mock_emit):
+        import re
+
+        from server.core.download_progress import _ProgressTqdm, track_model_download
+
+        with track_model_download("nvidia/test-model"):
+            bar = _ProgressTqdm(total=2_000_000)
+            bar.update(2_000_000)
+            bar.close()
+
+        complete_event = mock_emit[-1]
+        assert complete_event["status"] == "complete"
+        assert re.match(self.SIZE_PATTERN, complete_event["downloadedSize"])
+        assert re.match(self.SIZE_PATTERN, complete_event["totalSize"])
+
+
 # ── Throttling ─────────────────────────────────────────────────────────
 
 
@@ -320,8 +399,9 @@ class TestTrackModelDownload:
         complete_event = mock_emit[-1]
         assert complete_event["status"] == "complete"
         assert complete_event["label"] == "test-model ready"
-        assert complete_event["downloadedSize"] == 2_000_000
-        assert complete_event["totalSize"] == 2_000_000
+        # Sizes are emitted pre-formatted for dashboard display (GH-207).
+        assert complete_event["downloadedSize"] == "1.9 MB"
+        assert complete_event["totalSize"] == "1.9 MB"
 
     def test_error_emits_error_event_and_reraises(self, mock_emit):
         from server.core.download_progress import track_model_download

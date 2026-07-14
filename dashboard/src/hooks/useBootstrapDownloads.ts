@@ -42,6 +42,9 @@ export function useBootstrapDownloads(): void {
           label: event.label,
           status,
           legacyType: event.type as LegacyDownloadType,
+          ...(event.progress !== undefined ? { progress: event.progress } : {}),
+          ...(event.downloadedSize ? { downloadedSize: event.downloadedSize } : {}),
+          ...(event.totalSize ? { totalSize: event.totalSize } : {}),
           ...(status === 'error' && event.error ? { error: event.error } : {}),
           ...(status === 'complete' ? { completedAt: Date.now() } : {}),
         });
@@ -53,6 +56,13 @@ export function useBootstrapDownloads(): void {
     if (api.onActivityEvent) {
       const cleanup = api.onActivityEvent((event) => {
         const store = useActivityStore.getState();
+
+        // A granular model-load event supersedes the coarse log-parser card:
+        // without this the legacy spinner-only "Loading Model" card stands in
+        // front of the card that actually carries progress data (GH-207).
+        if (event.id.startsWith('model-load-')) {
+          store.dismissActivity('model-preload');
+        }
 
         store.addActivity({
           id: event.id,
