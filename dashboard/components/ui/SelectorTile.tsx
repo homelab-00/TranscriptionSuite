@@ -122,9 +122,9 @@ export const SelectorTile: React.FC<SelectorTileProps> = ({
           {icon}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-white/90">{label}</span>
+          <span className="block text-sm font-medium break-words text-white/90">{label}</span>
           {sublabel && (
-            <span className="block truncate text-[10px] text-slate-400">{sublabel}</span>
+            <span className="block text-[10px] break-words text-slate-400">{sublabel}</span>
           )}
         </span>
         {locked && <Lock size={12} className="shrink-0 text-slate-400" />}

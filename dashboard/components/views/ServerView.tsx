@@ -36,7 +36,6 @@ import { IntelIcon } from '../ui/icons/IntelIcon';
 import { AppleIcon } from '../ui/icons/AppleIcon';
 import { GpuHealthCard } from './GpuHealthCard';
 import { GpuDiagnosticModal, type GpuDiagnosticResultProp } from './GpuDiagnosticModal';
-import { ModelManagerModal } from './ModelManagerModal';
 import { InstanceSettingsSelectors } from './server/InstanceSettingsSelectors';
 import { RemoteConnectionCard } from './server/RemoteConnectionCard';
 import { StartupActivityInline } from './server/StartupActivityInline';
@@ -699,8 +698,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const isRunningAndHealthy = isRunning && containerStatus.health === 'healthy';
 
   // Single owner of the model-download cache and in-flight-download state,
-  // shared between the Instance Settings selectors and the Model Manager
-  // modal so the two surfaces never disagree about what is downloading.
+  // consumed by the Instance Settings selectors.
   const { modelCacheStatus, refreshCacheStatus } = useModelCache({ isRunning, isMetal });
 
   // Host-side GGML cache status (vulkan-wsl2 only - models live on the
@@ -732,7 +730,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     refreshHostCacheStatus,
   });
 
-  const [isModelManagerOpen, setIsModelManagerOpen] = useState(false);
+  // vulkan-wsl2: GGML weights live on the Windows host filesystem, outside the
+  // Docker volume, so the container-side cache check can't see them. Overlay
+  // the host-side status (GGML ids only) so the model picker's cached/missing
+  // dots stay truthful for whisper.cpp models on that profile.
+  const effectiveModelCacheStatus = useMemo(
+    () => (isVulkanWsl2 ? { ...modelCacheStatus, ...hostCacheStatus } : modelCacheStatus),
+    [isVulkanWsl2, modelCacheStatus, hostCacheStatus],
+  );
 
   // MLX (native process) server state
   type MLXStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
@@ -2389,7 +2394,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   activeTranscriber={activeTranscriber}
                   activeLiveModel={activeLiveModel}
                   diarizationStatusModelId={diarizationStatusModelId}
-                  modelCacheStatus={modelCacheStatus}
+                  modelCacheStatus={effectiveModelCacheStatus}
                   liveModelWhisperOnlyCompatible={liveModelWhisperOnlyCompatible}
                   liveModeModelConstraintMessage={liveModeModelConstraintMessage}
                   modelsLoaded={adminStatus?.models_loaded}
@@ -2400,7 +2405,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   downloadingIds={downloadingIds}
                   onDownloadModel={downloadModel}
                   onRemoveModel={removeModel}
-                  onOpenModelManager={() => setIsModelManagerOpen(true)}
                 />
               </div>
             </GlassCard>
@@ -2795,32 +2799,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           </DialogPanel>
         </div>
       </Dialog>
-
-      <ModelManagerModal
-        isOpen={isModelManagerOpen}
-        onClose={() => setIsModelManagerOpen(false)}
-        mainModelSelection={mainModelSelection}
-        setMainModelSelection={setMainModelSelection}
-        mainCustomModel={mainCustomModel}
-        setMainCustomModel={setMainCustomModel}
-        liveModelSelection={liveModelSelection}
-        setLiveModelSelection={setLiveModelSelection}
-        liveCustomModel={liveCustomModel}
-        setLiveCustomModel={setLiveCustomModel}
-        diarizationModelSelection={diarizationModelSelection}
-        setDiarizationModelSelection={setDiarizationModelSelection}
-        diarizationCustomModel={diarizationCustomModel}
-        setDiarizationCustomModel={setDiarizationCustomModel}
-        modelCacheStatus={modelCacheStatus}
-        isRunning={isRunning}
-        refreshCacheStatus={refreshCacheStatus}
-        isMetal={isMetal}
-        runtimeProfile={runtimeProfile}
-        downloadingIds={downloadingIds}
-        hostCacheStatus={hostCacheStatus}
-        onDownload={downloadModel}
-        onRemove={removeModel}
-      />
     </>
   );
 };

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Library, Zap } from 'lucide-react';
+import { Zap } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
 import { ModelPickerRow } from '../../models/ModelPickerRow';
@@ -20,18 +20,17 @@ interface MainModelPickerProps {
   onMainCustomModelChange: (value: string) => void;
   onDownload: (id: string) => void;
   onRemove: (id: string) => void;
-  onOpenManager: () => void;
 }
 
 /**
- * Replaces the old single Model Variant dropdown with one expandable row per
- * model in the selected family tile. This is what makes the merged NeMo tile
- * usable: Parakeet (ASR-only) and Canary (translates) show up as two separate,
- * individually selectable rows instead of being flattened into one option.
+ * One card per model in the selected family tile. This is what makes the
+ * merged NeMo tile usable: Parakeet (ASR-only) and Canary (translates) show
+ * up as two separate, individually selectable cards instead of being
+ * flattened into one option.
  *
- * Cross-family work (downloading a family that is not currently selected, or
- * managing diarization models) is out of scope here - it lives behind the
- * Manage all models button, which opens the full Model Manager modal.
+ * This picker is the only model-management surface: each card carries its own
+ * download/remove actions, so downloading a family that is not currently
+ * selected means selecting that family tile first.
  */
 export function MainModelPicker({
   selectedFamily,
@@ -45,19 +44,13 @@ export function MainModelPicker({
   onMainCustomModelChange,
   onDownload,
   onRemove,
-  onOpenManager,
 }: MainModelPickerProps) {
   const models = selectedFamily ? modelsForFamilyChoice(selectedFamily) : [];
   const isCustomSelected = mainModelSelection === MAIN_MODEL_CUSTOM_OPTION;
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <label className="text-xs font-medium tracking-wider text-slate-500 uppercase">Model</label>
-        <Button variant="ghost" size="sm" icon={<Library size={13} />} onClick={onOpenManager}>
-          Manage all models
-        </Button>
-      </div>
+      <label className="text-xs font-medium tracking-wider text-slate-500 uppercase">Model</label>
 
       <div className="space-y-2">
         {models.map((model) => (
@@ -77,23 +70,34 @@ export function MainModelPicker({
         ))}
 
         <div
-          className={`rounded-lg border px-3 py-2.5 transition-colors ${
-            isCustomSelected ? 'border-accent-magenta/60 bg-white/10' : 'border-white/10 bg-white/5'
+          className={`rounded-lg border px-4 py-3 transition-colors duration-200 ${
+            isCustomSelected
+              ? 'border-accent-magenta/60 bg-white/10'
+              : 'border-white/10 bg-white/5 hover:bg-white/10'
           }`}
         >
-          <div className="flex items-center gap-3">
-            <input
-              type="radio"
-              name="main-model"
-              checked={isCustomSelected}
-              disabled={isRunning}
-              onChange={() => onMainModelSelectionChange(MAIN_MODEL_CUSTOM_OPTION)}
-              aria-label="Custom HuggingFace repo"
-              className="accent-accent-magenta h-3.5 w-3.5 shrink-0"
-            />
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">
-              Custom (HuggingFace repo)
-            </span>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="truncate text-sm font-medium text-white">
+                Custom (HuggingFace repo)
+              </span>
+              {isCustomSelected && (
+                <span className="bg-accent-cyan/15 text-accent-cyan rounded px-1.5 py-0.5 text-[10px] font-semibold">
+                  Main
+                </span>
+              )}
+            </div>
+            {!isCustomSelected && (
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label="Select custom HuggingFace repo"
+                onClick={() => onMainModelSelectionChange(MAIN_MODEL_CUSTOM_OPTION)}
+                disabled={isRunning}
+              >
+                Select
+              </Button>
+            )}
           </div>
 
           {isCustomSelected && (

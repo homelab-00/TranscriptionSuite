@@ -16,7 +16,6 @@ function setup(overrides: Partial<React.ComponentProps<typeof MainModelPicker>> 
     onMainCustomModelChange: vi.fn(),
     onDownload: vi.fn(),
     onRemove: vi.fn(),
-    onOpenManager: vi.fn(),
     ...overrides,
   };
   render(<MainModelPicker {...props} />);
@@ -27,42 +26,44 @@ describe('MainModelPicker', () => {
   it('lists both models behind the merged NeMo family tile', () => {
     setup();
 
-    expect(screen.getByRole('radio', { name: /Parakeet/ })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /Canary/ })).toBeInTheDocument();
+    expect(screen.getByText(/Parakeet/)).toBeInTheDocument();
+    expect(screen.getByText(/Canary/)).toBeInTheDocument();
   });
 
   it('does not leak models from other families', () => {
     setup();
 
-    expect(screen.queryByRole('radio', { name: /Whisper/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Faster Whisper/)).not.toBeInTheDocument();
   });
 
   it('scopes the list to whichever family is selected', () => {
     setup({ selectedFamily: 'sensevoice', mainModelSelection: 'iic/SenseVoiceSmall' });
 
-    expect(screen.getByRole('radio', { name: /SenseVoice/ })).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: /Parakeet/ })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/SenseVoice/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Parakeet/)).not.toBeInTheDocument();
   });
 
-  it('reports the model id when a row is selected', () => {
+  it('reports the model id when a card is selected', () => {
     const props = setup();
 
-    fireEvent.click(screen.getByRole('radio', { name: /Canary/ }));
+    fireEvent.click(screen.getByRole('button', { name: /select canary/i }));
 
     expect(props.onMainModelSelectionChange).toHaveBeenCalledWith('nvidia/canary-1b-v2');
   });
 
-  it('marks the currently selected model as checked', () => {
+  it('marks the currently selected model with a Main badge', () => {
     setup();
 
-    expect(screen.getByRole('radio', { name: /Parakeet/ })).toBeChecked();
-    expect(screen.getByRole('radio', { name: /Canary/ })).not.toBeChecked();
+    // Parakeet is selected, so its card carries the badge and no Select button.
+    expect(screen.getByText('Main')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /select parakeet/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /select canary/i })).toBeInTheDocument();
   });
 
-  it('switches to the custom option when the custom row is chosen', () => {
+  it('switches to the custom option when the custom card is chosen', () => {
     const props = setup();
 
-    fireEvent.click(screen.getByRole('radio', { name: /custom/i }));
+    fireEvent.click(screen.getByRole('button', { name: /select custom/i }));
 
     expect(props.onMainModelSelectionChange).toHaveBeenCalledWith(MAIN_MODEL_CUSTOM_OPTION);
   });
@@ -85,11 +86,11 @@ describe('MainModelPicker', () => {
     expect(props.onMainCustomModelChange).toHaveBeenCalledWith('me/my-model');
   });
 
-  it('locks every row while the server is running', () => {
+  it('locks every Select button while the server is running', () => {
     setup({ isRunning: true });
 
-    for (const radio of screen.getAllByRole('radio')) {
-      expect(radio).toBeDisabled();
+    for (const button of screen.getAllByRole('button', { name: /^select /i })) {
+      expect(button).toBeDisabled();
     }
   });
 
@@ -103,19 +104,11 @@ describe('MainModelPicker', () => {
     expect(screen.getByRole('button', { name: /download/i })).toBeInTheDocument();
   });
 
-  it('opens the full manager on request', () => {
-    const props = setup();
-
-    fireEvent.click(screen.getByRole('button', { name: /manage all models/i }));
-
-    expect(props.onOpenManager).toHaveBeenCalled();
-  });
-
-  it('renders nothing but the custom row when no family is selected', () => {
+  it('renders nothing but the custom card when no family is selected', () => {
     setup({ selectedFamily: null });
 
-    expect(screen.getByRole('radio', { name: /custom/i })).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: /Parakeet/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /select custom/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Parakeet/)).not.toBeInTheDocument();
   });
 
   it('shows the current custom repo in the input', () => {

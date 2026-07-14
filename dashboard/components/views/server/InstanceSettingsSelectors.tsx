@@ -84,7 +84,6 @@ interface InstanceSettingsSelectorsProps {
   downloadingIds: ReadonlySet<string>;
   onDownloadModel: (id: string) => void;
   onRemoveModel: (id: string) => void;
-  onOpenModelManager: () => void;
 }
 
 const FAMILY_ICONS: Record<FamilyChoiceId, React.ReactNode> = {
@@ -183,7 +182,6 @@ export function InstanceSettingsSelectors({
   downloadingIds,
   onDownloadModel,
   onRemoveModel,
-  onOpenModelManager,
 }: InstanceSettingsSelectorsProps) {
   const familyChoices = useMemo(() => familyChoicesFor(runtimeProfile), [runtimeProfile]);
 
@@ -312,7 +310,6 @@ export function InstanceSettingsSelectors({
         onMainCustomModelChange={onMainCustomModelChange}
         onDownload={onDownloadModel}
         onRemove={onRemoveModel}
-        onOpenManager={onOpenModelManager}
       />
 
       {/* Live Mode model */}

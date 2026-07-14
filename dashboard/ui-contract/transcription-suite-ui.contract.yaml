@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.5.0
+  spec_version: 1.6.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -92,7 +92,6 @@ meta:
       - components/views/__tests__/AudioNoteModal.auto-actions.test.tsx
       - components/views/__tests__/GpuDiagnosticModal.test.tsx
       - components/views/__tests__/GpuHealthCard.test.tsx
-      - components/views/__tests__/ModelManagerModal.test.tsx
       - components/views/AboutModal.tsx
       - components/views/AddNoteModal.tsx
       - components/views/AudioNoteModal.tsx
@@ -102,8 +101,6 @@ meta:
       - components/views/GpuHealthCard.tsx
       - components/views/LiveTranscriptView.tsx
       - components/views/LogsView.tsx
-      - components/views/ModelManagerModal.tsx
-      - components/views/ModelManagerTab.tsx
       - components/views/NotebookView.tsx
       - components/views/server/__tests__/MainModelPicker.test.tsx
       - components/views/server/InstanceSettingsSelectors.tsx
@@ -120,7 +117,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-07-14T19:05:46.969Z
+    generated_at: 2026-07-14T22:01:07.003Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -395,7 +392,6 @@ foundation:
         - h-[85%]
         - h-[85vh]
         - max-h-[80vh]
-        - max-h-[85vh]
         - max-h-[90vh]
         - min-h-[20rem]
         - min-h-[38px]
@@ -515,7 +511,6 @@ utility_allowlist:
   exact_classes:
     - -bottom-1
     - -left-4.25
-    - -mt-0.5
     - -mt-1
     - -mt-12
     - -right-1
@@ -597,7 +592,6 @@ utility_allowlist:
     - bg-orange-500/10
     - bg-purple-400/10
     - bg-purple-500
-    - bg-purple-500/10
     - bg-red-400/10
     - bg-red-500
     - bg-red-500/10
@@ -607,7 +601,6 @@ utility_allowlist:
     - bg-slate-300/10
     - bg-slate-400/10
     - bg-slate-500
-    - bg-slate-500/10
     - bg-slate-500/20
     - bg-slate-700
     - bg-slate-800
@@ -664,15 +657,7 @@ utility_allowlist:
     - border-green-500/30
     - border-l
     - border-l-2
-    - border-l-accent-magenta
-    - border-l-amber-400
-    - border-l-blue-400
-    - border-l-green-400
-    - border-l-orange-400
-    - border-l-purple-400
     - border-l-red-500
-    - border-l-slate-300
-    - border-l-slate-500
     - border-orange-400/60
     - border-orange-500/20
     - border-purple-400/60
@@ -911,7 +896,6 @@ utility_allowlist:
     - min-w-25
     - min-w-32.5
     - min-w-36
-    - min-w-42.5
     - min-w-6
     - ml-0.5
     - ml-1
@@ -981,7 +965,6 @@ utility_allowlist:
     - pl-4
     - pl-5
     - pl-6
-    - pl-7
     - pl-8
     - pointer-events-auto
     - pointer-events-none
@@ -1235,7 +1218,6 @@ utility_allowlist:
     - h-[85%]
     - h-[85vh]
     - max-h-[80vh]
-    - max-h-[85vh]
     - max-h-[90vh]
     - md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]
     - min-h-[20rem]
@@ -1281,8 +1263,6 @@ inline_style_allowlist:
     - backgroundColor
     - backgroundImage
     - backgroundSize
-    - containIntrinsicSize
-    - contentVisibility
     - display
     - gridTemplateRows
     - height
@@ -1307,7 +1287,6 @@ inline_style_allowlist:
     - "1"
     - "100"
     - 100%
-    - 120px
     - 16%
     - 1px
     - 1rem
@@ -1322,8 +1301,6 @@ inline_style_allowlist:
     - 50%
     - 7%
     - "90"
-    - auto
-    - auto 120px
     - auto repeat(${gridRows}, 1fr)
     - fixed
     - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
@@ -1335,7 +1312,6 @@ inline_style_allowlist:
     - radial-gradient(circle at top left, transparent 1rem, black 1rem)
     - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
     - translateY(${pillTop}px)
-    - visible
   keyframes:
     - dropdown-appear
     - dropzone-flash
@@ -1800,23 +1776,6 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   CopyableCommand:
     file: components/views/GpuHealthCard.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  CustomModelRow:
-    file: components/views/ModelManagerTab.tsx
     required_tokens:
       - colors
       - motion
@@ -2349,40 +2308,6 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  ModelManagerModal:
-    file: components/views/ModelManagerModal.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  ModelManagerTab:
-    file: components/views/ModelManagerTab.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   ModelPickerRow:
     file: components/models/ModelPickerRow.tsx
     required_tokens:
@@ -2419,23 +2344,6 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   ModelProfilesPanel:
     file: components/profiles/ModelProfilesPanel.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  ModelRow:
-    file: components/views/ModelManagerTab.tsx
     required_tokens:
       - colors
       - motion

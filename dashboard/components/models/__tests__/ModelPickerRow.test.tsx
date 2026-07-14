@@ -37,47 +37,33 @@ function setup(overrides: Partial<React.ComponentProps<typeof ModelPickerRow>> =
 }
 
 describe('ModelPickerRow', () => {
-  it('is collapsed by default, showing the name but not the description', () => {
+  it('shows the full detail block on the card itself', () => {
     setup();
 
     expect(screen.getByText('Canary 1B V2')).toBeInTheDocument();
-    expect(screen.queryByText(MODEL.description)).not.toBeInTheDocument();
-  });
-
-  it('reveals the full detail when expanded', () => {
-    setup();
-
-    fireEvent.click(screen.getByRole('button', { name: /details/i }));
-
     expect(screen.getByText(MODEL.description)).toBeInTheDocument();
     expect(screen.getByText('nvidia/canary-1b-v2')).toBeInTheDocument();
   });
 
-  it('selects the model when the radio is clicked', () => {
+  it('selects the model via the Select button', () => {
     const props = setup();
 
-    fireEvent.click(screen.getByRole('radio', { name: /Canary 1B V2/ }));
+    fireEvent.click(screen.getByRole('button', { name: /select canary/i }));
 
     expect(props.onSelect).toHaveBeenCalledWith('nvidia/canary-1b-v2');
   });
 
-  it('marks the selected row as checked', () => {
+  it('marks the selected card with a Main badge instead of a Select button', () => {
     setup({ selected: true });
 
-    expect(screen.getByRole('radio', { name: /Canary 1B V2/ })).toBeChecked();
+    expect(screen.getByText('Main')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /select canary/i })).not.toBeInTheDocument();
   });
 
-  // The disabled attribute IS the lock: a real browser dispatches no click at all
-  // to a disabled input, so onSelect cannot fire. Asserting the attribute is the
-  // faithful check and matches the pattern used for every disabled control in this
-  // repo. Clicking it here would be misleading rather than stricter, because
-  // fireEvent.click on a disabled radio still invokes onChange: React suppresses
-  // mouse handlers on disabled controls but derives onChange from the click, so the
-  // synthetic click produces a change event the browser would never produce.
   it('does not allow selection while the server is running', () => {
     setup({ disabled: true });
 
-    expect(screen.getByRole('radio', { name: /Canary 1B V2/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /select canary/i })).toBeDisabled();
   });
 
   it('offers Download for an absent model', () => {
@@ -113,13 +99,13 @@ describe('ModelPickerRow', () => {
   });
 
   // The two locks are independent on purpose. Cache operations on Metal are
-  // host-local and work with the server stopped, so a row that is locked for
+  // host-local and work with the server stopped, so a card that is locked for
   // selection must still be downloadable. Varying one flag at a time cannot
   // catch a regression that couples them.
   it('still allows download while selection is locked', () => {
     const props = setup({ disabled: true, canManage: true });
 
-    expect(screen.getByRole('radio', { name: /Canary 1B V2/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /select canary/i })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: /download/i }));
 
@@ -132,5 +118,16 @@ describe('ModelPickerRow', () => {
     fireEvent.click(screen.getByRole('button', { name: /remove/i }));
 
     expect(props.onRemove).toHaveBeenCalledWith('nvidia/canary-1b-v2');
+  });
+
+  it('links out to the model page on HuggingFace', () => {
+    const openExternal = vi.fn();
+    (window as any).electronAPI = { app: { openExternal } };
+    setup();
+
+    fireEvent.click(screen.getByTitle('View on HuggingFace'));
+
+    expect(openExternal).toHaveBeenCalledWith('https://huggingface.co/nvidia/canary-1b-v2');
+    delete (window as any).electronAPI;
   });
 });

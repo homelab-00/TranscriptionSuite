@@ -22,9 +22,8 @@ interface ModelRowDetailsProps {
  * The detail block for one model: repo id, on-disk size, parameter count,
  * capability badges, language count, and description.
  *
- * Shared by the Model Manager rows and the Server tab model picker so the two
- * cannot drift apart. ModelInfo carries no size field, so a size is shown only
- * for a model that is already cached.
+ * Rendered inside every Server tab model picker card. ModelInfo carries no
+ * size field, so a size is shown only for a model that is already cached.
  */
 export const ModelRowDetails: React.FC<ModelRowDetailsProps> = ({
   model,
