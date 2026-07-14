@@ -161,23 +161,17 @@ whisper_cpp:
     # WHISPERCPP_SERVER_URL or the built-in default (http://whisper-server:8080).
     # server_url: http://whisper-server:8080
 
+    # NOTE: inference has NO time limit. A slow machine takes as long as it needs;
+    # the only interrupt is the user pressing Cancel. (It was previously capped at
+    # ~2x real-time, which silently truncated transcripts on low-end hardware.)
+    # There is deliberately no timeout knob here to raise.
+    #
     # Maximum chunk duration (seconds) for long audio. Audio longer than this is
-    # split into sequential /inference POSTs (GH #168) so no single request can
-    # time out on a multi-hour file. Must be >= 60. Default: 600 (10 minutes).
+    # split into sequential /inference POSTs (GH #168) so each request is bounded
+    # in MEMORY (this is not, and never was, a time limit) and progress/cancel can
+    # be reported per chunk. Must be >= 60. Default: 600 (10 minutes).
     # Env override: WHISPERCPP_CHUNK_DURATION_S
     chunk_duration_s: 600
-
-    # Minimum per-request read timeout (seconds). The actual timeout scales with
-    # the chunk's duration but never drops below this floor. Raise it for very
-    # slow/loaded Vulkan GPUs. Must be >= 60. Default: 300.
-    # Env override: WHISPERCPP_INFERENCE_TIMEOUT_S
-    inference_timeout_s: 300
-
-    # Timeout scaling: seconds of budget per second of audio. Each request's
-    # timeout = max(inference_timeout_s, ceil(chunk_seconds * this)). Higher
-    # tolerates slower inference. Must be >= 0.5. Default: 2.0 (~2x real-time).
-    # Env override: WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND
-    timeout_seconds_per_audio_second: 2.0
 
 # ----------------------------------------------------------------------------
 # Sortformer Diarization Settings (Apple Silicon only)

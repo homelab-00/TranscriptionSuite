@@ -23,6 +23,11 @@ from server.core.stt.backends.base import (
     PartialTranscriptionError,
     STTBackend,
 )
+from server.core.stt.backends.whispercpp_transport import (
+    InferenceAborted,
+    ResponseTooLarge,
+    post_inference,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,21 +41,24 @@ class WhisperCppResponseError(RuntimeError):
 
 
 _DEFAULT_SERVER_URL = "http://whisper-server:8080"
-# Floor for the per-request httpx timeout. The actual budget scales with chunk
-# duration via ``_inference_timeout_for`` (GH #168 / #153): long audio is split
-# into ``_MAX_CHUNK_DURATION_S`` chunks in ``transcribe``, so each /inference POST
-# is bounded in size and time — replacing the old single un-chunked request whose
-# fixed 300s ceiling a 5h+ file could never satisfy.
-_INFERENCE_TIMEOUT = 300  # seconds — minimum per-request budget
 _MAX_CHUNK_DURATION_S = 10 * 60  # 10 min per /inference POST (mirrors the NeMo backends)
 # Hard ceiling on the configurable chunk duration. Even a deliberately huge
 # WHISPERCPP_CHUNK_DURATION_S must not route a whole multi-hour file through a
 # single un-chunked /inference request — that path re-exposes the GH #172
 # truncation and defeats per-chunk progress/cancellation. 30 min keeps each
 # chunk's plausible segment count far below any proportional cap.
+#
+# NOTE: chunking bounds MEMORY per forward pass. It is not, and never was, a time
+# limit — a chunk may take as long as it takes.
 _MAX_CHUNK_DURATION_CEILING_S = 30 * 60
-_TIMEOUT_SECONDS_PER_AUDIO_SECOND = 2.0  # tolerate inference up to ~2× real-time
 _LOAD_TIMEOUT = 60
+
+# Inference has NO time limit when the caller can cancel (the normal longform
+# case): a slow machine is allowed to take as long as it needs. Callers with no
+# cancellation_check — warmup, live mode, preview — have no way out of a wedged
+# sidecar, so they keep a finite read. Their audio is seconds long, so this is
+# already orders of magnitude above any honest inference time.
+_UNCANCELLABLE_READ_TIMEOUT_S = 300.0
 
 # whisper-server's own default for beam_size (see
 # ``examples/server/server.cpp``). Named so the client-vs-server default
@@ -73,14 +81,10 @@ _MAX_WORDS_PER_AUDIO_SECOND = 40
 _SEGMENT_CAP_FLOOR = 200
 _WORDS_CAP_FLOOR = 1_000
 
-# Hard ceiling on a single /inference response body, enforced WHILE reading so a
-# hostile or misconfigured ``WHISPERCPP_SERVER_URL`` returning a multi-GB body is
-# rejected before it is deserialized into memory. The proportional segment/word
-# caps above only run AFTER the body is parsed, so they cannot bound the read —
-# this is the real memory guard the old post-parse list slice only pretended to
-# be (GH #193). A 6-hour verbose_json transcript with word timestamps is well
-# under this, so it never trips on legitimate output.
-_MAX_RESPONSE_BYTES = 256 * 1024 * 1024  # 256 MiB
+# NOTE: the ceiling on a single /inference response body (GH #193) now lives in
+# ``whispercpp_transport.MAX_RESPONSE_BYTES``, where it is enforced WHILE the
+# body is read. The proportional segment/word caps above only run AFTER the body
+# is parsed, so they never could bound the read.
 
 # Practical cap on user-supplied initial_prompt. whisper.cpp uses the prompt
 # as a decoder hint in the context window (~224 tokens ≈ ~1 KB of text). A
@@ -113,31 +117,12 @@ _SIDECAR_LOAD_TIMEOUT_MSG = (
     "the model. Wait a moment and retry, or check the sidecar container logs."
 )
 
-_SIDECAR_INFERENCE_TIMEOUT_MSG = (
-    "whisper.cpp sidecar at {url} accepted the request but transcription "
-    "timed out after {timeout}s. This usually means the audio is too long for "
-    "the current timeout, or the Vulkan device is under heavy load. Try "
-    "shorter audio or check the sidecar container logs."
+_SIDECAR_WEDGED_MSG = (
+    "whisper.cpp sidecar at {url} accepted the request but sent no response "
+    "within {timeout:.0f}s. This path (warmup / live mode / preview) sends only "
+    "a few seconds of audio, so the sidecar is almost certainly wedged — check "
+    "the sidecar container logs. (File transcription has no time limit.)"
 )
-
-
-def _inference_timeout_for(
-    num_samples: int,
-    sample_rate: int,
-    floor: int = _INFERENCE_TIMEOUT,
-    factor: float = _TIMEOUT_SECONDS_PER_AUDIO_SECOND,
-) -> int:
-    """Per-request httpx read-timeout (seconds), scaled to the chunk's duration.
-
-    Floored at ``floor``. Because audio is chunked before it reaches the sidecar
-    (see ``WhisperCppBackend.transcribe``), every request is bounded, so scaling
-    the timeout to the chunk length lets a slow or heavily-loaded Vulkan GPU
-    finish without the client giving up prematurely (GH #168 / #153). ``floor``
-    and ``factor`` default to the module constants but are overridable via config
-    (``WHISPERCPP_INFERENCE_TIMEOUT_S`` / ``WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND``).
-    """
-    duration_s = num_samples / sample_rate if sample_rate > 0 else 0.0
-    return max(floor, math.ceil(duration_s * factor))
 
 
 def _read_whispercpp_setting(env_key: str, cfg_key: str) -> str | None:
@@ -199,36 +184,6 @@ def _word_cap_for(audio_duration_s: float) -> int:
     exceeding it means a malformed/hostile sidecar payload (GH #172).
     """
     return max(_WORDS_CAP_FLOOR, math.ceil(audio_duration_s * _MAX_WORDS_PER_AUDIO_SECOND))
-
-
-def _resolve_timeout_config() -> tuple[int, float]:
-    """``(inference_timeout_floor_s, seconds_per_audio_second)`` from env → config → default."""
-    raw_floor = _read_whispercpp_setting("WHISPERCPP_INFERENCE_TIMEOUT_S", "inference_timeout_s")
-    floor = _INFERENCE_TIMEOUT
-    if raw_floor is not None:
-        try:
-            floor = max(60, int(float(raw_floor)))
-        except (TypeError, ValueError):
-            logger.warning(
-                "Ignoring invalid whisper.cpp inference timeout %r (expected a number ≥ 60); using %ds",
-                raw_floor,
-                _INFERENCE_TIMEOUT,
-            )
-
-    raw_factor = _read_whispercpp_setting(
-        "WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND", "timeout_seconds_per_audio_second"
-    )
-    factor = _TIMEOUT_SECONDS_PER_AUDIO_SECOND
-    if raw_factor is not None:
-        try:
-            factor = max(0.5, float(raw_factor))
-        except (TypeError, ValueError):
-            logger.warning(
-                "Ignoring invalid whisper.cpp timeout factor %r (expected a number ≥ 0.5); using %.1f",
-                raw_factor,
-                _TIMEOUT_SECONDS_PER_AUDIO_SECOND,
-            )
-    return floor, factor
 
 
 def _resolve_server_url() -> str:
@@ -490,17 +445,23 @@ class WhisperCppBackend(STTBackend):
         self._model_name: str | None = None
         self._loaded: bool = False
         self._client: httpx.Client | None = None
-        # Chunking + timeout knobs. Default to the module constants; ``load()``
-        # overrides them from env/config (WHISPERCPP_*). Instance attributes so
-        # tests can shrink them; mirrors ``ParakeetBackend._max_chunk_duration_s``.
+        # Chunking knob. Defaults to the module constant; ``load()`` overrides it
+        # from env/config (WHISPERCPP_CHUNK_DURATION_S). An instance attribute so
+        # tests can shrink it; mirrors ``ParakeetBackend._max_chunk_duration_s``.
         # Audio longer than ``_max_chunk_duration_s`` (seconds) is split into
-        # chunks before being sent to the sidecar (GH #168).
+        # chunks before being sent to the sidecar (GH #168). This bounds memory
+        # per forward pass — it is NOT a time limit.
         self._max_chunk_duration_s: int = _MAX_CHUNK_DURATION_S
-        self._inference_timeout: int = _INFERENCE_TIMEOUT
-        self._timeout_seconds_per_audio_second: float = _TIMEOUT_SECONDS_PER_AUDIO_SECOND
 
     def _ensure_client(self) -> httpx.Client:
-        """Return (or create) a persistent httpx.Client.
+        """Return (or create) the persistent sync httpx.Client used by ``/load``.
+
+        ONLY ``/load`` uses this client now: ``/inference`` goes through
+        ``whispercpp_transport.post_inference``, because a blocked *sync* read
+        cannot be aborted and inference is no longer time-limited. ``/load``
+        passes its own explicit ``_LOAD_TIMEOUT``, so no client-level default is
+        set here (httpx replaces the client default wholesale when a per-request
+        ``timeout=`` is given, which made the old default dead code anyway).
 
         TODO(GH-62-followup #G): this is not thread-safe — two concurrent
         callers both passing the ``self._client is None`` check would each
@@ -511,7 +472,7 @@ class WhisperCppBackend(STTBackend):
         ambient assumption.
         """
         if self._client is None:
-            self._client = httpx.Client(timeout=_INFERENCE_TIMEOUT)
+            self._client = httpx.Client()
         return self._client
 
     # ------------------------------------------------------------------
@@ -521,18 +482,14 @@ class WhisperCppBackend(STTBackend):
     def load(self, model_name: str, device: str, **kwargs: Any) -> None:
         self._server_url = _resolve_server_url()
         self._model_name = model_name
-        # Resolve chunking / timeout knobs once at load time (env → config →
-        # default), mirroring how _resolve_server_url is consumed here.
+        # Resolve the chunking knob once at load time (env → config → default),
+        # mirroring how _resolve_server_url is consumed here.
         self._max_chunk_duration_s = _resolve_chunk_duration_config()
-        self._inference_timeout, self._timeout_seconds_per_audio_second = _resolve_timeout_config()
         logger.info(
-            "WhisperCppBackend: loading model %s via %s "
-            "(chunk=%ds, timeout_floor=%ds, timeout_factor=%.1fx)",
+            "WhisperCppBackend: loading model %s via %s (chunk=%ds, inference=unbounded)",
             model_name,
             self._server_url,
             self._max_chunk_duration_s,
-            self._inference_timeout,
-            self._timeout_seconds_per_audio_second,
         )
 
         client = self._ensure_client()
@@ -625,12 +582,14 @@ class WhisperCppBackend(STTBackend):
         #     English; non-English targets are rejected upstream in
         #     capabilities.py::validate_translation_request.
         # ``progress_callback`` IS honoured for chunked (long) audio — one tick
-        # per chunk (GH #168). Short audio goes out in a single synchronous POST
-        # and so still cannot report sub-call progress.
-        # ``cancellation_check`` IS honoured for chunked audio: it is polled
-        # between chunks (the engine forwards it because supports_cancellation()
-        # is True) so a long job stops within one chunk instead of after the
-        # whole file. A single /inference POST cannot be interrupted mid-flight.
+        # per chunk (GH #168). Short audio goes out in a single POST and so still
+        # cannot report sub-call progress.
+        # ``cancellation_check`` IS honoured, and is now the ONLY interrupt:
+        # inference itself has no time limit. It is polled between chunks AND
+        # forwarded into the in-flight POST (whispercpp_transport aborts a read
+        # blocked on a silent sidecar), so a job stops within ~a quarter second
+        # rather than at the next chunk boundary. Passing it also switches the
+        # request to an unbounded read — see _UNCANCELLABLE_READ_TIMEOUT_S.
 
         if not self._loaded:
             raise RuntimeError("WhisperCppBackend: model is not loaded")
@@ -665,11 +624,18 @@ class WhisperCppBackend(STTBackend):
             # form value to that literal (see server.cpp ``req.has_file``).
             data["split_on_word"] = "true"
 
-        # Short audio: one synchronous POST (the original fast path).
+        # Short audio: one POST (the original fast path).
         total_samples = len(audio)
         chunk_samples = int(self._max_chunk_duration_s * audio_sample_rate)
         if chunk_samples <= 0 or total_samples <= chunk_samples:
-            return self._transcribe_chunk(audio, audio_sample_rate, data)
+            try:
+                return self._transcribe_chunk(audio, audio_sample_rate, data, cancellation_check)
+            except InferenceAborted as exc:
+                # Single chunk: there is no completed work to salvage, so this is
+                # a plain cancellation.
+                from server.core.model_manager import TranscriptionCancelledError
+
+                raise TranscriptionCancelledError("Transcription cancelled by user") from exc
 
         # Long audio: split into bounded chunks and stitch with time offsets so
         # no single request must cover the whole file (GH #168). Mirrors
@@ -681,19 +647,24 @@ class WhisperCppBackend(STTBackend):
         chunk_data = data
         for i in range(num_chunks):
             if cancellation_check is not None and cancellation_check():
-                # Lazy import avoids a circular dependency (model_manager imports
-                # backend factories at module load).
-                from server.core.model_manager import TranscriptionCancelledError
-
                 logger.info(
                     "WhisperCppBackend: transcription cancelled at chunk %d/%d", i + 1, num_chunks
                 )
-                raise TranscriptionCancelledError("Transcription cancelled by user")
+                raise self._cancelled_or_partial(all_segments, first_info, offset)
 
             start = i * chunk_samples
             chunk = audio[start : min(start + chunk_samples, total_samples)]
             try:
-                segments, info = self._transcribe_chunk(chunk, audio_sample_rate, chunk_data)
+                segments, info = self._transcribe_chunk(
+                    chunk, audio_sample_rate, chunk_data, cancellation_check
+                )
+            except InferenceAborted:
+                # The user cancelled while this chunk was in flight. Completed
+                # chunks are real transcription work — surface them rather than
+                # discard them ("avoid data loss at all costs"). MUST precede the
+                # generic handler below, which would otherwise swallow this.
+                logger.info("WhisperCppBackend: cancelled mid-chunk %d/%d", i + 1, num_chunks)
+                raise self._cancelled_or_partial(all_segments, first_info, offset) from None
             except Exception as exc:
                 if first_info is None:
                     # Failed on the very first chunk — nothing to salvage, so the
@@ -741,68 +712,49 @@ class WhisperCppBackend(STTBackend):
         )
 
     def _transcribe_chunk(
-        self, chunk: np.ndarray, sample_rate: int, data: dict[str, Any]
+        self,
+        chunk: np.ndarray,
+        sample_rate: int,
+        data: dict[str, Any],
+        cancellation_check: Callable[[], bool] | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
         """POST a single (already-bounded) audio chunk to /inference and parse it.
 
-        The read-timeout scales with the chunk's duration (floored at
-        ``_INFERENCE_TIMEOUT``) so a slow Vulkan GPU does not false-time-out on
-        an otherwise-healthy request.
+        There is NO time limit on inference when ``cancellation_check`` is given:
+        a slow machine takes as long as it takes, and the only interrupt is the
+        user. See ``whispercpp_transport`` for why an unbounded read is safe there
+        and why it is refused everywhere else.
+
+        The response body is bounded at read time by the transport (GH #193).
         """
         wav_bytes = _audio_to_wav_bytes(chunk, sample_rate)
-        timeout = _inference_timeout_for(
-            len(chunk),
-            sample_rate,
-            self._inference_timeout,
-            self._timeout_seconds_per_audio_second,
-        )
-
-        client = self._ensure_client()
-        body = bytearray()
         try:
-            # Stream the response and bound it AT READ TIME (GH #193): a hostile
-            # or misconfigured sidecar could otherwise return a multi-GB body
-            # that ``resp.json()`` would materialize whole, exhausting memory
-            # before any segment/word cap (which only runs post-parse) could
-            # reject it. Reject early on an honest server's declared
-            # Content-Length, and — for servers that omit or lie about it —
-            # abort the read the instant the accumulated bytes cross the ceiling.
-            with client.stream(
-                "POST",
+            body = post_inference(
                 f"{self._server_url}/inference",
-                files={"file": ("audio.wav", wav_bytes, "audio/wav")},
-                data=data,
-                timeout=timeout,
-            ) as resp:
-                resp.raise_for_status()
-                declared = resp.headers.get("Content-Length")
-                # ``isascii()`` first: str.isdigit() is True for non-ASCII digit
-                # codepoints (e.g. "²") that int() then rejects, and a hostile
-                # sidecar can smuggle byte 0xB2 → "²" into the header.
-                if (
-                    declared
-                    and declared.isascii()
-                    and declared.isdigit()
-                    and int(declared) > _MAX_RESPONSE_BYTES
-                ):
-                    raise WhisperCppResponseError(
-                        f"whisper.cpp sidecar at {self._server_url} declared a "
-                        f"{int(declared)}-byte /inference response "
-                        f"(max {_MAX_RESPONSE_BYTES}); refusing to read it"
-                    )
-                for piece in resp.iter_bytes():
-                    body += piece
-                    if len(body) > _MAX_RESPONSE_BYTES:
-                        raise WhisperCppResponseError(
-                            f"whisper.cpp sidecar at {self._server_url} returned a "
-                            f"/inference response exceeding {_MAX_RESPONSE_BYTES} "
-                            f"bytes; aborting read to bound memory"
-                        )
+                wav_bytes,
+                data,
+                cancellation_check=cancellation_check,
+                read_timeout_s=(
+                    None if cancellation_check is not None else _UNCANCELLABLE_READ_TIMEOUT_S
+                ),
+            )
+        except InferenceAborted:
+            # The caller asked for this, and only the caller knows whether there
+            # is completed work worth keeping — propagate untouched.
+            raise
+        except ResponseTooLarge as exc:
+            raise WhisperCppResponseError(
+                f"whisper.cpp sidecar at {self._server_url}: {exc}"
+            ) from exc
         except (httpx.NetworkError, OSError) as exc:
             raise RuntimeError(_SIDECAR_UNREACHABLE_MSG.format(url=self._server_url)) from exc
         except httpx.TimeoutException as exc:
+            # Only reachable on the uncancellable paths (warmup / live / preview),
+            # which are the only ones that still carry a read deadline.
             raise RuntimeError(
-                _SIDECAR_INFERENCE_TIMEOUT_MSG.format(url=self._server_url, timeout=timeout)
+                _SIDECAR_WEDGED_MSG.format(
+                    url=self._server_url, timeout=_UNCANCELLABLE_READ_TIMEOUT_S
+                )
             ) from exc
         except HttpxHTTPStatusError as exc:
             raise RuntimeError(
@@ -820,8 +772,6 @@ class WhisperCppBackend(STTBackend):
             ) from exc
 
         try:
-            # json.loads / the preview accept the bytearray directly — no full
-            # copy, so a near-cap body isn't transiently doubled in memory.
             result = json.loads(body)
         except ValueError as exc:
             # Sidecar returned non-JSON (e.g. plain-text error page) or an empty
@@ -835,11 +785,39 @@ class WhisperCppBackend(STTBackend):
         audio_duration_s = len(chunk) / sample_rate if sample_rate else 0.0
         return self._parse_response(result, audio_duration_s)
 
+    @staticmethod
+    def _cancelled_or_partial(
+        segments: list[BackendSegment],
+        info: BackendTranscriptionInfo | None,
+        completed_seconds: float,
+    ) -> Exception:
+        """The exception to raise when the user cancels mid-file.
+
+        With completed chunks in hand, cancelling must NOT throw them away — a
+        cancel five hours into a six-hour file would otherwise destroy five hours
+        of real transcription. Mirrors engine.py's own refusal to discard salvaged
+        work on a late cancel. With nothing done yet, it is a plain cancellation.
+        """
+        # Lazy import avoids a circular dependency (model_manager imports the
+        # backend factories at module load).
+        from server.core.model_manager import TranscriptionCancelledError
+
+        if info is None or not segments:
+            return TranscriptionCancelledError("Transcription cancelled by user")
+        return PartialTranscriptionError(
+            "Cancelled by user",
+            segments=segments,
+            info=info,
+            completed_seconds=completed_seconds,
+        )
+
     def supports_translation(self) -> bool:
         return True
 
     def supports_cancellation(self) -> bool:
-        # transcribe() polls cancellation_check between chunks (GH #168 follow-up).
+        # transcribe() polls cancellation_check between chunks AND forwards it
+        # into the in-flight /inference request, which the transport can abort.
+        # Since inference is no longer time-limited, this is the ONLY interrupt.
         return True
 
     @property

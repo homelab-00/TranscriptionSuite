@@ -10,88 +10,78 @@ import numpy as np
 import pytest
 from server.core.stt.backends.base import PartialTranscriptionError
 from server.core.stt.backends.whispercpp_backend import (
-    _INFERENCE_TIMEOUT,
     _MAX_CHUNK_DURATION_CEILING_S,
     _MAX_CHUNK_DURATION_S,
     _MAX_SEGMENTS_PER_AUDIO_SECOND,
     _MAX_WORDS_PER_AUDIO_SECOND,
     _SEGMENT_CAP_FLOOR,
-    _TIMEOUT_SECONDS_PER_AUDIO_SECOND,
+    _UNCANCELLABLE_READ_TIMEOUT_S,
     _WORDS_CAP_FLOOR,
     WhisperCppBackend,
     WhisperCppResponseError,
     _audio_to_wav_bytes,
     _coerce_float,
-    _inference_timeout_for,
     _resolve_chunk_duration_config,
     _resolve_server_url,
-    _resolve_timeout_config,
     _sanitize_for_error_preview,
     _sanitize_language_code,
     _segment_cap_for,
     _validate_server_url,
     _word_cap_for,
 )
+from server.core.stt.backends.whispercpp_transport import InferenceAborted, ResponseTooLarge
 
 # ---------------------------------------------------------------------------
-# /inference response seam (GH #193)
+# /inference seam
 # ---------------------------------------------------------------------------
 #
-# GH #193: production will read the /inference response via client.stream(...)
-# (accumulating resp.iter_bytes() under a byte ceiling) instead of
-# client.post(...) + resp.json(). To make that switch a ONE-LINE change here
-# (flip _INFERENCE_METHOD), _inference_response() builds a DUAL-CAPABLE mock
-# response usable by BOTH read paths:
-#   * legacy post path: resp.json() returns the payload
-#   * streaming path:   `with ... as resp: resp.iter_bytes()` yields the body
-# /load still uses client.post directly, so its mocks stay on .post.
-_INFERENCE_METHOD = "stream"  # production reads /inference via client.stream() (GH #193)
+# /inference no longer goes through the sync httpx.Client at all. It goes through
+# ``whispercpp_transport.post_inference(url, wav_bytes, data, *, cancellation_check,
+# read_timeout_s, ...)``, which returns the raw response body as BYTES and raises
+# InferenceAborted / ResponseTooLarge / httpx.* on failure.
+#
+# WHY: whisper-server sends no bytes until inference completes, so httpx's read
+# timeout was acting as a ~2x-real-time WORK DEADLINE that silently truncated
+# transcripts on slow machines. The transport removes that limit by making the
+# request abortable (asyncio task.cancel() instead of an uninterruptible sync
+# read). The streaming/byte-ceiling logic moved there too, and is covered against
+# a REAL stalling socket server in tests/test_whispercpp_transport.py — a mock
+# cannot prove an abort actually interrupts a blocked read.
+#
+# These tests therefore mock post_inference and assert on WhisperCppBackend's own
+# behaviour: request shape, response parsing, chunk stitching, error mapping.
+# /load still uses the sync client, so its mocks stay on mock_httpx.post.
 
 
 def _inf(mock_httpx: MagicMock) -> MagicMock:
-    """The mocked httpx.Client method production uses to call /inference."""
-    return getattr(mock_httpx, _INFERENCE_METHOD)
+    """The mocked callable production uses to reach /inference."""
+    return mock_httpx.post_inference
 
 
 def _inference_response(
     payload: dict | None = None,
     *,
     raw: bytes | None = None,
-    status_code: int = 200,
-    headers: dict | None = None,
-    raise_status: Exception | None = None,
-) -> MagicMock:
-    """Build a mock /inference response that works for BOTH the post path
-    (resp.json()) and the stream path (context manager + resp.iter_bytes()).
-    Pass `raw=` for a non-JSON body (resp.json() then raises ValueError and the
-    streamed bytes fail json.loads). Pass `raise_status=` to make
-    resp.raise_for_status() raise."""
-    body = raw if raw is not None else json.dumps({} if payload is None else payload).encode()
-    resp = MagicMock(status_code=status_code, content=body)
-    resp.headers = dict(headers or {})
-    if raise_status is not None:
-        resp.raise_for_status.side_effect = raise_status
-    else:
-        resp.raise_for_status.return_value = None
+) -> bytes:
+    """Build a fake /inference response body. post_inference() returns raw bytes,
+    so that is what the mock returns. Pass ``raw=`` for a non-JSON body (the
+    backend must then map the json.loads failure to a RuntimeError)."""
     if raw is not None:
-        resp.json.side_effect = ValueError("not json")
-    else:
-        resp.json.return_value = {} if payload is None else payload
-    resp.iter_bytes.return_value = [body]
-    # Context-manager protocol for the future streaming path.
-    resp.__enter__.return_value = resp
-    resp.__exit__.return_value = False
-    return resp
+        return raw
+    return json.dumps({} if payload is None else payload).encode()
 
 
 def _inference_url(mock_httpx: MagicMock) -> str:
-    """The URL of the last /inference call, regardless of post-vs-stream shape.
-    post(url, ...) puts the url at args[0]; stream("POST", url, ...) at args[1]."""
+    """The URL of the last /inference call. post_inference(url, wav, data, ...)."""
     call = _inf(mock_httpx).call_args
     assert call is not None, "expected an /inference call to have been issued"
-    if _INFERENCE_METHOD == "stream":
-        return call.args[1] if len(call.args) > 1 else call.kwargs.get("url", "")
     return call.args[0] if call.args else call.kwargs.get("url", "")
+
+
+def _inference_data(call) -> dict:
+    """The form-data dict of an /inference call. post_inference passes it as the
+    third positional arg."""
+    return call.args[2] if len(call.args) > 2 else call.kwargs["data"]
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +96,13 @@ def backend() -> WhisperCppBackend:
 
 @pytest.fixture()
 def mock_httpx():
-    """Patch httpx.Client so no real HTTP calls are made.
+    """Patch both seams so no real HTTP call is made:
+
+      * ``httpx.Client``  -> used by /load (still a plain sync POST).
+      * ``post_inference`` -> used by /inference (the abortable async transport).
+
+    The post_inference mock is exposed as ``mock_httpx.post_inference`` so the
+    ``_inf()`` helper can reach it, keeping every existing call site unchanged.
 
     IMPORTANT: only replace the ``Client`` attribute, not the whole ``httpx``
     module. The production code catches real exception classes
@@ -115,18 +111,28 @@ def mock_httpx():
     with ``TypeError: catching classes that do not inherit from
     BaseException``.
 
-    PATCH-TARGET NOTE: the production code does ``self._client =
-    httpx.Client(...)`` through the module-level ``httpx`` name. If a
-    refactor changes that to ``from httpx import Client`` and ``Client(...)``
-    directly, this patch silently stops applying and every test runs against
-    real httpx. ``test_mock_httpx_patches_the_call_site`` below pins the
-    coupling so such a refactor fails loudly.
+    PATCH-TARGET NOTE: production does ``self._client = httpx.Client(...)``
+    through the module-level ``httpx`` name, and calls ``post_inference(...)``
+    as a module-level name imported into whispercpp_backend. If a refactor
+    changes either binding, these patches silently stop applying and the tests
+    run against the real thing. ``test_mock_httpx_patches_the_call_site`` and
+    ``test_mock_patches_the_post_inference_call_site`` pin both couplings so
+    such a refactor fails loudly.
     """
     mock_client = MagicMock()
-    with patch(
-        "server.core.stt.backends.whispercpp_backend.httpx.Client",
-        return_value=mock_client,
+    mock_post_inference = MagicMock()
+    with (
+        patch(
+            "server.core.stt.backends.whispercpp_backend.httpx.Client",
+            return_value=mock_client,
+        ),
+        patch(
+            "server.core.stt.backends.whispercpp_backend.post_inference",
+            mock_post_inference,
+        ),
     ):
+        # Reachable via _inf(); keeps the 70-odd existing call sites unchanged.
+        mock_client.post_inference = mock_post_inference
         yield mock_client
 
 
@@ -143,10 +149,17 @@ def loaded_backend(backend: WhisperCppBackend, mock_httpx: MagicMock) -> Whisper
 
 
 def _post_data(mock_httpx: MagicMock) -> dict:
-    """Return the ``data`` kwarg of the last POST call on the mocked client."""
+    """Return the form-data of the last /inference call."""
     call = _inf(mock_httpx).call_args
-    assert call is not None, "expected a POST to have been issued"
-    return call.kwargs.get("data") or call[1].get("data", {}) or {}
+    assert call is not None, "expected an /inference call to have been issued"
+    return _inference_data(call) or {}
+
+
+def _post_wav(mock_httpx: MagicMock) -> bytes:
+    """Return the WAV bytes of the last /inference call. post_inference(url, wav, data)."""
+    call = _inf(mock_httpx).call_args
+    assert call is not None, "expected an /inference call to have been issued"
+    return call.args[1] if len(call.args) > 1 else call.kwargs["wav_bytes"]
 
 
 def _seconds_of_audio(seconds: float) -> np.ndarray:
@@ -593,8 +606,13 @@ class TestTranscribe:
         with pytest.raises(RuntimeError, match="not loaded"):
             backend.transcribe(audio)
 
-    def test_sends_multipart_post(self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock):
-        """Request must go to /inference and carry a multipart 'file' field.
+    def test_sends_wav_to_inference(self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock):
+        """Request must go to /inference and carry real WAV bytes.
+
+        The multipart wrapping itself (filename "audio.wav", content-type
+        "audio/wav") is now the transport's job and is covered in
+        test_whispercpp_transport.py. What the backend owes is the right URL and
+        a real encoded WAV.
 
         Tightened from an ``isinstance``-only check so a mutation that
         short-circuits the HTTP call (``return [], BackendTranscriptionInfo(...)``
@@ -604,15 +622,10 @@ class TestTranscribe:
         audio = np.zeros(16000, dtype=np.float32)
         loaded_backend.transcribe(audio)
         call = _inf(mock_httpx).call_args
-        assert call is not None, "expected a POST to have been issued"
+        assert call is not None, "expected an /inference call to have been issued"
         # URL assertion — catches any routing regression.
         assert _inference_url(mock_httpx).endswith("/inference")
-        files = call.kwargs.get("files")
-        assert files is not None, "expected a multipart 'file' upload"
-        assert "file" in files
-        filename, wav_bytes, content_type = files["file"]
-        assert filename == "audio.wav"
-        assert content_type == "audio/wav"
+        wav_bytes = _post_wav(mock_httpx)
         assert wav_bytes[:4] == b"RIFF", "body must be a real WAV, not a placeholder"
 
     def test_parses_segments(self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock):
@@ -1170,23 +1183,22 @@ class TestTranscribe:
     def test_transcribe_raises_on_timeout(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
-        """Inference timeout must surface the inference-timeout message."""
+        """A read timeout is only reachable on the UNCANCELLABLE paths now
+        (warmup/live/preview). File transcription has no time limit at all, so
+        the message must say so rather than blame the audio for being too long."""
         _inf(mock_httpx).side_effect = httpx.ReadTimeout("deadline")
         audio = np.zeros(16000, dtype=np.float32)
-        with pytest.raises(RuntimeError, match="transcription timed out"):
+        with pytest.raises(RuntimeError, match="sent no response within"):
             loaded_backend.transcribe(audio)
 
     def test_transcribe_raises_on_http_5xx(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
         """A 5xx from /inference must surface as an actionable RuntimeError."""
-        _inf(mock_httpx).return_value = _inference_response(
-            status_code=503,
-            raise_status=httpx.HTTPStatusError(
-                "503 Service Unavailable",
-                request=MagicMock(),
-                response=MagicMock(status_code=503),
-            ),
+        _inf(mock_httpx).side_effect = httpx.HTTPStatusError(
+            "503 Service Unavailable",
+            request=MagicMock(),
+            response=MagicMock(status_code=503),
         )
         audio = np.zeros(16000, dtype=np.float32)
         with pytest.raises(RuntimeError, match="returned HTTP 503"):
@@ -1200,126 +1212,6 @@ class TestTranscribe:
         audio = np.zeros(16000, dtype=np.float32)
         with pytest.raises(RuntimeError, match="non-JSON"):
             loaded_backend.transcribe(audio)
-
-
-# ---------------------------------------------------------------------------
-# /inference response byte guard (GH #193) — bound the read BEFORE deserializing
-# ---------------------------------------------------------------------------
-
-
-class TestResponseByteGuard:
-    """The /inference body is bounded at HTTP read time so a hostile or
-    misconfigured WHISPERCPP_SERVER_URL cannot exhaust memory before any
-    segment/word cap (which only runs post-parse) gets a chance to reject it.
-
-    Both the declared ``Content-Length`` (honest servers) and the actual
-    streamed bytes (servers that omit/lie about it) are checked, and the read
-    aborts as soon as the ceiling is crossed — this is the real memory bound
-    the old post-parse list slice only pretended to be.
-    """
-
-    @staticmethod
-    def _stream_resp(*, headers=None, iter_bytes=None):
-        """A minimal streaming-response mock: a context manager exposing
-        ``headers``/``raise_for_status``/``iter_bytes`` (the surface the byte
-        guard reads), independent of the dual-capable ``_inference_response``."""
-        resp = MagicMock(status_code=200)
-        resp.headers = dict(headers or {})
-        resp.raise_for_status.return_value = None
-        if iter_bytes is not None:
-            resp.iter_bytes = iter_bytes
-        resp.__enter__.return_value = resp
-        resp.__exit__.return_value = False
-        return resp
-
-    def test_oversized_streamed_body_is_rejected_before_full_read(
-        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
-    ):
-        """A body with no/dishonest Content-Length that exceeds the cap must be
-        rejected, and the read must STOP at the ceiling (proving the memory
-        bound) rather than materialize the whole over-cap body."""
-        from server.core.stt.backends.whispercpp_backend import _MAX_RESPONSE_BYTES
-
-        piece = b"x" * (1024 * 1024)  # 1 MiB
-        # Enough pieces to blow well past the cap if the read ran to completion.
-        n_pieces = (_MAX_RESPONSE_BYTES // len(piece)) + 100
-        consumed = {"n": 0}
-
-        def iter_bytes():
-            for _ in range(n_pieces):
-                consumed["n"] += 1
-                yield piece
-
-        # No Content-Length header → the accumulator guard is what must fire.
-        mock_httpx.stream.return_value = self._stream_resp(iter_bytes=iter_bytes)
-        with pytest.raises(WhisperCppResponseError):
-            loaded_backend.transcribe(_seconds_of_audio(1))
-        # Bounded memory: the guard stopped reading once the cap was crossed,
-        # not after consuming every (over-cap) piece.
-        assert consumed["n"] <= (_MAX_RESPONSE_BYTES // len(piece)) + 1
-
-    def test_oversized_content_length_header_is_rejected_before_read(
-        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
-    ):
-        """An honest server that declares a Content-Length above the cap must be
-        rejected BEFORE the body is read at all."""
-        from server.core.stt.backends.whispercpp_backend import _MAX_RESPONSE_BYTES
-
-        def iter_bytes():
-            raise AssertionError("must reject on Content-Length before reading the body")
-            yield  # pragma: no cover — makes this a generator
-
-        resp = self._stream_resp(
-            headers={"Content-Length": str(_MAX_RESPONSE_BYTES + 1)},
-            iter_bytes=iter_bytes,
-        )
-        mock_httpx.stream.return_value = resp
-        with pytest.raises(WhisperCppResponseError):
-            loaded_backend.transcribe(_seconds_of_audio(1))
-
-    def test_non_ascii_content_length_is_ignored(
-        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
-    ):
-        """A bogus non-ASCII Content-Length must be ignored, not crash the read.
-
-        A hostile sidecar can put raw byte 0xB2 in the header, which httpx
-        decodes (latin-1) to ``"²"``. ``str.isdigit()`` is True for it but
-        ``int("²")`` raises ValueError — which none of the read handlers catch.
-        The guard must only honour ASCII digits and otherwise fall through to
-        the streamed-bytes accumulator, reading the (valid) body normally.
-        """
-        body = json.dumps({"segments": [], "language": "en"}).encode()
-
-        def iter_bytes():
-            yield body
-
-        mock_httpx.stream.return_value = self._stream_resp(
-            headers={"Content-Length": "²"},  # superscript two: isdigit() True, int() raises
-            iter_bytes=iter_bytes,
-        )
-        segments, info = loaded_backend.transcribe(_seconds_of_audio(1))
-        assert segments == []
-        assert info.language == "en"
-
-    def test_response_at_cap_is_accepted(
-        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
-    ):
-        """A well-formed response whose body is at/under the cap streams through
-        normally — the guard must not false-trip on legitimate transcripts."""
-        from server.core.stt.backends.whispercpp_backend import _MAX_RESPONSE_BYTES
-
-        body = json.dumps({"segments": [], "language": "en"}).encode()
-        assert len(body) <= _MAX_RESPONSE_BYTES
-
-        def iter_bytes():
-            # Deliberately chunked to exercise the accumulator loop.
-            yield body[: len(body) // 2]
-            yield body[len(body) // 2 :]
-
-        mock_httpx.stream.return_value = self._stream_resp(iter_bytes=iter_bytes)
-        segments, info = loaded_backend.transcribe(_seconds_of_audio(1))
-        assert segments == []
-        assert info.language == "en"
 
 
 # ---------------------------------------------------------------------------
@@ -1420,28 +1312,118 @@ class TestWordProportionalCap:
 
 
 # ---------------------------------------------------------------------------
-# _inference_timeout_for — duration-scaled per-request timeout (GH #168)
+# Unbounded inference — the ~2x-real-time cap is gone
 # ---------------------------------------------------------------------------
 
 
-class TestInferenceTimeoutFor:
-    def test_floors_at_inference_timeout(self):
-        # 10s of audio → 20s scaled, floored up to the 300s minimum.
-        assert _inference_timeout_for(10 * 16000, 16000) == _INFERENCE_TIMEOUT
+class TestUnboundedInference:
+    """Inference has no time limit. A slow machine takes as long as it needs,
+    and cancellation is the only interrupt.
 
-    def test_scales_above_floor(self):
-        # A 10-min chunk → 600 * 2.0 = 1200s, comfortably above the floor.
-        assert _inference_timeout_for(600 * 16000, 16000) == 1200
-
-    def test_zero_samples_is_floor(self):
-        assert _inference_timeout_for(0, 16000) == _INFERENCE_TIMEOUT
-
-    def test_zero_sample_rate_is_guarded(self):
-        # Must not divide by zero — fall back to the floor.
-        assert _inference_timeout_for(16000, 0) == _INFERENCE_TIMEOUT
+    The old budget was max(300, ceil(chunk_seconds * 2.0)). Because whisper-server
+    sends no bytes until inference completes, that read timeout acted as a WORK
+    DEADLINE: honest-but-slow hardware tripped it, raised PartialTranscriptionError,
+    and the partial was persisted as status='completed' — a silently truncated
+    transcript the user could not even retry.
+    """
 
     def test_default_chunk_duration_is_ten_minutes(self):
+        # Chunking survives: it bounds MEMORY per forward pass, and was never the
+        # time limit. Only the timeout was removed.
         assert _MAX_CHUNK_DURATION_S == 10 * 60
+
+    def test_no_timeout_knobs_remain(self):
+        """The cap is deleted, not merely defaulted to something generous."""
+        import server.core.stt.backends.whispercpp_backend as mod
+
+        for gone in (
+            "_INFERENCE_TIMEOUT",
+            "_TIMEOUT_SECONDS_PER_AUDIO_SECOND",
+            "_inference_timeout_for",
+            "_resolve_timeout_config",
+        ):
+            assert not hasattr(mod, gone), f"{gone} should have been deleted"
+
+    def test_chunk_post_is_unbounded_when_cancellable(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """A caller that can cancel gets read_timeout_s=None: no work deadline."""
+        _inf(mock_httpx).return_value = _inference_response({"segments": []})
+        loaded_backend.transcribe(_seconds_of_audio(1), cancellation_check=lambda: False)
+
+        call = _inf(mock_httpx).call_args
+        assert call.kwargs["cancellation_check"] is not None
+        assert call.kwargs["read_timeout_s"] is None
+
+    def test_chunk_post_is_bounded_when_not_cancellable(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """warmup/live/preview pass no cancellation_check, so they have no way out
+        of a wedged sidecar — they must keep a finite read."""
+        _inf(mock_httpx).return_value = _inference_response({"segments": []})
+        loaded_backend.transcribe(_seconds_of_audio(1))
+
+        call = _inf(mock_httpx).call_args
+        assert call.kwargs["cancellation_check"] is None
+        assert call.kwargs["read_timeout_s"] == _UNCANCELLABLE_READ_TIMEOUT_S
+
+    def test_oversized_response_maps_to_a_response_error(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """The byte ceiling itself now lives in the transport (and is tested there
+        against a real socket). The backend's job is to map it."""
+        _inf(mock_httpx).side_effect = ResponseTooLarge("body exceeded 256 MiB")
+        with pytest.raises(WhisperCppResponseError):
+            loaded_backend.transcribe(_seconds_of_audio(1))
+
+
+class TestCancelPreservesCompletedChunks:
+    """Cancelling mid-file must NOT throw away chunks that already finished.
+
+    Cancel is now the escape hatch from a wedged sidecar, so a user cancelling
+    five hours into a six-hour file would otherwise destroy five hours of real
+    transcription. Mirrors engine.py's own refusal to discard salvaged work on a
+    late cancel.
+    """
+
+    def test_cancel_midway_returns_a_partial_not_an_empty_discard(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        loaded_backend._max_chunk_duration_s = 1  # 1s chunks
+        calls = {"n": 0}
+
+        def _fake_post(*args, **kwargs):
+            check = kwargs["cancellation_check"]
+            if check is not None and check():
+                raise InferenceAborted("cancelled while awaiting the sidecar")
+            calls["n"] += 1
+            return _inference_response(
+                {"segments": [{"text": f"chunk{calls['n']}", "start": 0.0, "end": 1.0}]}
+            )
+
+        _inf(mock_httpx).side_effect = _fake_post
+
+        # Cancel goes True once two chunks are done.
+        with pytest.raises(PartialTranscriptionError) as exc:
+            loaded_backend.transcribe(
+                _seconds_of_audio(4), cancellation_check=lambda: calls["n"] >= 2
+            )
+
+        assert len(exc.value.segments) == 2, "completed chunks must be preserved"
+        assert exc.value.segments[0].text == "chunk1"
+        assert exc.value.completed_seconds == pytest.approx(2.0, abs=0.01)
+
+    def test_cancel_before_any_chunk_completes_still_cancels(
+        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """Nothing to salvage -> a real cancellation, not a bogus empty partial."""
+        from server.core.model_manager import TranscriptionCancelledError
+
+        loaded_backend._max_chunk_duration_s = 1
+        _inf(mock_httpx).side_effect = InferenceAborted("cancelled")
+
+        with pytest.raises(TranscriptionCancelledError):
+            loaded_backend.transcribe(_seconds_of_audio(4), cancellation_check=lambda: True)
 
 
 # ---------------------------------------------------------------------------
@@ -1548,9 +1530,9 @@ class TestTranscribeChunking:
         ]
         loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32), language=None)
         calls = _inf(mock_httpx).call_args_list
-        assert "language" not in (calls[0].kwargs.get("data") or {})  # chunk 0 auto-detects
-        assert calls[1].kwargs["data"].get("language") == "el"  # pinned thereafter
-        assert calls[2].kwargs["data"].get("language") == "el"
+        assert "language" not in (_inference_data(calls[0]) or {})  # chunk 0 auto-detects
+        assert _inference_data(calls[1]).get("language") == "el"  # pinned thereafter
+        assert _inference_data(calls[2]).get("language") == "el"
 
     def test_explicit_language_sent_to_every_chunk(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
@@ -1562,27 +1544,16 @@ class TestTranscribeChunking:
         ]
         loaded_backend.transcribe(np.zeros(2 * 16000, dtype=np.float32), language="fr")
         for call in _inf(mock_httpx).call_args_list:
-            assert call.kwargs["data"].get("language") == "fr"
+            assert _inference_data(call).get("language") == "fr"
 
-    def test_each_chunk_post_uses_scaled_timeout(
+    def test_long_subthreshold_audio_stays_single_post(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
-        """Every chunk POST carries the duration-scaled timeout (floored at 300)."""
-        loaded_backend._max_chunk_duration_s = 1
-        _inf(mock_httpx).side_effect = [self._resp({"segments": []}) for _ in range(2)]
-        loaded_backend.transcribe(np.zeros(2 * 16000, dtype=np.float32))
-        expected = _inference_timeout_for(16000, 16000)  # 1s chunk → floored at 300
-        for call in _inf(mock_httpx).call_args_list:
-            assert call.kwargs.get("timeout") == expected
-
-    def test_single_post_timeout_scales_for_long_subthreshold_audio(
-        self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
-    ):
-        """A 200s file (< 600s threshold) stays single-POST but its timeout scales past 300."""
+        """A 200s file (< the 600s chunk threshold) stays a single POST. It used to
+        also carry a scaled 400s deadline; there is no deadline any more."""
         _inf(mock_httpx).return_value = self._resp({"segments": []})
         loaded_backend.transcribe(np.zeros(200 * 16000, dtype=np.float32))
         assert _inf(mock_httpx).call_count == 1
-        assert _inf(mock_httpx).call_args.kwargs.get("timeout") == 400  # max(300, 200 * 2)
 
     def test_empty_middle_chunk_still_advances_offset(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
@@ -1649,54 +1620,25 @@ class TestWhisperCppConfigResolution:
         ):
             assert _resolve_chunk_duration_config() == _MAX_CHUNK_DURATION_S
 
-    def test_timeout_config_env_wins(self):
-        with patch.dict(
-            "os.environ",
-            {
-                "WHISPERCPP_INFERENCE_TIMEOUT_S": "500",
-                "WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND": "3.0",
-            },
-        ):
-            assert _resolve_timeout_config() == (500, 3.0)
-
-    def test_timeout_config_floors_enforced(self):
-        with patch.dict(
-            "os.environ",
-            {
-                "WHISPERCPP_INFERENCE_TIMEOUT_S": "10",  # below 60 floor
-                "WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND": "0.1",  # below 0.5 floor
-            },
-        ):
-            assert _resolve_timeout_config() == (60, 0.5)
-
-    def test_timeout_config_defaults_when_no_source(self):
-        with (
-            patch.dict("os.environ", {}, clear=True),
-            patch("server.config.get_config", side_effect=RuntimeError("no config")),
-        ):
-            assert _resolve_timeout_config() == (
-                _INFERENCE_TIMEOUT,
-                _TIMEOUT_SECONDS_PER_AUDIO_SECOND,
-            )
-
     def test_load_resolves_config_into_instance_vars(
         self, backend: WhisperCppBackend, mock_httpx: MagicMock
     ):
-        """load() must populate the chunk/timeout instance vars from env/config."""
+        """load() must populate the chunk instance var from env/config.
+
+        There are no longer any timeout instance vars: inference is unbounded.
+        """
         mock_httpx.post.return_value = MagicMock(status_code=200)
         with patch.dict(
             "os.environ",
             {
                 "WHISPERCPP_SERVER_URL": "http://test:8080",
                 "WHISPERCPP_CHUNK_DURATION_S": "300",
-                "WHISPERCPP_INFERENCE_TIMEOUT_S": "450",
-                "WHISPERCPP_TIMEOUT_SECONDS_PER_AUDIO_SECOND": "1.5",
             },
         ):
             backend.load("ggml-large-v3.bin", "cpu")
         assert backend._max_chunk_duration_s == 300
-        assert backend._inference_timeout == 450
-        assert backend._timeout_seconds_per_audio_second == 1.5
+        assert not hasattr(backend, "_inference_timeout")
+        assert not hasattr(backend, "_timeout_seconds_per_audio_second")
 
 
 # ---------------------------------------------------------------------------
@@ -1849,7 +1791,7 @@ class TestTranscribePartialPersistence:
         with pytest.raises(RuntimeError) as excinfo:
             loaded_backend.transcribe(np.zeros(3 * 16000, dtype=np.float32))
         assert not isinstance(excinfo.value, PartialTranscriptionError)
-        assert "transcription timed out" in str(excinfo.value)
+        assert "sent no response within" in str(excinfo.value)
 
     def test_short_audio_failure_is_not_partial(
         self, loaded_backend: WhisperCppBackend, mock_httpx: MagicMock
