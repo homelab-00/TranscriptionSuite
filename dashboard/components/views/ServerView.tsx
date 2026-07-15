@@ -2200,7 +2200,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   new PyTorch index — this is handled via a confirmation dialog.
                 */}
                 {runtimeProfile === 'gpu' && (
-                  <div className="flex items-center gap-3 border-b border-white/5 pb-4">
+                  <div className="border-b border-white/5 pb-4">
                     <AppleSwitch
                       checked={useLegacyGpu}
                       // Disabled when the container exists at all — even stopped
@@ -2217,15 +2217,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         setLegacyGpuDialogOpen(true);
                       }}
                       size="sm"
+                      label="Legacy GPU image"
+                      description={
+                        containerStatus.exists && !isRunning
+                          ? 'Remove the existing container to switch image variants'
+                          : 'Installs cu126 wheels for GTX 10-series / 900-series and older NVIDIA cards (Pascal / Maxwell, Tesla and Quadro P/M)'
+                      }
                     />
-                    <span className="text-sm font-medium text-slate-300">
-                      Use legacy-GPU image (GTX 10-series / 900-series and older)
-                    </span>
-                    <span className="text-xs text-slate-500 italic">
-                      {containerStatus.exists && !isRunning
-                        ? 'Remove the existing container to switch variants'
-                        : 'cu126 wheels — required for Pascal/Maxwell cards (GTX 1050–1080 Ti, GTX 900s, Tesla P/M, Quadro P/M)'}
-                    </span>
                   </div>
                 )}
                 {runtimeProfile === 'vulkan' && !isRunning && sidecarNeeded && (
