@@ -30,7 +30,6 @@ import { ImageTagChips } from '../ui/ImageTagChips';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { SelectorGroup } from '../ui/SelectorGroup';
 import { SelectorTile } from '../ui/SelectorTile';
-import { ScrollFadeOverlay } from '../ui/ScrollFadeOverlay';
 import { NvidiaIcon } from '../ui/icons/NvidiaIcon';
 import { AmdIcon } from '../ui/icons/AmdIcon';
 import { IntelIcon } from '../ui/icons/IntelIcon';
@@ -47,7 +46,6 @@ import { useServerStatus } from '../../src/hooks/useServerStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { useModelCache } from '../../src/hooks/useModelCache';
 import { useModelDownloads } from '../../src/hooks/useModelDownloads';
-import { useScrollFade } from '../../src/hooks/useScrollFade';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { formatDateDMY, compareVersionTags } from '../../src/services/versionUtils';
@@ -1561,144 +1559,129 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     }
   }, [docker, selectedTagForActions]);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollFadeState = useScrollFade(scrollRef);
-
   return (
     <>
-      {/* The scroller spans the full view but the cards live in a centered max-w-4xl
-          column, so the edge fades hang off a frame matching that column instead of the
-          scroller itself — a full-width bar would overhang the cards on wide windows.
-          They also cannot live inside the scroller: an absolutely positioned child of a
-          scrolling box is laid out against the scrolled content and would slide away. */}
-      <div className="relative h-full w-full">
-        <div className="pointer-events-none absolute inset-0 z-20 mx-auto max-w-4xl px-6">
-          <div className="relative h-full">
-            <ScrollFadeOverlay edge="top" visible={scrollFadeState.top} rightInset="flush" />
-            <ScrollFadeOverlay edge="bottom" visible={scrollFadeState.bottom} rightInset="flush" />
-          </div>
-        </div>
-        <div ref={scrollRef} className="custom-scrollbar h-full w-full overflow-y-auto">
-          <div className="mx-auto flex max-w-4xl flex-col space-y-6 p-6 pt-8 pb-10">
-            <div className="flex flex-none items-center pt-2">
-              <div>
-                <h1 className="mb-2 text-3xl font-bold tracking-tight text-white">
-                  Server Configuration
-                </h1>
-                <p className="-mt-1 text-slate-400">
-                  Manage runtime resources and persistent storage.
-                </p>
-              </div>
+      <div className="custom-scrollbar h-full w-full overflow-y-auto">
+        <div className="mx-auto flex max-w-4xl flex-col space-y-6 p-6 pt-8 pb-10">
+          <div className="flex flex-none items-center pt-2">
+            <div>
+              <h1 className="mb-2 text-3xl font-bold tracking-tight text-white">
+                Server Configuration
+              </h1>
+              <p className="-mt-1 text-slate-400">
+                Manage runtime resources and persistent storage.
+              </p>
             </div>
+          </div>
 
-            {/* Setup checklist — shown on first run or when prerequisites are missing */}
-            {showChecklist && (
-              <div
-                className={`overflow-hidden rounded-xl border transition-all duration-300 ${allPassed ? 'border-green-500/20 bg-green-500/10' : 'border-accent-orange/20 bg-accent-orange/10'}`}
+          {/* Setup checklist — shown on first run or when prerequisites are missing */}
+          {showChecklist && (
+            <div
+              className={`overflow-hidden rounded-xl border transition-all duration-300 ${allPassed ? 'border-green-500/20 bg-green-500/10' : 'border-accent-orange/20 bg-accent-orange/10'}`}
+            >
+              <button
+                onClick={() => setSetupExpanded(!setupExpanded)}
+                className="flex w-full items-center justify-between px-5 py-3.5 transition-colors hover:bg-white/5"
               >
-                <button
-                  onClick={() => setSetupExpanded(!setupExpanded)}
-                  className="flex w-full items-center justify-between px-5 py-3.5 transition-colors hover:bg-white/5"
-                >
-                  <div className="flex items-center gap-3">
-                    {allPassed ? (
-                      <CheckCircle2 size={18} className="text-green-400" />
-                    ) : (
-                      <AlertTriangle size={18} className="text-accent-orange" />
-                    )}
-                    <span className="text-sm font-semibold text-white">
-                      {allPassed ? 'Setup Complete' : 'Setup Checklist'}
-                    </span>
-                    <span className="font-mono text-xs text-slate-500">
-                      {setupChecks.filter((c) => !c.na && c.ok).length}/
-                      {setupChecks.filter((c) => !c.na).length} checks passed
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {!allPassed && (
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => {
+                <div className="flex items-center gap-3">
+                  {allPassed ? (
+                    <CheckCircle2 size={18} className="text-green-400" />
+                  ) : (
+                    <AlertTriangle size={18} className="text-accent-orange" />
+                  )}
+                  <span className="text-sm font-semibold text-white">
+                    {allPassed ? 'Setup Complete' : 'Setup Checklist'}
+                  </span>
+                  <span className="font-mono text-xs text-slate-500">
+                    {setupChecks.filter((c) => !c.na && c.ok).length}/
+                    {setupChecks.filter((c) => !c.na).length} checks passed
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!allPassed && (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        docker.retryDetection();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
                           e.stopPropagation();
                           docker.retryDetection();
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.stopPropagation();
-                            docker.retryDetection();
-                          }
-                        }}
-                        className="hover:text-accent-cyan flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-white/10"
-                        title="Re-check container runtime, images, and GPU"
-                      >
-                        <RotateCcw size={12} />
-                        Retry
-                      </div>
-                    )}
-                    {allPassed && (
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => {
+                        }
+                      }}
+                      className="hover:text-accent-cyan flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-white/10"
+                      title="Re-check container runtime, images, and GPU"
+                    >
+                      <RotateCcw size={12} />
+                      Retry
+                    </div>
+                  )}
+                  {allPassed && (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDismissSetup();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
                           e.stopPropagation();
                           handleDismissSetup();
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.stopPropagation();
-                            handleDismissSetup();
-                          }
-                        }}
-                        className="cursor-pointer rounded px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                        }
+                      }}
+                      className="cursor-pointer rounded px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                    >
+                      Dismiss
+                    </div>
+                  )}
+                  {setupExpanded ? (
+                    <ChevronUp size={14} className="text-slate-400" />
+                  ) : (
+                    <ChevronDown size={14} className="text-slate-400" />
+                  )}
+                </div>
+              </button>
+              {setupExpanded && (
+                <div className="space-y-2.5 px-5 pb-4">
+                  {setupChecks.map((check, i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      {(check as any).na ? (
+                        <MinusCircle size={15} className="shrink-0 text-slate-600" />
+                      ) : check.ok ? (
+                        <CheckCircle2 size={15} className="shrink-0 text-green-400" />
+                      ) : check.warn ? (
+                        <AlertTriangle size={15} className="text-accent-orange shrink-0" />
+                      ) : (
+                        <XCircle size={15} className="shrink-0 text-red-400" />
+                      )}
+                      <span
+                        className={`text-sm ${
+                          (check as any).na
+                            ? 'text-slate-600'
+                            : check.ok
+                              ? 'text-slate-300'
+                              : 'text-white'
+                        }`}
                       >
-                        Dismiss
-                      </div>
-                    )}
-                    {setupExpanded ? (
-                      <ChevronUp size={14} className="text-slate-400" />
-                    ) : (
-                      <ChevronDown size={14} className="text-slate-400" />
-                    )}
-                  </div>
-                </button>
-                {setupExpanded && (
-                  <div className="space-y-2.5 px-5 pb-4">
-                    {setupChecks.map((check, i) => (
-                      <div key={i} className="flex items-center gap-3">
-                        {(check as any).na ? (
-                          <MinusCircle size={15} className="shrink-0 text-slate-600" />
-                        ) : check.ok ? (
-                          <CheckCircle2 size={15} className="shrink-0 text-green-400" />
-                        ) : check.warn ? (
-                          <AlertTriangle size={15} className="text-accent-orange shrink-0" />
-                        ) : (
-                          <XCircle size={15} className="shrink-0 text-red-400" />
-                        )}
-                        <span
-                          className={`text-sm ${
-                            (check as any).na
-                              ? 'text-slate-600'
-                              : check.ok
-                                ? 'text-slate-300'
-                                : 'text-white'
-                          }`}
-                        >
-                          {check.label}
-                        </span>
-                        <span
-                          className={`ml-auto text-xs ${(check as any).na ? 'text-slate-700' : 'text-slate-500'}`}
-                        >
-                          {check.hint}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+                        {check.label}
+                      </span>
+                      <span
+                        className={`ml-auto text-xs ${(check as any).na ? 'text-slate-700' : 'text-slate-500'}`}
+                      >
+                        {check.hint}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
-            {/*
+          {/*
             GPU Health card (NVIDIA Linux only). Sits adjacent to the setup
             checklist so all hardware/runtime status is colocated at the top
             of the wizard. Self-gates: returns null when gpuDetected is false,
@@ -1706,149 +1689,149 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             See: dashboard/components/views/GpuHealthCard.tsx
             Plan:  docs/superpowers/plans/2026-04-29-cuda-error-999-recovery.md
           */}
-            {hostPlatform === 'linux' && (gpuInfo?.gpu ?? false) && (
-              <GpuHealthCard
-                gpuDetected={true}
-                preflight={gpuPreflight}
-                backendError={gpuBackendError}
-                onRunDiagnostic={handleRunGpuDiagnostic}
-                running={diagnosticRunning}
-                cpuFallbackActive={cpuFallbackActive}
-              />
-            )}
-
-            <GpuDiagnosticModal
-              isOpen={diagnosticOpen}
-              result={diagnosticResult}
-              onClose={handleCloseDiagnostic}
+          {hostPlatform === 'linux' && (gpuInfo?.gpu ?? false) && (
+            <GpuHealthCard
+              gpuDetected={true}
+              preflight={gpuPreflight}
+              backendError={gpuBackendError}
+              onRunDiagnostic={handleRunGpuDiagnostic}
+              running={diagnosticRunning}
+              cpuFallbackActive={cpuFallbackActive}
             />
+          )}
 
-            {/* 1. Docker Image or Inference Server (metal) Card */}
-            {runtimeProfile === 'metal' ? (
-              <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-                <div
-                  className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${mlxStatus === 'running' ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : mlxStatus === 'starting' || mlxStatus === 'stopping' ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
-                >
-                  <Zap size={14} />
+          <GpuDiagnosticModal
+            isOpen={diagnosticOpen}
+            result={diagnosticResult}
+            onClose={handleCloseDiagnostic}
+          />
+
+          {/* 1. Docker Image or Inference Server (metal) Card */}
+          {runtimeProfile === 'metal' ? (
+            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+              <div
+                className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${mlxStatus === 'running' ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : mlxStatus === 'starting' || mlxStatus === 'stopping' ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+              >
+                <Zap size={14} />
+              </div>
+              <GlassCard
+                title="1. Inference Server"
+                className={`transition-all duration-500 ease-in-out ${mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+              >
+                <div className="flex flex-wrap items-center gap-5">
+                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
+                    <StatusLight
+                      status={
+                        mlxStatus === 'running'
+                          ? 'active'
+                          : mlxStatus === 'starting' || mlxStatus === 'stopping'
+                            ? 'warning'
+                            : 'inactive'
+                      }
+                      animate={mlxStatus === 'running'}
+                    />
+                    <span
+                      className={`font-mono text-sm transition-colors ${
+                        mlxStatus === 'running'
+                          ? 'text-slate-300'
+                          : mlxStatus === 'starting' || mlxStatus === 'stopping'
+                            ? 'text-accent-orange'
+                            : 'text-slate-500'
+                      }`}
+                    >
+                      {mlxStatus === 'running'
+                        ? 'Running'
+                        : mlxStatus === 'starting'
+                          ? 'Starting…'
+                          : mlxStatus === 'stopping'
+                            ? 'Stopping…'
+                            : mlxStatus === 'error'
+                              ? 'Error'
+                              : 'Stopped'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Button
+                      variant="secondary"
+                      className="h-9 px-4 whitespace-nowrap"
+                      onClick={handleMLXStart}
+                      disabled={
+                        mlxStatus === 'running' ||
+                        mlxStatus === 'starting' ||
+                        mlxStatus === 'stopping'
+                      }
+                    >
+                      {mlxStatus === 'starting' ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" /> Starting…
+                        </>
+                      ) : (
+                        <>
+                          <Zap size={14} /> Start Metal Server
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      className="h-9 px-4 whitespace-nowrap"
+                      onClick={handleMLXStop}
+                      disabled={mlxStatus !== 'running' && mlxStatus !== 'starting'}
+                    >
+                      {mlxStatus === 'stopping' ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" /> Stopping…
+                        </>
+                      ) : (
+                        'Stop'
+                      )}
+                    </Button>
+                    {mlxStatus === 'error' && (
+                      <span className="text-xs text-red-400">Error — check logs</span>
+                    )}
+                  </div>
                 </div>
-                <GlassCard
-                  title="1. Inference Server"
-                  className={`transition-all duration-500 ease-in-out ${mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
-                >
-                  <div className="flex flex-wrap items-center gap-5">
-                    <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
-                      <StatusLight
-                        status={
-                          mlxStatus === 'running'
-                            ? 'active'
-                            : mlxStatus === 'starting' || mlxStatus === 'stopping'
-                              ? 'warning'
-                              : 'inactive'
-                        }
-                        animate={mlxStatus === 'running'}
-                      />
+              </GlassCard>
+            </div>
+          ) : (
+            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+              <div
+                className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${hasImages ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+              >
+                <Download size={14} />
+              </div>
+              <GlassCard
+                title="1. Docker Image"
+                className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+              >
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <StatusLight status={hasImages ? 'active' : 'inactive'} />
                       <span
-                        className={`font-mono text-sm transition-colors ${
-                          mlxStatus === 'running'
-                            ? 'text-slate-300'
-                            : mlxStatus === 'starting' || mlxStatus === 'stopping'
-                              ? 'text-accent-orange'
-                              : 'text-slate-500'
-                        }`}
+                        className={`font-mono text-sm whitespace-nowrap transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
                       >
-                        {mlxStatus === 'running'
-                          ? 'Running'
-                          : mlxStatus === 'starting'
-                            ? 'Starting…'
-                            : mlxStatus === 'stopping'
-                              ? 'Stopping…'
-                              : mlxStatus === 'error'
-                                ? 'Error'
-                                : 'Stopped'}
+                        {hasImages
+                          ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available`
+                          : 'No images'}
                       </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Button
-                        variant="secondary"
-                        className="h-9 px-4 whitespace-nowrap"
-                        onClick={handleMLXStart}
-                        disabled={
-                          mlxStatus === 'running' ||
-                          mlxStatus === 'starting' ||
-                          mlxStatus === 'stopping'
-                        }
-                      >
-                        {mlxStatus === 'starting' ? (
-                          <>
-                            <Loader2 size={14} className="animate-spin" /> Starting…
-                          </>
-                        ) : (
-                          <>
-                            <Zap size={14} /> Start Metal Server
-                          </>
-                        )}
-                      </Button>
-                      <Button
-                        variant="danger"
-                        className="h-9 px-4 whitespace-nowrap"
-                        onClick={handleMLXStop}
-                        disabled={mlxStatus !== 'running' && mlxStatus !== 'starting'}
-                      >
-                        {mlxStatus === 'stopping' ? (
-                          <>
-                            <Loader2 size={14} className="animate-spin" /> Stopping…
-                          </>
-                        ) : (
-                          'Stop'
-                        )}
-                      </Button>
-                      {mlxStatus === 'error' && (
-                        <span className="text-xs text-red-400">Error — check logs</span>
+
+                      {hasImages && docker.images[0] && (
+                        <div className="flex shrink-0 gap-2 transition-opacity duration-300">
+                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs whitespace-nowrap text-slate-400">
+                            {formatDateDMY(docker.images[0].created) ??
+                              docker.images[0].created.split(' ')[0]}
+                          </span>
+                          <span className="rounded bg-white/10 px-2 py-0.5 text-xs whitespace-nowrap text-slate-400">
+                            {docker.images[0].size}
+                          </span>
+                        </div>
                       )}
                     </div>
-                  </div>
-                </GlassCard>
-              </div>
-            ) : (
-              <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-                <div
-                  className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${hasImages ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}
-                >
-                  <Download size={14} />
-                </div>
-                <GlassCard
-                  title="1. Docker Image"
-                  className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
-                >
-                  <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                    <div className="space-y-4">
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <StatusLight status={hasImages ? 'active' : 'inactive'} />
-                        <span
-                          className={`font-mono text-sm whitespace-nowrap transition-colors ${hasImages ? 'text-slate-300' : 'text-slate-500'}`}
-                        >
-                          {hasImages
-                            ? `${docker.images.length} image${docker.images.length > 1 ? 's' : ''} available`
-                            : 'No images'}
-                        </span>
-
-                        {hasImages && docker.images[0] && (
-                          <div className="flex shrink-0 gap-2 transition-opacity duration-300">
-                            <span className="rounded bg-white/10 px-2 py-0.5 text-xs whitespace-nowrap text-slate-400">
-                              {formatDateDMY(docker.images[0].created) ??
-                                docker.images[0].created.split(' ')[0]}
-                            </span>
-                            <span className="rounded bg-white/10 px-2 py-0.5 text-xs whitespace-nowrap text-slate-400">
-                              {docker.images[0].size}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-500">
-                          Select Image Tag
-                        </label>
-                        {/*
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-500">
+                        Select Image Tag
+                      </label>
+                      {/*
                         GH-83 EC-7+12: distinguish "registry returned 404" from
                         "registry returned an empty tag list". The legacy-GPU
                         package (`…-server-legacy`) can legitimately return 404
@@ -1859,269 +1842,294 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         local build or wait for the next release instead of
                         silently getting zero chips.
                       */}
-                        {docker.remoteTagsStatus === 'not-published' && useLegacyGpu ? (
-                          <div className="border-accent-amber/30 bg-accent-amber/5 rounded-lg border px-3 py-2 text-xs text-slate-400">
-                            Legacy image not yet published for this release. Pull a default image
-                            and toggle legacy mode off, or wait for the next release.
-                          </div>
-                        ) : (
-                          <ImageTagChips
-                            remoteTags={mergedTags}
-                            localTags={localTagSet}
-                            localDates={localDateMap}
-                            value={selectedImage}
-                            onChange={setSelectedImage}
-                          />
-                        )}
-                      </div>
+                      {docker.remoteTagsStatus === 'not-published' && useLegacyGpu ? (
+                        <div className="border-accent-amber/30 bg-accent-amber/5 rounded-lg border px-3 py-2 text-xs text-slate-400">
+                          Legacy image not yet published for this release. Pull a default image and
+                          toggle legacy mode off, or wait for the next release.
+                        </div>
+                      ) : (
+                        <ImageTagChips
+                          remoteTags={mergedTags}
+                          localTags={localTagSet}
+                          localDates={localDateMap}
+                          value={selectedImage}
+                          onChange={setSelectedImage}
+                        />
+                      )}
                     </div>
-                    <div className="flex flex-col justify-end">
-                      {/*
+                  </div>
+                  <div className="flex flex-col justify-end">
+                    {/*
                       Give "Fetch Fresh Image" and "Remove Image" a shared width
                       (the wider of the two labels) and right-align the pair so
                       they no longer smoosh against the version-tag chips at
                       narrower window widths. w-max sizes the group to its widest
                       child; w-full makes both buttons fill that shared width.
                     */}
-                      <div className="ml-auto flex w-max flex-col gap-2">
-                        <Button
-                          variant="secondary"
-                          className="h-10 w-full"
-                          onClick={handleFetchFreshImage}
-                          disabled={docker.operating}
-                        >
-                          {docker.pulling ? (
-                            <>
-                              <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
-                            </>
-                          ) : (
-                            'Fetch Fresh Image'
-                          )}
-                        </Button>
-                        {docker.pulling && (
-                          <Button
-                            variant="danger"
-                            className="h-10 w-full"
-                            onClick={() => {
-                              docker.cancelPull();
-                              const dlId = `docker-image-${selectedTagForActions}`;
-                              useActivityStore
-                                .getState()
-                                .updateActivity(dlId, { status: 'dismissed' });
-                            }}
-                          >
-                            Cancel Pull
-                          </Button>
-                        )}
-                        <Button
-                          variant="danger"
-                          className="h-10 w-full"
-                          onClick={() => docker.removeImage(selectedTagForActions)}
-                          disabled={docker.operating || docker.images.length === 0}
-                        >
-                          Remove Image
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                  {docker.operationError && (
-                    <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                      <span className="min-w-0 flex-1">{docker.operationError}</span>
-                      {selectedTagForActions && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          className="shrink-0"
-                          onClick={handleFetchFreshImage}
-                          disabled={docker.operating || docker.pulling}
-                        >
-                          Retry
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                  <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-white/5 pt-4">
-                    <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
-                      <StatusLight
-                        status={
-                          isRunningAndHealthy
-                            ? 'active'
-                            : containerStatus.exists
-                              ? 'warning'
-                              : 'inactive'
-                        }
-                        animate={isRunningAndHealthy}
-                      />
-                      <span
-                        className={`font-mono text-sm transition-colors ${
-                          isRunning
-                            ? 'text-slate-300'
-                            : containerStatus.exists
-                              ? 'text-accent-orange'
-                              : 'text-slate-500'
-                        }`}
+                    <div className="ml-auto flex w-max flex-col gap-2">
+                      <Button
+                        variant="secondary"
+                        className="h-10 w-full"
+                        onClick={handleFetchFreshImage}
+                        disabled={docker.operating}
                       >
-                        {statusLabel}
-                      </span>
-                      {isRunning && serverMode && (
-                        <span
-                          className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
-                        >
-                          {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
-                          {serverMode}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="secondary"
-                          className="h-9 px-4 whitespace-nowrap"
-                          onClick={() =>
-                            onStartServer('local', runtimeProfile, selectedTagForStart, {
-                              mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                              liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                              diarizationModel: sanitizeModelName(activeDiarizationModel),
-                              sensevoiceDiarizationEngine: sensevoiceEngineValue,
-                              ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
-                            })
-                          }
-                          disabled={
-                            docker.operating ||
-                            isRunning ||
-                            startupFlowPending ||
-                            !liveModelWhisperOnlyCompatible ||
-                            (needsDocker && !docker.composeAvailable)
-                          }
-                        >
-                          {docker.operating || startupFlowPending ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            'Start Local'
-                          )}
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          className="h-9 px-4 whitespace-nowrap"
-                          onClick={() =>
-                            onStartServer('remote', runtimeProfile, selectedTagForStart, {
-                              mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                              liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                              diarizationModel: sanitizeModelName(activeDiarizationModel),
-                              sensevoiceDiarizationEngine: sensevoiceEngineValue,
-                              ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
-                            })
-                          }
-                          disabled={
-                            docker.operating ||
-                            isRunning ||
-                            startupFlowPending ||
-                            !liveModelWhisperOnlyCompatible ||
-                            (needsDocker && !docker.composeAvailable)
-                          }
-                        >
-                          Start Remote
-                        </Button>
+                        {docker.pulling ? (
+                          <>
+                            <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
+                          </>
+                        ) : (
+                          'Fetch Fresh Image'
+                        )}
+                      </Button>
+                      {docker.pulling && (
                         <Button
                           variant="danger"
-                          className="h-9 px-4 whitespace-nowrap"
-                          onClick={() => docker.stopContainer()}
-                          disabled={docker.operating || !isRunning}
+                          className="h-10 w-full"
+                          onClick={() => {
+                            docker.cancelPull();
+                            const dlId = `docker-image-${selectedTagForActions}`;
+                            useActivityStore
+                              .getState()
+                              .updateActivity(dlId, { status: 'dismissed' });
+                          }}
                         >
-                          Stop
+                          Cancel Pull
                         </Button>
-                      </div>
+                      )}
                       <Button
                         variant="danger"
-                        className="h-9 px-4 whitespace-nowrap"
-                        onClick={() => docker.removeContainer()}
-                        disabled={docker.operating || isRunning || !containerStatus.exists}
+                        className="h-10 w-full"
+                        onClick={() => docker.removeImage(selectedTagForActions)}
+                        disabled={docker.operating || docker.images.length === 0}
                       >
-                        Remove Container
+                        Remove Image
                       </Button>
                     </div>
                   </div>
-                  {docker.operationError && (
-                    <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                      {docker.operationError}
+                </div>
+                {docker.operationError && (
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                    <span className="min-w-0 flex-1">{docker.operationError}</span>
+                    {selectedTagForActions && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={handleFetchFreshImage}
+                        disabled={docker.operating || docker.pulling}
+                      >
+                        Retry
+                      </Button>
+                    )}
+                  </div>
+                )}
+                <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-white/5 pt-4">
+                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
+                    <StatusLight
+                      status={
+                        isRunningAndHealthy
+                          ? 'active'
+                          : containerStatus.exists
+                            ? 'warning'
+                            : 'inactive'
+                      }
+                      animate={isRunningAndHealthy}
+                    />
+                    <span
+                      className={`font-mono text-sm transition-colors ${
+                        isRunning
+                          ? 'text-slate-300'
+                          : containerStatus.exists
+                            ? 'text-accent-orange'
+                            : 'text-slate-500'
+                      }`}
+                    >
+                      {statusLabel}
+                    </span>
+                    {isRunning && serverMode && (
+                      <span
+                        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                      >
+                        {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
+                        {serverMode}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="secondary"
+                        className="h-9 px-4 whitespace-nowrap"
+                        onClick={() =>
+                          onStartServer('local', runtimeProfile, selectedTagForStart, {
+                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                            diarizationModel: sanitizeModelName(activeDiarizationModel),
+                            sensevoiceDiarizationEngine: sensevoiceEngineValue,
+                            ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
+                          })
+                        }
+                        disabled={
+                          docker.operating ||
+                          isRunning ||
+                          startupFlowPending ||
+                          !liveModelWhisperOnlyCompatible ||
+                          (needsDocker && !docker.composeAvailable)
+                        }
+                      >
+                        {docker.operating || startupFlowPending ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          'Start Local'
+                        )}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-9 px-4 whitespace-nowrap"
+                        onClick={() =>
+                          onStartServer('remote', runtimeProfile, selectedTagForStart, {
+                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                            diarizationModel: sanitizeModelName(activeDiarizationModel),
+                            sensevoiceDiarizationEngine: sensevoiceEngineValue,
+                            ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
+                          })
+                        }
+                        disabled={
+                          docker.operating ||
+                          isRunning ||
+                          startupFlowPending ||
+                          !liveModelWhisperOnlyCompatible ||
+                          (needsDocker && !docker.composeAvailable)
+                        }
+                      >
+                        Start Remote
+                      </Button>
+                      <Button
+                        variant="danger"
+                        className="h-9 px-4 whitespace-nowrap"
+                        onClick={() => docker.stopContainer()}
+                        disabled={docker.operating || !isRunning}
+                      >
+                        Stop
+                      </Button>
                     </div>
-                  )}
-                  {/* Active model downloads while the server is starting (GH-207) */}
-                  {isRunning && !isRunningAndHealthy && <StartupActivityInline />}
-                  {containerStatus.startedAt && isRunning && (
-                    <div className="mt-2 font-mono text-xs text-slate-500">
-                      Started: {new Date(containerStatus.startedAt).toLocaleString()}
-                      {containerStatus.health && (
-                        <span className="ml-3">
-                          Health:{' '}
-                          <span
-                            className={
-                              containerStatus.health === 'healthy'
-                                ? 'text-green-400'
-                                : 'text-accent-orange'
-                            }
-                          >
-                            {containerStatus.health}
-                          </span>
+                    <Button
+                      variant="danger"
+                      className="h-9 px-4 whitespace-nowrap"
+                      onClick={() => docker.removeContainer()}
+                      disabled={docker.operating || isRunning || !containerStatus.exists}
+                    >
+                      Remove Container
+                    </Button>
+                  </div>
+                </div>
+                {docker.operationError && (
+                  <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                    {docker.operationError}
+                  </div>
+                )}
+                {/* Active model downloads while the server is starting (GH-207) */}
+                {isRunning && !isRunningAndHealthy && <StartupActivityInline />}
+                {containerStatus.startedAt && isRunning && (
+                  <div className="mt-2 font-mono text-xs text-slate-500">
+                    Started: {new Date(containerStatus.startedAt).toLocaleString()}
+                    {containerStatus.health && (
+                      <span className="ml-3">
+                        Health:{' '}
+                        <span
+                          className={
+                            containerStatus.health === 'healthy'
+                              ? 'text-green-400'
+                              : 'text-accent-orange'
+                          }
+                        >
+                          {containerStatus.health}
                         </span>
-                      )}
-                    </div>
-                  )}
-                </GlassCard>
-              </div>
-            )}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </GlassCard>
+            </div>
+          )}
 
-            {/* 2. Instance Settings Card */}
-            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-              <div
-                className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning || mlxStatus === 'running' ? `bg-accent-cyan text-slate-900 ${isRunningAndHealthy || mlxStatus === 'running' ? 'shadow-[0_0_15px_rgba(34,211,238,0.5)]' : ''}` : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
-              >
-                <SlidersHorizontal size={16} />
-              </div>
-              <GlassCard
-                title="2. Instance Settings"
-                className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy || mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
-              >
-                <div className="space-y-6">
-                  {/* Runtime selector — tiles gated per host platform. hostPlatform
+          {/* 2. Instance Settings Card */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+            <div
+              className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning || mlxStatus === 'running' ? `bg-accent-cyan text-slate-900 ${isRunningAndHealthy || mlxStatus === 'running' ? 'shadow-[0_0_15px_rgba(34,211,238,0.5)]' : ''}` : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+            >
+              <SlidersHorizontal size={16} />
+            </div>
+            <GlassCard
+              title="2. Instance Settings"
+              className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy || mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+            >
+              <div className="space-y-6">
+                {/* Runtime selector — tiles gated per host platform. hostPlatform
                     stays 'unknown' in jsdom/test mounts, which keeps every tile
                     enabled there (gating only engages on a known platform). */}
-                  <div className="border-b border-white/5 pb-4">
-                    <SelectorGroup
-                      icon={<Zap size={16} className="text-accent-cyan" />}
-                      title="Runtime"
-                      hint="Which hardware runs the inference server"
-                      action={
-                        /* GH-101 follow-up: re-run GPU detection without restarting
+                <div className="border-b border-white/5 pb-4">
+                  <SelectorGroup
+                    icon={<Zap size={16} className="text-accent-cyan" />}
+                    title="Runtime"
+                    hint="Which hardware runs the inference server"
+                    action={
+                      /* GH-101 follow-up: re-run GPU detection without restarting
                          Electron. Hidden until initial detection completes
                          (gpuInfo !== null) so it never appears in the loading flicker. */
-                        gpuInfo !== null ? (
-                          <button
-                            type="button"
-                            onClick={handleRedetectGpu}
-                            disabled={gpuRedetecting || isRunning}
-                            title="Re-run GPU detection (use after toggling Docker Desktop's WSL2/Hyper-V backend)"
-                            className={`text-xs whitespace-nowrap underline ${
-                              gpuRedetecting || isRunning
-                                ? 'cursor-not-allowed text-slate-600'
-                                : 'cursor-pointer text-slate-500 hover:text-slate-200'
-                            }`}
-                          >
-                            {gpuRedetecting ? 'Detecting...' : 'Re-detect'}
-                          </button>
-                        ) : undefined
+                      gpuInfo !== null ? (
+                        <button
+                          type="button"
+                          onClick={handleRedetectGpu}
+                          disabled={gpuRedetecting || isRunning}
+                          title="Re-run GPU detection (use after toggling Docker Desktop's WSL2/Hyper-V backend)"
+                          className={`text-xs whitespace-nowrap underline ${
+                            gpuRedetecting || isRunning
+                              ? 'cursor-not-allowed text-slate-600'
+                              : 'cursor-pointer text-slate-500 hover:text-slate-200'
+                          }`}
+                        >
+                          {gpuRedetecting ? 'Detecting...' : 'Re-detect'}
+                        </button>
+                      ) : undefined
+                    }
+                  >
+                    <SelectorTile
+                      icon={<NvidiaIcon size={16} />}
+                      label="GPU (CUDA)"
+                      sublabel="NVIDIA"
+                      accent="green"
+                      selected={runtimeProfile === 'gpu'}
+                      disabled={isRunning || hostPlatform === 'darwin'}
+                      badge={hostPlatform === 'darwin' ? 'Requires NVIDIA' : undefined}
+                      onSelect={() => handleRuntimeProfileChange('gpu')}
+                    />
+                    <SelectorTile
+                      icon={
+                        <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                          <AmdIcon size={30} />
+                          <IntelIcon size={30} />
+                        </span>
                       }
-                    >
-                      <SelectorTile
-                        icon={<NvidiaIcon size={16} />}
-                        label="GPU (CUDA)"
-                        sublabel="NVIDIA"
-                        accent="green"
-                        selected={runtimeProfile === 'gpu'}
-                        disabled={isRunning || hostPlatform === 'darwin'}
-                        badge={hostPlatform === 'darwin' ? 'Requires NVIDIA' : undefined}
-                        onSelect={() => handleRuntimeProfileChange('gpu')}
-                      />
+                      label="GPU (Vulkan Linux)"
+                      sublabel="AMD / Intel"
+                      accent="red"
+                      selected={runtimeProfile === 'vulkan'}
+                      disabled={isRunning || hostPlatform === 'win32' || hostPlatform === 'darwin'}
+                      badge={
+                        hostPlatform === 'win32' || hostPlatform === 'darwin'
+                          ? 'Linux only'
+                          : undefined
+                      }
+                      hint="Experimental"
+                      onSelect={() => handleRuntimeProfileChange('vulkan')}
+                    />
+                    {/* Experimental Vulkan-WSL2 tile (GH-101 follow-up) — only
+                        rendered when the main-process probe confirms Docker
+                        Desktop runs on the WSL2 backend AND a tiny container
+                        could see /dev/dxg. */}
+                    {gpuInfo?.wslSupport?.gpuPassthroughDetected && hostPlatform === 'win32' && (
                       <SelectorTile
                         icon={
                           <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
@@ -2129,86 +2137,59 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                             <IntelIcon size={30} />
                           </span>
                         }
-                        label="GPU (Vulkan Linux)"
-                        sublabel="AMD / Intel"
+                        label="GPU (Vulkan Windows)"
+                        sublabel="AMD / Intel · WSL2"
                         accent="red"
-                        selected={runtimeProfile === 'vulkan'}
-                        disabled={
-                          isRunning || hostPlatform === 'win32' || hostPlatform === 'darwin'
-                        }
-                        badge={
-                          hostPlatform === 'win32' || hostPlatform === 'darwin'
-                            ? 'Linux only'
-                            : undefined
-                        }
-                        hint="Experimental"
-                        onSelect={() => handleRuntimeProfileChange('vulkan')}
-                      />
-                      {/* Experimental Vulkan-WSL2 tile (GH-101 follow-up) — only
-                        rendered when the main-process probe confirms Docker
-                        Desktop runs on the WSL2 backend AND a tiny container
-                        could see /dev/dxg. */}
-                      {gpuInfo?.wslSupport?.gpuPassthroughDetected && hostPlatform === 'win32' && (
-                        <SelectorTile
-                          icon={
-                            <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
-                              <AmdIcon size={30} />
-                              <IntelIcon size={30} />
-                            </span>
-                          }
-                          label="GPU (Vulkan Windows)"
-                          sublabel="AMD / Intel · WSL2"
-                          accent="red"
-                          selected={runtimeProfile === 'vulkan-wsl2'}
-                          disabled={isRunning}
-                          hint="Experimental"
-                          onSelect={() => handleRuntimeProfileChange('vulkan-wsl2')}
-                        />
-                      )}
-                      <SelectorTile
-                        icon={<AppleIcon size={16} />}
-                        label="GPU (Metal)"
-                        sublabel="Apple Silicon"
-                        accent="purple"
-                        selected={runtimeProfile === 'metal'}
-                        disabled={
-                          isRunning || (hostPlatform !== 'unknown' && hostPlatform !== 'darwin')
-                        }
-                        badge={
-                          hostPlatform !== 'unknown' && hostPlatform !== 'darwin'
-                            ? 'Requires Apple Silicon'
-                            : undefined
-                        }
-                        onSelect={() => handleRuntimeProfileChange('metal')}
-                      />
-                      <SelectorTile
-                        icon={<Cpu size={16} />}
-                        label="CPU Only"
-                        sublabel="Universal"
-                        accent="orange"
-                        selected={runtimeProfile === 'cpu'}
+                        selected={runtimeProfile === 'vulkan-wsl2'}
                         disabled={isRunning}
-                        onSelect={() => handleRuntimeProfileChange('cpu')}
+                        hint="Experimental"
+                        onSelect={() => handleRuntimeProfileChange('vulkan-wsl2')}
                       />
-                    </SelectorGroup>
-                    {runtimeProfile === 'vulkan' && !isRunning && (
-                      <p className="mt-2 text-xs text-slate-500 italic">
-                        AMD/Intel GPU via whisper.cpp — no diarization; live mode via GGML models
-                      </p>
                     )}
-                    {runtimeProfile === 'vulkan-wsl2' && !isRunning && (
-                      <p className="text-accent-orange mt-2 text-xs italic">
-                        Experimental: AMD/Intel GPU via WSL2 + Mesa dzn — see README §2.5.2
-                      </p>
-                    )}
-                    {runtimeProfile === 'cpu' && !isRunning && (
-                      <p className="mt-2 text-xs text-slate-500 italic">
-                        Slower transcription, no NVIDIA GPU required
-                      </p>
-                    )}
-                  </div>
+                    <SelectorTile
+                      icon={<AppleIcon size={16} />}
+                      label="GPU (Metal)"
+                      sublabel="Apple Silicon"
+                      accent="purple"
+                      selected={runtimeProfile === 'metal'}
+                      disabled={
+                        isRunning || (hostPlatform !== 'unknown' && hostPlatform !== 'darwin')
+                      }
+                      badge={
+                        hostPlatform !== 'unknown' && hostPlatform !== 'darwin'
+                          ? 'Requires Apple Silicon'
+                          : undefined
+                      }
+                      onSelect={() => handleRuntimeProfileChange('metal')}
+                    />
+                    <SelectorTile
+                      icon={<Cpu size={16} />}
+                      label="CPU Only"
+                      sublabel="Universal"
+                      accent="orange"
+                      selected={runtimeProfile === 'cpu'}
+                      disabled={isRunning}
+                      onSelect={() => handleRuntimeProfileChange('cpu')}
+                    />
+                  </SelectorGroup>
+                  {runtimeProfile === 'vulkan' && !isRunning && (
+                    <p className="mt-2 text-xs text-slate-500 italic">
+                      AMD/Intel GPU via whisper.cpp — no diarization; live mode via GGML models
+                    </p>
+                  )}
+                  {runtimeProfile === 'vulkan-wsl2' && !isRunning && (
+                    <p className="text-accent-orange mt-2 text-xs italic">
+                      Experimental: AMD/Intel GPU via WSL2 + Mesa dzn — see README §2.5.2
+                    </p>
+                  )}
+                  {runtimeProfile === 'cpu' && !isRunning && (
+                    <p className="mt-2 text-xs text-slate-500 italic">
+                      Slower transcription, no NVIDIA GPU required
+                    </p>
+                  )}
+                </div>
 
-                  {/*
+                {/*
                   Legacy-GPU image toggle (Issue #83 — Pascal/Maxwell support).
                   Gated to GPU (CUDA) runtime only: the cu126 wheels are
                   pointless on Vulkan, CPU, or Metal, and surfacing the toggle
@@ -2218,306 +2199,305 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   runtime volume so the next bootstrap re-syncs wheels from the
                   new PyTorch index — this is handled via a confirmation dialog.
                 */}
-                  {runtimeProfile === 'gpu' && (
-                    <div className="flex items-center gap-3 border-b border-white/5 pb-4">
-                      <AppleSwitch
-                        checked={useLegacyGpu}
-                        // Disabled when the container exists at all — even stopped
-                        // containers still hold a reference to the runtime volume,
-                        // so the wipe-on-toggle would silently fail. User must
-                        // remove the container (Stop + cleanup) before switching.
-                        disabled={isRunning || containerStatus.exists}
-                        onChange={(next) => {
-                          // Don't apply immediately — show the confirmation
-                          // dialog so the user acknowledges the restart
-                          // requirement and chooses the wipe-volume option.
-                          setPendingLegacyGpuValue(next);
-                          setLegacyGpuWipeVolume(true);
-                          setLegacyGpuDialogOpen(true);
-                        }}
-                        size="sm"
-                      />
-                      <span className="text-sm font-medium text-slate-300">
-                        Use legacy-GPU image (GTX 10-series / 900-series and older)
-                      </span>
-                      <span className="text-xs text-slate-500 italic">
-                        {containerStatus.exists && !isRunning
-                          ? 'Remove the existing container to switch variants'
-                          : 'cu126 wheels — required for Pascal/Maxwell cards (GTX 1050–1080 Ti, GTX 900s, Tesla P/M, Quadro P/M)'}
-                      </span>
-                    </div>
-                  )}
-                  {runtimeProfile === 'vulkan' && !isRunning && sidecarNeeded && (
-                    <div className="border-accent-rose/20 bg-accent-rose/5 flex items-center gap-3 rounded-lg border px-4 py-3">
-                      {docker.sidecarPulling ? (
-                        <>
-                          <Loader2 size={14} className="text-accent-rose animate-spin" />
-                          <span className="text-sm text-slate-300">
-                            Downloading Vulkan sidecar image...
-                          </span>
-                          <button
-                            onClick={() => {
-                              docker.cancelSidecarPull();
-                              useActivityStore
-                                .getState()
-                                .updateActivity('sidecar-vulkan', { status: 'dismissed' });
-                            }}
-                            className="ml-auto text-xs text-slate-400 underline hover:text-slate-200"
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <Download size={14} className="text-accent-rose" />
-                          <span className="text-sm text-slate-300">
-                            {docker.operationError
-                              ? `Download failed: ${docker.operationError}`
-                              : 'Vulkan mode requires the whisper.cpp sidecar image.'}
-                          </span>
-                          <Button
-                            variant="secondary"
-                            className="ml-auto h-8 px-3 text-xs"
-                            disabled={docker.operating}
-                            onClick={async () => {
-                              const dlId = 'sidecar-vulkan';
-                              useActivityStore.getState().addActivity({
-                                id: dlId,
-                                category: 'download',
-                                label: 'Vulkan Sidecar (whisper.cpp)',
-                                legacyType: 'sidecar-image',
-                              });
-                              try {
-                                await docker.pullSidecarImage();
-                                useActivityStore.getState().updateActivity(dlId, {
-                                  status: 'complete',
-                                  completedAt: Date.now(),
-                                });
-                              } catch (err: unknown) {
-                                const msg = err instanceof Error ? err.message : 'Pull failed';
-                                useActivityStore.getState().updateActivity(dlId, {
-                                  status: 'error',
-                                  error: msg,
-                                  completedAt: Date.now(),
-                                });
-                              }
-                              const hasIt = await docker.hasSidecarImage();
-                              if (hasIt) setSidecarNeeded(false);
-                            }}
-                          >
-                            Download
-                          </Button>
-                          <button
-                            onClick={() => setSidecarNeeded(false)}
-                            className="text-xs text-slate-500 hover:text-slate-300"
-                          >
-                            Skip
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Model / live / diarization selectors — all valid combinations
-                    come from src/services/instanceMatrix.ts */}
-                  <InstanceSettingsSelectors
-                    runtimeProfile={runtimeProfile}
-                    isRunning={isRunning}
-                    mainModelSelection={mainModelSelection}
-                    onMainModelSelectionChange={setMainModelSelection}
-                    liveModelSelection={liveModelSelection}
-                    onLiveModelSelectionChange={setLiveModelSelection}
-                    diarizationModelSelection={diarizationModelSelection}
-                    onDiarizationModelSelectionChange={setDiarizationModelSelection}
-                    activeTranscriber={activeTranscriber}
-                    activeLiveModel={activeLiveModel}
-                    diarizationStatusModelId={diarizationStatusModelId}
-                    modelCacheStatus={effectiveModelCacheStatus}
-                    liveModelWhisperOnlyCompatible={liveModelWhisperOnlyCompatible}
-                    liveModeModelConstraintMessage={liveModeModelConstraintMessage}
-                    modelsLoaded={adminStatus?.models_loaded}
-                    modelsLoading={modelsLoading}
-                    onLoadModels={handleLoadModels}
-                    onUnloadModels={handleUnloadModels}
-                    canManage={isMetal || isRunning}
-                    downloadingIds={downloadingIds}
-                    onDownloadModel={downloadModel}
-                    onRemoveModel={removeModel}
-                  />
-                </div>
-              </GlassCard>
-            </div>
-
-            {/* 3. Remote Connection Card */}
-            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
-              <div
-                className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunningAndHealthy && serverMode === 'remote' ? 'bg-accent-magenta text-slate-900 shadow-[0_0_15px_rgba(232,121,249,0.5)]' : 'bg-slate-800 text-slate-300'}`}
-              >
-                <Globe size={14} />
-              </div>
-              <RemoteConnectionCard
-                title="3. Remote Connection"
-                isRunningAndHealthy={isRunningAndHealthy}
-              />
-            </div>
-
-            {/* 4. Volumes Card */}
-            <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
-              <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
-                <HardDrive size={14} />
-              </div>
-              <GlassCard
-                title="4. Persistent Volumes"
-                action={
-                  !isMetal ? (
-                    <Button
-                      variant="ghost"
+                {runtimeProfile === 'gpu' && (
+                  <div className="flex items-center gap-3 border-b border-white/5 pb-4">
+                    <AppleSwitch
+                      checked={useLegacyGpu}
+                      // Disabled when the container exists at all — even stopped
+                      // containers still hold a reference to the runtime volume,
+                      // so the wipe-on-toggle would silently fail. User must
+                      // remove the container (Stop + cleanup) before switching.
+                      disabled={isRunning || containerStatus.exists}
+                      onChange={(next) => {
+                        // Don't apply immediately — show the confirmation
+                        // dialog so the user acknowledges the restart
+                        // requirement and chooses the wipe-volume option.
+                        setPendingLegacyGpuValue(next);
+                        setLegacyGpuWipeVolume(true);
+                        setLegacyGpuDialogOpen(true);
+                      }}
                       size="sm"
-                      icon={<RefreshCw size={14} />}
-                      onClick={() => docker.refreshVolumes()}
-                    >
-                      Refresh
-                    </Button>
-                  ) : undefined
-                }
-              >
-                <div className="space-y-4">
-                  {isMetal ? (
-                    // Bare-metal mode: show native filesystem paths instead of Docker volumes
-                    <>
-                      {[
-                        { label: 'Data directory', path: nativeDataDir, color: 'bg-blue-500' },
-                        {
-                          label: 'Models cache (HF_HOME)',
-                          path: nativeModelsDir,
-                          color: 'bg-purple-500',
-                        },
-                      ].map(({ label, path: dir, color }) => (
-                        <div key={label} className="py-1 text-sm">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-3">
-                              <div className={`h-2 w-2 rounded-full ${color}`} />
-                              <span className="text-slate-300">{label}</span>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-1">
-                              <button
-                                onClick={() => handleOpenNativePath(dir)}
-                                disabled={!dir}
-                                className="rounded p-1 text-slate-500 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                                title="Open in file manager"
-                              >
-                                <FolderOpen size={14} />
-                              </button>
-                              <button
-                                onClick={() => handleCopyNativePath(dir, label)}
-                                disabled={!dir}
-                                className="rounded p-1 text-slate-500 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                                title="Copy path"
-                              >
-                                {copiedPath === label ? (
-                                  <Check size={14} className="text-green-400" />
-                                ) : (
-                                  <Copy size={14} />
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                          <div className="mt-1 pl-5 font-mono text-xs break-all text-slate-400">
-                            {dir ?? '…'}
-                          </div>
-                        </div>
-                      ))}
-                      <p className="text-xs text-slate-500 italic">
-                        Managed by the native server process. Delete these directories to clear
-                        cached models or transcription data.
-                      </p>
-                    </>
-                  ) : docker.volumes.length > 0 ? (
-                    docker.volumes.map((vol) => {
-                      const colorMap: Record<string, string> = {
-                        'transcriptionsuite-data': 'bg-blue-500',
-                        'transcriptionsuite-models': 'bg-purple-500',
-                        'transcriptionsuite-runtime': 'bg-orange-500',
-                      };
-                      return (
-                        <div
-                          key={vol.name}
-                          className="flex items-center justify-between py-1 text-sm"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div
-                              className={`h-2 w-2 rounded-full ${colorMap[vol.name] || 'bg-slate-500'}`}
-                            ></div>
-                            <span className="text-slate-300">{vol.label}</span>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <span className="font-mono text-slate-500">{vol.size || '—'}</span>
-                            <span
-                              className={`text-xs ${vol.mountpoint ? 'text-green-400' : 'text-slate-500'}`}
-                            >
-                              {vol.mountpoint ? 'Mounted' : 'Not Found'}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="py-2 text-center text-sm text-slate-500">
-                      {docker.available ? 'No volumes found' : 'Container runtime not available'}
-                    </div>
-                  )}
-
-                  {!isMetal && docker.volumes.length > 0 && (
-                    <div className="mt-4 flex gap-2 overflow-x-auto border-t border-white/5 pt-4 pb-2">
-                      {docker.volumes.map((vol) => (
-                        <Button
-                          key={vol.name}
-                          size="sm"
-                          variant="danger"
-                          className="text-xs whitespace-nowrap"
-                          onClick={() => docker.removeVolume(vol.name)}
-                          disabled={docker.operating || isRunning}
-                        >
-                          Clear {vol.label.replace(' Volume', '')}
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </GlassCard>
-            </div>
-
-            {/* 5. Clean Up */}
-            <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
-              <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
-                <AlertTriangle size={14} />
-              </div>
-              <GlassCard title="5. Clean Up">
-                <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
-                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                    <div className="space-y-1">
-                      <p className="text-xs font-semibold tracking-wider text-red-300 uppercase">
-                        Danger Zone
-                      </p>
-                      <p className="text-sm text-red-200/90">
-                        Stop and remove container, remove all server images, delete runtime, and
-                        remove any unchecked persistent resources.
-                      </p>
-                    </div>
-                    <Button
-                      variant="danger"
-                      size="lg"
-                      icon={<AlertTriangle size={16} />}
-                      className="ml-auto h-12 w-44 shrink-0 border border-red-400/40 bg-red-500/25 text-red-100 shadow-[0_0_18px_rgba(239,68,68,0.35)] hover:bg-red-500/35"
-                      onClick={openCleanAllDialog}
-                      disabled={docker.operating || startupFlowPending}
-                    >
-                      Clean All
-                    </Button>
+                    />
+                    <span className="text-sm font-medium text-slate-300">
+                      Use legacy-GPU image (GTX 10-series / 900-series and older)
+                    </span>
+                    <span className="text-xs text-slate-500 italic">
+                      {containerStatus.exists && !isRunning
+                        ? 'Remove the existing container to switch variants'
+                        : 'cu126 wheels — required for Pascal/Maxwell cards (GTX 1050–1080 Ti, GTX 900s, Tesla P/M, Quadro P/M)'}
+                    </span>
                   </div>
-                </div>
-              </GlassCard>
+                )}
+                {runtimeProfile === 'vulkan' && !isRunning && sidecarNeeded && (
+                  <div className="border-accent-rose/20 bg-accent-rose/5 flex items-center gap-3 rounded-lg border px-4 py-3">
+                    {docker.sidecarPulling ? (
+                      <>
+                        <Loader2 size={14} className="text-accent-rose animate-spin" />
+                        <span className="text-sm text-slate-300">
+                          Downloading Vulkan sidecar image...
+                        </span>
+                        <button
+                          onClick={() => {
+                            docker.cancelSidecarPull();
+                            useActivityStore
+                              .getState()
+                              .updateActivity('sidecar-vulkan', { status: 'dismissed' });
+                          }}
+                          className="ml-auto text-xs text-slate-400 underline hover:text-slate-200"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <Download size={14} className="text-accent-rose" />
+                        <span className="text-sm text-slate-300">
+                          {docker.operationError
+                            ? `Download failed: ${docker.operationError}`
+                            : 'Vulkan mode requires the whisper.cpp sidecar image.'}
+                        </span>
+                        <Button
+                          variant="secondary"
+                          className="ml-auto h-8 px-3 text-xs"
+                          disabled={docker.operating}
+                          onClick={async () => {
+                            const dlId = 'sidecar-vulkan';
+                            useActivityStore.getState().addActivity({
+                              id: dlId,
+                              category: 'download',
+                              label: 'Vulkan Sidecar (whisper.cpp)',
+                              legacyType: 'sidecar-image',
+                            });
+                            try {
+                              await docker.pullSidecarImage();
+                              useActivityStore.getState().updateActivity(dlId, {
+                                status: 'complete',
+                                completedAt: Date.now(),
+                              });
+                            } catch (err: unknown) {
+                              const msg = err instanceof Error ? err.message : 'Pull failed';
+                              useActivityStore.getState().updateActivity(dlId, {
+                                status: 'error',
+                                error: msg,
+                                completedAt: Date.now(),
+                              });
+                            }
+                            const hasIt = await docker.hasSidecarImage();
+                            if (hasIt) setSidecarNeeded(false);
+                          }}
+                        >
+                          Download
+                        </Button>
+                        <button
+                          onClick={() => setSidecarNeeded(false)}
+                          className="text-xs text-slate-500 hover:text-slate-300"
+                        >
+                          Skip
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Model / live / diarization selectors — all valid combinations
+                    come from src/services/instanceMatrix.ts */}
+                <InstanceSettingsSelectors
+                  runtimeProfile={runtimeProfile}
+                  isRunning={isRunning}
+                  mainModelSelection={mainModelSelection}
+                  onMainModelSelectionChange={setMainModelSelection}
+                  liveModelSelection={liveModelSelection}
+                  onLiveModelSelectionChange={setLiveModelSelection}
+                  diarizationModelSelection={diarizationModelSelection}
+                  onDiarizationModelSelectionChange={setDiarizationModelSelection}
+                  activeTranscriber={activeTranscriber}
+                  activeLiveModel={activeLiveModel}
+                  diarizationStatusModelId={diarizationStatusModelId}
+                  modelCacheStatus={effectiveModelCacheStatus}
+                  liveModelWhisperOnlyCompatible={liveModelWhisperOnlyCompatible}
+                  liveModeModelConstraintMessage={liveModeModelConstraintMessage}
+                  modelsLoaded={adminStatus?.models_loaded}
+                  modelsLoading={modelsLoading}
+                  onLoadModels={handleLoadModels}
+                  onUnloadModels={handleUnloadModels}
+                  canManage={isMetal || isRunning}
+                  downloadingIds={downloadingIds}
+                  onDownloadModel={downloadModel}
+                  onRemoveModel={removeModel}
+                />
+              </div>
+            </GlassCard>
+          </div>
+
+          {/* 3. Remote Connection Card */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+            <div
+              className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunningAndHealthy && serverMode === 'remote' ? 'bg-accent-magenta text-slate-900 shadow-[0_0_15px_rgba(232,121,249,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+            >
+              <Globe size={14} />
             </div>
+            <RemoteConnectionCard
+              title="3. Remote Connection"
+              isRunningAndHealthy={isRunningAndHealthy}
+            />
+          </div>
+
+          {/* 4. Volumes Card */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
+            <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
+              <HardDrive size={14} />
+            </div>
+            <GlassCard
+              title="4. Persistent Volumes"
+              action={
+                !isMetal ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<RefreshCw size={14} />}
+                    onClick={() => docker.refreshVolumes()}
+                  >
+                    Refresh
+                  </Button>
+                ) : undefined
+              }
+            >
+              <div className="space-y-4">
+                {isMetal ? (
+                  // Bare-metal mode: show native filesystem paths instead of Docker volumes
+                  <>
+                    {[
+                      { label: 'Data directory', path: nativeDataDir, color: 'bg-blue-500' },
+                      {
+                        label: 'Models cache (HF_HOME)',
+                        path: nativeModelsDir,
+                        color: 'bg-purple-500',
+                      },
+                    ].map(({ label, path: dir, color }) => (
+                      <div key={label} className="py-1 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-3">
+                            <div className={`h-2 w-2 rounded-full ${color}`} />
+                            <span className="text-slate-300">{label}</span>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              onClick={() => handleOpenNativePath(dir)}
+                              disabled={!dir}
+                              className="rounded p-1 text-slate-500 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                              title="Open in file manager"
+                            >
+                              <FolderOpen size={14} />
+                            </button>
+                            <button
+                              onClick={() => handleCopyNativePath(dir, label)}
+                              disabled={!dir}
+                              className="rounded p-1 text-slate-500 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                              title="Copy path"
+                            >
+                              {copiedPath === label ? (
+                                <Check size={14} className="text-green-400" />
+                              ) : (
+                                <Copy size={14} />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="mt-1 pl-5 font-mono text-xs break-all text-slate-400">
+                          {dir ?? '…'}
+                        </div>
+                      </div>
+                    ))}
+                    <p className="text-xs text-slate-500 italic">
+                      Managed by the native server process. Delete these directories to clear cached
+                      models or transcription data.
+                    </p>
+                  </>
+                ) : docker.volumes.length > 0 ? (
+                  docker.volumes.map((vol) => {
+                    const colorMap: Record<string, string> = {
+                      'transcriptionsuite-data': 'bg-blue-500',
+                      'transcriptionsuite-models': 'bg-purple-500',
+                      'transcriptionsuite-runtime': 'bg-orange-500',
+                    };
+                    return (
+                      <div
+                        key={vol.name}
+                        className="flex items-center justify-between py-1 text-sm"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`h-2 w-2 rounded-full ${colorMap[vol.name] || 'bg-slate-500'}`}
+                          ></div>
+                          <span className="text-slate-300">{vol.label}</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <span className="font-mono text-slate-500">{vol.size || '—'}</span>
+                          <span
+                            className={`text-xs ${vol.mountpoint ? 'text-green-400' : 'text-slate-500'}`}
+                          >
+                            {vol.mountpoint ? 'Mounted' : 'Not Found'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="py-2 text-center text-sm text-slate-500">
+                    {docker.available ? 'No volumes found' : 'Container runtime not available'}
+                  </div>
+                )}
+
+                {!isMetal && docker.volumes.length > 0 && (
+                  <div className="mt-4 flex gap-2 overflow-x-auto border-t border-white/5 pt-4 pb-2">
+                    {docker.volumes.map((vol) => (
+                      <Button
+                        key={vol.name}
+                        size="sm"
+                        variant="danger"
+                        className="text-xs whitespace-nowrap"
+                        onClick={() => docker.removeVolume(vol.name)}
+                        disabled={docker.operating || isRunning}
+                      >
+                        Clear {vol.label.replace(' Volume', '')}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </GlassCard>
+          </div>
+
+          {/* 5. Clean Up */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
+            <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
+              <AlertTriangle size={14} />
+            </div>
+            <GlassCard title="5. Clean Up">
+              <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold tracking-wider text-red-300 uppercase">
+                      Danger Zone
+                    </p>
+                    <p className="text-sm text-red-200/90">
+                      Stop and remove container, remove all server images, delete runtime, and
+                      remove any unchecked persistent resources.
+                    </p>
+                  </div>
+                  <Button
+                    variant="danger"
+                    size="lg"
+                    icon={<AlertTriangle size={16} />}
+                    className="ml-auto h-12 w-44 shrink-0 border border-red-400/40 bg-red-500/25 text-red-100 shadow-[0_0_18px_rgba(239,68,68,0.35)] hover:bg-red-500/35"
+                    onClick={openCleanAllDialog}
+                    disabled={docker.operating || startupFlowPending}
+                  >
+                    Clean All
+                  </Button>
+                </div>
+              </div>
+            </GlassCard>
           </div>
         </div>
       </div>

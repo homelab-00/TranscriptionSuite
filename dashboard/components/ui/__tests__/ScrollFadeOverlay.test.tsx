@@ -74,18 +74,10 @@ describe('ScrollFadeOverlay', () => {
     expect(bottom.className).not.toContain('rounded-t-2xl');
   });
 
-  it('insets from the right by default so it does not wash over the scrollbar track', () => {
+  it('insets from the right so it does not wash over the scrollbar track', () => {
     const bar = renderBar(<ScrollFadeOverlay edge="top" visible={true} />);
 
     expect(bar.className).toContain('right-3');
-    expect(bar.className).not.toContain('right-0');
-  });
-
-  it('runs flush to the frame edge when the scrollbar sits outside the frame', () => {
-    const bar = renderBar(<ScrollFadeOverlay edge="top" visible={true} rightInset="flush" />);
-
-    expect(bar.className).toContain('right-0');
-    expect(bar.className).not.toContain('right-3');
   });
 
   it('forwards a caller className, which is how each view disables the bar in its wide layout', () => {
