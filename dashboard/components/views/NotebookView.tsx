@@ -1177,6 +1177,8 @@ const CalendarTab: React.FC<{
     // this grid becomes the scroller, so it needs edge fades that the wide layout does
     // not. They sit outside the scroller: an absolutely positioned child of a scrolling
     // box is laid out against the scrolled content and would slide away with it.
+    // The scroller is also rounded in that mode so its overflow clip matches the rounded
+    // corners of the fade bars - without it, clipped content pokes out square past them.
     <div className="relative h-full min-h-0">
       <ScrollFadeOverlay
         edge="top"
@@ -1185,7 +1187,7 @@ const CalendarTab: React.FC<{
       />
       <div
         ref={stackedScrollRef}
-        className="custom-scrollbar grid h-full min-h-0 grid-cols-1 gap-6 @max-[860px]:overflow-y-auto @min-[860px]:grid-cols-3"
+        className="custom-scrollbar grid h-full min-h-0 grid-cols-1 gap-6 @max-[860px]:overflow-y-auto @max-[860px]:rounded-2xl @min-[860px]:grid-cols-3"
       >
         <style>{`
                 @keyframes slideInRight { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
