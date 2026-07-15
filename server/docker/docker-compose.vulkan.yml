@@ -9,10 +9,14 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.vulkan.yml up -d
 #
 # --- GH-62 review follow-ups (deferred, not blocking the parser fix) -------
-# TODO(GH-62-followup #A): image tag ``main-vulkan`` is a rolling tag; an
-#   upstream response-schema change (e.g. ``start`` → ``t0``) would silently
-#   corrupt every transcription timestamp with only a warning. Pin a SHA
-#   digest or add a schema-probe at backend load time.
+# TODO(GH-62-followup #A): the sidecar now uses our own no-AVX2 rebuild
+#   (``ghcr.io/loukas-pap/whisper-cpp-vulkan-noavx2``, built from
+#   whispercpp-vulkan-noavx2.Dockerfile) instead of the upstream image, so we
+#   control when it changes. The ``:latest`` tag is still mutable, though — a
+#   rebuild that picked up a whisper.cpp response-schema change (e.g.
+#   ``start`` → ``t0``) would silently corrupt timestamps with only a warning.
+#   Pin a SHA digest here (and in dockerManager.ts::VULKAN_SIDECAR_IMAGE) or add
+#   a schema-probe at backend load time.
 # NOTE(GH-62-followup #B / GH-101): The ``devices: /dev/dri`` mount below is
 #   Linux-only. Docker Desktop on Windows/macOS runs containers in a Linux VM
 #   without /dev/dri passthrough, so this overlay cannot work there at all
@@ -21,11 +25,12 @@
 #   on non-Linux platforms (and on Linux without a DRI render node) before
 #   Docker is invoked, surfacing an actionable error instead of the cryptic
 #   "error gathering device information" daemon error.
-# TODO(GH-62-followup #C): the healthcheck shells out to ``curl``, which is
-#   present on the current ``ghcr.io/ggml-org/whisper.cpp:main-vulkan``
-#   image but not guaranteed across rebuilds. Replace with a tool-agnostic
-#   probe (e.g. ``bash -c 'exec 3<>/dev/tcp/localhost/8080'``) or pin the
-#   image digest.
+# NOTE(GH-62-followup #C): the healthcheck shells out to ``curl``. This is now
+#   guaranteed — our whispercpp-vulkan-noavx2.Dockerfile installs ``curl`` in
+#   the runtime stage explicitly — so the cross-rebuild fragility that applied
+#   to the upstream image no longer holds. (A tool-agnostic probe such as
+#   ``bash -c 'exec 3<>/dev/tcp/localhost/8080'`` would still remove the
+#   dependency entirely if ever desired.)
 # TODO(GH-62-followup #D): the model-wait retry loop sleeps 10s × 180 =
 #   30 min and exits 1, after which ``restart: unless-stopped`` restarts
 #   it immediately. On a permanently-missing model this floods logs.
@@ -44,7 +49,13 @@
 
 services:
   whisper-server:
-    image: ghcr.io/ggml-org/whisper.cpp:main-vulkan
+    # Custom no-AVX2 rebuild of whisper.cpp's main-vulkan sidecar (built from
+    # whispercpp-vulkan-noavx2.Dockerfile). Lowers the CPU instruction baseline
+    # to AVX+F16C so the CPU-side ops don't SIGILL on pre-Haswell CPUs (e.g.
+    # Ivy Bridge), while the GPU does the heavy lifting via Vulkan. Runs on
+    # modern CPUs too (AVX2 is only used for CPU fallback ops), so it replaces
+    # the upstream image for all Linux Vulkan users.
+    image: ghcr.io/loukas-pap/whisper-cpp-vulkan-noavx2:latest
     command:
       - >-
         n=0;

@@ -9,6 +9,7 @@ import math
 import os
 import re
 import struct
+import time
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
@@ -52,6 +53,29 @@ _MAX_CHUNK_DURATION_S = 10 * 60  # 10 min per /inference POST (mirrors the NeMo 
 # limit — a chunk may take as long as it takes.
 _MAX_CHUNK_DURATION_CEILING_S = 30 * 60
 _LOAD_TIMEOUT = 60
+
+# --- GGML model self-download ------------------------------------------------
+# The faster-whisper / Whisper backends auto-download their weights on load. The
+# whisper.cpp sidecar does NOT: it only reads the GGML file from the shared models
+# volume and waits for it to appear. On a fresh setup nothing fetches it — the
+# dashboard's model download needs a running server, which can't start without the
+# model (chicken-and-egg). To match the HF backends and break that deadlock, the
+# backend downloads the file into the shared volume itself before waiting on the
+# sidecar. Mirrors dockerManager.ts::downloadGgmlModel (same HF repo + URL).
+_GGML_HF_BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+# Directory the sidecar reads GGML files from — docker-compose mounts the shared
+# models volume here in both containers (matches HF_HOME=/models).
+_GGML_MODELS_DIR = "/models"
+# Filename allowlist: ggml-*.bin or *.gguf, no path separators — so a crafted
+# model name can't traverse the volume or poison the download URL.
+_GGML_FILENAME_RE = re.compile(r"^(?:ggml-[A-Za-z0-9._-]+\.bin|[A-Za-z0-9._-]+\.gguf)$")
+# Streaming download budget: bounded connect, generous per-read for slow links.
+_GGML_DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, read=300.0)
+# After the file appears, the sidecar's wait-loop (~10s cadence) launches
+# whisper-server and loads the model onto the GPU. Wait for /health up to this
+# long before /load so a first-run download doesn't race the POST.
+_SIDECAR_READY_TIMEOUT = 180
+_SIDECAR_HEALTH_POLL_INTERVAL = 2.0
 
 # Inference has NO time limit when the caller can cancel (the normal longform
 # case): a slow machine is allowed to take as long as it needs. Callers with no
@@ -122,6 +146,16 @@ _SIDECAR_WEDGED_MSG = (
     "within {timeout:.0f}s. This path (warmup / live mode / preview) sends only "
     "a few seconds of audio, so the sidecar is almost certainly wedged — check "
     "the sidecar container logs. (File transcription has no time limit.)"
+)
+
+_GGML_BAD_FILENAME_MSG = (
+    "Refusing to download GGML model with unexpected name {name!r} — expected a "
+    "ggml-*.bin or *.gguf filename."
+)
+
+_GGML_DOWNLOAD_FAILED_MSG = (
+    "Failed to download GGML model {filename} from {url}: {error}. Check the "
+    "server container's network access, or pre-place the file in the models volume."
 )
 
 
@@ -437,6 +471,66 @@ def _parse_words(raw_words: Any, word_cap: int, audio_duration_s: float) -> list
     return words
 
 
+def _ensure_ggml_model_present(model_name: str) -> None:
+    """Download the GGML model into the shared volume if it isn't there yet.
+
+    The whisper.cpp sidecar only *reads* the model file and waits for it to
+    appear; it never downloads. To match the faster-whisper/HF backends (which
+    auto-download on load) and break the first-run chicken-and-egg — the Models
+    tab download needs a running server, which can't start without the model —
+    the backend fetches the file itself, mirroring the dashboard downloader
+    (``dockerManager.ts::downloadGgmlModel``: same HF repo + URL).
+
+    No-op when the file already exists, or when the models directory isn't
+    present (e.g. unit tests, or a bare-metal run not using the shared volume) —
+    in that case fetching is left to whoever owns the volume.
+    """
+    filename = os.path.basename((model_name or "").strip())
+    if not _GGML_FILENAME_RE.match(filename):
+        raise RuntimeError(_GGML_BAD_FILENAME_MSG.format(name=model_name))
+    if not os.path.isdir(_GGML_MODELS_DIR):
+        logger.debug(
+            "GGML models dir %s not present; leaving model fetch to the sidecar",
+            _GGML_MODELS_DIR,
+        )
+        return
+    target = os.path.join(_GGML_MODELS_DIR, filename)
+    if os.path.exists(target):
+        return
+    url = f"{_GGML_HF_BASE_URL}/{filename}"
+    tmp = f"{target}.tmp"
+    logger.info(
+        "WhisperCppBackend: GGML model %s missing from %s — downloading from %s",
+        filename,
+        _GGML_MODELS_DIR,
+        url,
+    )
+    try:
+        # follow_redirects: HF ``resolve`` 302-redirects to a CDN host.
+        with httpx.stream(
+            "GET", url, timeout=_GGML_DOWNLOAD_TIMEOUT, follow_redirects=True
+        ) as resp:
+            resp.raise_for_status()
+            with open(tmp, "wb") as fh:
+                for chunk in resp.iter_bytes(chunk_size=1024 * 1024):
+                    fh.write(chunk)
+        # Same-dir rename → atomic publish; a crashed download leaves only .tmp.
+        os.replace(tmp, target)
+    except Exception as exc:  # noqa: BLE001 — collapse to one actionable error
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise RuntimeError(
+            _GGML_DOWNLOAD_FAILED_MSG.format(filename=filename, url=url, error=repr(exc))
+        ) from exc
+    logger.info(
+        "WhisperCppBackend: GGML model %s downloaded (%d bytes)",
+        filename,
+        os.path.getsize(target),
+    )
+
+
 class WhisperCppBackend(STTBackend):
     """STTBackend that delegates to a whisper.cpp whisper-server via HTTP."""
 
@@ -475,6 +569,42 @@ class WhisperCppBackend(STTBackend):
             self._client = httpx.Client()
         return self._client
 
+    def _wait_for_sidecar_ready(self) -> None:
+        """Poll the sidecar's ``/health`` until it responds, best-effort.
+
+        On a first-run download the sidecar only launches whisper-server after
+        the GGML file appears, then spends time loading the model onto the GPU.
+        Polling ``/health`` here means the subsequent ``/load`` POST doesn't race
+        a still-starting server. A timeout is NOT fatal — it's logged and
+        ``load()`` proceeds, since ``/load`` has its own reachable/timeout/
+        disconnect handling.
+        """
+        client = self._ensure_client()
+        health_url = f"{self._server_url}/health"
+        deadline = time.monotonic() + _SIDECAR_READY_TIMEOUT
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                resp = client.get(health_url, timeout=_SIDECAR_HEALTH_POLL_INTERVAL)
+                if resp.status_code == 200:
+                    logger.info(
+                        "WhisperCppBackend: sidecar healthy after %d poll(s)", attempt
+                    )
+                    return
+            except (httpx.HTTPError, OSError) as exc:
+                logger.debug(
+                    "WhisperCppBackend: sidecar /health not ready yet: %s", repr(exc)
+                )
+            if time.monotonic() >= deadline:
+                logger.warning(
+                    "WhisperCppBackend: sidecar not healthy after %ds; "
+                    "proceeding to /load anyway",
+                    _SIDECAR_READY_TIMEOUT,
+                )
+                return
+            time.sleep(_SIDECAR_HEALTH_POLL_INTERVAL)
+
     # ------------------------------------------------------------------
     # STTBackend interface
     # ------------------------------------------------------------------
@@ -492,6 +622,14 @@ class WhisperCppBackend(STTBackend):
             self._max_chunk_duration_s,
         )
 
+        # GGML models are not auto-fetched by the sidecar (it only reads + waits),
+        # so download into the shared volume ourselves — this is what breaks the
+        # first-run deadlock and lets the model actually be downloaded. Then wait
+        # for the sidecar to come up so the /load POST doesn't race a starting
+        # server. Both are no-ops in the already-running / already-present case.
+        _ensure_ggml_model_present(model_name)
+        self._wait_for_sidecar_ready()
+
         client = self._ensure_client()
         try:
             resp = client.post(
@@ -508,6 +646,15 @@ class WhisperCppBackend(STTBackend):
             raise RuntimeError(
                 _SIDECAR_LOAD_TIMEOUT_MSG.format(url=self._server_url, timeout=_LOAD_TIMEOUT)
             ) from exc
+        except httpx.RemoteProtocolError:
+            # Sidecar accepted the connection but disconnected without a
+            # response — it's up but still loading the model onto the GPU
+            # (whisper-server can be single-threaded during load). Not fatal:
+            # proceed as loaded; the first /inference reaches the ready server.
+            logger.warning(
+                "WhisperCppBackend: /load disconnected without a response "
+                "(sidecar likely still loading the model); continuing anyway",
+            )
         except HttpxHTTPStatusError:
             logger.warning(
                 "WhisperCppBackend: /load returned an error status (server may "
