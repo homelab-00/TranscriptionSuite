@@ -10,7 +10,6 @@ import {
   Loader2,
   Mic,
   MicOff,
-  PenLine,
   Radio,
   Sparkles,
   Speech,
@@ -20,13 +19,12 @@ import {
 
 import { AppleIcon } from '../../ui/icons/AppleIcon';
 import { Button } from '../../ui/Button';
-import { CustomSelect } from '../../ui/CustomSelect';
 import { SelectorGroup } from '../../ui/SelectorGroup';
 import { SelectorTile } from '../../ui/SelectorTile';
 import type { TileAccent } from '../../ui/SelectorTile';
 import { MainModelPicker } from './MainModelPicker';
+import { ModelCardPicker } from '../../models/ModelCardPicker';
 import {
-  DIARIZATION_MODEL_CUSTOM_OPTION,
   type FamilyChoiceId,
   defaultModelForFamilyChoice,
   diarizationTilesFor,
@@ -38,16 +36,13 @@ import {
 } from '../../../src/services/instanceMatrix';
 import {
   DISABLED_MODEL_SENTINEL,
-  LIVE_MODEL_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   LIVE_RECOMMENDED_MODEL,
-  MAIN_MODEL_CUSTOM_OPTION,
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   MODEL_DISABLED_OPTION,
   VULKAN_RECOMMENDED_MODEL,
 } from '../../../src/services/modelSelection';
 import { isWhisperCppModel } from '../../../src/services/modelCapabilities';
-import { buildModelOptionPresentation } from '../../../src/services/modelOptionPresentation';
 import type { RuntimeProfile } from '../../../src/types/runtime';
 
 interface ModelCacheStatus {
@@ -60,16 +55,10 @@ interface InstanceSettingsSelectorsProps {
   isRunning: boolean;
   mainModelSelection: string;
   onMainModelSelectionChange: (value: string) => void;
-  mainCustomModel: string;
-  onMainCustomModelChange: (value: string) => void;
   liveModelSelection: string;
   onLiveModelSelectionChange: (value: string) => void;
-  liveCustomModel: string;
-  onLiveCustomModelChange: (value: string) => void;
   diarizationModelSelection: string;
   onDiarizationModelSelectionChange: (value: string) => void;
-  diarizationCustomModel: string;
-  onDiarizationCustomModelChange: (value: string) => void;
   activeTranscriber: string;
   activeLiveModel: string;
   diarizationStatusModelId: string;
@@ -84,7 +73,6 @@ interface InstanceSettingsSelectorsProps {
   downloadingIds: ReadonlySet<string>;
   onDownloadModel: (id: string) => void;
   onRemoveModel: (id: string) => void;
-  onOpenModelManager: () => void;
 }
 
 const FAMILY_ICONS: Record<FamilyChoiceId, React.ReactNode> = {
@@ -117,7 +105,6 @@ const DIARIZATION_TILE_ICONS: Record<string, React.ReactNode> = {
   campp: <Zap size={16} />,
   sortformer: <AppleIcon size={16} />,
   builtin: <Sparkles size={16} />,
-  custom: <PenLine size={16} />,
 };
 
 const DIARIZATION_TILE_ACCENTS: Record<string, TileAccent> = {
@@ -125,7 +112,6 @@ const DIARIZATION_TILE_ACCENTS: Record<string, TileAccent> = {
   campp: 'amber',
   sortformer: 'slate',
   builtin: 'blue',
-  custom: 'cyan',
 };
 
 function CacheBadge({ status }: { status: ModelCacheStatus | undefined }) {
@@ -159,16 +145,10 @@ export function InstanceSettingsSelectors({
   isRunning,
   mainModelSelection,
   onMainModelSelectionChange,
-  mainCustomModel,
-  onMainCustomModelChange,
   liveModelSelection,
   onLiveModelSelectionChange,
-  liveCustomModel,
-  onLiveCustomModelChange,
   diarizationModelSelection,
   onDiarizationModelSelectionChange,
-  diarizationCustomModel,
-  onDiarizationCustomModelChange,
   activeTranscriber,
   activeLiveModel,
   diarizationStatusModelId,
@@ -183,18 +163,14 @@ export function InstanceSettingsSelectors({
   downloadingIds,
   onDownloadModel,
   onRemoveModel,
-  onOpenModelManager,
 }: InstanceSettingsSelectorsProps) {
   const familyChoices = useMemo(() => familyChoicesFor(runtimeProfile), [runtimeProfile]);
 
-  // The family tile that should light up: derived from the dropdown value
-  // (or the custom text when the Custom option is active).
-  const selectedFamily = useMemo(() => {
-    if (mainModelSelection === MAIN_MODEL_CUSTOM_OPTION) {
-      return familyChoiceForModel(mainCustomModel) ?? 'whisper';
-    }
-    return familyChoiceForModel(mainModelSelection);
-  }, [mainModelSelection, mainCustomModel]);
+  // The family tile that should light up, derived from the selected model id.
+  const selectedFamily = useMemo(
+    () => familyChoiceForModel(mainModelSelection),
+    [mainModelSelection],
+  );
 
   const liveTiles = useMemo(
     () => liveTilesFor(runtimeProfile, activeTranscriber),
@@ -208,14 +184,10 @@ export function InstanceSettingsSelectors({
     return 'whisper';
   }, [liveModelSelection]);
 
-  const livePresentation = useMemo(() => {
-    if (activeLiveTile === 'same-as-main' || activeLiveTile === 'disabled') {
-      return buildModelOptionPresentation([], {}, []);
-    }
-    const models = liveModelsFor(activeLiveTile === 'whispercpp' ? 'vulkan' : 'gpu');
-    const tail = activeLiveTile === 'whispercpp' ? [] : [LIVE_MODEL_CUSTOM_OPTION];
-    return buildModelOptionPresentation(models, modelCacheStatus, tail);
-  }, [activeLiveTile, modelCacheStatus]);
+  const liveModels = useMemo(() => {
+    if (activeLiveTile === 'same-as-main' || activeLiveTile === 'disabled') return [];
+    return liveModelsFor(activeLiveTile === 'whispercpp' ? 'vulkan' : 'gpu');
+  }, [activeLiveTile]);
 
   const diarizationTiles = useMemo(
     () => diarizationTilesFor(runtimeProfile, activeTranscriber),
@@ -256,10 +228,7 @@ export function InstanceSettingsSelectors({
             disabled={!choice.enabled || isRunning}
             badge={choice.reason}
             hint={choice.hint}
-            onSelect={() => {
-              onMainModelSelectionChange(defaultModelForFamilyChoice(choice.id));
-              onMainCustomModelChange('');
-            }}
+            onSelect={() => onMainModelSelectionChange(defaultModelForFamilyChoice(choice.id))}
             glyphs={
               <>
                 <span
@@ -303,16 +272,13 @@ export function InstanceSettingsSelectors({
       <MainModelPicker
         selectedFamily={selectedFamily}
         mainModelSelection={mainModelSelection}
-        mainCustomModel={mainCustomModel}
         isRunning={isRunning}
         canManage={canManage}
         modelCacheStatus={modelCacheStatus}
         downloadingIds={downloadingIds}
         onMainModelSelectionChange={onMainModelSelectionChange}
-        onMainCustomModelChange={onMainCustomModelChange}
         onDownload={onDownloadModel}
         onRemove={onRemoveModel}
-        onOpenManager={onOpenModelManager}
       />
 
       {/* Live Mode model */}
@@ -341,31 +307,19 @@ export function InstanceSettingsSelectors({
           />
         ))}
       </SelectorGroup>
-      {livePresentation.options.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <CustomSelect
-              value={liveModelSelection}
-              onChange={onLiveModelSelectionChange}
-              options={livePresentation.options}
-              optionLabel={livePresentation.optionLabel}
-              optionDescription={livePresentation.optionDescription}
-              optionMeta={livePresentation.optionMeta}
-              className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-              disabled={isRunning}
-            />
-            {liveModelSelection === LIVE_MODEL_CUSTOM_OPTION && (
-              <input
-                type="text"
-                value={liveCustomModel}
-                onChange={(e) => onLiveCustomModelChange(e.target.value)}
-                placeholder="owner/model-name"
-                disabled={isRunning}
-                className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-              />
-            )}
-          </div>
-        </div>
+      {liveModels.length > 0 && (
+        <ModelCardPicker
+          models={liveModels}
+          selection={liveModelSelection}
+          badgeLabel="Live"
+          isRunning={isRunning}
+          canManage={canManage}
+          modelCacheStatus={modelCacheStatus}
+          downloadingIds={downloadingIds}
+          onSelectionChange={onLiveModelSelectionChange}
+          onDownload={onDownloadModel}
+          onRemove={onRemoveModel}
+        />
       )}
       {!liveModelWhisperOnlyCompatible && (
         <p className="text-accent-orange text-xs">{liveModeModelConstraintMessage}</p>
@@ -403,20 +357,6 @@ export function InstanceSettingsSelectors({
           Diarization is not available for whisper.cpp (GGML) models.
         </p>
       )}
-      {diarizationTiles.length > 0 &&
-        diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION && (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <input
-              type="text"
-              value={diarizationCustomModel}
-              onChange={(e) => onDiarizationCustomModelChange(e.target.value)}
-              placeholder="owner/model-name"
-              disabled={isRunning}
-              className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-            />
-          </div>
-        )}
-
       {/* Load / unload models */}
       <div className="flex gap-2 border-t border-white/5 pt-2">
         <Button

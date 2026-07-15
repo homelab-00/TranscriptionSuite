@@ -1332,7 +1332,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
           stacked, the columns go overflow-visible and the grid scrolls instead. The
           stacked fades therefore cannot live inside the grid, because an absolutely
           positioned child of a scroller is laid out against the scrolled box and would
-          slide away with the content. They hang off this non-scrolling wrapper instead. */}
+          slide away with the content. They hang off this non-scrolling wrapper instead.
+          The grid is also rounded when stacked so its overflow clip matches the rounded
+          corners of the fade bars - without it, clipped content pokes out square past them. */}
       <div className="relative flex min-h-0 flex-1 flex-col">
         <ScrollFadeOverlay
           edge="top"
@@ -1341,7 +1343,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         />
         <div
           ref={stackedScrollRef}
-          className="custom-scrollbar grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 @max-[840px]:overflow-y-auto @min-[840px]:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]"
+          className="custom-scrollbar grid min-h-0 flex-1 grid-cols-1 items-stretch gap-6 @max-[840px]:overflow-y-auto @max-[840px]:rounded-2xl @min-[840px]:grid-cols-[minmax(480px,5fr)_minmax(300px,7fr)]"
         >
           {/* Left Column: Controls (40%) */}
           {/* min-h-0 is gated to @min-[840px] (wide mode) ON PURPOSE: in the two-column

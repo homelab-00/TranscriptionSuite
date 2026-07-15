@@ -530,11 +530,8 @@ const store = new Store({
     // the dashboard uses the `-legacy` GHCR repo for list/pull/tag operations.
     'server.useLegacyGpu': false,
     'server.mainModelSelection': 'nvidia/parakeet-tdt-0.6b-v3',
-    'server.mainCustomModel': '',
     'server.liveModelSelection': 'Systran/faster-whisper-medium',
-    'server.liveCustomModel': '',
     'server.diarizationModelSelection': 'pyannote/speaker-diarization-community-1',
-    'server.diarizationCustomModel': '',
     'shortcuts.startRecording': 'Alt+Ctrl+Z',
     'shortcuts.stopTranscribe': 'Alt+Ctrl+X',
     'app.pasteAtCursor': false,
@@ -2381,7 +2378,10 @@ app.whenReady().then(async () => {
     const mainTranscriberModel =
       (store.get('server.mainModelSelection') as string) || 'mlx-community/whisper-small-asr-fp16';
 
-    // Resolve live transcriber model from stored selection sentinels.
+    // Resolve live transcriber model from stored selection sentinels. The
+    // Custom option was removed from the UI, but old stores may still hold its
+    // sentinel (plus the retired server.liveCustomModel text) until ServerView
+    // hydrates once and normalizes them — tolerate it here.
     const LIVE_SAME_AS_MAIN = 'Same as Main Transcriber';
     const LIVE_CUSTOM = 'Custom (HuggingFace repo)';
     const liveModelSelection = (store.get('server.liveModelSelection') as string) || '';
@@ -2404,7 +2404,8 @@ app.whenReady().then(async () => {
     // Resolve diarization selection sentinels the same way ServerView does. The
     // stored value is a UI label, not always a model id: CAM++, Sortformer and the
     // legacy Auto label all mean "let the server pick", which mlxServerManager
-    // expects as an empty model.
+    // expects as an empty model. The Custom sentinel is legacy-only (removed from
+    // the UI) but tolerated until ServerView normalizes the store.
     const DIARIZATION_CAMPP = 'CAM++ (fast, built-in)';
     const DIARIZATION_SORTFORMER = 'Sortformer (Metal; ≤ 4 speakers)';
     const DIARIZATION_CUSTOM = 'Custom (HuggingFace repo)';

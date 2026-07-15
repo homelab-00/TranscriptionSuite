@@ -64,6 +64,16 @@ describe('ScrollFadeOverlay', () => {
     expect(bar.className).toContain('pointer-events-none');
   });
 
+  it('rounds its corners to hug the rounded-2xl card silhouette on each edge', () => {
+    const top = renderBar(<ScrollFadeOverlay edge="top" visible={true} />);
+    const bottom = renderBar(<ScrollFadeOverlay edge="bottom" visible={true} />);
+
+    expect(top.className).toContain('rounded-t-2xl');
+    expect(top.className).not.toContain('rounded-b-2xl');
+    expect(bottom.className).toContain('rounded-b-2xl');
+    expect(bottom.className).not.toContain('rounded-t-2xl');
+  });
+
   it('insets from the right so it does not wash over the scrollbar track', () => {
     const bar = renderBar(<ScrollFadeOverlay edge="top" visible={true} />);
 

@@ -67,7 +67,10 @@ const DEFAULT_SHORTCUTS = {
   stopTranscribe: 'Alt+Ctrl+X',
 } as const;
 const REMOTE_PROFILE_OPTIONS = ['Tailscale', 'LAN'] as const;
-const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
+// Legacy sentinel of the removed custom-repo option. Old stores may still hold
+// it in server.mainModelSelection until ServerView hydrates once and
+// normalizes them, so this reader keeps tolerating it.
+const LEGACY_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
 // GH-120 — Folder Watch duplicate-handling policy. Display order + labels for
 // the App-tab dropdown; values map to importQueueStore's DuplicatePolicy.
@@ -92,7 +95,7 @@ function resolveConfiguredMainModel(cfg: Record<string, unknown>): string {
   const selection = normalizeConfigString(cfg['server.mainModelSelection']);
   const custom = normalizeConfigString(cfg['server.mainCustomModel']);
 
-  if (selection === MAIN_MODEL_CUSTOM_OPTION) return custom;
+  if (selection === LEGACY_CUSTOM_OPTION) return custom;
   if (!selection || selection === MODEL_DEFAULT_LOADING_PLACEHOLDER) return custom;
   return selection;
 }

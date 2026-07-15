@@ -22,9 +22,8 @@ interface ModelRowDetailsProps {
  * The detail block for one model: repo id, on-disk size, parameter count,
  * capability badges, language count, and description.
  *
- * Shared by the Model Manager rows and the Server tab model picker so the two
- * cannot drift apart. ModelInfo carries no size field, so a size is shown only
- * for a model that is already cached.
+ * Rendered inside every Server tab model picker card. ModelInfo carries no
+ * size field, so a size is shown only for a model that is already cached.
  */
 export const ModelRowDetails: React.FC<ModelRowDetailsProps> = ({
   model,
@@ -48,7 +47,16 @@ export const ModelRowDetails: React.FC<ModelRowDetailsProps> = ({
         </>
       )}
       <span className="text-slate-600">&middot;</span>
-      <CapBadge label="Translation" active={model.capabilities.translation} />
+      <CapBadge
+        label={
+          model.capabilities.translation === 'multilingual'
+            ? 'Translation (between languages)'
+            : model.capabilities.translation === 'toEnglish'
+              ? 'Translation (to English)'
+              : 'Translation'
+        }
+        active={model.capabilities.translation !== 'none'}
+      />
       <CapBadge label="Live Mode" active={model.capabilities.liveMode} />
       <CapBadge label="Diarization" active={model.capabilities.diarization} />
       {model.capabilities.languageCount > 0 && (

@@ -11,9 +11,11 @@ interface ScrollFadeOverlayProps {
   className?: string;
 }
 
+// The corners are rounded to the same 1rem radius as the rounded-2xl cards the bar
+// washes over, so the bar hugs the card silhouette instead of drawing a square band.
 const EDGE_ANCHOR: Record<ScrollFadeEdge, string> = {
-  top: 'top-0',
-  bottom: 'bottom-0',
+  top: 'top-0 rounded-t-2xl',
+  bottom: 'bottom-0 rounded-b-2xl',
 };
 
 // The gradient and the mask both point away from the edge, so the bar is densest where
