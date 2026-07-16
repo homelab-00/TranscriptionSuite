@@ -39,6 +39,7 @@ import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampTog
 import { getConfig, setConfig } from '../../src/config/store';
 import { useSessionWatcher } from '../../src/hooks/useSessionWatcher';
 import { useAriaAnnouncerStore } from '../../src/stores/ariaAnnouncerStore';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import {
   supportsAutoDetect,
   supportsTranslation,
@@ -402,14 +403,18 @@ export const SessionImportTab: React.FC = () => {
       });
 
       // GH-210: immediate feedback on manual add. The Folder-Watch path
-      // already toasts in handleFilesDetected; this mirrors it for drops and
-      // file-picker selections. Only fires after addFiles (the guard above
-      // early-returns without enqueueing).
-      toast.success(
-        fileArray.length === 1
-          ? `Added "${fileArray[0].name}" to the Import Queue`
-          : `${fileArray.length} files added to the Import Queue`,
-      );
+      // already surfaces detection in handleFilesDetected; this mirrors it for
+      // drops and file-picker selections. Only fires after addFiles (the guard
+      // above early-returns without enqueueing).
+      useNotificationsStore.getState().notify({
+        id: `import-queued-${Date.now()}`,
+        category: 'import',
+        title:
+          fileArray.length === 1
+            ? `Added "${fileArray[0].name}" to the Import Queue`
+            : `${fileArray.length} files added to the Import Queue`,
+        status: 'complete',
+      });
       useAriaAnnouncerStore
         .getState()
         .announce(
