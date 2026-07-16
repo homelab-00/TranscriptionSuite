@@ -29,11 +29,10 @@ import { useLiveMode } from './src/hooks/useLiveMode';
 import { useImportQueueStore, selectIsUploading } from './src/stores/importQueueStore';
 import { QueuePausedBanner } from './components/ui/QueuePausedBanner';
 import { UpdateBanner } from './components/ui/UpdateBanner';
-import { ActivityNotifications } from './components/ui/ActivityNotifications';
 import { NotificationToasts } from './components/ui/NotificationToasts';
 import { HfTokenExplainer } from './components/ui/HfTokenExplainer';
 import { useStarPopup } from './src/hooks/useStarPopup';
-import { useBootstrapDownloads } from './src/hooks/useBootstrapDownloads';
+import { useNotificationBridge } from './src/hooks/useNotificationBridge';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
 import { useAuthTokenSync } from './src/hooks/useAuthTokenSync';
 import { useWatcherFilesBridge } from './src/hooks/useWatcherFilesBridge';
@@ -110,8 +109,8 @@ const AppInner: React.FC = () => {
 
   // Always-on Docker log token scanner
   useAuthTokenSync(serverConnection.reachable, useRemote);
-  // Bridge bootstrap log events → download store (runs regardless of active tab)
-  useBootstrapDownloads();
+  // Bridge bootstrap log events → notifications store (runs regardless of active tab)
+  useNotificationBridge();
   // Singleton subscriber for the watcher:filesDetected IPC channel — must be
   // mounted at app root so it does not double-register when a per-tab hook
   // (e.g. useSessionWatcher) survives a tab switch (Issue #94).
@@ -1089,9 +1088,6 @@ const App: React.FC = () => (
     <DockerProvider>
       <AppInner />
     </DockerProvider>
-    <ErrorBoundary FallbackComponent={ErrorFallback}>
-      <ActivityNotifications />
-    </ErrorBoundary>
     <ErrorBoundary FallbackComponent={ErrorFallback}>
       <NotificationToasts />
     </ErrorBoundary>
