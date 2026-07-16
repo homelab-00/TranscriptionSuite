@@ -1512,6 +1512,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     refreshAdminStatus();
   }, [refreshAdminStatus]);
 
+  // Drives the Load/Unload Models control in the unified instance panel.
+  // undefined until the first admin-status poll lands.
+  const modelsLoaded = adminStatus?.models_loaded;
+
   const openCleanAllDialog = useCallback(() => {
     setKeepDataVolume(false);
     setKeepModelsVolume(false);
@@ -1923,133 +1927,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     )}
                   </div>
                 )}
-                <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-white/5 pt-4">
-                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
-                    <StatusLight
-                      status={
-                        isRunningAndHealthy
-                          ? 'active'
-                          : containerStatus.exists
-                            ? 'warning'
-                            : 'inactive'
-                      }
-                      animate={isRunningAndHealthy}
-                    />
-                    <span
-                      className={`font-mono text-sm transition-colors ${
-                        isRunning
-                          ? 'text-slate-300'
-                          : containerStatus.exists
-                            ? 'text-accent-orange'
-                            : 'text-slate-500'
-                      }`}
-                    >
-                      {statusLabel}
-                    </span>
-                    {isRunning && serverMode && (
-                      <span
-                        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
-                      >
-                        {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
-                        {serverMode}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="secondary"
-                        className="h-9 px-4 whitespace-nowrap"
-                        onClick={() =>
-                          onStartServer('local', runtimeProfile, selectedTagForStart, {
-                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                            diarizationModel: sanitizeModelName(activeDiarizationModel),
-                            sensevoiceDiarizationEngine: sensevoiceEngineValue,
-                            ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
-                          })
-                        }
-                        disabled={
-                          docker.operating ||
-                          isRunning ||
-                          startupFlowPending ||
-                          !liveModelWhisperOnlyCompatible ||
-                          (needsDocker && !docker.composeAvailable)
-                        }
-                      >
-                        {docker.operating || startupFlowPending ? (
-                          <Loader2 size={14} className="animate-spin" />
-                        ) : (
-                          'Start Local'
-                        )}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        className="h-9 px-4 whitespace-nowrap"
-                        onClick={() =>
-                          onStartServer('remote', runtimeProfile, selectedTagForStart, {
-                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                            diarizationModel: sanitizeModelName(activeDiarizationModel),
-                            sensevoiceDiarizationEngine: sensevoiceEngineValue,
-                            ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
-                          })
-                        }
-                        disabled={
-                          docker.operating ||
-                          isRunning ||
-                          startupFlowPending ||
-                          !liveModelWhisperOnlyCompatible ||
-                          (needsDocker && !docker.composeAvailable)
-                        }
-                      >
-                        Start Remote
-                      </Button>
-                      <Button
-                        variant="danger"
-                        className="h-9 px-4 whitespace-nowrap"
-                        onClick={() => docker.stopContainer()}
-                        disabled={docker.operating || !isRunning}
-                      >
-                        Stop
-                      </Button>
-                    </div>
-                    <Button
-                      variant="danger"
-                      className="h-9 px-4 whitespace-nowrap"
-                      onClick={() => docker.removeContainer()}
-                      disabled={docker.operating || isRunning || !containerStatus.exists}
-                    >
-                      Remove Container
-                    </Button>
-                  </div>
-                </div>
-                {docker.operationError && (
-                  <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                    {docker.operationError}
-                  </div>
-                )}
-                {/* Active model downloads while the server is starting (GH-207) */}
-                {isRunning && !isRunningAndHealthy && <StartupActivityInline />}
-                {containerStatus.startedAt && isRunning && (
-                  <div className="mt-2 font-mono text-xs text-slate-500">
-                    Started: {new Date(containerStatus.startedAt).toLocaleString()}
-                    {containerStatus.health && (
-                      <span className="ml-3">
-                        Health:{' '}
-                        <span
-                          className={
-                            containerStatus.health === 'healthy'
-                              ? 'text-green-400'
-                              : 'text-accent-orange'
-                          }
-                        >
-                          {containerStatus.health}
-                        </span>
-                      </span>
-                    )}
-                  </div>
-                )}
               </GlassCard>
             </div>
           )}
@@ -2066,6 +1943,173 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy || mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
             >
               <div className="space-y-6">
+                {/* Unified instance control panel: container lifecycle controls
+                    (moved up from the Docker Image card) plus the model
+                    load/unload control (moved from the selectors footer), so
+                    everything that starts, stops, or resets this instance sits
+                    in one place above the settings it applies. On Metal the
+                    container controls are irrelevant (the native server has its
+                    own card above), so only the models control renders. */}
+                <div className="border-b border-white/5 pb-4">
+                  <div className="flex flex-wrap items-center gap-5">
+                    {!isMetal && (
+                      <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
+                        <StatusLight
+                          status={
+                            isRunningAndHealthy
+                              ? 'active'
+                              : containerStatus.exists
+                                ? 'warning'
+                                : 'inactive'
+                          }
+                          animate={isRunningAndHealthy}
+                        />
+                        <span
+                          className={`font-mono text-sm transition-colors ${
+                            isRunning
+                              ? 'text-slate-300'
+                              : containerStatus.exists
+                                ? 'text-accent-orange'
+                                : 'text-slate-500'
+                          }`}
+                        >
+                          {statusLabel}
+                        </span>
+                        {isRunning && serverMode && (
+                          <span
+                            className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                          >
+                            {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
+                            {serverMode}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
+                      {!isMetal && (
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="secondary"
+                            className="h-9 px-4 whitespace-nowrap"
+                            onClick={() =>
+                              onStartServer('local', runtimeProfile, selectedTagForStart, {
+                                mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                                liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                                diarizationModel: sanitizeModelName(activeDiarizationModel),
+                                sensevoiceDiarizationEngine: sensevoiceEngineValue,
+                                ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
+                              })
+                            }
+                            disabled={
+                              docker.operating ||
+                              isRunning ||
+                              startupFlowPending ||
+                              !liveModelWhisperOnlyCompatible ||
+                              (needsDocker && !docker.composeAvailable)
+                            }
+                          >
+                            {docker.operating || startupFlowPending ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              'Start Local'
+                            )}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            className="h-9 px-4 whitespace-nowrap"
+                            onClick={() =>
+                              onStartServer('remote', runtimeProfile, selectedTagForStart, {
+                                mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                                liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                                diarizationModel: sanitizeModelName(activeDiarizationModel),
+                                sensevoiceDiarizationEngine: sensevoiceEngineValue,
+                                ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
+                              })
+                            }
+                            disabled={
+                              docker.operating ||
+                              isRunning ||
+                              startupFlowPending ||
+                              !liveModelWhisperOnlyCompatible ||
+                              (needsDocker && !docker.composeAvailable)
+                            }
+                          >
+                            Start Remote
+                          </Button>
+                          <Button
+                            variant="danger"
+                            className="h-9 px-4 whitespace-nowrap"
+                            onClick={() => docker.stopContainer()}
+                            disabled={docker.operating || !isRunning}
+                          >
+                            Stop
+                          </Button>
+                        </div>
+                      )}
+                      <div className="ml-auto flex flex-wrap items-center gap-2">
+                        {modelsLoaded !== undefined && (
+                          <span
+                            className={`self-center font-mono text-xs ${modelsLoaded ? 'text-green-400' : 'text-slate-500'}`}
+                          >
+                            {modelsLoaded ? 'Models Loaded' : 'Models Not Loaded'}
+                          </span>
+                        )}
+                        <Button
+                          variant={modelsLoaded === false ? 'secondary' : 'danger'}
+                          className="h-9 px-4 whitespace-nowrap"
+                          onClick={modelsLoaded === false ? handleLoadModels : handleUnloadModels}
+                          disabled={modelsLoading || !isRunning}
+                        >
+                          {modelsLoading ? (
+                            <>
+                              <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
+                            </>
+                          ) : modelsLoaded === false ? (
+                            'Load Models'
+                          ) : (
+                            'Unload Models'
+                          )}
+                        </Button>
+                        {!isMetal && (
+                          <Button
+                            variant="danger"
+                            className="h-9 px-4 whitespace-nowrap"
+                            onClick={() => docker.removeContainer()}
+                            disabled={docker.operating || isRunning || !containerStatus.exists}
+                          >
+                            Remove Container
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {!isMetal && docker.operationError && (
+                    <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                      {docker.operationError}
+                    </div>
+                  )}
+                  {/* Active model downloads while the server is starting (GH-207) */}
+                  {!isMetal && isRunning && !isRunningAndHealthy && <StartupActivityInline />}
+                  {!isMetal && containerStatus.startedAt && isRunning && (
+                    <div className="mt-2 font-mono text-xs text-slate-500">
+                      Started: {new Date(containerStatus.startedAt).toLocaleString()}
+                      {containerStatus.health && (
+                        <span className="ml-3">
+                          Health:{' '}
+                          <span
+                            className={
+                              containerStatus.health === 'healthy'
+                                ? 'text-green-400'
+                                : 'text-accent-orange'
+                            }
+                          >
+                            {containerStatus.health}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {/* Runtime selector — tiles gated per host platform. hostPlatform
                     stays 'unknown' in jsdom/test mounts, which keeps every tile
                     enabled there (gating only engages on a known platform). */}
@@ -2105,6 +2149,37 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       badge={hostPlatform === 'darwin' ? 'Requires NVIDIA' : undefined}
                       onSelect={() => handleRuntimeProfileChange('gpu')}
                     />
+                    {/* Vulkan-WSL2 (GH-101 follow-up) — always rendered so the
+                        full runtime matrix stays readable; selectable only on
+                        Windows hosts where the main-process probe confirmed
+                        Docker Desktop runs on the WSL2 backend AND a tiny
+                        container could see /dev/dxg. */}
+                    <SelectorTile
+                      icon={
+                        <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                          <AmdIcon size={30} />
+                          <IntelIcon size={30} />
+                        </span>
+                      }
+                      label="GPU (Vulkan Windows)"
+                      sublabel="AMD / Intel · WSL2"
+                      accent="red"
+                      selected={runtimeProfile === 'vulkan-wsl2'}
+                      disabled={
+                        isRunning ||
+                        (hostPlatform !== 'unknown' && hostPlatform !== 'win32') ||
+                        (hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected)
+                      }
+                      badge={
+                        hostPlatform !== 'unknown' && hostPlatform !== 'win32'
+                          ? 'Windows only'
+                          : hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected
+                            ? 'Requires WSL2 GPU'
+                            : undefined
+                      }
+                      hint="Experimental"
+                      onSelect={() => handleRuntimeProfileChange('vulkan-wsl2')}
+                    />
                     <SelectorTile
                       icon={
                         <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
@@ -2125,27 +2200,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       hint="Experimental"
                       onSelect={() => handleRuntimeProfileChange('vulkan')}
                     />
-                    {/* Experimental Vulkan-WSL2 tile (GH-101 follow-up) — only
-                        rendered when the main-process probe confirms Docker
-                        Desktop runs on the WSL2 backend AND a tiny container
-                        could see /dev/dxg. */}
-                    {gpuInfo?.wslSupport?.gpuPassthroughDetected && hostPlatform === 'win32' && (
-                      <SelectorTile
-                        icon={
-                          <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
-                            <AmdIcon size={30} />
-                            <IntelIcon size={30} />
-                          </span>
-                        }
-                        label="GPU (Vulkan Windows)"
-                        sublabel="AMD / Intel · WSL2"
-                        accent="red"
-                        selected={runtimeProfile === 'vulkan-wsl2'}
-                        disabled={isRunning}
-                        hint="Experimental"
-                        onSelect={() => handleRuntimeProfileChange('vulkan-wsl2')}
-                      />
-                    )}
                     <SelectorTile
                       icon={<AppleIcon size={16} />}
                       label="GPU (Metal)"
@@ -2314,10 +2368,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   modelCacheStatus={effectiveModelCacheStatus}
                   liveModelWhisperOnlyCompatible={liveModelWhisperOnlyCompatible}
                   liveModeModelConstraintMessage={liveModeModelConstraintMessage}
-                  modelsLoaded={adminStatus?.models_loaded}
-                  modelsLoading={modelsLoading}
-                  onLoadModels={handleLoadModels}
-                  onUnloadModels={handleUnloadModels}
                   canManage={isMetal || isRunning}
                   downloadingIds={downloadingIds}
                   onDownloadModel={downloadModel}

@@ -7,7 +7,6 @@ import {
   KeyRound,
   Languages,
   Link2,
-  Loader2,
   Mic,
   MicOff,
   Radio,
@@ -18,7 +17,6 @@ import {
 } from 'lucide-react';
 
 import { AppleIcon } from '../../ui/icons/AppleIcon';
-import { Button } from '../../ui/Button';
 import { SelectorGroup } from '../../ui/SelectorGroup';
 import { SelectorTile } from '../../ui/SelectorTile';
 import type { TileAccent } from '../../ui/SelectorTile';
@@ -65,10 +63,6 @@ interface InstanceSettingsSelectorsProps {
   modelCacheStatus: Record<string, ModelCacheStatus>;
   liveModelWhisperOnlyCompatible: boolean;
   liveModeModelConstraintMessage: string;
-  modelsLoaded: boolean | undefined;
-  modelsLoading: boolean;
-  onLoadModels: () => void;
-  onUnloadModels: () => void;
   canManage: boolean;
   downloadingIds: ReadonlySet<string>;
   onDownloadModel: (id: string) => void;
@@ -95,7 +89,7 @@ const LIVE_TILE_ICONS: Record<LiveTileId, React.ReactNode> = {
 
 const LIVE_TILE_ACCENTS: Record<LiveTileId, TileAccent> = {
   'same-as-main': 'cyan',
-  whisper: 'slate',
+  whisper: 'purple',
   whispercpp: 'purple',
   disabled: 'slate',
 };
@@ -155,10 +149,6 @@ export function InstanceSettingsSelectors({
   modelCacheStatus,
   liveModelWhisperOnlyCompatible,
   liveModeModelConstraintMessage,
-  modelsLoaded,
-  modelsLoading,
-  onLoadModels,
-  onUnloadModels,
   canManage,
   downloadingIds,
   onDownloadModel,
@@ -357,32 +347,6 @@ export function InstanceSettingsSelectors({
           Diarization is not available for whisper.cpp (GGML) models.
         </p>
       )}
-      {/* Load / unload models */}
-      <div className="flex gap-2 border-t border-white/5 pt-2">
-        <Button
-          variant={modelsLoaded === false ? 'secondary' : 'danger'}
-          className="h-9 px-4 whitespace-nowrap"
-          onClick={modelsLoaded === false ? onLoadModels : onUnloadModels}
-          disabled={modelsLoading || !isRunning}
-        >
-          {modelsLoading ? (
-            <>
-              <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
-            </>
-          ) : modelsLoaded === false ? (
-            'Load Models'
-          ) : (
-            'Unload Models'
-          )}
-        </Button>
-        {modelsLoaded !== undefined && (
-          <span
-            className={`ml-auto self-center font-mono text-xs ${modelsLoaded ? 'text-green-400' : 'text-slate-500'}`}
-          >
-            {modelsLoaded ? 'Models Loaded' : 'Models Not Loaded'}
-          </span>
-        )}
-      </div>
     </div>
   );
 }
