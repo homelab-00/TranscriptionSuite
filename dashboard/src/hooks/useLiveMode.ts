@@ -58,7 +58,7 @@ export interface LiveStartOptions {
   gracePeriodSeconds?: number;
   model?: string;
   systemAudio?: boolean;
-  monitorDeviceLabel?: string;
+  monitorSinkName?: string;
 }
 
 export function useLiveMode(): LiveModeState {
@@ -126,8 +126,11 @@ export function useLiveMode(): LiveModeState {
         if (state === 'LISTENING') {
           setStatus('listening');
           setStatusMessage(null);
-          // Start audio capture once engine is ready
+          // Start audio capture once engine is ready. Stop any previous
+          // instance first — GH-230: replacing a still-starting capture
+          // without stopping it would orphan its loopback hold and stream.
           if (!captureRef.current?.isCapturing) {
+            captureRef.current?.stop();
             captureRef.current = new AudioCapture((chunk) => {
               socketRef.current?.sendAudio(chunk);
             });
@@ -135,12 +138,15 @@ export function useLiveMode(): LiveModeState {
               .start({
                 deviceId: startOptsRef.current.deviceId,
                 systemAudio: startOptsRef.current.systemAudio,
-                monitorDeviceLabel: startOptsRef.current.monitorDeviceLabel,
+                monitorSinkName: startOptsRef.current.monitorSinkName,
               })
               .then(() => {
                 setAnalyser(captureRef.current?.analyser ?? null);
               })
               .catch((err) => {
+                // A stop() that raced the start — the stop already put the
+                // state machine where it belongs; don't flip to error.
+                if (err instanceof Error && err.name === 'AbortError') return;
                 setError(err instanceof Error ? err.message : 'Audio capture failed');
                 setStatus('error');
                 socketRef.current?.disconnect();
@@ -149,6 +155,11 @@ export function useLiveMode(): LiveModeState {
         } else if (state === 'PROCESSING') {
           setStatus('processing');
         } else if (state === 'STOPPED') {
+          // GH-230: a server-initiated stop must tear down capture too —
+          // leaving it running kept streaming audio into a dead session and
+          // stranded the Linux loopback module (mic indicator stayed lit).
+          captureRef.current?.stop();
+          setAnalyser(null);
           setStatus('idle');
           setStatusMessage(null);
         }

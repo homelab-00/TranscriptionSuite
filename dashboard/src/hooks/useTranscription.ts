@@ -49,7 +49,7 @@ export interface TranscriptionState {
     translate?: boolean;
     translationTarget?: string;
     systemAudio?: boolean;
-    monitorDeviceLabel?: string;
+    monitorSinkName?: string;
     /** Save the finished recording to the Audio Notebook (GH-199). */
     autoAddToNotebook?: boolean;
   }) => void;
@@ -145,7 +145,7 @@ export function useTranscription(): TranscriptionState {
     translate?: boolean;
     translationTarget?: string;
     systemAudio?: boolean;
-    monitorDeviceLabel?: string;
+    monitorSinkName?: string;
     /** Active recording-profile id (FR18). Snapshotted server-side at job start. */
     profileId?: number | null;
     /** Save the finished recording to the Audio Notebook (GH-199). */
@@ -281,7 +281,10 @@ export function useTranscription(): TranscriptionState {
                 ? Math.round(rawCaptureRate)
                 : 16000;
             socketRef.current?.setAudioSampleRate(captureSampleRateHz);
-            // Begin audio capture
+            // Begin audio capture. Stop any previous instance first — GH-230:
+            // replacing a still-starting capture without stopping it would
+            // orphan its loopback hold and its stream.
+            captureRef.current?.stop();
             captureRef.current = new AudioCapture((chunk) => {
               socketRef.current?.sendAudio(chunk);
             });
@@ -289,13 +292,16 @@ export function useTranscription(): TranscriptionState {
               .start({
                 deviceId: startOptsRef.current.deviceId,
                 systemAudio: startOptsRef.current.systemAudio,
-                monitorDeviceLabel: startOptsRef.current.monitorDeviceLabel,
+                monitorSinkName: startOptsRef.current.monitorSinkName,
                 targetSampleRateHz: captureSampleRateHz,
               })
               .then(() => {
                 setAnalyser(captureRef.current?.analyser ?? null);
               })
               .catch((err) => {
+                // A stop() that raced the start — the stop already put the
+                // state machine where it belongs; don't flip to error.
+                if (err instanceof Error && err.name === 'AbortError') return;
                 setError(err instanceof Error ? err.message : 'Failed to start audio capture');
                 setStatus('error');
                 socketRef.current?.disconnect();
@@ -446,7 +452,7 @@ export function useTranscription(): TranscriptionState {
       translate?: boolean;
       translationTarget?: string;
       systemAudio?: boolean;
-      monitorDeviceLabel?: string;
+      monitorSinkName?: string;
       profileId?: number | null;
       autoAddToNotebook?: boolean;
     }) => {

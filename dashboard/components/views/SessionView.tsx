@@ -49,6 +49,7 @@ import { useScrollFade } from '../../src/hooks/useScrollFade';
 import { apiClient } from '../../src/api/client';
 import { getAuthToken, getConfig, setConfig } from '../../src/config/store';
 import { logClientEvent } from '../../src/services/clientDebugLog';
+import { loopbackOwner } from '../../src/services/loopbackOwner';
 import {
   supportsTranslation,
   filterLanguagesForModel,
@@ -108,8 +109,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Capture gain — boosts quiet system audio sources via Web Audio GainNode.
   // Persisted per-sink in config store. Also drives live mode gain.
   const [captureGain, setCaptureGain] = useState(1.0);
-  // Diagnostic: effective monitor source volume after loopback creation (Linux)
+  // Diagnostic: effective monitor source volume after loopback creation (Linux).
+  // Fed by loopbackOwner (GH-230): pct when the module is created, null when
+  // the deferred removal actually executes.
   const [monitorVolumePct, setMonitorVolumePct] = useState<number | null>(null);
+  useEffect(() => loopbackOwner.subscribeVolumePct(setMonitorVolumePct), []);
 
   // Runtime profile (read from persisted config)
   const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('cpu');
@@ -648,10 +652,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
     serverConnection.refresh();
   }, [serverConnection]);
 
-  const handleStopClient = useCallback(() => {
-    setClientRunning(false);
-    logClientEvent('Client', 'Client link stopped', 'warning');
-  }, []);
+  // handleStopClient is defined below handleLiveToggle — it now terminates
+  // active sessions (GH-230) and therefore depends on the stop handlers.
 
   const handleUnloadAllModels = useCallback(async () => {
     setModelsOperationPending(true);
@@ -793,20 +795,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
     const mainTranslateTarget = isCanaryMainBidi ? (resolveLanguage(mainBidiTarget) ?? 'en') : 'en';
 
     void (async () => {
-      let monitorLabel: string | undefined;
-      if (isSystemAudio) {
-        if (isLinux) {
-          // Linux: create a virtual mic from the selected sink's monitor source
-          const selectedSink = sinkNameMap[sysDevice];
-          if (selectedSink) {
-            const result = await window.electronAPI?.audio?.createMonitorLoopback(selectedSink);
-            monitorLabel = 'TranscriptionSuite_Loopback';
-            setMonitorVolumePct(result?.volumePct ?? null);
-          }
-        } else {
-          // Windows / macOS: register getDisplayMedia loopback handler
-          await window.electronAPI?.audio?.enableSystemAudioLoopback?.();
-        }
+      if (isSystemAudio && !isLinux) {
+        // Windows / macOS: register getDisplayMedia loopback handler
+        await window.electronAPI?.audio?.enableSystemAudioLoopback?.();
       }
       // GH-199: read at start so the server knows whether to promote this
       // recording into the Audio Notebook when it finishes.
@@ -818,7 +809,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
         translate: mainTranslateActive,
         translationTarget: mainTranslateTarget,
         systemAudio: isSystemAudio,
-        monitorDeviceLabel: monitorLabel,
+        // Linux system audio: pass the selected sink through — AudioCapture
+        // acquires/releases the pactl loopback module via loopbackOwner, so
+        // every teardown path releases it (GH-230).
+        monitorSinkName: isSystemAudio && isLinux ? sinkNameMap[sysDevice] : undefined,
         autoAddToNotebook,
       });
       // Apply persisted capture gain after capture starts
@@ -847,10 +841,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
   ]);
 
   const handleStopRecording = useCallback(() => {
+    // Linux loopback-module cleanup is owned by AudioCapture/loopbackOwner
+    // (GH-230) — no manual removeMonitorLoopback here.
     transcription.stop();
-    if (isLinux) {
-      window.electronAPI?.audio?.removeMonitorLoopback?.();
-    } else {
+    if (!isLinux) {
       window.electronAPI?.audio?.disableSystemAudioLoopback?.();
     }
   }, [transcription, isLinux]);
@@ -868,9 +862,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
     } catch (err) {
       console.error('Failed to cancel transcription:', err);
     } finally {
-      if (isLinux) {
-        window.electronAPI?.audio?.removeMonitorLoopback?.();
-      } else {
+      // Loopback module release happens inside transcription.reset() →
+      // capture.stop() → loopbackOwner (GH-230).
+      if (!isLinux) {
         window.electronAPI?.audio?.disableSystemAudioLoopback?.();
       }
       transcription.reset();
@@ -966,18 +960,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
               ? rawGracePeriod
               : 1.0;
 
-          let monitorLabel: string | undefined;
-          if (isSystemAudio) {
-            if (isLinux) {
-              const selectedSink = sinkNameMap[sysDevice];
-              if (selectedSink) {
-                const result = await window.electronAPI?.audio?.createMonitorLoopback(selectedSink);
-                monitorLabel = 'TranscriptionSuite_Loopback';
-                setMonitorVolumePct(result?.volumePct ?? null);
-              }
-            } else {
-              await window.electronAPI?.audio?.enableSystemAudioLoopback?.();
-            }
+          if (isSystemAudio && !isLinux) {
+            await window.electronAPI?.audio?.enableSystemAudioLoopback?.();
           }
 
           live.start({
@@ -987,7 +971,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
             translationTarget: liveTranslateTarget,
             gracePeriodSeconds,
             systemAudio: isSystemAudio,
-            monitorDeviceLabel: monitorLabel,
+            // Linux system audio: AudioCapture owns the loopback module
+            // lifecycle via loopbackOwner (GH-230).
+            monitorSinkName: isSystemAudio && isLinux ? sinkNameMap[sysDevice] : undefined,
           });
           // Apply persisted capture gain after capture starts
           if (isSystemAudio) {
@@ -995,10 +981,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
           }
         })();
       } else {
+        // live.stop() → capture.stop() → loopbackOwner release (GH-230).
         live.stop();
-        if (isLinux) {
-          window.electronAPI?.audio?.removeMonitorLoopback?.();
-        } else {
+        if (!isLinux) {
           window.electronAPI?.audio?.disableSystemAudioLoopback?.();
         }
       }
@@ -1023,6 +1008,27 @@ export const SessionView: React.FC<SessionViewProps> = ({
       languagesLoading,
     ],
   );
+
+  // GH-230: stopping the client link used to only flip the UI flag while an
+  // active session kept recording invisibly — the status read "Disconnected"
+  // but audio kept streaming and the OS microphone indicator stayed lit
+  // (v0.5.6's ClientControlMixin disconnected the session; the port lost
+  // that). End active sessions before dropping the link.
+  const handleStopClient = useCallback(() => {
+    if (transcription.status === 'recording') {
+      // Stop-and-transcribe: the buffered audio is sent to the server now.
+      handleStopRecording();
+    } else if (transcription.status === 'connecting') {
+      transcription.reset();
+    }
+    // 'processing' is deliberately left alone — the server already holds the
+    // audio and the poll-for-result fallback can still deliver the transcript.
+    if (isLive) {
+      handleLiveToggle(false);
+    }
+    setClientRunning(false);
+    logClientEvent('Client', 'Client link stopped', 'warning');
+  }, [transcription, handleStopRecording, isLive, handleLiveToggle, setClientRunning]);
 
   const prevClientConnectedRef = useRef(clientConnected);
   useEffect(() => {

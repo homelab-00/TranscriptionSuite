@@ -478,14 +478,18 @@ describe('SessionView — Canary language guards (gh-102)', () => {
 
   // ── Tray Stop / Cancel routed through their handlers (gh-102 followup #2) ──
   //
-  // Pre-fix the tray callbacks bypassed handleStopRecording (skipping Linux
-  // loopback / Win+Mac system-audio cleanup) and handleCancelProcessing
-  // (leaving orphan transcription jobs running on the server during
-  // `processing` — a CLAUDE.md data-loss-class regression). The fix routes
-  // them through the existing handlers via wrapped arrows (TDZ — same
-  // pattern as the gh-102 Start Recording fix at SessionView.tsx:633).
+  // Pre-fix the tray callbacks bypassed handleStopRecording (skipping Win+Mac
+  // system-audio cleanup) and handleCancelProcessing (leaving orphan
+  // transcription jobs running on the server during `processing` — a
+  // CLAUDE.md data-loss-class regression). The fix routes them through the
+  // existing handlers via wrapped arrows (TDZ — same pattern as the gh-102
+  // Start Recording fix at SessionView.tsx:633).
+  //
+  // GH-230: the Linux loopback module is no longer removed by SessionView —
+  // AudioCapture releases it via loopbackOwner on every capture teardown, so
+  // these tests pin that the handlers DON'T call removeMonitorLoopback.
 
-  it('tray Stop on Linux while recording calls handleStopRecording (transcription.stop + removeMonitorLoopback)', async () => {
+  it('tray Stop on Linux while recording calls handleStopRecording (transcription.stop; loopback owned by loopbackOwner)', async () => {
     Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64', configurable: true });
     mockTranscription.status = 'recording';
 
@@ -506,7 +510,8 @@ describe('SessionView — Canary language guards (gh-102)', () => {
     const audio = (
       window as unknown as { electronAPI: { audio: Record<string, ReturnType<typeof vi.fn>> } }
     ).electronAPI.audio;
-    expect(audio.removeMonitorLoopback).toHaveBeenCalledTimes(1);
+    // GH-230: module release is loopbackOwner's job (via capture.stop()).
+    expect(audio.removeMonitorLoopback).not.toHaveBeenCalled();
     expect(audio.disableSystemAudioLoopback).not.toHaveBeenCalled();
   });
 
@@ -560,7 +565,9 @@ describe('SessionView — Canary language guards (gh-102)', () => {
     const audio = (
       window as unknown as { electronAPI: { audio: Record<string, ReturnType<typeof vi.fn>> } }
     ).electronAPI.audio;
-    expect(audio.removeMonitorLoopback).toHaveBeenCalledTimes(1);
+    // GH-230: module release happens inside reset() → capture.stop() →
+    // loopbackOwner, not in the SessionView handler.
+    expect(audio.removeMonitorLoopback).not.toHaveBeenCalled();
   });
 
   it('tray Cancel during recording skips apiClient.cancelTranscription but still runs reset and loopback cleanup', async () => {
@@ -585,6 +592,8 @@ describe('SessionView — Canary language guards (gh-102)', () => {
     const audio = (
       window as unknown as { electronAPI: { audio: Record<string, ReturnType<typeof vi.fn>> } }
     ).electronAPI.audio;
-    expect(audio.removeMonitorLoopback).toHaveBeenCalledTimes(1);
+    // GH-230: module release happens inside reset() → capture.stop() →
+    // loopbackOwner, not in the SessionView handler.
+    expect(audio.removeMonitorLoopback).not.toHaveBeenCalled();
   });
 });
