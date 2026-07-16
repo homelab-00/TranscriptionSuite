@@ -1210,6 +1210,10 @@ ipcMain.handle('docker:listRemoteTags', async () => {
   return dockerManager.listRemoteTags();
 });
 
+ipcMain.handle('docker:listVariantTags', async () => {
+  return dockerManager.listVariantTags();
+});
+
 ipcMain.handle('docker:fetchRemoteTagDates', async (_event, tags: string[]) => {
   return dockerManager.fetchRemoteTagDates(tags);
 });

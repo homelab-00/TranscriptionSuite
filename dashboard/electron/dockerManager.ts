@@ -54,6 +54,24 @@ const __dirname = path.dirname(__filename);
 export const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
 export const LEGACY_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-legacy';
 export const VULKAN_WSL2_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2';
+export const VULKAN_LINUX_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux';
+
+/**
+ * Server image variants selectable from the Docker Image card. The active
+ * variant is a projection of existing settings — the runtime profile implies
+ * the vulkan repos, `server.useLegacyGpu` picks legacy vs default — so this
+ * type introduces no new persisted state. Pull/start wiring for the
+ * `vulkan-linux` repo is intentionally not hooked up yet (the Vulkan Linux
+ * runtime is WIP); the variant only participates in the availability display.
+ */
+export type ImageVariant = 'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux';
+
+export const IMAGE_VARIANT_REPOS: Record<ImageVariant, string> = {
+  cuda: IMAGE_REPO,
+  'cuda-legacy': LEGACY_IMAGE_REPO,
+  'vulkan-wsl2': VULKAN_WSL2_IMAGE_REPO,
+  'vulkan-linux': VULKAN_LINUX_IMAGE_REPO,
+};
 
 /**
  * Select the GHCR image repo for this session based on the persisted
@@ -4230,6 +4248,52 @@ export async function listRemoteTags(): Promise<RemoteTagsResult> {
 }
 
 /**
+ * Version-tag lists per image variant, keyed by `ImageVariant`. An empty
+ * array means unpublished, private, or unreachable — callers treat the three
+ * identically (the variant cannot be pulled for any tag right now).
+ */
+export type VariantTags = Record<ImageVariant, string[]>;
+
+/**
+ * Fetch the tag lists of all four server image variants in parallel.
+ *
+ * Powers the per-version variant availability display in the Docker Image
+ * card: a variant tile renders as "Not published" when the selected version
+ * tag is missing from that variant's GHCR package. Read-only — pulling and
+ * starting still target the single repo resolved by `resolveImageRepo`.
+ *
+ * Failures are per-variant and non-fatal: a variant whose token or tags/list
+ * request fails simply reports an empty list. The renderer fails open when
+ * even the default repo comes back empty (that signals network trouble, not
+ * "nothing published" — the default repo has had tags since v0.4.4).
+ */
+export async function listVariantTags(): Promise<VariantTags> {
+  const variants = Object.keys(IMAGE_VARIANT_REPOS) as ImageVariant[];
+  const entries = await Promise.all(
+    variants.map(async (variant): Promise<[ImageVariant, string[]]> => {
+      try {
+        const { tokenUrl, tagsUrl } = buildGhcrUrlsForRepo(IMAGE_VARIANT_REPOS[variant]);
+        const signal = AbortSignal.timeout(5000);
+        const tokenResp = await fetch(tokenUrl, { signal });
+        if (!tokenResp.ok) return [variant, []];
+        const { token } = (await tokenResp.json()) as { token?: string };
+        if (!token) return [variant, []];
+        const resp = await fetch(tagsUrl, {
+          signal,
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!resp.ok) return [variant, []];
+        const data = (await resp.json()) as { tags?: string[] };
+        return [variant, (data.tags ?? []).filter((t) => TAG_RE.test(t))];
+      } catch {
+        return [variant, []];
+      }
+    }),
+  );
+  return Object.fromEntries(entries) as VariantTags;
+}
+
+/**
  * Fetch creation dates for the given tags from GHCR OCI manifests.
  * Called separately from listRemoteTags so the tag list appears instantly.
  * Returns a map of tag → ISO date string.
@@ -4324,5 +4388,6 @@ export const dockerManager = {
   CONTAINER_NAME,
   IMAGE_REPO,
   listRemoteTags,
+  listVariantTags,
   fetchRemoteTagDates,
 };

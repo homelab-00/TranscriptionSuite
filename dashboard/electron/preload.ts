@@ -194,6 +194,9 @@ export interface ElectronAPI {
       | { status: 'error'; tags: [] }
     >;
     fetchRemoteTagDates: (tags: string[]) => Promise<Record<string, string | null>>;
+    listVariantTags: () => Promise<
+      Record<'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux', string[]>
+    >;
     pullImage: (tag: string) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;
@@ -560,6 +563,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     fetchRemoteTagDates: (tags: string[]) =>
       ipcRenderer.invoke('docker:fetchRemoteTagDates', tags) as Promise<
         Record<string, string | null>
+      >,
+    listVariantTags: () =>
+      ipcRenderer.invoke('docker:listVariantTags') as Promise<
+        Record<'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux', string[]>
       >,
     pullImage: (tag: string) => ipcRenderer.invoke('docker:pullImage', tag),
     cancelPull: () => ipcRenderer.invoke('docker:cancelPull'),

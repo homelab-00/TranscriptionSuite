@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.11.0
+  spec_version: 1.11.1
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -121,7 +121,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-07-16T14:28:13.681Z
+    generated_at: 2026-07-16T22:12:55.890Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -574,7 +574,6 @@ utility_allowlist:
     - bg-blue-400
     - bg-blue-400/10
     - bg-blue-400/20
-    - bg-blue-500
     - bg-blue-500/10
     - bg-cyan-400/10
     - bg-cyan-400/20
@@ -597,10 +596,8 @@ utility_allowlist:
     - bg-neutral-700
     - bg-neutral-900
     - bg-orange-400/10
-    - bg-orange-500
     - bg-orange-500/10
     - bg-purple-400/10
-    - bg-purple-500
     - bg-red-400/10
     - bg-red-500
     - bg-red-500/10
@@ -640,8 +637,6 @@ utility_allowlist:
     - border-accent-magenta/5
     - border-accent-magenta/60
     - border-accent-orange/20
-    - border-accent-orange/25
-    - border-accent-rose/20
     - border-amber-400/20
     - border-amber-400/25
     - border-amber-400/30
@@ -859,6 +854,7 @@ utility_allowlist:
     - left-8
     - lg:flex
     - lg:grid-cols-2
+    - lg:grid-cols-4
     - lg:grid-cols-5
     - lg:p-10
     - line-clamp-2
@@ -897,7 +893,6 @@ utility_allowlist:
     - md:grid-cols-4
     - md:items-center
     - md:items-end
-    - md:justify-between
     - min-h-0
     - min-h-20
     - min-h-32
@@ -1122,7 +1117,6 @@ utility_allowlist:
     - text-purple-400
     - text-red-100
     - text-red-200
-    - text-red-200/90
     - text-red-300
     - text-red-400
     - text-red-400/80
