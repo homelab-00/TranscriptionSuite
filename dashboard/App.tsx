@@ -34,6 +34,8 @@ import { HfTokenExplainer } from './components/ui/HfTokenExplainer';
 import { useStarPopup } from './src/hooks/useStarPopup';
 import { useNotificationBridge } from './src/hooks/useNotificationBridge';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
+import { useNotificationsStore } from './src/stores/notificationsStore';
+import { SERVER_START_ID } from './src/utils/startupEventMapping';
 import { useAuthTokenSync } from './src/hooks/useAuthTokenSync';
 import { useWatcherFilesBridge } from './src/hooks/useWatcherFilesBridge';
 import { useUpdateToast } from './src/hooks/useUpdateToast';
@@ -676,7 +678,16 @@ const AppInner: React.FC = () => {
           }
         }
 
-        await docker.startContainer(
+        useNotificationsStore.getState().notify({
+          id: SERVER_START_ID,
+          category: 'server',
+          title: 'Starting server...',
+          detail: 'Preparing the container',
+          status: 'active',
+          progress: 0,
+        });
+
+        const startError = await docker.startContainer(
           mode,
           runtimeProfile,
           undefined,
@@ -694,6 +705,19 @@ const AppInner: React.FC = () => {
             ...(models?.whispercppModel ? { whispercppModel: models.whispercppModel } : {}),
           },
         );
+
+        if (startError !== null) {
+          const entries = useNotificationsStore.getState().notifications;
+          const newestStart = [...entries].reverse().find((n) => n.id === SERVER_START_ID);
+          // Guard: only fail a start card that is still in flight.
+          if (newestStart?.status === 'active') {
+            useNotificationsStore.getState().updateNotification(SERVER_START_ID, {
+              title: 'Server failed to start',
+              status: 'error',
+              error: startError,
+            });
+          }
+        }
       } finally {
         startupFlowPendingRef.current = false;
         setStartupFlowPending(false);

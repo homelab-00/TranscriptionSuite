@@ -41,6 +41,7 @@ import { RemoteConnectionCard } from './server/RemoteConnectionCard';
 import { StartupActivityInline } from './server/StartupActivityInline';
 
 import { useNotificationsStore } from '../../src/stores/notificationsStore';
+import { SERVER_START_ID } from '../../src/utils/startupEventMapping';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useServerStatus } from '../../src/hooks/useServerStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
@@ -868,6 +869,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const handleMLXStart = useCallback(async () => {
     const api = (window as any).electronAPI;
     if (!api?.mlx) return;
+    useNotificationsStore.getState().notify({
+      id: SERVER_START_ID,
+      category: 'server',
+      title: 'Starting server...',
+      detail: 'Launching the Metal (MLX) server process',
+      status: 'active',
+      progress: 0,
+    });
     try {
       const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
       const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
@@ -889,6 +898,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`Failed to start Metal server: ${msg}`);
+      useNotificationsStore.getState().updateNotification(SERVER_START_ID, {
+        title: 'Server failed to start',
+        status: 'error',
+        error: msg,
+      });
     }
   }, [activeTranscriber, normalizedLiveModel, activeDiarizationModel]);
 

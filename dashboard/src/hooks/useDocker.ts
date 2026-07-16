@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { RuntimeProfile } from '../types/runtime';
+import { useNotificationsStore } from '../stores/notificationsStore';
 
 // ─── Types (mirrors electron.d.ts shapes) ───────────────────────────────────
 
@@ -120,7 +121,7 @@ export interface UseDockerReturn {
     imageTag?: string,
     hfToken?: string,
     onboardingOptions?: StartContainerOnboardingOptions,
-  ) => Promise<void>;
+  ) => Promise<string | null>;
   stopContainer: () => Promise<void>;
   removeContainer: () => Promise<void>;
 
@@ -435,10 +436,10 @@ export function useDocker(): UseDockerReturn {
       imageTag?: string,
       hfToken?: string,
       onboardingOptions?: StartContainerOnboardingOptions,
-    ) => {
+    ): Promise<string | null> => {
       const docker = api();
-      if (!docker) return;
-      await withOperation(async () => {
+      if (!docker) return 'Docker API is unavailable';
+      return withOperation(async () => {
         await docker.startContainer({
           mode,
           runtimeProfile,
@@ -462,6 +463,12 @@ export function useDocker(): UseDockerReturn {
       await docker.stopContainer();
       await new Promise((r) => setTimeout(r, 1000));
       setContainer(await docker.getContainerStatus());
+      useNotificationsStore.getState().notify({
+        id: `server-stop-${Date.now()}`,
+        category: 'server',
+        title: 'Server stopped',
+        status: 'complete',
+      });
     });
   }, [withOperation]);
 
