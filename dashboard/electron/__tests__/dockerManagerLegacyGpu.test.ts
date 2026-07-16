@@ -39,6 +39,8 @@ vi.mock('electron-store', () => ({
 import {
   IMAGE_REPO,
   LEGACY_IMAGE_REPO,
+  VULKAN_WSL2_IMAGE_REPO,
+  VULKAN_LINUX_IMAGE_REPO,
   resolveImageRepo,
   buildGhcrUrlsForRepo,
   readUseLegacyGpuFromStore,
@@ -99,6 +101,19 @@ describe('[P1] Issue #83 — resolveImageRepo', () => {
 
   it('never mixes repos — the two outputs are distinct', () => {
     expect(new Set([resolveImageRepo(false), resolveImageRepo(true)]).size).toBe(2);
+  });
+
+  it('returns the vulkan-linux repo when the runtime profile is vulkan', () => {
+    expect(resolveImageRepo(false, 'vulkan')).toBe(VULKAN_LINUX_IMAGE_REPO);
+  });
+
+  it('prefers the vulkan-linux repo over the legacy flag', () => {
+    expect(resolveImageRepo(true, 'vulkan')).toBe(VULKAN_LINUX_IMAGE_REPO);
+  });
+
+  it('keeps the vulkan-wsl2 and vulkan-linux repos distinct', () => {
+    expect(resolveImageRepo(false, 'vulkan-wsl2')).toBe(VULKAN_WSL2_IMAGE_REPO);
+    expect(VULKAN_LINUX_IMAGE_REPO).not.toBe(VULKAN_WSL2_IMAGE_REPO);
   });
 });
 

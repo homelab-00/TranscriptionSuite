@@ -8,6 +8,7 @@ import {
   IMAGE_REPO,
   LEGACY_IMAGE_REPO,
   VULKAN_WSL2_IMAGE_REPO,
+  VULKAN_LINUX_IMAGE_REPO,
   resolveImageRepo,
 } from './versionUtils';
 
@@ -188,7 +189,18 @@ describe('resolveImageRepo', () => {
     expect(resolveImageRepo(true, 'vulkan-wsl2')).toBe(VULKAN_WSL2_IMAGE_REPO);
   });
 
-  it('ignores non-vulkan-wsl2 profiles and falls back to the legacy flag', () => {
+  it('returns the vulkan-linux repo when the runtime profile is vulkan', () => {
+    expect(resolveImageRepo(false, 'vulkan')).toBe(VULKAN_LINUX_IMAGE_REPO);
+  });
+
+  it('prefers the vulkan-linux repo over the legacy flag', () => {
+    // Linux Vulkan has its own dedicated repo, so it wins even when the
+    // legacy flag is set — matching the resolveImageRepo twin in
+    // dockerManager.ts.
+    expect(resolveImageRepo(true, 'vulkan')).toBe(VULKAN_LINUX_IMAGE_REPO);
+  });
+
+  it('ignores non-vulkan profiles and falls back to the legacy flag', () => {
     expect(resolveImageRepo(false, 'gpu')).toBe(IMAGE_REPO);
     expect(resolveImageRepo(true, 'cpu')).toBe(LEGACY_IMAGE_REPO);
     expect(resolveImageRepo(false, null)).toBe(IMAGE_REPO);
@@ -198,8 +210,11 @@ describe('resolveImageRepo', () => {
     // Guards against future refactors that might introduce a suffix/prefix.
     const defaultResolved = resolveImageRepo(false);
     const legacyResolved = resolveImageRepo(true);
-    const vulkanResolved = resolveImageRepo(false, 'vulkan-wsl2');
+    const vulkanWsl2Resolved = resolveImageRepo(false, 'vulkan-wsl2');
+    const vulkanLinuxResolved = resolveImageRepo(false, 'vulkan');
     expect(defaultResolved).not.toEqual(legacyResolved);
-    expect(new Set([defaultResolved, legacyResolved, vulkanResolved]).size).toBe(3);
+    expect(
+      new Set([defaultResolved, legacyResolved, vulkanWsl2Resolved, vulkanLinuxResolved]).size,
+    ).toBe(4);
   });
 });

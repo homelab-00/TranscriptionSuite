@@ -1407,9 +1407,9 @@ The Vulkan overlay (`docker-compose.vulkan.yml`) adds a `whisper-server` service
 services:
   whisper-server:
     # Our no-AVX2 rebuild of whisper.cpp's main-vulkan (built from
-    # whispercpp-vulkan-noavx2.Dockerfile) — AVX+F16C CPU baseline so the
+    # whisper-cpp-linux.Dockerfile) — AVX+F16C CPU baseline so the
     # sidecar's CPU-side ops don't SIGILL on pre-Haswell CPUs.
-    image: ghcr.io/loukas-pap/whisper-cpp-vulkan-noavx2:latest
+    image: ghcr.io/homelab-00/whisper-cpp-linux:latest
     restart: unless-stopped
     volumes:
       - huggingface-models:/models:ro    # Shared model volume (read-only)

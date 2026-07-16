@@ -73,8 +73,16 @@ _GGML_FILENAME_RE = re.compile(r"^(?:ggml-[A-Za-z0-9._-]+\.bin|[A-Za-z0-9._-]+\.
 _GGML_DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, read=300.0)
 # After the file appears, the sidecar's wait-loop (~10s cadence) launches
 # whisper-server and loads the model onto the GPU. Wait for /health up to this
-# long before /load so a first-run download doesn't race the POST.
+# long before /load so a first-run download doesn't race the POST. Only used
+# when this call just downloaded the GGML file itself (_ensure_ggml_model_present
+# returned True) — a genuine cold start: sidecar wait-loop cadence + GGML→GPU load.
 _SIDECAR_READY_TIMEOUT = 180
+# When the model file was already on disk, the sidecar has had no reason to be
+# mid-startup — it either finished starting up long ago or isn't going to
+# become ready at all (e.g. a genuinely broken/incompatible sidecar). Waiting
+# the full 180s in that case only pays for a scenario (a slow cold start) that
+# didn't happen this call, so cap it much lower.
+_SIDECAR_READY_TIMEOUT_WARM = 15
 _SIDECAR_HEALTH_POLL_INTERVAL = 2.0
 
 # Inference has NO time limit when the caller can cancel (the normal longform
@@ -471,7 +479,7 @@ def _parse_words(raw_words: Any, word_cap: int, audio_duration_s: float) -> list
     return words
 
 
-def _ensure_ggml_model_present(model_name: str) -> None:
+def _ensure_ggml_model_present(model_name: str) -> bool:
     """Download the GGML model into the shared volume if it isn't there yet.
 
     The whisper.cpp sidecar only *reads* the model file and waits for it to
@@ -481,9 +489,15 @@ def _ensure_ggml_model_present(model_name: str) -> None:
     the backend fetches the file itself, mirroring the dashboard downloader
     (``dockerManager.ts::downloadGgmlModel``: same HF repo + URL).
 
-    No-op when the file already exists, or when the models directory isn't
-    present (e.g. unit tests, or a bare-metal run not using the shared volume) —
-    in that case fetching is left to whoever owns the volume.
+    Returns True iff a download actually happened this call — callers use this
+    to size the subsequent sidecar-ready wait: a fresh download means the
+    sidecar's model-wait loop + GPU load is genuinely starting from scratch
+    (worth a long timeout), while an already-present file means the sidecar has
+    likely been sitting ready for a while already (a long wait is just wasted
+    time). No-op (returns False) when the file already exists, or when the
+    models directory isn't present (e.g. unit tests, or a bare-metal run not
+    using the shared volume) — in that case fetching is left to whoever owns
+    the volume.
     """
     filename = os.path.basename((model_name or "").strip())
     if not _GGML_FILENAME_RE.match(filename):
@@ -493,10 +507,10 @@ def _ensure_ggml_model_present(model_name: str) -> None:
             "GGML models dir %s not present; leaving model fetch to the sidecar",
             _GGML_MODELS_DIR,
         )
-        return
+        return False
     target = os.path.join(_GGML_MODELS_DIR, filename)
     if os.path.exists(target):
-        return
+        return False
     url = f"{_GGML_HF_BASE_URL}/{filename}"
     tmp = f"{target}.tmp"
     logger.info(
@@ -529,6 +543,7 @@ def _ensure_ggml_model_present(model_name: str) -> None:
         filename,
         os.path.getsize(target),
     )
+    return True
 
 
 class WhisperCppBackend(STTBackend):
@@ -569,7 +584,7 @@ class WhisperCppBackend(STTBackend):
             self._client = httpx.Client()
         return self._client
 
-    def _wait_for_sidecar_ready(self) -> None:
+    def _wait_for_sidecar_ready(self, timeout_s: float) -> None:
         """Poll the sidecar's ``/health`` until it responds, best-effort.
 
         On a first-run download the sidecar only launches whisper-server after
@@ -577,11 +592,15 @@ class WhisperCppBackend(STTBackend):
         Polling ``/health`` here means the subsequent ``/load`` POST doesn't race
         a still-starting server. A timeout is NOT fatal — it's logged and
         ``load()`` proceeds, since ``/load`` has its own reachable/timeout/
-        disconnect handling.
+        disconnect handling. ``timeout_s`` is the caller's call — a fresh
+        download this call warrants the full cold-start budget
+        (``_SIDECAR_READY_TIMEOUT``); an already-present model file warrants
+        only the short ``_SIDECAR_READY_TIMEOUT_WARM`` one, since there's no
+        reason to expect the sidecar to still be starting up.
         """
         client = self._ensure_client()
         health_url = f"{self._server_url}/health"
-        deadline = time.monotonic() + _SIDECAR_READY_TIMEOUT
+        deadline = time.monotonic() + timeout_s
         attempt = 0
         while True:
             attempt += 1
@@ -600,7 +619,7 @@ class WhisperCppBackend(STTBackend):
                 logger.warning(
                     "WhisperCppBackend: sidecar not healthy after %ds; "
                     "proceeding to /load anyway",
-                    _SIDECAR_READY_TIMEOUT,
+                    timeout_s,
                 )
                 return
             time.sleep(_SIDECAR_HEALTH_POLL_INTERVAL)
@@ -627,14 +646,27 @@ class WhisperCppBackend(STTBackend):
         # first-run deadlock and lets the model actually be downloaded. Then wait
         # for the sidecar to come up so the /load POST doesn't race a starting
         # server. Both are no-ops in the already-running / already-present case.
-        _ensure_ggml_model_present(model_name)
-        self._wait_for_sidecar_ready()
+        just_downloaded = _ensure_ggml_model_present(model_name)
+        ready_timeout = _SIDECAR_READY_TIMEOUT if just_downloaded else _SIDECAR_READY_TIMEOUT_WARM
+        self._wait_for_sidecar_ready(ready_timeout)
 
         client = self._ensure_client()
+        # whisper-server's /load reads the model path via req.get_file_value("model")
+        # — it requires a multipart/form-data part named "model" (has_file("model")),
+        # NOT a JSON body. A JSON body always fails has_file() and 400s before ever
+        # calling whisper_init_from_file_with_params(), so /load silently never
+        # switched models — verified by sending it correctly (curl -F) against a
+        # running sidecar and getting "Load was successful!". files={"model": (None,
+        # value)} makes httpx send the same shape as curl's non-@ -F (a form part
+        # with no filename). The value must be the absolute in-container path
+        # (matches the compose command's own --model "$WHISPER_MODEL" convention and
+        # _ensure_ggml_model_present's target) — the bare filename alone can't be
+        # opened from whisper-server's CWD (/tmp, per the sidecar Dockerfile).
+        model_path = os.path.join(_GGML_MODELS_DIR, os.path.basename((model_name or "").strip()))
         try:
             resp = client.post(
                 f"{self._server_url}/load",
-                json={"model": model_name},
+                files={"model": (None, model_path)},
                 timeout=_LOAD_TIMEOUT,
             )
             resp.raise_for_status()

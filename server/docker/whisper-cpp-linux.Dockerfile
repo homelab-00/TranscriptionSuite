@@ -20,12 +20,11 @@
 # Build + push to GHCR (requires `write:packages`; make the package Public
 # afterwards so end users can pull without auth):
 #
-#   gh auth token | docker login ghcr.io -u loukas-pap --password-stdin
+#   gh auth token | docker login ghcr.io -u homelab-00 --password-stdin
 #   cd server/docker
-#   docker build -f whispercpp-vulkan-noavx2.Dockerfile \
-#     -t ghcr.io/loukas-pap/whisper-cpp-vulkan-noavx2:latest .
-#   docker push ghcr.io/loukas-pap/whisper-cpp-vulkan-noavx2:latest
-#
+#   docker build -f whisper-cpp-linux.Dockerfile \
+#     -t ghcr.io/homelab-00/whisper-cpp-linux:latest .
+#   docker push ghcr.io/homelab-00/whisper-cpp-linux
 # Pin whisper.cpp to a specific release instead of master:
 #   docker build --build-arg WHISPER_CPP_REF=v1.7.4 -f ...
 
@@ -71,7 +70,8 @@ FROM ubuntu:24.04 AS runtime
 # Links the published GHCR package to the repo (Packages tab) and documents the
 # no-AVX2 CPU baseline. org.opencontainers.image.source is what GHCR reads to
 # associate the package with the repository automatically.
-LABEL org.opencontainers.image.description="whisper.cpp Vulkan sidecar rebuilt with an AVX+F16C CPU baseline (no AVX2/FMA) for pre-Haswell CPUs" \
+LABEL org.opencontainers.image.source="https://github.com/homelab-00/TranscriptionSuite" \
+      org.opencontainers.image.description="whisper.cpp Vulkan sidecar rebuilt with an AVX+F16C CPU baseline (no AVX2/FMA) for pre-Haswell CPUs" \
       org.opencontainers.image.licenses="MIT"
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libvulkan1 mesa-vulkan-drivers \

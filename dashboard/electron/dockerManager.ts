@@ -54,19 +54,22 @@ const __dirname = path.dirname(__filename);
 export const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
 export const LEGACY_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-legacy';
 export const VULKAN_WSL2_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2';
+export const VULKAN_LINUX_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux';
 
 /**
  * Select the GHCR image repo for this session based on the persisted
  * `server.useLegacyGpu` setting (Issue #83 — Pascal/Maxwell support) and
- * the active runtime profile. Vulkan-WSL2 gets its own dedicated repo so
- * its tag list never mixes with the standard or legacy-GPU variants.
- * The dashboard uses exactly one repo at a time — never mixes the two.
+ * the active runtime profile. Vulkan-WSL2 and Linux Vulkan each get their
+ * own dedicated repo so their tag lists never mix with the standard or
+ * legacy-GPU variants. The dashboard uses exactly one repo at a time — never
+ * mixes repos within a single session.
  */
 export function resolveImageRepo(
   useLegacyGpu: boolean,
   runtimeProfile?: RuntimeProfile | null,
 ): string {
   if (runtimeProfile === 'vulkan-wsl2') return VULKAN_WSL2_IMAGE_REPO;
+  if (runtimeProfile === 'vulkan') return VULKAN_LINUX_IMAGE_REPO;
   return useLegacyGpu ? LEGACY_IMAGE_REPO : IMAGE_REPO;
 }
 
@@ -126,14 +129,14 @@ function getStartupEventsFilePath(): string | null {
 
 /**
  * Vulkan sidecar image — our no-AVX2 rebuild of whisper.cpp's `main-vulkan`
- * (built from `server/docker/whispercpp-vulkan-noavx2.Dockerfile`, published to
+ * (built from `server/docker/whisper-cpp-linux.Dockerfile`, published to
  * GHCR). Lowers the CPU instruction baseline to AVX+F16C so the sidecar's
  * CPU-side ops don't SIGILL on pre-Haswell CPUs (e.g. Ivy Bridge), while the
  * GPU handles inference via Vulkan. Modern CPUs run it fine too, so it replaces
  * the upstream image for all Linux Vulkan users. Must match the `image:` in
  * `docker-compose.vulkan.yml`.
  */
-const VULKAN_SIDECAR_IMAGE = 'ghcr.io/loukas-pap/whisper-cpp-vulkan-noavx2:latest';
+const VULKAN_SIDECAR_IMAGE = 'ghcr.io/homelab-00/whisper-cpp-linux:latest';
 
 /**
  * Vulkan-WSL2 sidecar image — locally-built variant adding Mesa's `dzn`
