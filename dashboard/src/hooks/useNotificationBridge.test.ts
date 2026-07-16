@@ -138,4 +138,72 @@ describe('useNotificationBridge (GH-207)', () => {
     expect(preload!.toastDismissed).toBe(true);
     expect(newest('model-load-x')?.title).toBe('Downloading x...');
   });
+
+  it('forwards byte-progress fields on docker download events (GGML path)', () => {
+    renderHook(() => useNotificationBridge());
+
+    downloadEventCallback!({
+      action: 'start',
+      id: 'ggml-download-ggml-large-v3.bin',
+      label: 'Downloading ggml-large-v3.bin...',
+      progress: 55,
+      downloadedSize: '1.6 GB',
+      totalSize: '2.9 GB',
+    });
+
+    const item = newest('ggml-download-ggml-large-v3.bin');
+    expect(item).toBeDefined();
+    expect(item!.progress).toBe(55);
+    expect(item!.downloadedSize).toBe('1.6 GB');
+    expect(item!.totalSize).toBe('2.9 GB');
+  });
+
+  it('records app-update download progress from installer status', () => {
+    let installerCb: ((status: Record<string, unknown>) => void) | null = null;
+    (window as unknown as { electronAPI: unknown }).electronAPI = {
+      docker: {
+        onDownloadEvent: () => vi.fn(),
+        onActivityEvent: () => vi.fn(),
+      },
+      updates: {
+        onInstallerStatus: (cb: (status: Record<string, unknown>) => void) => {
+          installerCb = cb;
+          return vi.fn();
+        },
+        getInstallerStatus: vi.fn().mockResolvedValue({ state: 'idle' }),
+      },
+    };
+    renderHook(() => useNotificationBridge());
+
+    installerCb!({ state: 'downloading', version: '9.9.9', percent: 42 });
+
+    const item = newest('app-update-download');
+    expect(item).toBeDefined();
+    expect(item!.category).toBe('update');
+    expect(item!.status).toBe('active');
+    expect(item!.progress).toBe(42);
+  });
+
+  it('completes the server-start aggregate when MLX reports running', () => {
+    let mlxCb: ((status: string) => void) | null = null;
+    (window as unknown as { electronAPI: unknown }).electronAPI = {
+      docker: {
+        onDownloadEvent: () => vi.fn(),
+        onActivityEvent: () => vi.fn(),
+      },
+      mlx: {
+        onStatusChanged: (cb: (status: string) => void) => {
+          mlxCb = cb;
+          return vi.fn();
+        },
+      },
+    };
+    renderHook(() => useNotificationBridge());
+
+    mlxCb!('running');
+
+    const aggregate = newest('server-start');
+    expect(aggregate?.status).toBe('complete');
+    expect(aggregate?.title).toBe('Server ready');
+  });
 });

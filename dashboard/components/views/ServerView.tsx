@@ -1544,20 +1544,22 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       detail: 'Pulling container image',
       status: 'active',
     });
-    try {
-      await docker.pullImage(selectedTagForActions);
-      useNotificationsStore.getState().notify({
+    // withOperation never throws - it resolves with the error message (or
+    // null on success), so branch on the return value instead of try/catch.
+    const pullError = await docker.pullImage(selectedTagForActions);
+    const store = useNotificationsStore.getState();
+    const newest = [...store.notifications].reverse().find((n) => n.id === dlId);
+    // A user cancel already closed the record - leave it alone.
+    if (newest?.status !== 'active') return;
+    if (pullError === null) {
+      store.notify({
         id: dlId,
         category: 'download',
         title: `Server Image (${selectedTagForActions}) downloaded`,
         status: 'complete',
       });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Pull failed';
-      useNotificationsStore.getState().updateNotification(dlId, {
-        status: 'error',
-        error: msg,
-      });
+    } else {
+      store.updateNotification(dlId, { status: 'error', error: pullError });
     }
   }, [docker, selectedTagForActions]);
 
@@ -2271,20 +2273,28 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                               detail: 'Pulling sidecar image',
                               status: 'active',
                             });
-                            try {
-                              await docker.pullSidecarImage();
-                              useNotificationsStore.getState().notify({
-                                id: dlId,
-                                category: 'download',
-                                title: 'Vulkan Sidecar (whisper.cpp) downloaded',
-                                status: 'complete',
-                              });
-                            } catch (err: unknown) {
-                              const msg = err instanceof Error ? err.message : 'Pull failed';
-                              useNotificationsStore.getState().updateNotification(dlId, {
-                                status: 'error',
-                                error: msg,
-                              });
+                            // withOperation resolves with the error message (or
+                            // null on success) rather than throwing.
+                            const pullError = await docker.pullSidecarImage();
+                            const store = useNotificationsStore.getState();
+                            const newest = [...store.notifications]
+                              .reverse()
+                              .find((n) => n.id === dlId);
+                            // A user cancel already closed the record - leave it.
+                            if (newest?.status === 'active') {
+                              if (pullError === null) {
+                                store.notify({
+                                  id: dlId,
+                                  category: 'download',
+                                  title: 'Vulkan Sidecar (whisper.cpp) downloaded',
+                                  status: 'complete',
+                                });
+                              } else {
+                                store.updateNotification(dlId, {
+                                  status: 'error',
+                                  error: pullError,
+                                });
+                              }
                             }
                             const hasIt = await docker.hasSidecarImage();
                             if (hasIt) setSidecarNeeded(false);

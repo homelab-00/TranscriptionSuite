@@ -57,6 +57,25 @@ describe('StartupActivityInline (GH-207)', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('renders only download/server items, not other active categories', () => {
+    useNotificationsStore.getState().notify({
+      id: 'docker-image-latest',
+      category: 'download',
+      title: 'Downloading server image...',
+      status: 'active',
+    });
+    useNotificationsStore.getState().notify({
+      id: 'rec-1',
+      category: 'recording',
+      title: 'Recording live note...',
+      status: 'active',
+    });
+    render(<StartupActivityInline />);
+
+    expect(screen.getByText('Downloading server image...')).toBeInTheDocument();
+    expect(screen.queryByText('Recording live note...')).toBeNull();
+  });
+
   it('renders nothing for items whose toast is dismissed', () => {
     useNotificationsStore.getState().notify({
       id: 'model-load-x',
