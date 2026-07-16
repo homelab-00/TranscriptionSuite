@@ -14,23 +14,45 @@
  */
 
 import { useEffect } from 'react';
-import { useNotificationsStore, type AppNotification } from '../stores/notificationsStore';
+import {
+  useNotificationsStore,
+  type AppNotification,
+  type NotificationCategory,
+  type NotificationStatus,
+} from '../stores/notificationsStore';
 import { mapStartupEvent, serverStartPatch, SERVER_START_ID } from '../utils/startupEventMapping';
 
 const PERSIST_DEBOUNCE_MS = 400;
 
+const NOTIFICATION_CATEGORIES: readonly NotificationCategory[] = [
+  'download',
+  'server',
+  'update',
+  'recording',
+  'import',
+  'note',
+  'transcription',
+];
+const NOTIFICATION_STATUSES: readonly NotificationStatus[] = ['active', 'complete', 'error'];
+
+/** Never trust file content: reject the whole array if any entry is malformed. */
 function isNotificationArray(value: unknown): value is AppNotification[] {
   return (
     Array.isArray(value) &&
-    value.every(
-      (v) =>
-        typeof v === 'object' &&
-        v !== null &&
-        typeof (v as AppNotification).entryId === 'string' &&
-        typeof (v as AppNotification).id === 'string' &&
-        typeof (v as AppNotification).title === 'string' &&
-        typeof (v as AppNotification).category === 'string',
-    )
+    value.every((v) => {
+      if (typeof v !== 'object' || v === null) return false;
+      const n = v as AppNotification;
+      return (
+        typeof n.entryId === 'string' &&
+        typeof n.id === 'string' &&
+        typeof n.title === 'string' &&
+        (NOTIFICATION_CATEGORIES as string[]).includes(n.category) &&
+        (NOTIFICATION_STATUSES as string[]).includes(n.status) &&
+        typeof n.createdAt === 'number' &&
+        Number.isFinite(n.createdAt) &&
+        typeof n.toastDismissed === 'boolean'
+      );
+    })
   );
 }
 
@@ -101,6 +123,12 @@ export function useNotificationBridge(): void {
     if (docker?.onActivityEvent) {
       cleanups.push(
         docker.onActivityEvent((event) => {
+          // A granular model-load event supersedes the coarse log-parser card
+          // (GH-207): hide its toast; the record itself stays in the log and
+          // completes on its own when the parser sees the loaded line.
+          if (event.id.startsWith('model-load-')) {
+            store().dismissToast('model-preload');
+          }
           const entry = mapStartupEvent(event);
           if (entry) store().notify(entry);
           const aggregate = serverStartPatch(event);
