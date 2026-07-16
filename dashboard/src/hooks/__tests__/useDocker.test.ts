@@ -8,6 +8,7 @@
 
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { useNotificationsStore } from '../../stores/notificationsStore';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ describe('[P2] useDocker', () => {
 
   beforeEach(() => {
     originalElectronAPI = (window as any).electronAPI;
+    useNotificationsStore.setState({ notifications: [] });
   });
 
   afterEach(() => {
@@ -162,5 +164,86 @@ describe('[P2] useDocker', () => {
     });
 
     expect(result.current.operationError).toBe('Network timeout');
+  });
+
+  it('startContainer resolves null when the IPC call succeeds', async () => {
+    const dockerApi = makeDockerAPI({
+      startContainer: vi.fn().mockResolvedValue(undefined),
+    });
+    (window as any).electronAPI = { docker: dockerApi };
+
+    const { result } = renderHook(() => useDocker());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    let startResult: string | null = 'unset';
+    await act(async () => {
+      startResult = await result.current.startContainer('local', 'cpu');
+    });
+
+    expect(startResult).toBeNull();
+  });
+
+  it('startContainer resolves the error message string when the IPC call rejects', async () => {
+    const dockerApi = makeDockerAPI({
+      startContainer: vi.fn().mockRejectedValue(new Error('compose exploded')),
+    });
+    (window as any).electronAPI = { docker: dockerApi };
+
+    const { result } = renderHook(() => useDocker());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    let startResult: string | null = null;
+    await act(async () => {
+      startResult = await result.current.startContainer('local', 'cpu');
+    });
+
+    expect(startResult).toBe('compose exploded');
+    expect(result.current.operationError).toBe('compose exploded');
+  });
+
+  it('startContainer resolves a fallback message when electronAPI.docker is unavailable', async () => {
+    // Mirrors the "electronAPI is undefined" simulation used above (GH-231 P2-HOOK-007).
+    delete (window as any).electronAPI;
+
+    const { result } = renderHook(() => useDocker());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    let startResult: string | null = null;
+    await act(async () => {
+      startResult = await result.current.startContainer('local', 'cpu');
+    });
+
+    expect(startResult).toBe('Docker API is unavailable');
+  });
+
+  it('stopContainer records a complete "Server stopped" notification in the notifications store', async () => {
+    const dockerApi = makeDockerAPI();
+    (window as any).electronAPI = { docker: dockerApi };
+
+    const { result } = renderHook(() => useDocker());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.stopContainer();
+    });
+
+    const entries = useNotificationsStore.getState().notifications;
+    const stopEntry = entries.find((n) => n.id.startsWith('server-stop-'));
+    expect(stopEntry).toBeDefined();
+    expect(stopEntry?.category).toBe('server');
+    expect(stopEntry?.status).toBe('complete');
+    expect(stopEntry?.title).toBe('Server stopped');
   });
 });
