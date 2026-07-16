@@ -1075,7 +1075,25 @@ export const SessionView: React.FC<SessionViewProps> = ({
         detail: '',
         status: 'error',
         error: transcription.error ?? 'Recording failed',
+        toastDismissed: false,
       });
+    }
+    // A cancel resets the machine to idle from any live phase - terminalize
+    // the card or it pulses forever and the next recording merges into it.
+    if (
+      transcription.status === 'idle' &&
+      (prev === 'connecting' || prev === 'recording' || prev === 'processing')
+    ) {
+      const newest = [...store.notifications].reverse().find((n) => n.id === 'session-recording');
+      if (newest?.status === 'active') {
+        store.notify({
+          id: 'session-recording',
+          category: 'recording',
+          title: prev === 'processing' ? 'Transcription cancelled' : 'Recording cancelled',
+          detail: '',
+          status: 'complete',
+        });
+      }
     }
   }, [transcription.status, transcription.error]);
 
@@ -1115,6 +1133,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         detail: `${text.length.toLocaleString()} characters`,
         status: 'complete',
         transcript: text,
+        toastDismissed: false,
       });
 
       // Desktop notification via Electron's async Notification module (IPC).
@@ -1125,17 +1144,19 @@ export const SessionView: React.FC<SessionViewProps> = ({
         ?.show({ title: 'Transcription Complete', body })
         .catch(() => false);
     }
-    if (wasProcessing && transcription.status === 'error' && transcription.error) {
+    if (wasProcessing && transcription.status === 'error') {
+      const errorMessage = transcription.error || 'Transcription failed';
       useNotificationsStore.getState().notify({
         id: 'session-recording',
         category: 'transcription',
         title: 'Transcription failed',
         detail: '',
         status: 'error',
-        error: transcription.error,
+        error: errorMessage,
+        toastDismissed: false,
       });
       void window.electronAPI?.notifications
-        ?.show({ title: 'Transcription Failed', body: transcription.error })
+        ?.show({ title: 'Transcription Failed', body: errorMessage })
         .catch(() => false);
     }
   }, [transcription.status, transcription.result?.text, transcription.error]);

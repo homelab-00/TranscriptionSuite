@@ -194,6 +194,7 @@ vi.mock('../../src/types/runtime', () => ({
 import { SessionView } from '../views/SessionView';
 import { SessionTab } from '../../types';
 import { isModelDisabled } from '../../src/services/modelSelection';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 
 function createWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -303,6 +304,52 @@ describe('[P2] SessionView', () => {
     // Copy and Download buttons may appear more than once in the DOM
     expect(screen.getAllByText('Copy').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Download').length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ── Task 10 hardening — cancel terminalizes the session-recording card ─────
+
+describe('Session notifications lifecycle - cancel edge', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTranscription.status = 'idle';
+    mockTranscription.result = null;
+    mockTranscription.error = null;
+    mockTranscription.vadActive = false;
+    mockTranscription.processingProgress = null;
+    useNotificationsStore.setState({ notifications: [] });
+
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockResolvedValue(undefined),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+      },
+      audio: { listSinks: vi.fn().mockResolvedValue([]) },
+      tray: { onAction: vi.fn().mockReturnValue(vi.fn()) },
+      notifications: { show: vi.fn() },
+    };
+  });
+
+  it('terminalizes the session-recording card as "Recording cancelled" when recording resets to idle', () => {
+    const { rerender } = render(React.createElement(SessionView, baseProps), {
+      wrapper: createWrapper(),
+    });
+
+    mockTranscription.status = 'recording';
+    rerender(React.createElement(SessionView, baseProps));
+
+    mockTranscription.status = 'idle';
+    rerender(React.createElement(SessionView, baseProps));
+
+    const entries = useNotificationsStore
+      .getState()
+      .notifications.filter((n) => n.id === 'session-recording');
+    expect(entries).toHaveLength(1);
+    expect(entries[0].title).toBe('Recording cancelled');
+    expect(entries[0].status).toBe('complete');
   });
 });
 
