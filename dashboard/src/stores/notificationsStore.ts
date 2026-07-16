@@ -89,6 +89,15 @@ function findNewest(items: readonly AppNotification[], id: string): AppNotificat
   return undefined;
 }
 
+/** Drop explicitly-undefined keys so callers cannot clobber defaults or merged state. */
+function stripUndefined<T extends object>(obj: T): Partial<T> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out as Partial<T>;
+}
+
 /** Truncate huge transcripts and stamp completedAt on terminal states. */
 function finalize(n: AppNotification): AppNotification {
   const transcript =
@@ -126,13 +135,14 @@ export const useNotificationsStore = create<NotificationsStore>((set) => ({
         existing !== undefined && existing.status !== 'active' && incomingStatus === 'active';
 
       if (existing && !isReactivation) {
+        const cleanItem = stripUndefined(item);
         return {
           notifications: state.notifications.map((n) =>
             n.entryId !== existing.entryId
               ? n
               : finalize({
                   ...n,
-                  ...item,
+                  ...cleanItem,
                   entryId: n.entryId,
                   createdAt: n.createdAt,
                   toastDismissed: item.toastDismissed ?? n.toastDismissed,
@@ -145,7 +155,7 @@ export const useNotificationsStore = create<NotificationsStore>((set) => ({
         status: 'active',
         createdAt: Date.now(),
         toastDismissed: false,
-        ...item,
+        ...stripUndefined(item),
         entryId: nextEntryId(item.id),
       } as AppNotification);
       return { notifications: capLog([...state.notifications, entry]) };
@@ -155,11 +165,18 @@ export const useNotificationsStore = create<NotificationsStore>((set) => ({
     set((state) => {
       const target = findNewest(state.notifications, id);
       if (!target) return state;
+      const cleanPatch = stripUndefined(patch);
       return {
         notifications: state.notifications.map((n) =>
           n.entryId !== target.entryId
             ? n
-            : finalize({ ...n, ...patch, entryId: n.entryId, id: n.id, createdAt: n.createdAt }),
+            : finalize({
+                ...n,
+                ...cleanPatch,
+                entryId: n.entryId,
+                id: n.id,
+                createdAt: n.createdAt,
+              }),
         ),
       };
     }),

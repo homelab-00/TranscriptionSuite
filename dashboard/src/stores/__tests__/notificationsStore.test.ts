@@ -38,6 +38,28 @@ describe('notificationsStore', () => {
     expect(all()[0].progress).toBe(80);
   });
 
+  it('an explicit undefined field does not clobber defaults or an existing merged value', () => {
+    const store = useNotificationsStore.getState();
+    store.notify({
+      id: 'dl-2',
+      category: 'download',
+      title: 'Downloading Y',
+      status: undefined,
+      progress: 5,
+    });
+    expect(all()[0].status).toBe('active');
+    store.notify({
+      id: 'dl-2',
+      category: 'download',
+      title: 'Downloading Y',
+      status: undefined,
+      progress: 50,
+    });
+    expect(all()).toHaveLength(1);
+    expect(all()[0].status).toBe('active');
+    expect(all()[0].progress).toBe(50);
+  });
+
   it('preserves createdAt and toastDismissed across merges', () => {
     const store = useNotificationsStore.getState();
     store.notify({ id: 'dl-1', category: 'download', title: 'Downloading X' });
@@ -97,6 +119,16 @@ describe('notificationsStore', () => {
     store.notify({ id: 'imp-1', category: 'import', title: 'Importing' });
     store.updateNotification('imp-1', { transcript: 'hello world' });
     expect(all()[0].transcript).toBe('hello world');
+  });
+
+  it('updateNotification cannot overwrite entryId, id, or createdAt even if the patch includes them', () => {
+    const store = useNotificationsStore.getState();
+    store.notify({ id: 'imp-2', category: 'import', title: 'Importing' });
+    const { entryId, id, createdAt } = all()[0];
+    store.updateNotification('imp-2', { id: 'evil', entryId: 'evil', createdAt: 123 } as never);
+    expect(all()[0].entryId).toBe(entryId);
+    expect(all()[0].id).toBe(id);
+    expect(all()[0].createdAt).toBe(createdAt);
   });
 
   it('truncates oversized transcripts', () => {
