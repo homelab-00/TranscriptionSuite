@@ -211,6 +211,8 @@ export function useNotificationBridge(): void {
               id: SERVER_START_ID,
               category: 'server',
               title: 'Server ready',
+              // Clear any lingering active-phase stage label.
+              detail: '',
               status: 'complete',
               progress: 100,
             });

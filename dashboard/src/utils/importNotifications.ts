@@ -4,8 +4,12 @@
  * session-auto, notebook-normal, notebook-auto) are tracked uniformly -
  * session jobs have no callback mechanism, so this is the single hook point.
  *
- * A "note job" is an AddNoteModal submission: a notebook-typed job carrying
- * options.title (plain notebook imports never set a title).
+ * A "note job" is an AddNoteModal submission: a notebook-NORMAL job carrying a
+ * calendar-slot marker (options.title and/or options.file_created_at). Only
+ * AddNoteModal enqueues notebook-normal with those fields; the plain
+ * NotebookView import tab passes neither. Folder-watch auto-imports are
+ * notebook-AUTO and always stamp options.file_created_at, so they are excluded
+ * from the note class by the type check - they are ordinary imports, not notes.
  */
 
 import { apiClient } from '../api/client';
@@ -17,12 +21,15 @@ export function jobDisplayName(job: UnifiedImportJob): string {
 }
 
 export function isNoteJob(job: UnifiedImportJob): boolean {
-  // AddNoteModal jobs carry options.title and/or options.file_created_at
-  // (calendar slot); NotebookView plain ImportTab passes neither. A note
-  // with a cleared title AND no slot is indistinguishable at the queue level
-  // and falls back to the import category - accepted cosmetic edge.
+  // Restricted to notebook-NORMAL: AddNoteModal is the only site that enqueues
+  // notebook-normal with a title or calendar slot; the plain NotebookView
+  // ImportTab passes neither. Folder-watch is notebook-AUTO and always stamps
+  // file_created_at, so it must be excluded here or every auto-import would be
+  // mislabeled a note. A note with a cleared title AND no slot is
+  // indistinguishable at the queue level and falls back to the import category
+  // - accepted cosmetic edge.
   return (
-    job.type.startsWith('notebook') &&
+    job.type === 'notebook-normal' &&
     ((typeof job.options?.title === 'string' && job.options.title.length > 0) ||
       job.options?.file_created_at !== undefined)
   );
@@ -58,10 +65,16 @@ export function notifyJobSuccess(job: UnifiedImportJob): void {
     title: isNoteJob(job)
       ? `Note created - ${noteLabel(job)}`
       : `Import complete - ${jobDisplayName(job)}`,
+    // A session job with no outputFilename resolved via the duplicate-dialog
+    // use_existing/cancel path - nothing was written, so an empty string is the
+    // honest detail. The empty string is deliberate, not undefined: it merges
+    // over (clears) the stale active-phase 'Transcribing audio' detail, since
+    // the store's stripUndefined drops only undefined and both detail surfaces
+    // hide an empty string.
     detail: isSession
       ? job.outputFilename
         ? `Saved ${job.outputFilename}`
-        : 'Saved to the output folder'
+        : ''
       : 'Saved to the Audio Notebook',
     status: 'complete',
   });

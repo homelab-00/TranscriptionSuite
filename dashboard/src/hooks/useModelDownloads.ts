@@ -75,6 +75,8 @@ export function useModelDownloads({
             id: notifId,
             category: 'download',
             title: `Downloaded ${modelId}`,
+            // Clear the stale 'Fetching model weights' active-phase detail.
+            detail: '',
             status: 'complete',
           });
           refreshCacheStatus([modelId]);
@@ -85,6 +87,8 @@ export function useModelDownloads({
           id: notifId,
           category: 'download',
           title: `Download failed: ${modelId}`,
+          // Clear the stale 'Fetching model weights' active-phase detail.
+          detail: '',
           status: 'error',
           error: msg,
         });

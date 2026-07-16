@@ -1570,6 +1570,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         id: dlId,
         category: 'download',
         title: `Server Image (${selectedTagForActions}) downloaded`,
+        // Clear the stale 'Pulling container image' active-phase detail.
+        detail: '',
         status: 'complete',
       });
     } else {
@@ -2301,6 +2303,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                                   id: dlId,
                                   category: 'download',
                                   title: 'Vulkan Sidecar (whisper.cpp) downloaded',
+                                  // Clear the stale 'Pulling sidecar image' detail.
+                                  detail: '',
                                   status: 'complete',
                                 });
                               } else {

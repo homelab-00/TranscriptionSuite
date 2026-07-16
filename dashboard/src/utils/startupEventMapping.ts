@@ -77,6 +77,9 @@ export function serverStartPatch(event: StartupActivityEventLike): NotifyInput |
       id: SERVER_START_ID,
       category: 'server',
       title: 'Server ready',
+      // Clear the last stage label ('Loading model...' etc.) so it does not
+      // linger under the terminal 'Server ready' title.
+      detail: '',
       status: 'complete',
       progress: 100,
     };
