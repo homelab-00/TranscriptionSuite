@@ -1,6 +1,7 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useModelDownloads } from '../useModelDownloads';
+import { useNotificationsStore } from '../../stores/notificationsStore';
 
 const toastMessage = vi.fn();
 vi.mock('sonner', () => ({
@@ -30,6 +31,7 @@ beforeEach(() => {
   refreshCacheStatus.mockReset();
   refreshHostCacheStatus.mockReset();
   toastMessage.mockReset();
+  useNotificationsStore.setState({ notifications: [] });
   (window as any).electronAPI = {
     docker: {
       downloadModelToCache: dockerDownload,
@@ -124,7 +126,30 @@ describe('useModelDownloads', () => {
     await act(() => result.current.downloadModel(HF));
 
     expect(result.current.downloadingIds.size).toBe(0);
-    expect(toastMessage).toHaveBeenCalledWith(expect.stringMatching(/network down/));
+    const entries = useNotificationsStore.getState().notifications;
+    const entry = entries.find((n) => n.id === `model-download-${HF}`);
+    expect(entry?.status).toBe('error');
+    expect(entry?.error).toMatch(/network down/);
+  });
+
+  it('notifies the store with an active card on start and a complete card on success', async () => {
+    const { result } = setup();
+
+    await act(() => result.current.downloadModel(HF));
+
+    const entries = useNotificationsStore.getState().notifications;
+    const entry = entries.find((n) => n.id === `model-download-${HF}`);
+    expect(entry?.status).toBe('complete');
+    expect(entry?.category).toBe('download');
+  });
+
+  it('does not create a hook-level card for the GGML host path on vulkan-wsl2', async () => {
+    const { result } = setup('vulkan-wsl2');
+
+    await act(() => result.current.downloadModel(GGML));
+
+    const entries = useNotificationsStore.getState().notifications;
+    expect(entries.find((n) => n.id === `model-download-${GGML}`)).toBeUndefined();
   });
 
   it('removes from the container cache on Docker', async () => {

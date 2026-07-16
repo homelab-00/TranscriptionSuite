@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 import { getModelsByFamily } from '../services/modelRegistry';
+import { useNotificationsStore } from '../stores/notificationsStore';
 
 interface UseModelDownloadsOptions {
   isMetal: boolean;
@@ -47,20 +48,46 @@ export function useModelDownloads({
       const download = isMetal ? api?.mlx?.downloadModelToCache : api?.docker?.downloadModelToCache;
       if (!download) return;
 
+      const notifId = `model-download-${modelId}`;
+      const ggmlHostPath = isVulkanWsl2 && isWhisperCpp;
+      // The GGML host download emits its own ggml-download-* events with real
+      // byte progress (docker:downloadEvent channel), so it gets no hook-level
+      // card — one download, one card.
+      if (!ggmlHostPath) {
+        useNotificationsStore.getState().notify({
+          id: notifId,
+          category: 'download',
+          title: `Downloading ${modelId}...`,
+          detail: 'Fetching model weights',
+          status: 'active',
+        });
+      }
+
       setDownloadingIds((prev) => new Set(prev).add(modelId));
       try {
-        if (isVulkanWsl2 && isWhisperCpp) {
+        if (ggmlHostPath) {
           if (!api?.docker?.downloadGgmlModelToHost) return;
           await api.docker.downloadGgmlModelToHost(modelId);
-          toast.success(`Downloaded ${modelId}`);
           await refreshHostCacheStatus([modelId]);
         } else {
           await download(modelId);
-          toast.success(`Downloaded ${modelId}`);
+          useNotificationsStore.getState().notify({
+            id: notifId,
+            category: 'download',
+            title: `Downloaded ${modelId}`,
+            status: 'complete',
+          });
           refreshCacheStatus([modelId]);
         }
       } catch (err: any) {
-        toast.error(`Download failed: ${err?.message || 'Unknown error'}`);
+        const msg = err?.message || 'Unknown error';
+        useNotificationsStore.getState().notify({
+          id: notifId,
+          category: 'download',
+          title: `Download failed: ${modelId}`,
+          status: 'error',
+          error: msg,
+        });
       } finally {
         setDownloadingIds((prev) => {
           const next = new Set(prev);
