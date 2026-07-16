@@ -25,6 +25,13 @@ import { getConfig } from '../config/store';
 import { useDedupChoiceStore } from './dedupChoiceStore';
 import { useAriaAnnouncerStore } from './ariaAnnouncerStore';
 import type { DedupChoice } from '../../components/import/DedupPromptModal';
+import {
+  notifyJobProcessing,
+  notifyJobSuccess,
+  notifyJobError,
+  attachNotebookTranscript,
+  attachSessionTranscript,
+} from '../utils/importNotifications';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -455,6 +462,12 @@ async function processSessionJob(
         : j,
     ),
   }));
+
+  // Session completions have the transcript text in scope - attach it so the
+  // notification record carries a collapsible transcript (GH-202-safe: text is
+  // already local, no fetch needed). The dedup use_existing branch above
+  // returns early with no output and deliberately gets no transcript.
+  attachSessionTranscript(job, result.transcription.text);
 }
 
 async function processNotebookJob(
@@ -530,6 +543,7 @@ async function processQueue(): Promise<void> {
           j.id === jobId ? { ...j, status: 'processing' as const, error: undefined } : j,
         ),
       }));
+      notifyJobProcessing(nextJob);
 
       try {
         if (isSession) {
@@ -546,6 +560,14 @@ async function processQueue(): Promise<void> {
           const next = prev === 0 ? duration : Math.round(prev * 0.7 + duration * 0.3);
           store.setState({ avgProcessingMs: next });
         }
+
+        // Re-read the job so processor-set fields (session outputFilename,
+        // notebook result) are visible to the success notification.
+        const finishedJob = store.getState().jobs.find((j) => j.id === jobId);
+        notifyJobSuccess(finishedJob ?? nextJob);
+        if (finishedJob && !isSession && finishedJob.result?.recording_id !== undefined) {
+          attachNotebookTranscript(finishedJob, finishedJob.result.recording_id);
+        }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Import failed';
         store.setState((s) => ({
@@ -558,6 +580,7 @@ async function processQueue(): Promise<void> {
           const { notebookCallbacks } = store.getState();
           notebookCallbacks.onJobError?.(nextJob, errorMsg);
         }
+        notifyJobError(nextJob, errorMsg);
       } finally {
         delete _jobStartedAt[jobId];
       }

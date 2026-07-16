@@ -74,14 +74,20 @@ vi.mock('../../src/hooks/useAdminStatus', () => ({
   useAdminStatus: () => mockAdminStatus,
 }));
 
-vi.mock('../../src/stores/activityStore', () => {
+vi.mock('../../src/stores/notificationsStore', () => {
   // zustand-style store mock: callable as a hook AND exposing getState()
-  // (handleRuntimeProfileChange calls useActivityStore.getState() directly).
-  const state = { items: [], addActivity: vi.fn(), updateActivity: vi.fn() };
-  const useActivityStore = (selector?: (s: Record<string, unknown>) => unknown) =>
+  // (handleRuntimeProfileChange and the pull handlers call
+  // useNotificationsStore.getState() directly).
+  const state = {
+    notifications: [],
+    notify: vi.fn(),
+    updateNotification: vi.fn(),
+    dismissToast: vi.fn(),
+  };
+  const useNotificationsStore = (selector?: (s: Record<string, unknown>) => unknown) =>
     typeof selector === 'function' ? selector(state) : state;
-  useActivityStore.getState = () => state;
-  return { useActivityStore };
+  useNotificationsStore.getState = () => state;
+  return { useNotificationsStore };
 });
 
 // apiClient

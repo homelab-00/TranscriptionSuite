@@ -40,7 +40,8 @@ import { InstanceSettingsSelectors } from './server/InstanceSettingsSelectors';
 import { RemoteConnectionCard } from './server/RemoteConnectionCard';
 import { StartupActivityInline } from './server/StartupActivityInline';
 
-import { useActivityStore } from '../../src/stores/activityStore';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
+import { SERVER_START_ID } from '../../src/utils/startupEventMapping';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useServerStatus } from '../../src/hooks/useServerStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
@@ -624,7 +625,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       } else {
         setSidecarNeeded(null);
         docker.cancelSidecarPull();
-        useActivityStore.getState().updateActivity('sidecar-vulkan', { status: 'dismissed' });
+        useNotificationsStore.getState().dismissToast('sidecar-vulkan');
       }
       // Warn if Metal selected on unsupported hardware (still allow the selection)
       if (
@@ -868,6 +869,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const handleMLXStart = useCallback(async () => {
     const api = (window as any).electronAPI;
     if (!api?.mlx) return;
+    useNotificationsStore.getState().notify({
+      id: SERVER_START_ID,
+      category: 'server',
+      title: 'Starting server...',
+      detail: 'Launching the Metal (MLX) server process',
+      status: 'active',
+      progress: 0,
+    });
     try {
       const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
       const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
@@ -889,6 +898,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`Failed to start Metal server: ${msg}`);
+      useNotificationsStore.getState().updateNotification(SERVER_START_ID, {
+        title: 'Server failed to start',
+        status: 'error',
+        error: msg,
+      });
     }
   }, [activeTranscriber, normalizedLiveModel, activeDiarizationModel]);
 
@@ -1534,32 +1548,38 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   // Issue 103: shared by the "Fetch Fresh Image" button and the in-banner
   // Retry button so a user can re-attempt without re-navigating after a
-  // failure. The activity-store entry tracks the same dlId for both paths.
+  // failure. The notification entry tracks the same dlId for both paths.
   // (Avoid issue-number references with a leading hash in scanned files —
   //  the UI-contract color regex matches 3-digit hex shorthand and would
   //  pollute the literal palette.)
   const handleFetchFreshImage = useCallback(async (): Promise<void> => {
     if (!selectedTagForActions) return;
     const dlId = `docker-image-${selectedTagForActions}`;
-    const store = useActivityStore.getState();
-    store.addActivity({
+    useNotificationsStore.getState().notify({
       id: dlId,
       category: 'download',
-      label: `Server Image (${selectedTagForActions})`,
-      legacyType: 'docker-image',
+      title: `Server Image (${selectedTagForActions})`,
+      detail: 'Pulling container image',
+      status: 'active',
     });
-    try {
-      await docker.pullImage(selectedTagForActions);
-      useActivityStore
-        .getState()
-        .updateActivity(dlId, { status: 'complete', completedAt: Date.now() });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Pull failed';
-      useActivityStore.getState().updateActivity(dlId, {
-        status: 'error',
-        error: msg,
-        completedAt: Date.now(),
+    // withOperation never throws - it resolves with the error message (or
+    // null on success), so branch on the return value instead of try/catch.
+    const pullError = await docker.pullImage(selectedTagForActions);
+    const store = useNotificationsStore.getState();
+    const newest = [...store.notifications].reverse().find((n) => n.id === dlId);
+    // A user cancel already closed the record - leave it alone.
+    if (newest?.status !== 'active') return;
+    if (pullError === null) {
+      store.notify({
+        id: dlId,
+        category: 'download',
+        title: `Server Image (${selectedTagForActions}) downloaded`,
+        // Clear the stale 'Pulling container image' active-phase detail.
+        detail: '',
+        status: 'complete',
       });
+    } else {
+      store.updateNotification(dlId, { status: 'error', error: pullError });
     }
   }, [docker, selectedTagForActions]);
 
@@ -1892,9 +1912,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           onClick={() => {
                             docker.cancelPull();
                             const dlId = `docker-image-${selectedTagForActions}`;
-                            useActivityStore
-                              .getState()
-                              .updateActivity(dlId, { status: 'dismissed' });
+                            useNotificationsStore.getState().updateNotification(dlId, {
+                              status: 'complete',
+                              detail: 'Cancelled by user',
+                            });
                           }}
                         >
                           Cancel Pull
@@ -2291,9 +2312,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         <button
                           onClick={() => {
                             docker.cancelSidecarPull();
-                            useActivityStore
-                              .getState()
-                              .updateActivity('sidecar-vulkan', { status: 'dismissed' });
+                            useNotificationsStore.getState().updateNotification('sidecar-vulkan', {
+                              status: 'complete',
+                              detail: 'Cancelled by user',
+                            });
                           }}
                           className="ml-auto text-xs text-slate-400 underline hover:text-slate-200"
                         >
@@ -2314,25 +2336,37 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           disabled={docker.operating}
                           onClick={async () => {
                             const dlId = 'sidecar-vulkan';
-                            useActivityStore.getState().addActivity({
+                            useNotificationsStore.getState().notify({
                               id: dlId,
                               category: 'download',
-                              label: 'Vulkan Sidecar (whisper.cpp)',
-                              legacyType: 'sidecar-image',
+                              title: 'Vulkan Sidecar (whisper.cpp)',
+                              detail: 'Pulling sidecar image',
+                              status: 'active',
                             });
-                            try {
-                              await docker.pullSidecarImage();
-                              useActivityStore.getState().updateActivity(dlId, {
-                                status: 'complete',
-                                completedAt: Date.now(),
-                              });
-                            } catch (err: unknown) {
-                              const msg = err instanceof Error ? err.message : 'Pull failed';
-                              useActivityStore.getState().updateActivity(dlId, {
-                                status: 'error',
-                                error: msg,
-                                completedAt: Date.now(),
-                              });
+                            // withOperation resolves with the error message (or
+                            // null on success) rather than throwing.
+                            const pullError = await docker.pullSidecarImage();
+                            const store = useNotificationsStore.getState();
+                            const newest = [...store.notifications]
+                              .reverse()
+                              .find((n) => n.id === dlId);
+                            // A user cancel already closed the record - leave it.
+                            if (newest?.status === 'active') {
+                              if (pullError === null) {
+                                store.notify({
+                                  id: dlId,
+                                  category: 'download',
+                                  title: 'Vulkan Sidecar (whisper.cpp) downloaded',
+                                  // Clear the stale 'Pulling sidecar image' detail.
+                                  detail: '',
+                                  status: 'complete',
+                                });
+                              } else {
+                                store.updateNotification(dlId, {
+                                  status: 'error',
+                                  error: pullError,
+                                });
+                              }
                             }
                             const hasIt = await docker.hasSidecarImage();
                             if (hasIt) setSidecarNeeded(false);

@@ -8,18 +8,18 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import React from 'react';
 
 import { StartupActivityInline } from '../views/server/StartupActivityInline';
-import { useActivityStore } from '../../src/stores/activityStore';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 
 beforeEach(() => {
-  useActivityStore.setState({ items: [] });
+  useNotificationsStore.setState({ notifications: [] });
 });
 
 describe('StartupActivityInline (GH-207)', () => {
   it('renders label, percentage, and sizes for an active download item', () => {
-    useActivityStore.getState().addActivity({
+    useNotificationsStore.getState().notify({
       id: 'model-load-parakeet',
       category: 'download',
-      label: 'Downloading parakeet-tdt-0.6b-v2...',
+      title: 'Downloading parakeet-tdt-0.6b-v2...',
       status: 'active',
       progress: 37,
       downloadedSize: '1.1 GB',
@@ -33,10 +33,10 @@ describe('StartupActivityInline (GH-207)', () => {
   });
 
   it('renders an active item without progress data as label only', () => {
-    useActivityStore.getState().addActivity({
+    useNotificationsStore.getState().notify({
       id: 'model-load-x',
       category: 'download',
-      label: 'Loading test-model into memory...',
+      title: 'Loading test-model into memory...',
       status: 'active',
     });
     render(<StartupActivityInline />);
@@ -46,10 +46,10 @@ describe('StartupActivityInline (GH-207)', () => {
   });
 
   it('renders nothing when all items are complete', () => {
-    useActivityStore.getState().addActivity({
+    useNotificationsStore.getState().notify({
       id: 'model-load-x',
       category: 'download',
-      label: 'test-model ready',
+      title: 'test-model ready',
       status: 'complete',
     });
     const { container } = render(<StartupActivityInline />);
@@ -57,14 +57,33 @@ describe('StartupActivityInline (GH-207)', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('renders nothing for dismissed items', () => {
-    useActivityStore.getState().addActivity({
-      id: 'model-load-x',
+  it('renders only download/server items, not other active categories', () => {
+    useNotificationsStore.getState().notify({
+      id: 'docker-image-latest',
       category: 'download',
-      label: 'Downloading x...',
+      title: 'Downloading server image...',
       status: 'active',
     });
-    useActivityStore.getState().dismissActivity('model-load-x');
+    useNotificationsStore.getState().notify({
+      id: 'rec-1',
+      category: 'recording',
+      title: 'Recording live note...',
+      status: 'active',
+    });
+    render(<StartupActivityInline />);
+
+    expect(screen.getByText('Downloading server image...')).toBeInTheDocument();
+    expect(screen.queryByText('Recording live note...')).toBeNull();
+  });
+
+  it('renders nothing for items whose toast is dismissed', () => {
+    useNotificationsStore.getState().notify({
+      id: 'model-load-x',
+      category: 'download',
+      title: 'Downloading x...',
+      status: 'active',
+    });
+    useNotificationsStore.getState().dismissToast('model-load-x');
     const { container } = render(<StartupActivityInline />);
 
     expect(container).toBeEmptyDOMElement();

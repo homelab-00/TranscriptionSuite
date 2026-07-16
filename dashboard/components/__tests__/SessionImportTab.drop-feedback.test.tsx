@@ -2,16 +2,19 @@
  * SessionImportTab immediate drop feedback (GH-210)
  *
  * The manual-drop path used to enqueue silently while the Folder-Watch
- * auto-detect path already fired a toast (importQueueStore.ts). These tests
- * pin the new feedback surface:
+ * auto-detect path already surfaced the add (importQueueStore.ts). These tests
+ * pin the new feedback surface. The enqueue confirmation now lands as an
+ * 'import' record in the notifications store (Task 9) rather than a sonner
+ * toast; the polite aria-live announcement is unchanged:
  *
- *   1. Single-file drop → toast.success naming the file + polite aria-live
+ *   1. Single-file drop → import notification naming the file + polite aria-live
  *      announcement.
- *   2. Multi-file drop → count toast ("3 files added ...").
+ *   2. Multi-file drop → count notification ("3 files added ...").
  *   3. A new job appearing in the queue scrolls the Import Queue card into
  *      view (job-id diff, not list length).
  *   4. The dropzone gets the brief `dropzone-flash` class after an add.
- *   5. The language-guard refusal path (no enqueue) shows NO success toast.
+ *   5. The language-guard refusal path (no enqueue) records NO import
+ *      notification and shows NO success toast.
  */
 
 import React from 'react';
@@ -156,6 +159,7 @@ vi.mock('sonner', () => ({
 
 import { SessionImportTab } from '../views/SessionImportTab';
 import { useAriaAnnouncerStore } from '../../src/stores/ariaAnnouncerStore';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 
 function buildFile(name = 'sample.mp3'): File {
   return new File([new Uint8Array([0])], name, { type: 'audio/mpeg' });
@@ -216,6 +220,7 @@ describe('SessionImportTab drop feedback (GH-210)', () => {
     mockJobs = [];
 
     useAriaAnnouncerStore.setState({ politeMessage: '', assertiveMessage: '' });
+    useNotificationsStore.setState({ notifications: [] });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as unknown as { electronAPI?: any }).electronAPI = {
@@ -227,7 +232,7 @@ describe('SessionImportTab drop feedback (GH-210)', () => {
     };
   });
 
-  it('shows a success toast naming the file and announces politely on a single-file drop', async () => {
+  it('records an import notification naming the file and announces politely on a single-file drop', async () => {
     const { container } = await renderAndSettle();
 
     const dropZone = container.querySelector('.cursor-pointer');
@@ -238,12 +243,14 @@ describe('SessionImportTab drop feedback (GH-210)', () => {
     });
 
     expect(mockAddFiles).toHaveBeenCalledTimes(1);
-    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
-    expect(String(mockToastSuccess.mock.calls[0][0])).toMatch(/lecture\.mp3/);
+    const notes = useNotificationsStore.getState().notifications;
+    expect(notes).toHaveLength(1);
+    expect(notes[0].category).toBe('import');
+    expect(notes[0].title).toMatch(/lecture\.mp3/);
     expect(useAriaAnnouncerStore.getState().politeMessage).toMatch(/lecture\.mp3/);
   });
 
-  it('shows a count toast on a multi-file drop', async () => {
+  it('records a count notification on a multi-file drop', async () => {
     const { container } = await renderAndSettle();
 
     const dropZone = container.querySelector('.cursor-pointer');
@@ -254,8 +261,9 @@ describe('SessionImportTab drop feedback (GH-210)', () => {
       );
     });
 
-    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
-    expect(String(mockToastSuccess.mock.calls[0][0])).toMatch(/3 files added/i);
+    const notes = useNotificationsStore.getState().notifications;
+    expect(notes).toHaveLength(1);
+    expect(notes[0].title).toMatch(/3 files added/i);
     expect(useAriaAnnouncerStore.getState().politeMessage).toMatch(/3 files/i);
   });
 
@@ -318,6 +326,7 @@ describe('SessionImportTab drop feedback (GH-210)', () => {
     expect(mockAddFiles).not.toHaveBeenCalled();
     expect(mockToastError).toHaveBeenCalledTimes(1);
     expect(mockToastSuccess).not.toHaveBeenCalled();
+    expect(useNotificationsStore.getState().notifications).toHaveLength(0);
     expect(useAriaAnnouncerStore.getState().politeMessage).toBe('');
   });
 });

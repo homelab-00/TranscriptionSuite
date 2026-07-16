@@ -6,6 +6,7 @@ import { SessionView } from './components/views/SessionView';
 import { NotebookView } from './components/views/NotebookView';
 import { ServerView } from './components/views/ServerView';
 import { LogsView } from './components/views/LogsView';
+import { NotificationsView } from './components/views/NotificationsView';
 import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
 import { BugReportModal } from './components/views/BugReportModal';
@@ -28,11 +29,13 @@ import { useLiveMode } from './src/hooks/useLiveMode';
 import { useImportQueueStore, selectIsUploading } from './src/stores/importQueueStore';
 import { QueuePausedBanner } from './components/ui/QueuePausedBanner';
 import { UpdateBanner } from './components/ui/UpdateBanner';
-import { ActivityNotifications } from './components/ui/ActivityNotifications';
+import { NotificationToasts } from './components/ui/NotificationToasts';
 import { HfTokenExplainer } from './components/ui/HfTokenExplainer';
 import { useStarPopup } from './src/hooks/useStarPopup';
-import { useBootstrapDownloads } from './src/hooks/useBootstrapDownloads';
+import { useNotificationBridge } from './src/hooks/useNotificationBridge';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
+import { useNotificationsStore } from './src/stores/notificationsStore';
+import { SERVER_START_ID } from './src/utils/startupEventMapping';
 import { useAuthTokenSync } from './src/hooks/useAuthTokenSync';
 import { useWatcherFilesBridge } from './src/hooks/useWatcherFilesBridge';
 import { useUpdateToast } from './src/hooks/useUpdateToast';
@@ -108,8 +111,8 @@ const AppInner: React.FC = () => {
 
   // Always-on Docker log token scanner
   useAuthTokenSync(serverConnection.reachable, useRemote);
-  // Bridge bootstrap log events → download store (runs regardless of active tab)
-  useBootstrapDownloads();
+  // Bridge bootstrap log events → notifications store (runs regardless of active tab)
+  useNotificationBridge();
   // Singleton subscriber for the watcher:filesDetected IPC channel — must be
   // mounted at app root so it does not double-register when a per-tab hook
   // (e.g. useSessionWatcher) survives a tab switch (Issue #94).
@@ -675,7 +678,16 @@ const AppInner: React.FC = () => {
           }
         }
 
-        await docker.startContainer(
+        useNotificationsStore.getState().notify({
+          id: SERVER_START_ID,
+          category: 'server',
+          title: 'Starting server...',
+          detail: 'Preparing the container',
+          status: 'active',
+          progress: 0,
+        });
+
+        const startError = await docker.startContainer(
           mode,
           runtimeProfile,
           undefined,
@@ -693,6 +705,19 @@ const AppInner: React.FC = () => {
             ...(models?.whispercppModel ? { whispercppModel: models.whispercppModel } : {}),
           },
         );
+
+        if (startError !== null) {
+          const entries = useNotificationsStore.getState().notifications;
+          const newestStart = [...entries].reverse().find((n) => n.id === SERVER_START_ID);
+          // Guard: only fail a start card that is still in flight.
+          if (newestStart?.status === 'active') {
+            useNotificationsStore.getState().updateNotification(SERVER_START_ID, {
+              title: 'Server failed to start',
+              status: 'error',
+              error: startError,
+            });
+          }
+        }
       } finally {
         startupFlowPendingRef.current = false;
         setStartupFlowPending(false);
@@ -728,6 +753,12 @@ const AppInner: React.FC = () => {
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
             <LogsView runtimeProfile={runtimeProfile} />
+          </ErrorBoundary>
+        );
+      case View.NOTIFICATIONS:
+        return (
+          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
+            <NotificationsView />
           </ErrorBoundary>
         );
       default:
@@ -1082,7 +1113,7 @@ const App: React.FC = () => (
       <AppInner />
     </DockerProvider>
     <ErrorBoundary FallbackComponent={ErrorFallback}>
-      <ActivityNotifications />
+      <NotificationToasts />
     </ErrorBoundary>
     <Toaster position="bottom-right" theme="dark" richColors />
     <ReactQueryDevtools initialIsOpen={false} />

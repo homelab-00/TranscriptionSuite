@@ -62,6 +62,7 @@ import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { DeleteRecordingDialog } from '../recording/DeleteRecordingDialog';
 import { useActiveProfileStore } from '../../src/stores/activeProfileStore';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { getConfig, setConfig } from '../../src/config/store';
 import { useScrollFade } from '../../src/hooks/useScrollFade';
 import { ScrollFadeOverlay } from '../ui/ScrollFadeOverlay';
@@ -1759,6 +1760,18 @@ const ImportTab = ({
         // active profile is set so apiClient.uploadAndTranscribe's `!= null`
         // guard correctly omits the FormData field.
         profile_id: activeProfileId ?? undefined,
+      });
+
+      // Enqueue feedback for the Notebook import tab (parity with the Session
+      // import tab and AddNoteModal, which both surface a queued record).
+      useNotificationsStore.getState().notify({
+        id: `import-queued-${Date.now()}`,
+        category: 'import',
+        title:
+          files.length === 1
+            ? `Added "${files[0].name}" to the Import Queue`
+            : `${files.length} files added to the Import Queue`,
+        status: 'complete',
       });
 
       // 4.6 — track manual import count and possibly show hint

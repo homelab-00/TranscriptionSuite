@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { RuntimeProfile } from '../types/runtime';
+import { useNotificationsStore } from '../stores/notificationsStore';
 
 // ─── Types (mirrors electron.d.ts shapes) ───────────────────────────────────
 
@@ -75,7 +76,7 @@ export interface UseDockerReturn {
   // Image state
   images: DockerImage[];
   refreshImages: () => Promise<void>;
-  pullImage: (tag: string) => Promise<void>;
+  pullImage: (tag: string) => Promise<string | null>;
   cancelPull: () => Promise<void>;
   pulling: boolean;
   removeImage: (tag: string) => Promise<void>;
@@ -107,7 +108,7 @@ export interface UseDockerReturn {
 
   // Sidecar image state
   hasSidecarImage: () => Promise<boolean>;
-  pullSidecarImage: () => Promise<void>;
+  pullSidecarImage: () => Promise<string | null>;
   cancelSidecarPull: () => Promise<void>;
   sidecarPulling: boolean;
 
@@ -120,7 +121,7 @@ export interface UseDockerReturn {
     imageTag?: string,
     hfToken?: string,
     onboardingOptions?: StartContainerOnboardingOptions,
-  ) => Promise<void>;
+  ) => Promise<string | null>;
   stopContainer: () => Promise<void>;
   removeContainer: () => Promise<void>;
 
@@ -347,24 +348,27 @@ export function useDocker(): UseDockerReturn {
     }
   }, []);
 
-  const withOperation = useCallback(async (fn: () => Promise<unknown>) => {
+  const withOperation = useCallback(async (fn: () => Promise<unknown>): Promise<string | null> => {
     setOperating(true);
     setOperationError(null);
     try {
       await fn();
+      return null;
     } catch (err: any) {
-      setOperationError(err.message || 'Operation failed');
+      const msg = err.message || 'Operation failed';
+      setOperationError(msg);
+      return msg;
     } finally {
       setOperating(false);
     }
   }, []);
 
   const pullImage = useCallback(
-    async (tag: string) => {
+    async (tag: string): Promise<string | null> => {
       const docker = api();
-      if (!docker) return;
+      if (!docker) return 'Docker API is unavailable';
       setPulling(true);
-      await withOperation(async () => {
+      return withOperation(async () => {
         try {
           await docker.pullImage(tag);
           await refreshImages();
@@ -390,11 +394,11 @@ export function useDocker(): UseDockerReturn {
     return docker.hasSidecarImage();
   }, []);
 
-  const pullSidecarImage = useCallback(async () => {
+  const pullSidecarImage = useCallback(async (): Promise<string | null> => {
     const docker = api();
-    if (!docker) return;
+    if (!docker) return 'Docker API is unavailable';
     setSidecarPulling(true);
-    await withOperation(async () => {
+    return withOperation(async () => {
       try {
         await docker.pullSidecarImage();
       } finally {
@@ -432,10 +436,10 @@ export function useDocker(): UseDockerReturn {
       imageTag?: string,
       hfToken?: string,
       onboardingOptions?: StartContainerOnboardingOptions,
-    ) => {
+    ): Promise<string | null> => {
       const docker = api();
-      if (!docker) return;
-      await withOperation(async () => {
+      if (!docker) return 'Docker API is unavailable';
+      return withOperation(async () => {
         await docker.startContainer({
           mode,
           runtimeProfile,
@@ -459,6 +463,12 @@ export function useDocker(): UseDockerReturn {
       await docker.stopContainer();
       await new Promise((r) => setTimeout(r, 1000));
       setContainer(await docker.getContainerStatus());
+      useNotificationsStore.getState().notify({
+        id: `server-stop-${Date.now()}`,
+        category: 'server',
+        title: 'Server stopped',
+        status: 'complete',
+      });
     });
   }, [withOperation]);
 

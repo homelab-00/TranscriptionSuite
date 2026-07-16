@@ -450,6 +450,10 @@ export interface ElectronAPI {
       timeoutMs?: number;
     }) => Promise<boolean>;
   };
+  notificationLog: {
+    load: () => Promise<unknown[]>;
+    persist: (items: unknown[]) => Promise<void>;
+  };
   mlx: {
     start: (opts: {
       port: number;
@@ -811,6 +815,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   notifications: {
     show: (options: { title: string; body: string; silent?: boolean; timeoutMs?: number }) =>
       ipcRenderer.invoke('notifications:show', options) as Promise<boolean>,
+  },
+  notificationLog: {
+    load: () => ipcRenderer.invoke('notificationLog:load') as Promise<unknown[]>,
+    persist: (items: unknown[]) =>
+      ipcRenderer.invoke('notificationLog:persist', items) as Promise<void>,
   },
   mlx: {
     start: (opts: {
