@@ -6,6 +6,7 @@ import { SessionView } from './components/views/SessionView';
 import { NotebookView } from './components/views/NotebookView';
 import { ServerView } from './components/views/ServerView';
 import { LogsView } from './components/views/LogsView';
+import { NotificationsView } from './components/views/NotificationsView';
 import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
 import { BugReportModal } from './components/views/BugReportModal';
@@ -728,6 +729,12 @@ const AppInner: React.FC = () => {
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
             <LogsView runtimeProfile={runtimeProfile} />
+          </ErrorBoundary>
+        );
+      case View.NOTIFICATIONS:
+        return (
+          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
+            <NotificationsView />
           </ErrorBoundary>
         );
       default:

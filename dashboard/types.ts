@@ -3,6 +3,7 @@ export enum View {
   NOTEBOOK = 'NOTEBOOK',
   SERVER = 'SERVER',
   LOGS = 'LOGS',
+  NOTIFICATIONS = 'NOTIFICATIONS',
 }
 
 export enum NotebookTab {

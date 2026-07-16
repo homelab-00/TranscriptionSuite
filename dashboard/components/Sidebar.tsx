@@ -1,6 +1,7 @@
 import React, { useCallback, useLayoutEffect, useRef, useState, useEffect } from 'react';
 import { View, NotebookTab, SessionTab } from '../types';
 import {
+  Bell,
   Mic2,
   Book,
   Server,
@@ -424,6 +425,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
         </div>
       )}
+
+      {/* Notifications - session log entry point, bottom-anchored (GH: notifications store) */}
+      <div className="px-3 pb-1">
+        <button
+          onClick={() => onChangeView(View.NOTIFICATIONS)}
+          className={`flex h-12 w-full items-center rounded-xl transition-colors focus:ring-0 focus:outline-none ${collapsed ? 'justify-center' : 'gap-4 px-4'} ${
+            currentView === View.NOTIFICATIONS
+              ? 'bg-white/10 text-white'
+              : 'text-slate-400 hover:bg-white/5 hover:text-white'
+          }`}
+        >
+          <Bell
+            size={20}
+            className={currentView === View.NOTIFICATIONS ? 'text-accent-cyan' : ''}
+          />
+          <span
+            className={`text-sm font-medium whitespace-nowrap transition-all duration-200 ${collapsed ? 'hidden w-0 opacity-0' : 'opacity-100'}`}
+          >
+            Notifications
+          </span>
+        </button>
+      </div>
 
       {/* Bug Report - above the separator */}
       <div className="px-3 pb-2">
