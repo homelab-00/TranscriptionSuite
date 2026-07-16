@@ -87,7 +87,7 @@ const FAMILY_META: Record<FamilyChoiceId, FamilyMeta> = {
   whisper: {
     label: 'Whisper',
     sublabel: 'faster-whisper / WhisperX',
-    accent: 'slate',
+    accent: 'purple',
     capabilities: {
       languages: '90+',
       translation: 'english',
