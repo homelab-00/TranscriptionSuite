@@ -1,5 +1,5 @@
 import { renderHook, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 
 import { useTranscription } from './useTranscription';
 import { apiClient } from '../api/client';
@@ -517,21 +517,48 @@ describe('[P1] useTranscription', () => {
     });
   });
 
-  // ── Preview (ephemeral last-N-seconds reminder) ─────────────────────
-  describe('preview', () => {
-    it('sends a preview message with the requested duration while recording', async () => {
+  // ── Rolling preview (auto-refreshing last-N-seconds pane) ───────────
+  describe('rolling preview', () => {
+    beforeEach(() => {
+      // Explicit toFake so Date.now() advances with the timers — the adaptive
+      // refresh delay is computed from Date.now() deltas.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** Count sendJSON calls that were preview requests. */
+    function previewSends(): Array<Record<string, unknown>> {
+      return (lastSocket?.sendJSON.mock.calls ?? [])
+        .map((c) => c[0] as { type: string; data?: Record<string, unknown> })
+        .filter((m) => m.type === 'preview');
+    }
+
+    function deliverPreviewResult(text = 'recent words', actualSeconds = 20): void {
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'preview_result',
+          data: { text, language: 'en', actual_seconds: actualSeconds },
+        });
+      });
+    }
+
+    it('startPreview sends the first request immediately with the requested duration', async () => {
       const { result } = renderHook(() => useTranscription());
       await driveToRecording(result);
       lastSocket.sendJSON.mockClear();
 
       act(() => {
-        result.current.preview(30);
+        result.current.startPreview(30);
       });
 
       expect(lastSocket.sendJSON).toHaveBeenCalledWith({
         type: 'preview',
         data: { duration_seconds: 30 },
       });
+      expect(result.current.previewActive).toBe(true);
       expect(result.current.previewLoading).toBe(true);
     });
 
@@ -539,57 +566,152 @@ describe('[P1] useTranscription', () => {
       const { result } = renderHook(() => useTranscription());
 
       act(() => {
-        result.current.preview(20);
+        result.current.startPreview(20);
       });
 
-      const previewCalls = (lastSocket?.sendJSON.mock.calls ?? []).filter(
-        (c) => (c[0] as { type: string }).type === 'preview',
-      );
-      expect(previewCalls).toHaveLength(0);
+      expect(previewSends()).toHaveLength(0);
+      expect(result.current.previewActive).toBe(false);
       expect(result.current.previewLoading).toBe(false);
     });
 
-    it('ignores an overlapping request while one is in flight', async () => {
+    it('ignores startPreview while already active', async () => {
       const { result } = renderHook(() => useTranscription());
       await driveToRecording(result);
       lastSocket.sendJSON.mockClear();
 
       act(() => {
-        result.current.preview(20);
-        result.current.preview(20);
+        result.current.startPreview(20);
+        result.current.startPreview(20);
       });
 
-      expect(lastSocket.sendJSON).toHaveBeenCalledTimes(1);
+      expect(previewSends()).toHaveLength(1);
     });
 
-    it('populates preview state on preview_result', async () => {
+    it('populates preview state on preview_result and stays active', async () => {
       const { result } = renderHook(() => useTranscription());
       await driveToRecording(result);
       act(() => {
-        result.current.preview(20);
+        result.current.startPreview(20);
       });
 
-      act(() => {
-        lastSocketCbs.onMessage!({
-          type: 'preview_result',
-          data: { text: 'the last words I said', language: 'en', actual_seconds: 20 },
-        });
-      });
+      deliverPreviewResult('the last words I said', 20);
 
       expect(result.current.previewText).toBe('the last words I said');
       expect(result.current.previewSeconds).toBe(20);
       expect(result.current.previewLanguage).toBe('en');
       expect(result.current.previewLoading).toBe(false);
       expect(result.current.previewError).toBeNull();
+      expect(result.current.previewActive).toBe(true);
     });
 
-    it('surfaces preview_error and clears loading', async () => {
+    it('schedules the next refresh 5s after a fast result', async () => {
       const { result } = renderHook(() => useTranscription());
       await driveToRecording(result);
+      lastSocket.sendJSON.mockClear();
+
       act(() => {
-        result.current.preview(20);
+        result.current.startPreview(20);
+      });
+      deliverPreviewResult();
+      expect(previewSends()).toHaveLength(1);
+
+      act(() => {
+        vi.advanceTimersByTime(4999);
+      });
+      expect(previewSends()).toHaveLength(1);
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(previewSends()).toHaveLength(2);
+      expect(previewSends()[1]).toEqual({
+        type: 'preview',
+        data: { duration_seconds: 20 },
+      });
+    });
+
+    it('backs off to the transcription duration when a result is slow (50% duty cycle)', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.sendJSON.mockClear();
+
+      act(() => {
+        result.current.startPreview(20);
+      });
+      // The request takes 8s to come back — longer than the 5s base cadence.
+      act(() => {
+        vi.advanceTimersByTime(8000);
+      });
+      deliverPreviewResult();
+      expect(previewSends()).toHaveLength(1);
+
+      // Next refresh must wait a further 8s (not 5s - 8s = immediate).
+      act(() => {
+        vi.advanceTimersByTime(7999);
+      });
+      expect(previewSends()).toHaveLength(1);
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(previewSends()).toHaveLength(2);
+    });
+
+    it('stopPreview cancels the pending refresh and clears the pane state', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.sendJSON.mockClear();
+
+      act(() => {
+        result.current.startPreview(20);
+      });
+      deliverPreviewResult('something');
+      expect(result.current.previewText).toBe('something');
+
+      act(() => {
+        result.current.stopPreview();
       });
 
+      expect(result.current.previewActive).toBe(false);
+      expect(result.current.previewText).toBeNull();
+      expect(result.current.previewError).toBeNull();
+      expect(result.current.previewLoading).toBe(false);
+
+      act(() => {
+        vi.advanceTimersByTime(60000);
+      });
+      expect(previewSends()).toHaveLength(1);
+    });
+
+    it('ignores a late preview_result that lands after stopPreview', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      act(() => {
+        result.current.startPreview(20);
+      });
+      act(() => {
+        result.current.stopPreview();
+      });
+      deliverPreviewResult('late text');
+
+      expect(result.current.previewText).toBeNull();
+      expect(result.current.previewLoading).toBe(false);
+
+      act(() => {
+        vi.advanceTimersByTime(60000);
+      });
+      expect(previewSends()).toHaveLength(1);
+    });
+
+    it('stops the loop on preview_error and surfaces the message', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.sendJSON.mockClear();
+
+      act(() => {
+        result.current.startPreview(20);
+      });
       act(() => {
         lastSocketCbs.onMessage!({
           type: 'preview_error',
@@ -598,21 +720,144 @@ describe('[P1] useTranscription', () => {
       });
 
       expect(result.current.previewError).toBe('No audio captured yet');
+      expect(result.current.previewActive).toBe(false);
       expect(result.current.previewLoading).toBe(false);
+
+      act(() => {
+        vi.advanceTimersByTime(60000);
+      });
+      expect(previewSends()).toHaveLength(1);
+    });
+
+    it('stops the loop when the recording stops', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.sendJSON.mockClear();
+
+      act(() => {
+        result.current.startPreview(20);
+      });
+      deliverPreviewResult();
+
+      act(() => {
+        result.current.stop();
+      });
+      act(() => {
+        vi.advanceTimersByTime(60000);
+      });
+
+      expect(result.current.previewActive).toBe(false);
+      expect(previewSends()).toHaveLength(1);
+    });
+
+    it('halts the loop when the socket closes unexpectedly (server restart)', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.sendJSON.mockClear();
+
+      act(() => {
+        result.current.startPreview(20);
+      });
+      expect(result.current.previewLoading).toBe(true);
+
+      // Unintentional close — intentional disconnects never invoke onClose.
+      act(() => {
+        lastSocketCbs.onClose!(1001, 'server going away');
+      });
+
+      expect(result.current.previewActive).toBe(false);
+      expect(result.current.previewLoading).toBe(false);
+
+      act(() => {
+        vi.advanceTimersByTime(60000);
+      });
+      expect(previewSends()).toHaveLength(1);
+    });
+
+    it('halts the loop on a socket error', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.sendJSON.mockClear();
+
+      act(() => {
+        result.current.startPreview(20);
+      });
+      deliverPreviewResult();
+
+      act(() => {
+        lastSocketCbs.onError!('Connection lost');
+      });
+      act(() => {
+        vi.advanceTimersByTime(60000);
+      });
+
+      expect(result.current.previewActive).toBe(false);
+      expect(result.current.previewLoading).toBe(false);
+      expect(previewSends()).toHaveLength(1);
+    });
+
+    it('reuses an in-flight response after a quick off/on toggle instead of double-sending', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.sendJSON.mockClear();
+
+      // R1 goes out, then the user toggles off and immediately back on
+      // before R1 returns. A second 'preview' now would be rejected by the
+      // server ('Preview already in progress') and kill the loop.
+      act(() => {
+        result.current.startPreview(20);
+      });
+      act(() => {
+        result.current.stopPreview();
+      });
+      act(() => {
+        result.current.startPreview(20);
+      });
+
+      expect(previewSends()).toHaveLength(1);
+      expect(result.current.previewActive).toBe(true);
+      expect(result.current.previewLoading).toBe(true);
+
+      // R1's response arrives and is adopted by the restarted loop.
+      deliverPreviewResult('carried over');
+      expect(result.current.previewText).toBe('carried over');
+      expect(result.current.previewLoading).toBe(false);
+
+      // ...and the loop keeps rolling from it.
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(previewSends()).toHaveLength(2);
+    });
+
+    it('stops the loop on a server error', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.sendJSON.mockClear();
+
+      act(() => {
+        result.current.startPreview(20);
+      });
+      deliverPreviewResult();
+
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'error', data: { message: 'Backend OOM' } });
+      });
+      act(() => {
+        vi.advanceTimersByTime(60000);
+      });
+
+      expect(result.current.previewActive).toBe(false);
+      expect(previewSends()).toHaveLength(1);
     });
 
     it('clears preview state on a new start()', async () => {
       const { result } = renderHook(() => useTranscription());
       await driveToRecording(result);
       act(() => {
-        result.current.preview(20);
+        result.current.startPreview(20);
       });
-      act(() => {
-        lastSocketCbs.onMessage!({
-          type: 'preview_result',
-          data: { text: 'something', actual_seconds: 20 },
-        });
-      });
+      deliverPreviewResult('something');
       expect(result.current.previewText).toBe('something');
 
       act(() => {
@@ -622,6 +867,7 @@ describe('[P1] useTranscription', () => {
       expect(result.current.previewText).toBeNull();
       expect(result.current.previewError).toBeNull();
       expect(result.current.previewLoading).toBe(false);
+      expect(result.current.previewActive).toBe(false);
     });
   });
 });

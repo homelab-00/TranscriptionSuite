@@ -7,6 +7,7 @@ import {
   Languages,
   Copy,
   Eye,
+  EyeOff,
   Volume2,
   VolumeX,
   Maximize2,
@@ -876,13 +877,18 @@ export const SessionView: React.FC<SessionViewProps> = ({
     }
   }, [transcription, isLinux]);
 
-  // Preview: transcribe the last N seconds (user-configurable, default 20)
-  // so the user can recover their train of thought without stopping. The
-  // duration is clamped to the supported 10–60s range defensively.
-  const handlePreview = useCallback(async () => {
+  // Preview: rolling transcription of the last N seconds (user-configurable,
+  // default 20) so the user can follow their train of thought without
+  // stopping. Toggled on it auto-refreshes; toggled off it clears the pane.
+  // The duration is clamped to the supported 10–60s range defensively.
+  const handlePreviewToggle = useCallback(async () => {
+    if (transcription.previewActive) {
+      transcription.stopPreview();
+      return;
+    }
     const raw = await getConfig<number>('audio.previewDurationSeconds');
     const seconds = Math.min(60, Math.max(10, raw ?? 20));
-    transcription.preview(seconds);
+    transcription.startPreview(seconds);
   }, [transcription]);
 
   // Re-transcribe a truncated result from the job's saved audio. The server
@@ -1768,16 +1774,15 @@ export const SessionView: React.FC<SessionViewProps> = ({
                                 variant="secondary"
                                 className="shrink-0"
                                 icon={
-                                  transcription.previewLoading ? (
-                                    <Loader2 size={16} className="animate-spin" />
+                                  transcription.previewActive ? (
+                                    <EyeOff size={16} />
                                   ) : (
                                     <Eye size={16} />
                                   )
                                 }
-                                onClick={handlePreview}
-                                disabled={transcription.previewLoading}
+                                onClick={handlePreviewToggle}
                               >
-                                Preview
+                                {transcription.previewActive ? 'Stop Preview' : 'Preview'}
                               </Button>
                             )}
                             {(isConnecting || isRecording || isProcessing) && (
@@ -1800,34 +1805,34 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Preview — ephemeral "last N seconds" reminder during recording */}
-                    {isRecording &&
-                      (transcription.previewLoading ||
-                        transcription.previewText !== null ||
-                        transcription.previewError) && (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
-                            <Eye size={14} className="text-accent-cyan" />
-                            <span>
-                              Preview
-                              {transcription.previewSeconds
-                                ? ` · last ${transcription.previewSeconds}s`
-                                : ''}
-                            </span>
-                          </div>
-                          {transcription.previewError ? (
-                            <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                              {transcription.previewError}
-                            </div>
-                          ) : (
-                            <div className="selectable-text custom-scrollbar max-h-72 min-h-[8rem] overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300">
-                              {transcription.previewLoading && !transcription.previewText
-                                ? 'Transcribing recent audio…'
-                                : transcription.previewText || '(no speech detected)'}
-                            </div>
+                    {/* Preview — rolling "last N seconds" pane during recording */}
+                    {isRecording && (transcription.previewActive || transcription.previewError) && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
+                          <Eye size={14} className="text-accent-cyan" />
+                          <span>
+                            Preview
+                            {transcription.previewSeconds
+                              ? ` · last ${transcription.previewSeconds}s`
+                              : ''}
+                          </span>
+                          {transcription.previewLoading && (
+                            <Loader2 size={12} className="animate-spin" />
                           )}
                         </div>
-                      )}
+                        {transcription.previewError ? (
+                          <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                            {transcription.previewError}
+                          </div>
+                        ) : (
+                          <div className="selectable-text custom-scrollbar max-h-72 min-h-[8rem] overflow-y-auto rounded-xl border border-white/5 bg-black/20 p-4 font-mono text-sm leading-relaxed text-slate-300">
+                            {transcription.previewLoading && !transcription.previewText
+                              ? 'Transcribing recent audio…'
+                              : transcription.previewText || '(no speech detected)'}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Transcription Result */}
                     {transcription.result && (
