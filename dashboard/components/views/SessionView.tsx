@@ -63,6 +63,7 @@ import { isModelDisabled } from '../../src/services/modelSelection';
 import { SessionTab } from '../../types';
 import { SessionImportTab } from './SessionImportTab';
 import { useImportQueueStore } from '../../src/stores/importQueueStore';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { toast } from 'sonner';
 import { isRuntimeProfile, type RuntimeProfile } from '../../src/types/runtime';
 
@@ -1036,6 +1037,48 @@ export const SessionView: React.FC<SessionViewProps> = ({
     );
   }, [clientConnected]);
 
+  // Session-notifications lifecycle: one record per recording, driven by
+  // status edges (mirrors the completion effect below; catches tray-initiated
+  // recordings too since they share the same transcription state machine).
+  const prevNotifStatusRef = useRef(transcription.status);
+  useEffect(() => {
+    const prev = prevNotifStatusRef.current;
+    prevNotifStatusRef.current = transcription.status;
+    const store = useNotificationsStore.getState();
+
+    if (transcription.status === 'recording' && prev !== 'recording') {
+      store.notify({
+        id: 'session-recording',
+        category: 'recording',
+        title: 'Recording in progress',
+        detail: 'Capturing audio for transcription',
+        status: 'active',
+      });
+    }
+    if (transcription.status === 'processing' && prev === 'recording') {
+      store.notify({
+        id: 'session-recording',
+        category: 'recording',
+        title: 'Transcribing recording...',
+        detail: 'The server is processing the audio',
+        status: 'active',
+      });
+    }
+    // Failures BEFORE processing (WS drop or start failure mid-recording /
+    // mid-connect) never reach the completion effect below (it is gated on
+    // prev === 'processing') - close the card here or it stays active forever.
+    if (transcription.status === 'error' && (prev === 'recording' || prev === 'connecting')) {
+      store.notify({
+        id: 'session-recording',
+        category: 'transcription',
+        title: 'Recording failed',
+        detail: '',
+        status: 'error',
+        error: transcription.error ?? 'Recording failed',
+      });
+    }
+  }, [transcription.status, transcription.error]);
+
   // Auto-copy transcription to clipboard on completion + desktop notification
   const prevStatusRef = useRef(transcription.status);
   useEffect(() => {
@@ -1065,26 +1108,35 @@ export const SessionView: React.FC<SessionViewProps> = ({
         }
       })();
 
+      useNotificationsStore.getState().notify({
+        id: 'session-recording',
+        category: 'transcription',
+        title: 'Transcription complete',
+        detail: `${text.length.toLocaleString()} characters`,
+        status: 'complete',
+        transcript: text,
+      });
+
       // Desktop notification via Electron's async Notification module (IPC).
-      // Falls back to in-app toast if the IPC channel is unavailable or the
-      // OS notification fails (e.g. broken D-Bus proxy on Wayland).
       // Never uses the Web Notification API — its synchronous libnotify path
       // blocks the main process for 100+ seconds when D-Bus is unresponsive.
       const body = text.slice(0, 100) + (text.length > 100 ? '...' : '');
-      window.electronAPI?.notifications
+      void window.electronAPI?.notifications
         ?.show({ title: 'Transcription Complete', body })
-        .catch(() => false)
-        .then((shown) => {
-          if (!shown) toast.success('Transcription Complete', { description: body });
-        });
+        .catch(() => false);
     }
     if (wasProcessing && transcription.status === 'error' && transcription.error) {
-      window.electronAPI?.notifications
+      useNotificationsStore.getState().notify({
+        id: 'session-recording',
+        category: 'transcription',
+        title: 'Transcription failed',
+        detail: '',
+        status: 'error',
+        error: transcription.error,
+      });
+      void window.electronAPI?.notifications
         ?.show({ title: 'Transcription Failed', body: transcription.error })
-        .catch(() => false)
-        .then((shown) => {
-          if (!shown) toast.error('Transcription Failed', { description: transcription.error });
-        });
+        .catch(() => false);
     }
   }, [transcription.status, transcription.result?.text, transcription.error]);
 
