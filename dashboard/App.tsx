@@ -30,6 +30,7 @@ import { useImportQueueStore, selectIsUploading } from './src/stores/importQueue
 import { QueuePausedBanner } from './components/ui/QueuePausedBanner';
 import { UpdateBanner } from './components/ui/UpdateBanner';
 import { ActivityNotifications } from './components/ui/ActivityNotifications';
+import { NotificationToasts } from './components/ui/NotificationToasts';
 import { HfTokenExplainer } from './components/ui/HfTokenExplainer';
 import { useStarPopup } from './src/hooks/useStarPopup';
 import { useBootstrapDownloads } from './src/hooks/useBootstrapDownloads';
@@ -1090,6 +1091,9 @@ const App: React.FC = () => (
     </DockerProvider>
     <ErrorBoundary FallbackComponent={ErrorFallback}>
       <ActivityNotifications />
+    </ErrorBoundary>
+    <ErrorBoundary FallbackComponent={ErrorFallback}>
+      <NotificationToasts />
     </ErrorBoundary>
     <Toaster position="bottom-right" theme="dark" richColors />
     <ReactQueryDevtools initialIsOpen={false} />
