@@ -18,6 +18,7 @@ import {
   Check,
   FolderOpen,
   Laptop,
+  Layers,
   Radio,
   SlidersHorizontal,
   Zap,
@@ -27,7 +28,6 @@ import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { ImageTagChips } from '../ui/ImageTagChips';
-import { AppleSwitch } from '../ui/AppleSwitch';
 import { SelectorGroup } from '../ui/SelectorGroup';
 import { SelectorTile } from '../ui/SelectorTile';
 import { NvidiaIcon } from '../ui/icons/NvidiaIcon';
@@ -84,6 +84,7 @@ import {
   modelsForFamilyChoice,
 } from '../../src/services/instanceMatrix';
 import { isRuntimeProfile, type RuntimeProfile } from '../../src/types/runtime';
+import type { ImageVariant } from '../../src/hooks/useDocker';
 
 interface ServerViewProps {
   onStartServer: (
@@ -1190,6 +1191,66 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const selectedTagForActions = selectedImage;
   const selectedTagForStart = docker.images.length > 0 ? selectedTagForActions : undefined;
 
+  // ─── Image variant selection (Docker Image card) ──────────────────────────
+  // The active variant is a pure projection of existing settings — the
+  // runtime profile implies the vulkan repos, `useLegacyGpu` picks legacy vs
+  // default — so the selector adds no new persisted state or pull wiring:
+  // images are still only downloaded via "Fetch Fresh Image" or when the
+  // server starts. Note: the Vulkan Linux runtime is WIP; its tile mirrors
+  // the intended repo mapping, while actual pulls for that runtime keep
+  // targeting the default repo until the vulkan-linux wiring lands.
+
+  const activeImageVariant: ImageVariant =
+    runtimeProfile === 'vulkan-wsl2'
+      ? 'vulkan-wsl2'
+      : runtimeProfile === 'vulkan'
+        ? 'vulkan-linux'
+        : useLegacyGpu
+          ? 'cuda-legacy'
+          : 'cuda';
+
+  // Per-version availability from the four GHCR tag lists. Fail open: the
+  // default repo has been published since v0.4.4, so an empty `cuda` list
+  // means the probe itself failed (offline, GHCR down) — treat availability
+  // as unknown instead of disabling every tile.
+  const variantAvailability = useMemo(() => {
+    const vt = docker.variantTags;
+    if (!vt || (vt.cuda?.length ?? 0) === 0) return null;
+    return vt;
+  }, [docker.variantTags]);
+
+  const isVariantPublished = useCallback(
+    (variant: ImageVariant): boolean => {
+      if (!variantAvailability || !selectedImage) return true;
+      if (variantAvailability[variant]?.includes(selectedImage)) return true;
+      // A locally built/pulled tag counts for the active variant even when
+      // GHCR does not (or no longer) lists it — e.g. local dev builds.
+      return variant === activeImageVariant && localTagSet.has(selectedImage);
+    },
+    [variantAvailability, selectedImage, activeImageVariant, localTagSet],
+  );
+
+  // Switching image repos is blocked while a container exists — even a
+  // stopped container pins the runtime volume that the cuda ↔ cuda-legacy
+  // switch has to wipe (same rule as the retired Legacy GPU toggle).
+  const containerBlocksVariantSwitch = isRunning || containerStatus.exists;
+
+  // Variant tile click → the same confirmation flow the Legacy GPU toggle
+  // used (GH-83): the user acknowledges the restart + runtime-volume wipe
+  // before `server.useLegacyGpu` flips. The vulkan variants are implied by
+  // the Runtime selector, so their tiles never reach this handler.
+  const handleImageVariantSelect = useCallback(
+    (variant: ImageVariant) => {
+      if (variant !== 'cuda' && variant !== 'cuda-legacy') return;
+      const next = variant === 'cuda-legacy';
+      if (next === useLegacyGpu) return;
+      setPendingLegacyGpuValue(next);
+      setLegacyGpuWipeVolume(true);
+      setLegacyGpuDialogOpen(true);
+    },
+    [useLegacyGpu],
+  );
+
   // ─── Setup Checklist ────────────────────────────────────────────────────────
 
   const [setupDismissed, setSetupDismissed] = useState(true); // hide until loaded
@@ -1868,8 +1929,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       */}
                       {docker.remoteTagsStatus === 'not-published' && useLegacyGpu ? (
                         <div className="border-accent-amber/30 bg-accent-amber/5 rounded-lg border px-3 py-2 text-xs text-slate-400">
-                          Legacy image not yet published for this release. Pull a default image and
-                          toggle legacy mode off, or wait for the next release.
+                          Legacy image not yet published for this release. Switch the image variant
+                          below back to CUDA, or wait for the next release.
                         </div>
                       ) : (
                         <ImageTagChips
@@ -1931,6 +1992,119 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       </Button>
                     </div>
                   </div>
+                </div>
+                {/*
+                  Image variant selector — same visual language as the
+                  Instance Settings matrix (SelectorGroup + SelectorTile).
+                  Only cuda ↔ cuda-legacy is user-switchable here (this
+                  replaces the retired Legacy GPU toggle); the vulkan
+                  variants are implied by the Runtime selector and render
+                  locked (active) or disabled (inactive) so the whole
+                  variant matrix stays readable at a glance. Availability
+                  is per selected version tag: a variant whose GHCR package
+                  has no such tag shows a "Not published" badge.
+                */}
+                <div className="mt-6 border-t border-white/5 pt-4">
+                  <SelectorGroup
+                    icon={<Layers size={16} className="text-accent-cyan" />}
+                    title="Image Variant"
+                    hint="Which server image build this version uses"
+                    columnsClass="grid-cols-2 lg:grid-cols-4"
+                  >
+                    {(
+                      [
+                        {
+                          variant: 'cuda',
+                          label: 'CUDA',
+                          sublabel: 'Standard image',
+                          accent: 'green',
+                          icon: <NvidiaIcon size={16} />,
+                          runtimeOk: runtimeProfile === 'gpu' || runtimeProfile === 'cpu',
+                          runtimeBadge: 'Requires CUDA or CPU runtime',
+                        },
+                        {
+                          variant: 'cuda-legacy',
+                          label: 'CUDA Legacy',
+                          sublabel: 'GTX 10-series / 900-series and older',
+                          accent: 'amber',
+                          icon: <NvidiaIcon size={16} />,
+                          runtimeOk: runtimeProfile === 'gpu',
+                          runtimeBadge: 'Requires CUDA runtime',
+                        },
+                        {
+                          variant: 'vulkan-wsl2',
+                          label: 'Vulkan Windows',
+                          sublabel: 'AMD / Intel · WSL2',
+                          accent: 'red',
+                          icon: (
+                            <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                              <AmdIcon size={30} />
+                              <IntelIcon size={30} />
+                            </span>
+                          ),
+                          runtimeOk: runtimeProfile === 'vulkan-wsl2',
+                          runtimeBadge: 'Requires Vulkan Windows runtime',
+                        },
+                        {
+                          variant: 'vulkan-linux',
+                          label: 'Vulkan Linux',
+                          sublabel: 'AMD / Intel',
+                          accent: 'red',
+                          icon: (
+                            <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                              <AmdIcon size={30} />
+                              <IntelIcon size={30} />
+                            </span>
+                          ),
+                          runtimeOk: runtimeProfile === 'vulkan',
+                          runtimeBadge: 'Requires Vulkan Linux runtime',
+                        },
+                      ] satisfies Array<{
+                        variant: ImageVariant;
+                        label: string;
+                        sublabel: string;
+                        accent: 'green' | 'amber' | 'red';
+                        icon: React.ReactNode;
+                        runtimeOk: boolean;
+                        runtimeBadge: string;
+                      }>
+                    ).map((t) => {
+                      const isActiveTile = activeImageVariant === t.variant;
+                      const published = isVariantPublished(t.variant);
+                      const vulkanVariant =
+                        t.variant === 'vulkan-wsl2' || t.variant === 'vulkan-linux';
+                      const disabled =
+                        !isActiveTile &&
+                        (vulkanVariant ||
+                          !t.runtimeOk ||
+                          !published ||
+                          containerBlocksVariantSwitch);
+                      // Badge priority: version availability is the most
+                      // version-specific signal, then the runtime constraint,
+                      // then the container-pins-the-volume rule.
+                      const badge = disabled
+                        ? !published
+                          ? 'Not published'
+                          : vulkanVariant || !t.runtimeOk
+                            ? t.runtimeBadge
+                            : 'Remove container to switch'
+                        : undefined;
+                      return (
+                        <SelectorTile
+                          key={t.variant}
+                          icon={t.icon}
+                          label={t.label}
+                          sublabel={t.sublabel}
+                          accent={t.accent}
+                          selected={isActiveTile}
+                          disabled={disabled}
+                          locked={isActiveTile && vulkanVariant}
+                          badge={badge}
+                          onSelect={() => handleImageVariantSelect(t.variant)}
+                        />
+                      );
+                    })}
+                  </SelectorGroup>
                 </div>
                 {docker.operationError && (
                   <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
@@ -2264,43 +2438,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   )}
                 </div>
 
-                {/*
-                  Legacy-GPU image toggle (Issue #83 — Pascal/Maxwell support).
-                  Gated to GPU (CUDA) runtime only: the cu126 wheels are
-                  pointless on Vulkan, CPU, or Metal, and surfacing the toggle
-                  there would invite confusion. Pascal/Maxwell users must
-                  pick GPU (CUDA) first — the README's §2.4 note tells them so.
-                  Switching repos requires a container restart and clears the
-                  runtime volume so the next bootstrap re-syncs wheels from the
-                  new PyTorch index — this is handled via a confirmation dialog.
-                */}
-                {runtimeProfile === 'gpu' && (
-                  <div className="border-b border-white/5 pb-4">
-                    <AppleSwitch
-                      checked={useLegacyGpu}
-                      // Disabled when the container exists at all — even stopped
-                      // containers still hold a reference to the runtime volume,
-                      // so the wipe-on-toggle would silently fail. User must
-                      // remove the container (Stop + cleanup) before switching.
-                      disabled={isRunning || containerStatus.exists}
-                      onChange={(next) => {
-                        // Don't apply immediately — show the confirmation
-                        // dialog so the user acknowledges the restart
-                        // requirement and chooses the wipe-volume option.
-                        setPendingLegacyGpuValue(next);
-                        setLegacyGpuWipeVolume(true);
-                        setLegacyGpuDialogOpen(true);
-                      }}
-                      size="sm"
-                      label="Legacy GPU image"
-                      description={
-                        containerStatus.exists && !isRunning
-                          ? 'Remove the existing container to switch image variants'
-                          : 'Installs cu126 wheels for GTX 10-series / 900-series and older NVIDIA cards (Pascal / Maxwell, Tesla and Quadro P/M)'
-                      }
-                    />
-                  </div>
-                )}
+                {/* The Legacy GPU image toggle used to live here (GH-83) —
+                    it is now the CUDA Legacy tile in the Docker Image card's
+                    Image Variant selector, which reuses the same confirmation
+                    dialog + runtime-volume wipe flow below. */}
                 {runtimeProfile === 'vulkan' && !isRunning && sidecarNeeded && (
                   <div className="border-accent-rose/20 bg-accent-rose/5 flex items-center gap-3 rounded-lg border px-4 py-3">
                     {docker.sidecarPulling ? (
@@ -2688,7 +2829,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           <DialogPanel className="border-accent-orange/25 blur-panel w-full max-w-lg overflow-hidden rounded-3xl border bg-black/75 shadow-2xl backdrop-blur-xl">
             <div className="border-accent-orange/20 bg-accent-orange/10 border-b px-6 py-4">
               <DialogTitle className="text-accent-orange text-lg font-semibold">
-                {pendingLegacyGpuValue ? 'Enable legacy-GPU image?' : 'Disable legacy-GPU image?'}
+                {pendingLegacyGpuValue
+                  ? 'Switch to the CUDA Legacy image?'
+                  : 'Switch to the standard CUDA image?'}
               </DialogTitle>
               <p className="mt-1 text-sm text-slate-300">
                 {pendingLegacyGpuValue
@@ -2768,7 +2911,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         // GHCR repo. Fire-and-forget — refresh errors surface
                         // through the existing `remoteTagsStatus` channel.
                         void docker.refreshRemoteTags?.();
-                        const base = `${next ? 'Enabled' : 'Disabled'} legacy-GPU image. `;
+                        const base = `Switched to the ${next ? 'CUDA Legacy' : 'standard CUDA'} image. `;
                         if (legacyGpuWipeVolume && !result.runtimeVolumeWiped) {
                           // Wipe was requested but failed — tell the user so
                           // they know the runtime volume still holds old wheels.

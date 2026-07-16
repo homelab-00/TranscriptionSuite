@@ -18,6 +18,21 @@ export interface RemoteTag {
   created: string | null;
 }
 
+/**
+ * Server image variants shown in the Docker Image card. Mirrors the
+ * `ImageVariant` type in `electron/dockerManager.ts` — the active variant is
+ * a projection of the runtime profile + `server.useLegacyGpu`, not a new
+ * persisted setting.
+ */
+export type ImageVariant = 'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux';
+
+/**
+ * Version-tag lists per image variant from GHCR. An empty array means the
+ * variant is unpublished, private, or unreachable — either way it cannot be
+ * pulled right now.
+ */
+export type VariantTags = Record<ImageVariant, string[]>;
+
 export interface DockerImage {
   tag: string;
   fullName: string;
@@ -100,6 +115,12 @@ export interface UseDockerReturn {
   remoteTagsStatus: 'ok' | 'not-published' | 'error' | null;
   refreshRemoteTags: () => Promise<void>;
   /**
+   * Per-variant GHCR tag lists for the Docker Image card's variant selector,
+   * or null while loading / when the probe is unavailable (non-Electron).
+   * Fetched once on mount alongside the remote tags.
+   */
+  variantTags: VariantTags | null;
+  /**
    * GH-99: reset `remoteTags` / `remoteTagsStatus` to their initial empty
    * state. Called by `ServerView` on legacy-GPU toggle flip so stale chips
    * from the previous variant don't linger during the ~1-2s refetch window.
@@ -168,6 +189,7 @@ export function useDocker(): UseDockerReturn {
   const [remoteTagsStatus, setRemoteTagsStatus] = useState<'ok' | 'not-published' | 'error' | null>(
     null,
   );
+  const [variantTags, setVariantTags] = useState<VariantTags | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const volumeRefreshedOnHealthyRef = useRef(false);
@@ -290,6 +312,18 @@ export function useDocker(): UseDockerReturn {
   useEffect(() => {
     refreshRemoteTags();
   }, [refreshRemoteTags]);
+
+  // Fetch the per-variant tag lists once on mount. Purely informational
+  // (variant availability display) — a failure just leaves the selector
+  // failing open, so best-effort is fine here.
+  useEffect(() => {
+    const docker = api();
+    if (!docker?.listVariantTags) return;
+    docker
+      .listVariantTags()
+      .then(setVariantTags)
+      .catch(() => {});
+  }, []);
 
   /**
    * GH-99: clear cached remote tag state so the UI doesn't show stale chips
@@ -602,6 +636,7 @@ export function useDocker(): UseDockerReturn {
     remoteTags,
     remoteTagsStatus,
     refreshRemoteTags,
+    variantTags,
     clearRemoteTags,
     hasSidecarImage,
     pullSidecarImage,

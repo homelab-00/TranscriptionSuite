@@ -144,6 +144,9 @@ interface ElectronAPI {
       | { status: 'error'; tags: [] }
     >;
     fetchRemoteTagDates: (tags: string[]) => Promise<Record<string, string | null>>;
+    listVariantTags: () => Promise<
+      Record<'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux', string[]>
+    >;
     pullImage: (tag: string) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;
