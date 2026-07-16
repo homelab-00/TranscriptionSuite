@@ -272,6 +272,15 @@ interface ElectronAPI {
       timeoutMs?: number;
     }) => Promise<boolean>;
   };
+  notificationLog?: {
+    load: () => Promise<unknown[]>;
+    persist: (items: unknown[]) => Promise<void>;
+  };
+  mlx?: {
+    onStatusChanged: (
+      callback: (status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error') => void,
+    ) => () => void;
+  };
 }
 
 interface ComponentUpdateStatus {

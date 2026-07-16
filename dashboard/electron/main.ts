@@ -27,6 +27,7 @@ import {
 const execFileAsync = promisify(execFile);
 import Store from 'electron-store';
 import { CONTAINER_NAME, dockerManager, type StartContainerOptions } from './dockerManager.js';
+import { NotificationLog } from './notificationLog.js';
 import { StartupEventWatcher } from './startupEventWatcher.js';
 import { MLXServerManager, type MLXStartOptions } from './mlxServerManager.js';
 import { createMlxLogSink, type MlxLogSink } from './mlxLogSink.js';
@@ -120,6 +121,9 @@ if (process.platform === 'linux') {
 // would be lowercase because npm requires lowercase package names).
 app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'));
 app.setPath('crashDumps', path.join(app.getPath('appData'), 'TranscriptionSuite', 'Crashpad'));
+
+// Session notification log - wiped at boot and on quit (semi-persistent).
+const notificationLog = new NotificationLog(app.getPath('userData'));
 
 const isDev = !app.isPackaged;
 const CLIENT_LOG_DIR = 'logs';
@@ -2248,6 +2252,7 @@ function gracefulShutdown(): Promise<void> {
     launchWatchdog.destroy();
     await mlxServerManager.destroy();
     await watcherManager.destroyAll();
+    notificationLog.clear();
     shutdownLog('[Shutdown] Cleanup complete.');
   })();
 
@@ -2289,6 +2294,13 @@ if (!gotLock) {
 }
 
 app.whenReady().then(async () => {
+  // Fresh app session: drop any notification log a crashed session left behind.
+  notificationLog.clear();
+  ipcMain.handle('notificationLog:load', async () => notificationLog.load());
+  ipcMain.handle('notificationLog:persist', async (_event, items: unknown) => {
+    if (Array.isArray(items)) notificationLog.persist(items);
+  });
+
   // ─── Certificate Error Handler (LAN profile) ────────────────────────────
   // Tailscale certs only cover *.ts.net FQDNs, not IP addresses. LAN
   // connections will always fail TLS hostname validation. Accept the cert
