@@ -1,8 +1,9 @@
 /**
  * NotificationToasts - floating bottom-right toast stack over the
- * notifications store. Successor to ActivityNotifications: same placement
- * and card styling, but reads AppNotification records and dismissal only
- * hides the toast (the record stays in the Notifications view forever).
+ * notifications store. Successor to the legacy activity widget: same
+ * placement and card styling, but reads AppNotification records and
+ * dismissal only hides the toast (the record stays in the Notifications
+ * view forever).
  */
 
 import React, { useEffect } from 'react';

@@ -1,6 +1,7 @@
 /**
  * useNotificationBridge - the single renderer-side event funnel for the
- * session notifications store. Successor to useBootstrapDownloads.
+ * session notifications store. Successor to the legacy bootstrap-downloads
+ * bridge.
  *
  * Responsibilities:
  *  1. Hydrate the store from the semi-persistent session file, then persist

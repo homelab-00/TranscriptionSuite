@@ -1256,7 +1256,7 @@ ipcMain.handle('docker:getContainerStatus', async () => {
 
 // ─── Startup Event Watcher ────────────────────────────────────────────────
 // Watches the bind-mounted startup-events.jsonl file and forwards parsed
-// events to the renderer via IPC for the activityStore.
+// events to the renderer via IPC for the notifications store.
 
 const startupEventWatcher = new StartupEventWatcher();
 
