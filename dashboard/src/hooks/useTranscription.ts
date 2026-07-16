@@ -71,19 +71,28 @@ export interface TranscriptionState {
   jobId: string | null;
   /** Load an externally-fetched result into the hook (e.g. recovered from DB) */
   loadResult: (result: TranscriptionResult) => void;
-  /** Ephemeral "last N seconds" preview text (null until a preview is requested) */
+  /** Ephemeral "last N seconds" preview text (null until a preview has run) */
   previewText: string | null;
   /** Detected language of the most recent preview */
   previewLanguage?: string;
   /** Actual seconds of audio transcribed by the most recent preview */
   previewSeconds: number | null;
-  /** Whether a preview request is currently in flight */
+  /** Whether a preview refresh is currently in flight */
   previewLoading: boolean;
   /** Error message from the most recent preview attempt */
   previewError: string | null;
-  /** Request an ephemeral preview of the last `durationSeconds` of audio */
-  preview: (durationSeconds: number) => void;
+  /** Whether the rolling preview loop is running */
+  previewActive: boolean;
+  /** Start the rolling preview of the last `durationSeconds` of audio */
+  startPreview: (durationSeconds: number) => void;
+  /** Stop the rolling preview and clear its pane state */
+  stopPreview: () => void;
 }
+
+// Rolling-preview cadence: refresh every 5s measured send-to-send. The
+// adaptive delay in the preview_result handler stretches this for slow
+// models so transcription never exceeds a ~50% duty cycle.
+const PREVIEW_REFRESH_BASE_MS = 5000;
 
 export function useTranscription(): TranscriptionState {
   const [status, setStatus] = useState<TranscriptionStatus>('idle');
@@ -101,9 +110,17 @@ export function useTranscription(): TranscriptionState {
   const [previewSeconds, setPreviewSeconds] = useState<number | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  // Ref guard so the preview() callback can reject overlapping requests without
+  const [previewActive, setPreviewActive] = useState(false);
+  // Ref guard so refresh scheduling can reject overlapping requests without
   // a stale-closure read of previewLoading.
   const previewLoadingRef = useRef(false);
+  // Ref mirror of previewActive for the WS message handler and timer callbacks.
+  const previewActiveRef = useRef(false);
+  // Window length the active rolling preview was started with.
+  const previewDurationRef = useRef(20);
+  // Date.now() when the in-flight refresh was sent — drives the adaptive delay.
+  const previewSentAtRef = useRef(0);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const socketRef = useRef<TranscriptionSocket | null>(null);
   const captureRef = useRef<AudioCapture | null>(null);
@@ -139,6 +156,13 @@ export function useTranscription(): TranscriptionState {
   // so the server can finish and the poll-for-result fallback can recover
   useEffect(() => {
     return () => {
+      // Always kill a pending preview refresh — nothing is listening for the
+      // result after unmount, and previews are trivially reproducible.
+      if (previewTimerRef.current !== null) {
+        clearTimeout(previewTimerRef.current);
+        previewTimerRef.current = null;
+      }
+      previewActiveRef.current = false;
       const active = statusRef.current === 'recording' || statusRef.current === 'processing';
       if (!active) {
         pollCancelledRef.current = true;
@@ -161,6 +185,66 @@ export function useTranscription(): TranscriptionState {
       socketRef.current?.handleConfigChanged(apiClient.isBaseUrlConfigured());
     });
   }, []);
+
+  // Halt the rolling preview loop (flag + pending timer) without touching the
+  // pane state — preview_error keeps its message visible after the loop dies.
+  const haltPreviewLoop = useCallback(() => {
+    previewActiveRef.current = false;
+    setPreviewActive(false);
+    if (previewTimerRef.current !== null) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+  }, []);
+
+  const sendPreviewRequest = useCallback(() => {
+    if (!previewActiveRef.current || statusRef.current !== 'recording') return;
+    // Reject overlapping requests (server also guards, this avoids spamming).
+    if (previewLoadingRef.current) return;
+    previewLoadingRef.current = true;
+    setPreviewLoading(true);
+    previewSentAtRef.current = Date.now();
+    socketRef.current?.sendJSON({
+      type: 'preview',
+      data: { duration_seconds: previewDurationRef.current },
+    });
+  }, []);
+
+  const stopPreview = useCallback(() => {
+    haltPreviewLoop();
+    // previewLoadingRef is intentionally NOT cleared: it tracks whether a
+    // request is still on the wire. The socket stays open, so the server's
+    // response WILL arrive and clear it — and until then a new startPreview
+    // must not send a second 'preview' (the server rejects overlaps).
+    setPreviewLoading(false);
+    setPreviewText(null);
+    setPreviewLanguage(undefined);
+    setPreviewSeconds(null);
+    setPreviewError(null);
+  }, [haltPreviewLoop]);
+
+  const startPreview = useCallback(
+    (durationSeconds: number) => {
+      // Preview only makes sense during an active recording; ignore otherwise.
+      if (statusRef.current !== 'recording') return;
+      if (previewActiveRef.current) return;
+      previewActiveRef.current = true;
+      setPreviewActive(true);
+      setPreviewError(null);
+      previewDurationRef.current = durationSeconds;
+      if (previewLoadingRef.current) {
+        // A response from before a quick off/on toggle is still on the wire.
+        // Adopt it: the preview_result handler sees the loop active again,
+        // displays it, and schedules the next refresh. Sending now would be
+        // rejected server-side ('Preview already in progress') and the
+        // resulting preview_error would spuriously kill the new loop.
+        setPreviewLoading(true);
+        return;
+      }
+      sendPreviewRequest();
+    },
+    [sendPreviewRequest],
+  );
 
   const handleMessage = useCallback(
     (msg: ServerMessage) => {
@@ -296,19 +380,40 @@ export function useTranscription(): TranscriptionState {
           break;
         }
 
-        case 'preview_result':
+        case 'preview_result': {
           previewLoadingRef.current = false;
           setPreviewLoading(false);
+          // A late result landing after stopPreview() — the pane is already
+          // cleared and hidden; don't resurrect it.
+          if (!previewActiveRef.current) break;
           setPreviewText((msg.data?.text as string) ?? '');
           setPreviewLanguage(msg.data?.language as string | undefined);
           setPreviewSeconds((msg.data?.actual_seconds as number) ?? null);
           setPreviewError(null);
+          if (statusRef.current === 'recording') {
+            // Aim for one refresh every PREVIEW_REFRESH_BASE_MS send-to-send,
+            // but a refresh that took T ms waits at least T ms before the next
+            // one, capping transcription at a ~50% duty cycle on slow models.
+            const elapsedMs = Date.now() - previewSentAtRef.current;
+            const delayMs = Math.max(PREVIEW_REFRESH_BASE_MS - elapsedMs, elapsedMs);
+            // Defensive: never leave two refresh timers alive.
+            if (previewTimerRef.current !== null) {
+              clearTimeout(previewTimerRef.current);
+            }
+            previewTimerRef.current = setTimeout(() => {
+              previewTimerRef.current = null;
+              sendPreviewRequest();
+            }, delayMs);
+          }
           break;
+        }
 
         case 'preview_error':
           previewLoadingRef.current = false;
           setPreviewLoading(false);
           setPreviewError((msg.data?.message as string) ?? 'Preview failed');
+          // A failed refresh ends the loop; the user re-toggles to retry.
+          haltPreviewLoop();
           break;
 
         case 'vad_start':
@@ -323,6 +428,7 @@ export function useTranscription(): TranscriptionState {
         case 'error':
           setError((msg.data?.message as string) ?? 'Transcription error');
           setStatusTracked('error');
+          haltPreviewLoop();
           previewLoadingRef.current = false;
           setPreviewLoading(false);
           captureRef.current?.stop();
@@ -330,7 +436,7 @@ export function useTranscription(): TranscriptionState {
           break;
       }
     },
-    [setStatusTracked],
+    [setStatusTracked, haltPreviewLoop, sendPreviewRequest],
   );
 
   const start = useCallback(
@@ -351,11 +457,9 @@ export function useTranscription(): TranscriptionState {
       setMuted(false);
       jobIdRef.current = null;
       setJobId(null);
-      setPreviewText(null);
-      setPreviewLanguage(undefined);
-      setPreviewSeconds(null);
-      setPreviewError(null);
-      setPreviewLoading(false);
+      stopPreview();
+      // The old socket is being replaced — any in-flight preview response is
+      // lost with it, so the wire flag must not carry into the new session.
       previewLoadingRef.current = false;
       startOptsRef.current = options ?? {};
 
@@ -367,6 +471,7 @@ export function useTranscription(): TranscriptionState {
         onError: (err) => {
           setError(err);
           setStatusTracked('error');
+          haltPreviewLoop();
           previewLoadingRef.current = false;
           setPreviewLoading(false);
           captureRef.current?.stop();
@@ -375,6 +480,12 @@ export function useTranscription(): TranscriptionState {
         onClose: () => {
           captureRef.current?.stop();
           setAnalyser(null);
+          // onClose only fires for UNINTENTIONAL closes (disconnect() detaches
+          // it), so the socket is gone: an in-flight preview response can never
+          // arrive. Kill the loop and the wire flag, or the stuck previewLoading
+          // guard would block every future refresh — even across a reconnect.
+          stopPreview();
+          previewLoadingRef.current = false;
 
           // If we were processing when the socket closed, poll for the result
           const currentJobId = jobIdRef.current;
@@ -438,11 +549,14 @@ export function useTranscription(): TranscriptionState {
       });
       socketRef.current.connect();
     },
-    [handleMessage, setStatusTracked],
+    [handleMessage, setStatusTracked, stopPreview, haltPreviewLoop],
   );
 
   const stop = useCallback(() => {
     if (status === 'recording') {
+      // The rolling preview only exists during recording — halt it so no
+      // refresh fires into the processing phase.
+      haltPreviewLoop();
       // Tell the server to stop and produce the final result
       socketRef.current?.sendJSON({ type: 'stop' });
       // Stop audio capture immediately
@@ -450,7 +564,7 @@ export function useTranscription(): TranscriptionState {
       setAnalyser(null);
       setStatusTracked('processing');
     }
-  }, [status, setStatusTracked]);
+  }, [status, setStatusTracked, haltPreviewLoop]);
 
   const reset = useCallback(() => {
     captureRef.current?.stop();
@@ -464,27 +578,10 @@ export function useTranscription(): TranscriptionState {
     setProcessingProgress(null);
     jobIdRef.current = null;
     setJobId(null);
-    setPreviewText(null);
-    setPreviewLanguage(undefined);
-    setPreviewSeconds(null);
-    setPreviewError(null);
-    setPreviewLoading(false);
+    stopPreview();
+    // reset() disconnects the socket — the in-flight response (if any) is lost.
     previewLoadingRef.current = false;
-  }, [setStatusTracked]);
-
-  const preview = useCallback((durationSeconds: number) => {
-    // Preview only makes sense during an active recording; ignore otherwise.
-    if (statusRef.current !== 'recording') return;
-    // Reject overlapping requests (server also guards, this avoids spamming).
-    if (previewLoadingRef.current) return;
-    previewLoadingRef.current = true;
-    setPreviewLoading(true);
-    setPreviewError(null);
-    socketRef.current?.sendJSON({
-      type: 'preview',
-      data: { duration_seconds: durationSeconds },
-    });
-  }, []);
+  }, [setStatusTracked, stopPreview]);
 
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
@@ -530,6 +627,8 @@ export function useTranscription(): TranscriptionState {
     previewSeconds,
     previewLoading,
     previewError,
-    preview,
+    previewActive,
+    startPreview,
+    stopPreview,
   };
 }
