@@ -534,6 +534,7 @@ def _ensure_ggml_model_present(model_name: str) -> bool:
         try:
             os.remove(tmp)
         except OSError:
+            # Best-effort cleanup of the partial .tmp download; absence is fine.
             pass
         raise RuntimeError(
             _GGML_DOWNLOAD_FAILED_MSG.format(filename=filename, url=url, error=repr(exc))
