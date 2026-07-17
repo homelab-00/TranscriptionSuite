@@ -7,17 +7,22 @@ trained, so ς encodes to ``<unk>`` (id 0) and the models cannot write it.
 Upstream defect report (open, unanswered):
 https://huggingface.co/nvidia/canary-1b-v2/discussions/26
 
-The two model families fail differently:
+How the missing letter surfaces depends on the audio:
 
-* **Canary (AED)** emits the ``<unk>`` token at each final-sigma position and
-  SentencePiece renders it as " ⁇ " (U+2047) in the decoded text. That marker
-  deterministically locates the missing ς, so it can be repaired here.
-* **Parakeet (RNNT/TDT)** emits nothing at those positions - the sigma is
-  unrecoverable, so its backend only logs a warning for Greek requests.
+* On unnaturally crisp synthetic speech, **Canary (AED)** emits the ``<unk>``
+  token at final-sigma positions and SentencePiece renders it as " ⁇ "
+  (U+2047) in the decoded text. That marker deterministically locates the
+  missing ς and is repaired here.
+* On natural speech both families - Canary included - emit **nothing** at
+  those positions (verified against real recordings: y_sequence contains no
+  unk id under any decoding configuration). Nothing marker-based can help
+  there; the linguistic LLM restoration in ``greek_sigma_llm.py`` covers it.
 
-The repair is deliberately conservative: a marker is rewritten to ς only when
-it directly follows a Greek letter (ς is word-final only, so it always follows
-one). Markers in any other position are left untouched.
+This marker repair is kept because it is free, deterministic, and guarantees
+no " ⁇ " garbage ever reaches the user (or the LLM pass). It is deliberately
+conservative: a marker is rewritten to ς only when it directly follows a
+Greek letter (ς is word-final only, so it always follows one). Markers in any
+other position are left untouched.
 """
 
 from __future__ import annotations

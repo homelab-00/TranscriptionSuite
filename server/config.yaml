@@ -475,6 +475,16 @@ local_llm:
     # API key for authenticated providers (leave empty for local servers)
     api_key: ""
 
+    # Restore Greek final sigmas (ς) in NVIDIA NeMo transcriptions using the
+    # LLM above. The NeMo models (Canary/Parakeet) cannot write ς at all - an
+    # upstream tokenizer defect - so Greek word endings come out truncated
+    # ("σας" becomes "σα"). When enabled and the provider is reachable, the
+    # server asks the LLM to re-insert the sigmas and accepts its reply
+    # through a strict guard that only permits appending ς (or fixing a final
+    # σ) per word - the transcript cannot be otherwise altered. Applies to
+    # longform/file transcriptions with Greek output on NeMo models only.
+    greek_sigma_repair: true
+
     # Model ID to use (e.g. "gpt-4o", "llama-3.1-8b-instruct").
     # If empty, auto-detected from the provider's loaded models.
     # model: ""

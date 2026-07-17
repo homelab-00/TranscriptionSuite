@@ -155,11 +155,13 @@ class CanaryBackend(ParakeetBackend):
                 word_timestamps=word_timestamps,
             )
 
-        # Canary's tokenizer has no ς (U+03C2): the model emits <unk> at every
-        # Greek final-sigma position, rendered as " ⁇ " in the decoded text.
-        # Deterministically restore the sigma whenever Greek is the OUTPUT
-        # language (el transcription, or translation into el). See
-        # greek_sigma.py and https://huggingface.co/nvidia/canary-1b-v2/discussions/26
+        # Canary's tokenizer has no ς (U+03C2). On synthetic/crisp audio the
+        # model emits <unk> at final-sigma positions, rendered " ⁇ " in the
+        # decoded text - deterministically restored here whenever Greek is the
+        # OUTPUT language (el transcription, or translation into el). On real
+        # speech nothing is emitted and the marker never appears; the LLM pass
+        # in greek_sigma_llm.py (applied in engine.transcribe_file) covers it.
+        # See greek_sigma.py and https://huggingface.co/nvidia/canary-1b-v2/discussions/26
         if target_lang == "el":
             segments = repair_segments_greek_final_sigma(segments)
 

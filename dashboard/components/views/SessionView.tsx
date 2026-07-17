@@ -1806,9 +1806,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
                             <span>{recordingDisabledReason}</span>
                           </div>
                         )}
-                      {/* NeMo Parakeet tokenizers lack ς (U+03C2) and silently
-                        truncate Greek word endings; Canary is auto-repaired
-                        server-side. See modelCapabilities.truncatesGreekFinalSigma. */}
+                      {/* NeMo tokenizers lack ς (U+03C2) and truncate Greek word
+                        endings on real speech; the server restores them via the
+                        configured AI provider (local_llm.greek_sigma_repair).
+                        See modelCapabilities.truncatesGreekFinalSigma. */}
                       {truncatesGreekFinalSigma(activeModel) && mainLanguage === 'Greek' && (
                         <div
                           data-testid="greek-sigma-warning-main"
@@ -1816,9 +1817,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         >
                           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                           <span>
-                            This model cannot write the Greek final sigma (ς): word endings will be
-                            truncated ("σας" becomes "σα"). Prefer a Canary or Whisper model for
-                            Greek.
+                            NVIDIA models cannot write the Greek final sigma (ς). The server
+                            restores the endings through your AI provider (Settings, AI tab) when it
+                            is running; without it, word endings will be truncated ("σας" becomes
+                            "σα"). Whisper models are unaffected.
                           </span>
                         </div>
                       )}
@@ -1829,9 +1831,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         >
                           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                           <span>
-                            The live model cannot write the Greek final sigma (ς): live Greek
-                            transcripts will have truncated word endings. Prefer a Whisper live
-                            model for Greek.
+                            The live model cannot write the Greek final sigma (ς), and Live Mode
+                            skips the AI repair to stay fast. Live Greek transcripts will have
+                            truncated word endings; prefer a Whisper live model for Greek.
                           </span>
                         </div>
                       )}

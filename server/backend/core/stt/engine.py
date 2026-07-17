@@ -833,7 +833,7 @@ class AudioToTextRecorder:
                     sensitivity=vad_sensitivity,
                 )
 
-        return self.transcribe_audio(
+        result = self.transcribe_audio(
             audio_data,
             sample_rate=loaded_sample_rate,
             language=language,
@@ -844,6 +844,17 @@ class AudioToTextRecorder:
             cancellation_check=cancellation_check,
             progress_callback=progress_callback,
         )
+
+        # NeMo tokenizers cannot write the Greek final sigma (ς); on real
+        # speech nothing recoverable is emitted, so restore the endings
+        # linguistically via the configured LLM provider. Applied here (not in
+        # transcribe_audio) so the ephemeral rolling-preview path is never
+        # taxed with an LLM round-trip. All gating lives in the helper; it
+        # never raises and returns the input unchanged when repair does not
+        # apply. See greek_sigma_llm.py for the full defect analysis.
+        from server.core.stt.greek_sigma_llm import repair_transcription_result
+
+        return repair_transcription_result(result, backend_name=backend_name)
 
     def transcribe_audio(
         self,
