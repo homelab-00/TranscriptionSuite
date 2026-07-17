@@ -888,6 +888,18 @@ function createWindow(): void {
     mlxLogSink.flush();
   });
 
+  // GH-230: the renderer owns the loopback module lifecycle (loopbackOwner),
+  // so a renderer crash or reload (Ctrl+R) orphans any held module — nothing
+  // on the new page knows it exists. Sweep it here.
+  mainWindow.webContents.on('render-process-gone', () => {
+    if (process.platform === 'linux') void enqueueLoopbackOp(sweepStaleLoopbackModules);
+  });
+  mainWindow.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument && process.platform === 'linux') {
+      void enqueueLoopbackOp(sweepStaleLoopbackModules);
+    }
+  });
+
   // M6 stable-launch confirmation is handled by the
   // `updates:rendererReady` ipcMain.on handler — the renderer emits the
   // signal after its initial mount completes, which is the only signal
@@ -1463,76 +1475,138 @@ ipcMain.handle(
   },
 );
 
+// GH-230: serialize create/remove so overlapping IPC (or a removal racing a
+// re-create) can never interleave pactl subprocesses.
+let loopbackIpcChain: Promise<unknown> = Promise.resolve();
+function enqueueLoopbackOp<T>(op: () => Promise<T>): Promise<T> {
+  const run = loopbackIpcChain.then(op, op);
+  loopbackIpcChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/**
+ * Unload any module-remap-source named tsuite_loopback, including strays a
+ * crashed previous run left behind (GH-230). Without the sweep a stale module
+ * keeps the OS microphone indicator lit from boot AND makes the next
+ * load-module fail because the source name is already taken.
+ */
+async function sweepStaleLoopbackModules(): Promise<void> {
+  try {
+    // NOTE: `pactl -f json list modules` is useless here — on PipeWire the
+    // JSON objects carry NO index field (empirically verified: keys are
+    // name/argument/usage_counter/properties). Parse the tab-separated short
+    // listing instead: entry lines are `<index>\tmodule-remap-source\t<args>`
+    // and our remap-source argument is always single-line (brace-style
+    // multi-line arguments only occur for other module types).
+    const { stdout } = await execFileAsync('pactl', ['list', 'short', 'modules']);
+    for (const line of stdout.split('\n')) {
+      const m = /^(\d+)\tmodule-remap-source\t(.*)$/.exec(line);
+      if (m !== null && m[2].includes('source_name=tsuite_loopback')) {
+        try {
+          await execFileAsync('pactl', ['unload-module', m[1]]);
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+    loopbackModuleId = null;
+  } catch {
+    // Listing failed (pactl missing or transient exec failure) — degrade to
+    // the tracked-id unload rather than silently dropping the id, which
+    // would turn the remove/quit safety nets into no-ops for a live module.
+    if (loopbackModuleId !== null) {
+      try {
+        await execFileAsync('pactl', ['unload-module', String(loopbackModuleId)]);
+      } catch {
+        /* already gone */
+      }
+      loopbackModuleId = null;
+    }
+  }
+}
+
 /** Create a virtual mic from a sink's monitor source. */
-ipcMain.handle('audio:createMonitorLoopback', async (_e, sinkName: string) => {
-  // Clean up any previous loopback first
-  if (loopbackModuleId !== null) {
+ipcMain.handle('audio:createMonitorLoopback', async (_e, sinkName: string) =>
+  enqueueLoopbackOp(async () => {
+    // GH-230: a create queued behind the chain can otherwise run AFTER
+    // gracefulShutdown() already unloaded the module, re-loading one that
+    // then leaks past app.exit(0).
+    if (isQuitting) {
+      throw new Error('App is shutting down — refusing to create the loopback module');
+    }
+    // Clean up any previous loopback first — ours or a stale one from a
+    // crashed run (the sweep covers the tracked id too).
+    await sweepStaleLoopbackModules();
+    const { stdout } = await execFileAsync('pactl', [
+      'load-module',
+      'module-remap-source',
+      `master=${sinkName}.monitor`,
+      'source_name=tsuite_loopback',
+      'source_properties=device.description=TranscriptionSuite_Loopback',
+    ]);
+    loopbackModuleId = parseInt(stdout.trim(), 10);
+
+    // Ensure both the master monitor source and the virtual remap source are at
+    // 100 % (0 dB).  PipeWire/PulseAudio may inherit a lower volume from the
+    // sink, causing very faint capture on some devices (e.g. headphone outputs
+    // whose sink volume is low).  65536 = 100 % in PulseAudio volume units.
+    try {
+      await execFileAsync('pactl', ['set-source-volume', `${sinkName}.monitor`, '65536']);
+    } catch {
+      /* best-effort — some sinks may not allow volume changes */
+    }
+    try {
+      await execFileAsync('pactl', ['set-source-volume', 'tsuite_loopback', '65536']);
+    } catch {
+      /* best-effort */
+    }
+
+    // Read back the effective volume to return as a diagnostic percentage.
+    let volumePct: number | null = null;
+    try {
+      const { stdout: srcJson } = await execFileAsync('pactl', ['-f', 'json', 'list', 'sources']);
+      const sources = JSON.parse(srcJson) as Array<{
+        name: string;
+        volume: Record<string, { value_percent: string }>;
+      }>;
+      const loopSrc = sources.find((s) => s.name === 'tsuite_loopback');
+      if (loopSrc?.volume) {
+        const firstCh = Object.values(loopSrc.volume)[0];
+        if (firstCh?.value_percent) {
+          volumePct = parseInt(firstCh.value_percent, 10);
+        }
+      }
+    } catch {
+      /* diagnostic only — non-fatal */
+    }
+
+    return { moduleId: loopbackModuleId, volumePct };
+  }),
+);
+
+/** Remove the virtual mic. */
+ipcMain.handle('audio:removeMonitorLoopback', async () =>
+  enqueueLoopbackOp(async () => {
+    if (loopbackModuleId === null) return;
     try {
       await execFileAsync('pactl', ['unload-module', String(loopbackModuleId)]);
     } catch {
       /* already gone */
     }
     loopbackModuleId = null;
-  }
-  const { stdout } = await execFileAsync('pactl', [
-    'load-module',
-    'module-remap-source',
-    `master=${sinkName}.monitor`,
-    'source_name=tsuite_loopback',
-    'source_properties=device.description=TranscriptionSuite_Loopback',
-  ]);
-  loopbackModuleId = parseInt(stdout.trim(), 10);
+  }),
+);
 
-  // Ensure both the master monitor source and the virtual remap source are at
-  // 100 % (0 dB).  PipeWire/PulseAudio may inherit a lower volume from the
-  // sink, causing very faint capture on some devices (e.g. headphone outputs
-  // whose sink volume is low).  65536 = 100 % in PulseAudio volume units.
-  try {
-    await execFileAsync('pactl', ['set-source-volume', `${sinkName}.monitor`, '65536']);
-  } catch {
-    /* best-effort — some sinks may not allow volume changes */
-  }
-  try {
-    await execFileAsync('pactl', ['set-source-volume', 'tsuite_loopback', '65536']);
-  } catch {
-    /* best-effort */
-  }
-
-  // Read back the effective volume to return as a diagnostic percentage.
-  let volumePct: number | null = null;
-  try {
-    const { stdout: srcJson } = await execFileAsync('pactl', ['-f', 'json', 'list', 'sources']);
-    const sources = JSON.parse(srcJson) as Array<{
-      name: string;
-      volume: Record<string, { value_percent: string }>;
-    }>;
-    const loopSrc = sources.find((s) => s.name === 'tsuite_loopback');
-    if (loopSrc?.volume) {
-      const firstCh = Object.values(loopSrc.volume)[0];
-      if (firstCh?.value_percent) {
-        volumePct = parseInt(firstCh.value_percent, 10);
-      }
-    }
-  } catch {
-    /* diagnostic only — non-fatal */
-  }
-
-  return { moduleId: loopbackModuleId, volumePct };
-});
-
-/** Remove the virtual mic. */
-ipcMain.handle('audio:removeMonitorLoopback', async () => {
-  if (loopbackModuleId === null) return;
-  try {
-    await execFileAsync('pactl', ['unload-module', String(loopbackModuleId)]);
-  } catch {
-    /* already gone */
-  }
-  loopbackModuleId = null;
-});
-
-// Safety-net: clean up the loopback module on quit so it doesn't linger.
-app.on('will-quit', () => {
+/**
+ * Synchronous unload for shutdown paths (GH-230). Registered on will-quit AND
+ * called from gracefulShutdown(): every real quit path (before-quit handler,
+ * SIGINT/SIGTERM/SIGHUP) funnels through gracefulShutdown() and ends in
+ * app.exit(0), which SKIPS will-quit — so will-quit alone never fired.
+ */
+function unloadLoopbackModuleSync(): void {
   if (loopbackModuleId !== null && process.platform === 'linux') {
     try {
       execFileSync('pactl', ['unload-module', String(loopbackModuleId)]);
@@ -1541,7 +1615,10 @@ app.on('will-quit', () => {
     }
     loopbackModuleId = null;
   }
-});
+}
+
+// Safety-net: clean up the loopback module on quit so it doesn't linger.
+app.on('will-quit', unloadLoopbackModuleSync);
 
 // Kill any lingering wl-copy child on quit.
 app.on('will-quit', cleanupClipboard);
@@ -2155,6 +2232,9 @@ function gracefulShutdown(): Promise<void> {
   isQuitting = true;
 
   shutdownPromise = (async () => {
+    // GH-230: unload the Linux loopback module first — every real quit path
+    // funnels through here and then app.exit(0), which skips will-quit.
+    unloadLoopbackModuleSync();
     flushMainProcessLogRemainders();
     // Kill the container sentinel before we stop the container ourselves —
     // prevents both racing to docker-stop.
@@ -2298,6 +2378,11 @@ if (!gotLock) {
 }
 
 app.whenReady().then(async () => {
+  // GH-230: a crashed previous run can leave a tsuite_loopback module behind,
+  // keeping the OS microphone indicator lit from boot and blocking the next
+  // load-module (source name taken). Sweep it before anything records.
+  if (process.platform === 'linux') void enqueueLoopbackOp(sweepStaleLoopbackModules);
+
   // Fresh app session: drop any notification log a crashed session left behind.
   notificationLog.clear();
   ipcMain.handle('notificationLog:load', async () => notificationLog.load());

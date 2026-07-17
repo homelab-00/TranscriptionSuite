@@ -49,10 +49,22 @@ let lastCapture: {
   isCapturing: boolean;
 };
 
+// When set, the NEXT AudioCapture instance's start() rejects with this error
+// (consumed once). Lets tests exercise the capture-start failure paths even
+// though instances are created inside the session_started handler.
+let nextCaptureStartRejection: Error | null = null;
+
 vi.mock('../services/audioCapture', () => ({
   AudioCapture: vi.fn().mockImplementation(function () {
     lastCapture = {
-      start: vi.fn().mockResolvedValue(undefined),
+      start: vi.fn().mockImplementation(() => {
+        if (nextCaptureStartRejection !== null) {
+          const err = nextCaptureStartRejection;
+          nextCaptureStartRejection = null;
+          return Promise.reject(err);
+        }
+        return Promise.resolve(undefined);
+      }),
       stop: vi.fn(),
       mute: vi.fn(),
       unmute: vi.fn(),
@@ -868,6 +880,51 @@ describe('[P1] useTranscription', () => {
       expect(result.current.previewError).toBeNull();
       expect(result.current.previewLoading).toBe(false);
       expect(result.current.previewActive).toBe(false);
+    });
+  });
+
+  // ── GH-230: system-audio option pass-through ─────────────────────────
+  //
+  // The Linux loopback module lifecycle is owned by AudioCapture/loopbackOwner;
+  // the hook's only responsibility is to hand the selected sink through to
+  // capture.start() so the capture can acquire the module.
+
+  describe('GH-230: monitorSinkName pass-through', () => {
+    it('passes systemAudio + monitorSinkName to AudioCapture.start on session_started', async () => {
+      const { result } = renderHook(() => useTranscription());
+      act(() => {
+        result.current.start({ systemAudio: true, monitorSinkName: 'alsa_output.sink' });
+      });
+      await act(async () => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      await act(async () => {
+        lastSocketCbs.onMessage!({
+          type: 'session_started',
+          data: { job_id: 'job-sys', capture_sample_rate_hz: 16000 },
+        });
+      });
+
+      expect(lastCapture.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemAudio: true,
+          monitorSinkName: 'alsa_output.sink',
+        }),
+      );
+    });
+
+    it('a capture start aborted by a racing stop() does NOT flip the hook to error', async () => {
+      const abort = new Error('Audio capture start aborted by stop()');
+      abort.name = 'AbortError';
+      nextCaptureStartRejection = abort;
+
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      expect(result.current.status).not.toBe('error');
+      expect(result.current.error).toBeNull();
+      // The socket was NOT torn down by the swallowed abort.
+      expect(lastSocket.disconnect).not.toHaveBeenCalled();
     });
   });
 });

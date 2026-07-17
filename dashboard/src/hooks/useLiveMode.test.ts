@@ -633,4 +633,45 @@ describe('[P1] useLiveMode', () => {
       });
     });
   });
+
+  // ── GH-230: capture teardown + system-audio pass-through ─────────────
+
+  describe('GH-230: server STOPPED state and monitorSinkName', () => {
+    it("'state' STOPPED stops the capture and clears the analyser", async () => {
+      // Pre-fix the STOPPED branch only reset the status: the capture kept
+      // streaming into a dead session and the Linux loopback module stayed
+      // held (OS mic indicator lit forever).
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+      expect(lastCapture.stop).not.toHaveBeenCalled();
+
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'state', data: { state: 'STOPPED' } });
+      });
+
+      expect(lastCapture.stop).toHaveBeenCalledTimes(1);
+      expect(result.current.status).toBe('idle');
+      expect(result.current.analyser).toBeNull();
+    });
+
+    it('passes systemAudio + monitorSinkName to AudioCapture.start on LISTENING', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      act(() => {
+        result.current.start({ systemAudio: true, monitorSinkName: 'alsa_output.sink' });
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      await act(async () => {
+        lastSocketCbs.onMessage!({ type: 'state', data: { state: 'LISTENING' } });
+      });
+
+      expect(lastCapture.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemAudio: true,
+          monitorSinkName: 'alsa_output.sink',
+        }),
+      );
+    });
+  });
 });
