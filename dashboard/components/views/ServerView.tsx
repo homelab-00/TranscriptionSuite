@@ -211,8 +211,10 @@ function mapLiveModelToSelection(modelName: string, mainModelName: string): stri
   }
 
   const normalizedLiveModel = normalizeLiveModelToWhisper(modelName);
+  // Same-as-main requires a Whisper (faster-whisper) main; a whisper.cpp main
+  // with live==main maps to the explicit GGML preset below instead.
   if (
-    isLiveCompatibleModel(mainModelName) &&
+    isWhisperModel(mainModelName) &&
     normalizeModelName(normalizedLiveModel) === normalizeModelName(mainModelName)
   ) {
     return LIVE_MODEL_SAME_AS_MAIN_OPTION;
@@ -1031,16 +1033,26 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   ]);
 
   // Hard-reset any non-Live-compatible model selection to the default whisper model.
-  // Live Mode accepts faster-whisper and whisper.cpp (GGML) backends.
+  // Live Mode accepts faster-whisper and whisper.cpp (GGML) backends, but the
+  // Same-as-main tile additionally requires a faster-whisper main: with a
+  // whisper.cpp main, Same-as-main is demoted to an explicit GGML pick of the
+  // same model (or the whisper default if that GGML has no live role).
   useEffect(() => {
+    if (!localSelectionsHydrated || activeLiveModel === DISABLED_MODEL_SENTINEL) return;
     if (
-      !localSelectionsHydrated ||
-      activeLiveModel === DISABLED_MODEL_SENTINEL ||
-      isLiveCompatibleModel(activeLiveModel)
-    )
+      liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION &&
+      isWhisperCppModel(activeLiveModel)
+    ) {
+      setLiveModelSelection(
+        LIVE_MODEL_PRESETS.includes(activeLiveModel)
+          ? activeLiveModel
+          : FALLBACK_LIVE_WHISPER_MODEL,
+      );
       return;
+    }
+    if (isLiveCompatibleModel(activeLiveModel)) return;
     setLiveModelSelection(FALLBACK_LIVE_WHISPER_MODEL);
-  }, [activeLiveModel, localSelectionsHydrated]);
+  }, [activeLiveModel, liveModelSelection, localSelectionsHydrated]);
 
   // Metal mode: auto-switch a non-MLX main model to the MLX default.
   useEffect(() => {
