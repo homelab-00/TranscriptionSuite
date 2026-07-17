@@ -59,6 +59,7 @@ def transcribe_then_diarize(
     # Phase 1 — Transcribe
     # ------------------------------------------------------------------
     logger.info("Starting sequential transcription (transcribe-then-diarize)")
+    model_manager.job_tracker.set_phase("transcribing")
     result = engine.transcribe_file(
         file_path,
         language=language,
@@ -75,6 +76,9 @@ def transcribe_then_diarize(
     # Phase 2 — Diarize
     # ------------------------------------------------------------------
     try:
+        # The diarizing phase includes the model swap — the swap is part of
+        # the wait the user experiences (GH-211).
+        model_manager.job_tracker.set_phase("diarizing")
         model_manager.load_diarization_model()
         diar_engine = model_manager.diarization_engine
 
@@ -219,6 +223,7 @@ def transcribe_and_diarize(
     transcribe_future: Future[TranscriptionResult]
     diarize_future: Future[DiarizationResult]
 
+    model_manager.job_tracker.set_phase("transcribing_diarizing")
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="parallel_diarize") as pool:
         transcribe_future = pool.submit(_do_transcribe)
         diarize_future = pool.submit(_do_diarize)

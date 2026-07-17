@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { GlassCard } from '../ui/GlassCard';
 import { useImportQueueStore } from '../../src/stores/importQueueStore';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { apiClient } from '../../src/api/client';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useLanguages } from '../../src/hooks/useLanguages';
@@ -228,9 +229,14 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
         title: title.trim() || undefined,
       });
 
-      toast.success(
-        `Queued ${selectedFiles.length} file${selectedFiles.length === 1 ? '' : 's'} for import`,
-      );
+      useNotificationsStore.getState().notify({
+        id: `note-queued-${Date.now()}`,
+        category: 'note',
+        title: title.trim()
+          ? `Note "${title.trim()}" queued for transcription`
+          : `Queued ${selectedFiles.length} file${selectedFiles.length === 1 ? '' : 's'} for import`,
+        status: 'complete',
+      });
 
       // Queueing is immediate; close the modal and let the shared import queue
       // process uploads in the background.

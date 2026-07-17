@@ -10,16 +10,19 @@ vi.mock('../api/client', () => ({
   },
 }));
 
-// Mock transcription formatters
-vi.mock('../services/transcriptionFormatters', () => ({
-  renderSrt: vi.fn(() => 'srt-content'),
-  renderAss: vi.fn(() => 'ass-content'),
-  renderTxt: vi.fn(() => 'txt-content'),
-  resolveTranscriptionOutput: vi.fn(() => ({
-    outputFilename: 'test.txt',
-    content: 'txt-content',
-  })),
-}));
+// Mock transcription formatters. resolveTranscriptionOutputs (GH-212) stays
+// REAL so the processSessionJob tests exercise genuine multi-file resolution;
+// only the legacy single-output resolver keeps its historical stub.
+vi.mock('../services/transcriptionFormatters', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../services/transcriptionFormatters')>();
+  return {
+    ...actual,
+    resolveTranscriptionOutput: vi.fn(() => ({
+      outputFilename: 'test.txt',
+      content: 'txt-content',
+    })),
+  };
+});
 
 // Mock sonner so the new gh-102 #3 tests can assert on toast.warning calls
 // without rendering. Existing tests don't assert on toast and stay unaffected.
@@ -46,6 +49,7 @@ Object.defineProperty(globalThis, 'window', {
 });
 
 import { toast } from 'sonner';
+import { apiClient } from '../api/client';
 import {
   useImportQueueStore,
   resolveDuplicateChoice,
@@ -70,6 +74,7 @@ function resetStore() {
     sessionConfig: {
       outputDir: '',
       diarizedFormat: 'srt',
+      outputFormat: 'subtitles',
       hideTimestamps: false,
       enableDiarization: true,
       enableWordTimestamps: true,
@@ -191,6 +196,34 @@ describe('importQueueStore', () => {
       options.enable_diarization = false;
 
       expect(getState().jobs[0].options?.enable_diarization).toBe(true);
+    });
+
+    // GH-212 — queued session jobs display the format chosen at enqueue time.
+    it('stamps plannedFormat on session jobs from the current sessionConfig', () => {
+      getState().updateSessionConfig({ outputFormat: 'both', diarizedFormat: 'srt' });
+      getState().addFiles([new File(['a'], 'memo.m4a')], 'session-normal');
+
+      expect(getState().jobs[0].plannedFormat).toBe('.txt + .srt');
+    });
+
+    it('stamps plannedFormat=.txt when the session format is plain text', () => {
+      getState().updateSessionConfig({ outputFormat: 'txt' });
+      getState().addFiles([new File(['a'], 'memo.m4a')], 'session-normal');
+
+      expect(getState().jobs[0].plannedFormat).toBe('.txt');
+    });
+
+    it('stamps the subtitle flavor when the session format is subtitles', () => {
+      getState().updateSessionConfig({ outputFormat: 'subtitles', diarizedFormat: 'ass' });
+      getState().addFiles([new File(['a'], 'memo.m4a')], 'session-normal');
+
+      expect(getState().jobs[0].plannedFormat).toBe('.ass');
+    });
+
+    it('does not stamp plannedFormat on notebook jobs', () => {
+      getState().addFiles([new File(['a'], 'note.mp3')], 'notebook-normal');
+
+      expect(getState().jobs[0].plannedFormat).toBeUndefined();
     });
   });
 
@@ -477,6 +510,111 @@ describe('importQueueStore', () => {
         fileMeta: [],
       });
       expect(getState().jobs).toHaveLength(0);
+    });
+
+    // GH-212 — Folder Watch enqueues via addFiles, so auto jobs inherit the
+    // plannedFormat stamp with no extra wiring.
+    it('stamps plannedFormat on session-auto jobs from the current sessionConfig', () => {
+      getState().updateSessionConfig({ outputFormat: 'txt' });
+      getState().handleFilesDetected({
+        type: 'session',
+        files: ['/watch/memo.wav'],
+        count: 1,
+        fileMeta: [],
+      });
+      expect(getState().jobs[0].plannedFormat).toBe('.txt');
+    });
+  });
+
+  // ── processSessionJob — explicit output formats (GH-212) ───────────────
+  //
+  // Drives the real queue end-to-end under fake timers: addFiles schedules
+  // processQueue via setTimeout(0); pollForSessionResult waits one
+  // POLL_INTERVAL_MS (5s) before reading the mocked job tracker; the queue
+  // loop sleeps 500ms after the job. A single 10s advance covers all three.
+
+  describe('processSessionJob — explicit output formats (GH-212)', () => {
+    const sessionTranscription = {
+      text: 'Hello world.',
+      segments: [{ text: 'Hello world.', start: 0, end: 1.5 }],
+      words: [],
+      language_probability: 0.99,
+      duration: 1.5,
+      num_speakers: 0,
+    };
+
+    let writeText: Mock;
+
+    beforeEach(() => {
+      writeText = vi.fn().mockResolvedValue(undefined);
+      (window as any).electronAPI = { fileIO: { writeText } };
+      vi.mocked(getConfig).mockReset();
+      vi.mocked(apiClient.importAndTranscribe).mockResolvedValue({
+        job_id: 'server-job-1',
+      } as never);
+    });
+
+    afterEach(() => {
+      delete (window as any).electronAPI;
+    });
+
+    function mockConfig(values: Record<string, unknown>) {
+      vi.mocked(getConfig).mockImplementation(
+        (key: string) => Promise.resolve(values[key]) as never,
+      );
+    }
+
+    function mockPollResult(result: Record<string, unknown>) {
+      vi.mocked(apiClient.getAdminStatus).mockResolvedValue({
+        models: { job_tracker: { is_busy: false, result: { job_id: 'server-job-1', ...result } } },
+      } as never);
+    }
+
+    async function runQueue() {
+      getState().updateSessionConfig({ outputDir: '/out' });
+      getState().addFiles([new File(['audio'], 'memo.m4a')], 'session-normal');
+      await vi.advanceTimersByTimeAsync(10_000);
+    }
+
+    it("writes .txt AND subtitle file when the stored format is 'both'", async () => {
+      mockConfig({ 'sessionImport.outputFormat': 'both', 'output.hideTimestamps': false });
+      mockPollResult({ transcription: sessionTranscription });
+
+      await runQueue();
+
+      expect(writeText).toHaveBeenCalledTimes(2);
+      expect(writeText).toHaveBeenCalledWith('/out/memo.txt', expect.any(String));
+      expect(writeText).toHaveBeenCalledWith('/out/memo.srt', expect.any(String));
+      const job = getState().jobs[0];
+      expect(job.status).toBe('success');
+      expect(job.outputFilename).toBe('memo.txt, memo.srt');
+      expect(job.outputPath).toBe('/out/memo.srt');
+    });
+
+    it('falls back to the hideTimestamps-derived default when no explicit format is stored', async () => {
+      mockConfig({ 'output.hideTimestamps': true });
+      mockPollResult({ transcription: sessionTranscription });
+
+      await runQueue();
+
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledWith('/out/memo.txt', 'Hello world.');
+    });
+
+    it('copies result.diarization onto the job as diarizationOutcome (deferred from GH-209)', async () => {
+      mockConfig({ 'sessionImport.outputFormat': 'txt' });
+      mockPollResult({
+        transcription: sessionTranscription,
+        diarization: { requested: true, performed: false, reason: 'token_missing' },
+      });
+
+      await runQueue();
+
+      expect(getState().jobs[0].diarizationOutcome).toEqual({
+        requested: true,
+        performed: false,
+        reason: 'token_missing',
+      });
     });
   });
 

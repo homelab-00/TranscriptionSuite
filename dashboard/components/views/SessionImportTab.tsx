@@ -30,12 +30,16 @@ import {
   selectIsProcessing,
 } from '../../src/stores/importQueueStore';
 import type { UnifiedImportJob } from '../../src/stores/importQueueStore';
+import type { SessionOutputFormat } from '../../src/services/transcriptionFormatters';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
+import { useJobProgress } from '../../src/hooks/useJobProgress';
 import { useLanguages } from '../../src/hooks/useLanguages';
 import { apiClient } from '../../src/api/client';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
 import { getConfig, setConfig } from '../../src/config/store';
 import { useSessionWatcher } from '../../src/hooks/useSessionWatcher';
+import { useAriaAnnouncerStore } from '../../src/stores/ariaAnnouncerStore';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import {
   supportsAutoDetect,
   supportsTranslation,
@@ -88,6 +92,7 @@ export const SessionImportTab: React.FC = () => {
   const [outputDir, setOutputDir] = useState('');
   const [diarization, setDiarization] = useState(true);
   const [diarizedFormat, setDiarizedFormat] = useState<'srt' | 'ass'>('srt');
+  const [outputFormat, setOutputFormat] = useState<SessionOutputFormat>('subtitles');
   const [wordTimestamps, setWordTimestamps] = useState(true);
   const [hideTimestamps, setHideTimestamps] = useState(false);
   const [parallelDiarization, setParallelDiarization] = useState<boolean>(false);
@@ -97,6 +102,21 @@ export const SessionImportTab: React.FC = () => {
   const [isDragOverWatch, setIsDragOverWatch] = useState(false);
   const [logExpanded, setLogExpanded] = useState(false);
 
+  // GH-210: brief dropzone flash after files are added.
+  const [justAdded, setJustAdded] = useState(false);
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    },
+    [],
+  );
+
+  // GH-210: scroll the Import Queue into view when a NEW job appears. Diff
+  // job ids, not array length (clearFinished/removeJob also change length).
+  const queueRef = useRef<HTMLDivElement | null>(null);
+  const prevJobIdsRef = useRef<Set<string>>(new Set());
+
   // 4.6 — first-run hint state
   const manualImportCountRef = useRef(0);
   const [showWatchHint, setShowWatchHint] = useState(false);
@@ -104,6 +124,23 @@ export const SessionImportTab: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const admin = useAdminStatus();
+
+  // GH-211: live phase/position/ETA label for the active job. This hook owns
+  // the fast (3s) poll while a job runs; the useAdminStatus call above stays
+  // on the default interval (TanStack Query dedupes by queryKey, shortest
+  // refetchInterval wins).
+  const { label: progressLabel, stalled } = useJobProgress(isProcessing);
+
+  // GH-209: gate the diarization toggle on the server-side feature flag.
+  // Computed ONCE at container startup (ModelManager._initialize_diarization_
+  // feature_status) — adding a token in Settings requires a server restart.
+  const diarizationFeature = (admin.status?.models as any)?.features?.diarization as
+    | { available: boolean; reason: string }
+    | undefined;
+  const diarizationUnavailable = diarizationFeature?.available === false;
+  // Effective value: forced OFF when the server says the feature is unavailable.
+  const effectiveDiarization = diarizationUnavailable ? false : diarization;
+
   const activeModel: string | null =
     admin.status?.config?.main_transcriber?.model ??
     admin.status?.config?.transcription?.model ??
@@ -136,6 +173,17 @@ export const SessionImportTab: React.FC = () => {
       const electronAPI = (window as any).electronAPI;
 
       getConfig<boolean>('output.hideTimestamps').then((v) => setHideTimestamps(v ?? false));
+
+      // GH-212: explicit output format. Default preserves pre-selector
+      // behavior: txt when the global hideTimestamps was on, else subtitles.
+      getConfig<SessionOutputFormat>('sessionImport.outputFormat').then(async (v) => {
+        if (v) {
+          setOutputFormat(v);
+          return;
+        }
+        const hide = (await getConfig<boolean>('output.hideTimestamps')) ?? false;
+        setOutputFormat(hide ? 'txt' : 'subtitles');
+      });
 
       // Try to load persisted output dir from config
       const savedDir = await getConfig('sessionImport.outputDir');
@@ -218,8 +266,9 @@ export const SessionImportTab: React.FC = () => {
     updateSessionConfig({
       outputDir,
       diarizedFormat,
+      outputFormat,
       hideTimestamps,
-      enableDiarization: diarization,
+      enableDiarization: effectiveDiarization,
       enableWordTimestamps: wordTimestamps,
       parallelDiarization,
       multitrack,
@@ -228,8 +277,9 @@ export const SessionImportTab: React.FC = () => {
   }, [
     outputDir,
     diarizedFormat,
+    outputFormat,
     hideTimestamps,
-    diarization,
+    effectiveDiarization,
     wordTimestamps,
     parallelDiarization,
     multitrack,
@@ -262,6 +312,18 @@ export const SessionImportTab: React.FC = () => {
       setShowWatchHint(false);
     }
   }, [sessionWatchPath, showWatchHint]);
+
+  useEffect(() => {
+    const ids = new Set(jobs.map((j) => j.id));
+    const hasNew = jobs.some((j) => !prevJobIdsRef.current.has(j.id));
+    prevJobIdsRef.current = ids;
+    if (hasNew) {
+      // rAF: the queue card may be mounting in this very commit on the first drop
+      requestAnimationFrame(() => {
+        queueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+  }, [jobs]);
 
   const handleDiarizationChange = useCallback((enabled: boolean) => {
     setDiarization(enabled);
@@ -329,15 +391,41 @@ export const SessionImportTab: React.FC = () => {
         ? (resolveLanguage(mainBidiTarget) ?? 'en')
         : 'en';
 
-      addFiles(Array.from(files), 'session-normal', {
+      const fileArray = Array.from(files);
+      addFiles(fileArray, 'session-normal', {
         language: resolvedLang,
         translation_enabled: mainTranslateActive ? true : undefined,
         translation_target_language: mainTranslateActive ? mainTranslateTarget : undefined,
-        enable_diarization: multitrack ? false : diarization,
+        enable_diarization: multitrack ? false : effectiveDiarization,
         enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
-        parallel_diarization: diarization && !multitrack ? parallelDiarization : undefined,
+        parallel_diarization: effectiveDiarization && !multitrack ? parallelDiarization : undefined,
         multitrack: multitrack || undefined,
       });
+
+      // GH-210: immediate feedback on manual add. The Folder-Watch path
+      // already surfaces detection in handleFilesDetected; this mirrors it for
+      // drops and file-picker selections. Only fires after addFiles (the guard
+      // above early-returns without enqueueing).
+      useNotificationsStore.getState().notify({
+        id: `import-queued-${Date.now()}`,
+        category: 'import',
+        title:
+          fileArray.length === 1
+            ? `Added "${fileArray[0].name}" to the Import Queue`
+            : `${fileArray.length} files added to the Import Queue`,
+        status: 'complete',
+      });
+      useAriaAnnouncerStore
+        .getState()
+        .announce(
+          fileArray.length === 1
+            ? `${fileArray[0].name} added to import queue`
+            : `${fileArray.length} files added to import queue`,
+          'polite',
+        );
+      setJustAdded(true);
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = setTimeout(() => setJustAdded(false), 700);
 
       // 4.6 — track manual import count and possibly show hint
       const newCount = manualImportCountRef.current + files.length;
@@ -351,7 +439,7 @@ export const SessionImportTab: React.FC = () => {
     },
     [
       addFiles,
-      diarization,
+      effectiveDiarization,
       multitrack,
       parallelDiarization,
       supportsExplicitWordTimestampToggle,
@@ -446,18 +534,22 @@ export const SessionImportTab: React.FC = () => {
   const statusLabel = (job: UnifiedImportJob) => {
     switch (job.status) {
       case 'pending':
-        return 'Queued';
-      case 'processing': {
-        const progress = (admin.status?.models as any)?.job_tracker?.progress;
-        if (progress?.total > 0) {
-          return `Chunk ${progress.current}/${progress.total}`;
-        }
-        return 'Processing...';
-      }
+        return job.plannedFormat ? `Queued (${job.plannedFormat})` : 'Queued';
+      case 'processing':
+        return stalled
+          ? `${progressLabel} — no recent progress, the job may be stalled`
+          : progressLabel;
       case 'writing':
         return 'Saving file...';
-      case 'success':
-        return job.outputFilename ? `Done — ${job.outputFilename}` : 'Done';
+      case 'success': {
+        const diar = job.diarizationOutcome;
+        const skipped = !!diar?.requested && !diar?.performed;
+        const base = job.outputFilename ? `Done — ${job.outputFilename}` : 'Done';
+        if (!skipped) return base;
+        const why =
+          diar?.reason === 'token_missing' ? 'no HF token' : (diar?.reason ?? 'unavailable');
+        return `${base} (diarization skipped: ${why})`;
+      }
       case 'error':
         return job.error ?? 'Failed';
     }
@@ -493,7 +585,7 @@ export const SessionImportTab: React.FC = () => {
           isDragOver
             ? 'border-accent-cyan bg-accent-cyan/10 scale-[1.02]'
             : 'hover:border-accent-cyan/50 hover:bg-accent-cyan/5 border-white/20'
-        }`}
+        } ${justAdded ? 'dropzone-flash' : ''}`}
       >
         <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-white/5 transition-transform group-hover:scale-110">
           <Upload size={32} className="group-hover:text-accent-cyan text-slate-300" />
@@ -520,6 +612,103 @@ export const SessionImportTab: React.FC = () => {
           >
             <XCircle size={14} />
           </button>
+        </div>
+      )}
+
+      {/* Queue List: directly under the dropzone so a fresh drop is visible
+          without scrolling (GH-210) */}
+      {jobs.length > 0 && (
+        <div ref={queueRef}>
+          <GlassCard
+            title={`Import Queue${isProcessing ? ' — Processing' : ''}`}
+            action={
+              <div className="flex items-center gap-3 text-xs text-slate-400">
+                {completedCount > 0 && (
+                  <span className="text-green-400">{completedCount} done</span>
+                )}
+                {pendingCount > 0 && (
+                  <span>
+                    {pendingCount} pending
+                    {/* 4.5 — time estimate */}
+                    {avgProcessingMs > 0 && (
+                      <span className="ml-1 text-slate-500">
+                        (~{formatTimeEst(pendingCount * avgProcessingMs)})
+                      </span>
+                    )}
+                  </span>
+                )}
+                {errorCount > 0 && <span className="text-red-400">{errorCount} failed</span>}
+                <button
+                  onClick={isPaused ? resumeQueue : pauseQueue}
+                  className="ml-1 text-slate-500 transition-colors hover:text-white"
+                  title={isPaused ? 'Resume queue' : 'Pause queue'}
+                >
+                  {isPaused ? <Play size={18} /> : <Pause size={18} />}
+                </button>
+                {(completedCount > 0 || errorCount > 0) && (
+                  <button
+                    onClick={clearFinished}
+                    className="ml-1 text-slate-500 transition-colors hover:text-white"
+                    title="Clear finished"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                )}
+              </div>
+            }
+          >
+            <div className="max-h-60 space-y-2 overflow-y-auto">
+              {jobs.map((job) => (
+                <div
+                  key={job.id}
+                  className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 transition-colors hover:bg-white/8"
+                >
+                  {statusIcon(job)}
+                  {(job.type === 'session-auto' || job.type === 'notebook-auto') && (
+                    <span title="Auto-watch">
+                      <Eye size={14} className="shrink-0 text-slate-500" />
+                    </span>
+                  )}
+                  <span className="flex-1 truncate text-sm text-white">
+                    {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
+                  </span>
+                  <span
+                    className={`text-xs whitespace-nowrap ${
+                      job.status === 'success' && job.outputPath
+                        ? 'cursor-pointer text-green-400 hover:text-green-300'
+                        : 'text-slate-400'
+                    }`}
+                    onClick={
+                      job.status === 'success' && job.outputPath
+                        ? () => handleOpenOutputPath(job.outputPath!)
+                        : undefined
+                    }
+                    title={job.status === 'success' && job.outputPath ? 'Open folder' : undefined}
+                  >
+                    {statusLabel(job)}
+                  </span>
+                  {job.status === 'error' && (
+                    <button
+                      onClick={() => retryJob(job.id)}
+                      className="hover:text-accent-cyan p-1 text-slate-400 transition-colors"
+                      title="Retry"
+                    >
+                      <RotateCcw size={18} />
+                    </button>
+                  )}
+                  {job.status !== 'processing' && job.status !== 'writing' && (
+                    <button
+                      onClick={() => removeJob(job.id)}
+                      className="p-1 text-slate-500 transition-colors hover:text-red-400"
+                      title="Remove"
+                    >
+                      <XCircle size={18} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </GlassCard>
         </div>
       )}
 
@@ -663,138 +852,74 @@ export const SessionImportTab: React.FC = () => {
         </GlassCard>
       )}
 
-      {/* Queue List */}
-      {jobs.length > 0 && (
-        <GlassCard
-          title={`Import Queue${isProcessing ? ' — Processing' : ''}`}
-          action={
-            <div className="flex items-center gap-3 text-xs text-slate-400">
-              {completedCount > 0 && <span className="text-green-400">{completedCount} done</span>}
-              {pendingCount > 0 && (
-                <span>
-                  {pendingCount} pending
-                  {/* 4.5 — time estimate */}
-                  {avgProcessingMs > 0 && (
-                    <span className="ml-1 text-slate-500">
-                      (~{formatTimeEst(pendingCount * avgProcessingMs)})
-                    </span>
-                  )}
-                </span>
-              )}
-              {errorCount > 0 && <span className="text-red-400">{errorCount} failed</span>}
-              <button
-                onClick={isPaused ? resumeQueue : pauseQueue}
-                className="ml-1 text-slate-500 transition-colors hover:text-white"
-                title={isPaused ? 'Resume queue' : 'Pause queue'}
-              >
-                {isPaused ? <Play size={18} /> : <Pause size={18} />}
-              </button>
-              {(completedCount > 0 || errorCount > 0) && (
-                <button
-                  onClick={clearFinished}
-                  className="ml-1 text-slate-500 transition-colors hover:text-white"
-                  title="Clear finished"
-                >
-                  <Trash2 size={18} />
-                </button>
-              )}
-            </div>
-          }
-        >
-          <div className="max-h-60 space-y-2 overflow-y-auto">
-            {jobs.map((job) => (
-              <div
-                key={job.id}
-                className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 transition-colors hover:bg-white/8"
-              >
-                {statusIcon(job)}
-                {(job.type === 'session-auto' || job.type === 'notebook-auto') && (
-                  <span title="Auto-watch">
-                    <Eye size={14} className="shrink-0 text-slate-500" />
-                  </span>
-                )}
-                <span className="flex-1 truncate text-sm text-white">
-                  {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
-                </span>
-                <span
-                  className={`text-xs whitespace-nowrap ${
-                    job.status === 'success' && job.outputPath
-                      ? 'cursor-pointer text-green-400 hover:text-green-300'
-                      : 'text-slate-400'
-                  }`}
-                  onClick={
-                    job.status === 'success' && job.outputPath
-                      ? () => handleOpenOutputPath(job.outputPath!)
-                      : undefined
-                  }
-                  title={job.status === 'success' && job.outputPath ? 'Open folder' : undefined}
-                >
-                  {statusLabel(job)}
-                </span>
-                {job.status === 'error' && (
-                  <button
-                    onClick={() => retryJob(job.id)}
-                    className="hover:text-accent-cyan p-1 text-slate-400 transition-colors"
-                    title="Retry"
-                  >
-                    <RotateCcw size={18} />
-                  </button>
-                )}
-                {job.status !== 'processing' && job.status !== 'writing' && (
-                  <button
-                    onClick={() => removeJob(job.id)}
-                    className="p-1 text-slate-500 transition-colors hover:text-red-400"
-                    title="Remove"
-                  >
-                    <XCircle size={18} />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </GlassCard>
-      )}
-
       {/* Info Note */}
       <div className="flex items-start gap-2 rounded-lg bg-white/5 px-3 py-2.5">
         <Info size={14} className="mt-0.5 shrink-0 text-slate-500" />
         <p className="text-xs leading-relaxed text-slate-500">
-          {hideTimestamps
-            ? 'Transcriptions are saved as .txt (plain text) to the output folder. Timestamp output is disabled in Settings.'
-            : 'Transcriptions are saved as .txt (plain text) or .srt/.ass (subtitles with speaker labels when diarization is enabled) to the output folder.'}
+          {outputFormat === 'txt'
+            ? 'Transcriptions are saved as .txt (plain text) to the output folder.'
+            : outputFormat === 'both'
+              ? `Transcriptions are saved as .txt plus .${diarizedFormat} to the output folder.`
+              : `Transcriptions are saved as .${diarizedFormat} subtitles to the output folder.`}
         </p>
       </div>
 
       {/* Import Options */}
       <GlassCard title="Import Options">
         <div className="space-y-4">
+          <div className="flex items-center justify-between gap-4 pl-1">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white">Output Format</p>
+              <p className="text-xs text-slate-400">Applies to every imported file</p>
+            </div>
+            <select
+              aria-label="Output Format"
+              value={outputFormat}
+              onChange={(e) => {
+                const v = e.target.value as SessionOutputFormat;
+                setOutputFormat(v);
+                void setConfig('sessionImport.outputFormat', v);
+              }}
+              className="focus:border-accent-cyan/50 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white scheme-dark outline-none"
+            >
+              <option value="txt">Plain text (.txt)</option>
+              <option value="subtitles">Subtitles (.srt/.ass)</option>
+              <option value="both">Both</option>
+            </select>
+          </div>
+          {outputFormat !== 'txt' && (
+            <div className="flex items-center justify-between gap-4 pl-1">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-white">Subtitle format</p>
+                <p className="text-xs text-slate-400">File type for subtitle output</p>
+              </div>
+              <select
+                aria-label="Subtitle format"
+                value={diarizedFormat}
+                onChange={(e) => setDiarizedFormat(e.target.value as 'srt' | 'ass')}
+                className="focus:border-accent-cyan/50 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white scheme-dark outline-none"
+              >
+                <option value="srt">.srt</option>
+                <option value="ass">.ass</option>
+              </select>
+            </div>
+          )}
+          <div className="h-px bg-white/5"></div>
           <AppleSwitch
-            checked={diarization}
+            checked={effectiveDiarization}
             onChange={handleDiarizationChange}
+            disabled={diarizationUnavailable}
             label="Speaker Diarization"
             description={
-              hideTimestamps
-                ? 'Identify distinct speakers — output saved as .txt (timestamps disabled in Settings)'
-                : 'Identify distinct speakers — output saved as a subtitle file with speaker labels'
+              diarizationUnavailable
+                ? diarizationFeature?.reason === 'token_missing'
+                  ? 'Unavailable: no HuggingFace token configured. Add one in Settings, then restart the server.'
+                  : 'Unavailable on this server.'
+                : 'Identify distinct speakers. Speaker labels appear in subtitle output; plain text output is unaffected.'
             }
           />
-          {diarization && (
+          {effectiveDiarization && (
             <>
-              <div className="h-px bg-white/5"></div>
-              <div className="flex items-center justify-between gap-4 pl-1">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-white">Output Format</p>
-                  <p className="text-xs text-slate-400">Subtitle format for diarized output</p>
-                </div>
-                <select
-                  value={diarizedFormat}
-                  onChange={(e) => setDiarizedFormat(e.target.value as 'srt' | 'ass')}
-                  className="focus:border-accent-cyan/50 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white scheme-dark outline-none"
-                >
-                  <option value="srt">.srt</option>
-                  <option value="ass">.ass</option>
-                </select>
-              </div>
               <div className="h-px bg-white/5"></div>
               <div className="pl-1">
                 <AppleSwitch

@@ -269,6 +269,34 @@ class TestFasterWhisperBackendTranscribe:
         segments, _ = backend.transcribe(audio, word_timestamps=False)
         assert segments[0].words == []
 
+    def test_transcribe_reports_seconds_progress(self) -> None:
+        """GH-211: progress_callback receives (int(seg.end), total_seconds) per segment."""
+        fake = _FakeWhisperModel(
+            segments=[
+                _FakeSegment(" First sentence.", 0.0, 2.0),
+                _FakeSegment(" Second sentence.", 2.0, 4.5),
+            ]
+        )
+        backend, _ = self._make_loaded_backend(fake)
+        audio = np.zeros(10 * 16000, dtype=np.float32)  # 10 seconds
+        calls: list[tuple[int, int]] = []
+
+        backend.transcribe(audio, progress_callback=lambda c, t: calls.append((c, t)))
+
+        assert calls == [(2, 10), (4, 10)]
+
+    def test_transcribe_progress_callback_failure_does_not_break_result(self) -> None:
+        """A throwing progress_callback must never lose the transcription."""
+        backend, _ = self._make_loaded_backend()
+        audio = np.zeros(16000, dtype=np.float32)
+
+        def exploding_callback(current: int, total: int) -> None:
+            raise RuntimeError("boom")
+
+        segments, info = backend.transcribe(audio, progress_callback=exploding_callback)
+        assert len(segments) == 1
+        assert info.language == "en"
+
 
 # ---------------------------------------------------------------------------
 # FasterWhisperBackend — warmup

@@ -6,7 +6,7 @@ import { SessionView } from './components/views/SessionView';
 import { NotebookView } from './components/views/NotebookView';
 import { ServerView } from './components/views/ServerView';
 import { LogsView } from './components/views/LogsView';
-import { ModelManagerView } from './components/views/ModelManagerView';
+import { NotificationsView } from './components/views/NotificationsView';
 import { SettingsModal } from './components/views/SettingsModal';
 import { AboutModal } from './components/views/AboutModal';
 import { BugReportModal } from './components/views/BugReportModal';
@@ -29,10 +29,13 @@ import { useLiveMode } from './src/hooks/useLiveMode';
 import { useImportQueueStore, selectIsUploading } from './src/stores/importQueueStore';
 import { QueuePausedBanner } from './components/ui/QueuePausedBanner';
 import { UpdateBanner } from './components/ui/UpdateBanner';
-import { ActivityNotifications } from './components/ui/ActivityNotifications';
+import { NotificationToasts } from './components/ui/NotificationToasts';
+import { HfTokenExplainer } from './components/ui/HfTokenExplainer';
 import { useStarPopup } from './src/hooks/useStarPopup';
-import { useBootstrapDownloads } from './src/hooks/useBootstrapDownloads';
+import { useNotificationBridge } from './src/hooks/useNotificationBridge';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
+import { useNotificationsStore } from './src/stores/notificationsStore';
+import { SERVER_START_ID } from './src/utils/startupEventMapping';
 import { useAuthTokenSync } from './src/hooks/useAuthTokenSync';
 import { useWatcherFilesBridge } from './src/hooks/useWatcherFilesBridge';
 import { useUpdateToast } from './src/hooks/useUpdateToast';
@@ -40,6 +43,7 @@ import {
   MAIN_RECOMMENDED_MODEL,
   LIVE_RECOMMENDED_MODEL,
   DISABLED_MODEL_SENTINEL,
+  LEGACY_CUSTOM_OPTION,
   ONBOARDING_MAIN_MODEL_OPTIONS,
   ONBOARDING_LIVE_MODEL_OPTIONS,
   OptionalDependencyBootstrapStatus,
@@ -56,8 +60,6 @@ import { isRuntimeProfile, type RuntimeProfile } from './src/types/runtime';
 
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 type MissingFamily = 'whisper' | 'nemo' | 'vibevoice' | 'sensevoice';
-
-const HF_TERMS_URL = 'https://huggingface.co/pyannote/speaker-diarization-community-1';
 
 function normalizeHfDecision(value: unknown): HfTokenDecision {
   if (value === 'provided' || value === 'skipped' || value === 'unset') {
@@ -109,8 +111,8 @@ const AppInner: React.FC = () => {
 
   // Always-on Docker log token scanner
   useAuthTokenSync(serverConnection.reachable, useRemote);
-  // Bridge bootstrap log events → download store (runs regardless of active tab)
-  useBootstrapDownloads();
+  // Bridge bootstrap log events → notifications store (runs regardless of active tab)
+  useNotificationBridge();
   // Singleton subscriber for the watcher:filesDetected IPC channel — must be
   // mounted at app root so it does not double-register when a per-tab hook
   // (e.g. useSessionWatcher) survives a tab switch (Issue #94).
@@ -518,9 +520,7 @@ const AppInner: React.FC = () => {
 
           await Promise.all([
             setConfig('server.mainModelSelection', mapBackendModelToUiSelection(selectedMainModel)),
-            setConfig('server.mainCustomModel', ''),
             setConfig('server.liveModelSelection', mapBackendModelToUiSelection(selectedLiveModel)),
-            setConfig('server.liveCustomModel', ''),
             setConfig('app.modelSelectionOnboardingCompleted', true),
           ]);
         } else if (!selectedMainModel || !selectedLiveModel) {
@@ -539,30 +539,37 @@ const AppInner: React.FC = () => {
           const envMainModel = await readComposeEnvValue('MAIN_TRANSCRIBER_MODEL');
           const envLiveModel = await readComposeEnvValue('LIVE_TRANSCRIBER_MODEL');
 
-          const storedMainSelection =
+          let storedMainSelection =
             typeof storedMainSelectionRaw === 'string' && storedMainSelectionRaw.trim()
               ? storedMainSelectionRaw.trim()
               : mapBackendModelToUiSelection(envMainModel || MAIN_RECOMMENDED_MODEL);
-          const storedLiveSelection =
+          let storedLiveSelection =
             typeof storedLiveSelectionRaw === 'string' && storedLiveSelectionRaw.trim()
               ? storedLiveSelectionRaw.trim()
               : mapBackendModelToUiSelection(envLiveModel || LIVE_RECOMMENDED_MODEL);
 
+          // Legacy: pre-removal stores may still hold the retired Custom
+          // sentinel (until ServerView hydrates once and normalizes them).
+          // Adopt the old custom text so this start path keeps resolving to a
+          // real model.
           const storedMainCustom =
-            typeof storedMainCustomRaw === 'string' ? storedMainCustomRaw : '';
+            typeof storedMainCustomRaw === 'string' ? storedMainCustomRaw.trim() : '';
           const storedLiveCustom =
-            typeof storedLiveCustomRaw === 'string' ? storedLiveCustomRaw : '';
+            typeof storedLiveCustomRaw === 'string' ? storedLiveCustomRaw.trim() : '';
+          if (storedMainSelection === LEGACY_CUSTOM_OPTION) {
+            storedMainSelection = storedMainCustom || envMainModel || MAIN_RECOMMENDED_MODEL;
+          }
+          if (storedLiveSelection === LEGACY_CUSTOM_OPTION) {
+            storedLiveSelection = storedLiveCustom || envLiveModel || LIVE_RECOMMENDED_MODEL;
+          }
 
           const resolvedMainModel = resolveMainModelSelectionValue(
             storedMainSelection,
-            storedMainCustom,
             envMainModel || MAIN_RECOMMENDED_MODEL,
           );
           const resolvedLiveModel = resolveLiveModelSelectionValue(
             storedLiveSelection,
-            storedLiveCustom,
             resolvedMainModel,
-            envLiveModel || LIVE_RECOMMENDED_MODEL,
           );
 
           selectedMainModel = toBackendModelEnvValue(resolvedMainModel);
@@ -671,7 +678,16 @@ const AppInner: React.FC = () => {
           }
         }
 
-        await docker.startContainer(
+        useNotificationsStore.getState().notify({
+          id: SERVER_START_ID,
+          category: 'server',
+          title: 'Starting server...',
+          detail: 'Preparing the container',
+          status: 'active',
+          progress: 0,
+        });
+
+        const startError = await docker.startContainer(
           mode,
           runtimeProfile,
           undefined,
@@ -689,6 +705,19 @@ const AppInner: React.FC = () => {
             ...(models?.whispercppModel ? { whispercppModel: models.whispercppModel } : {}),
           },
         );
+
+        if (startError !== null) {
+          const entries = useNotificationsStore.getState().notifications;
+          const newestStart = [...entries].reverse().find((n) => n.id === SERVER_START_ID);
+          // Guard: only fail a start card that is still in flight.
+          if (newestStart?.status === 'active') {
+            useNotificationsStore.getState().updateNotification(SERVER_START_ID, {
+              title: 'Server failed to start',
+              status: 'error',
+              error: startError,
+            });
+          }
+        }
       } finally {
         startupFlowPendingRef.current = false;
         setStartupFlowPending(false);
@@ -720,16 +749,16 @@ const AppInner: React.FC = () => {
             />
           </ErrorBoundary>
         );
-      case View.MODEL_MANAGER:
-        return (
-          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
-            <ModelManagerView />
-          </ErrorBoundary>
-        );
       case View.LOGS:
         return (
           <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
             <LogsView runtimeProfile={runtimeProfile} />
+          </ErrorBoundary>
+        );
+      case View.NOTIFICATIONS:
+        return (
+          <ErrorBoundary FallbackComponent={ErrorFallback} resetKeys={[currentView]}>
+            <NotificationsView />
           </ErrorBoundary>
         );
       default:
@@ -967,16 +996,7 @@ const AppInner: React.FC = () => {
                 <p className="text-slate-400">
                   If skipped, diarization stays disabled until you add a token.
                 </p>
-                <p className="text-slate-400">
-                  Accept model terms first:{' '}
-                  <button
-                    type="button"
-                    onClick={() => void openExternal(HF_TERMS_URL)}
-                    className="text-accent-cyan hover:underline"
-                  >
-                    {HF_TERMS_URL}
-                  </button>
-                </p>
+                <HfTokenExplainer onOpenLink={(url) => void openExternal(url)} />
                 <div className="relative pt-1">
                   <input
                     type={showHfTokenDraft ? 'text' : 'password'}
@@ -1093,7 +1113,7 @@ const App: React.FC = () => (
       <AppInner />
     </DockerProvider>
     <ErrorBoundary FallbackComponent={ErrorFallback}>
-      <ActivityNotifications />
+      <NotificationToasts />
     </ErrorBoundary>
     <Toaster position="bottom-right" theme="dark" richColors />
     <ReactQueryDevtools initialIsOpen={false} />

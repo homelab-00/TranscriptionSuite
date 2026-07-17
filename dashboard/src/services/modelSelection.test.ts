@@ -15,8 +15,7 @@ import {
   DISABLED_MODEL_SENTINEL,
   MODEL_DISABLED_OPTION,
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
-  MAIN_MODEL_CUSTOM_OPTION,
-  LIVE_MODEL_CUSTOM_OPTION,
+  LEGACY_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   MAIN_RECOMMENDED_MODEL,
   VULKAN_RECOMMENDED_MODEL,
@@ -156,10 +155,9 @@ describe('toBackendModelEnvValue', () => {
     expect(toBackendModelEnvValue(DISABLED_MODEL_SENTINEL)).toBe(DISABLED_MODEL_SENTINEL);
   });
 
-  it('returns empty string for placeholder/custom options', () => {
+  it('returns empty string for the placeholder and the legacy custom sentinel', () => {
     expect(toBackendModelEnvValue(MODEL_DEFAULT_LOADING_PLACEHOLDER)).toBe('');
-    expect(toBackendModelEnvValue(MAIN_MODEL_CUSTOM_OPTION)).toBe('');
-    expect(toBackendModelEnvValue(LIVE_MODEL_CUSTOM_OPTION)).toBe('');
+    expect(toBackendModelEnvValue(LEGACY_CUSTOM_OPTION)).toBe('');
   });
 
   it('returns empty string for null/undefined/empty', () => {
@@ -174,33 +172,17 @@ describe('toBackendModelEnvValue', () => {
 // ---------------------------------------------------------------------------
 describe('resolveMainModelSelectionValue', () => {
   it('returns sentinel when disabled', () => {
-    expect(resolveMainModelSelectionValue(MODEL_DISABLED_OPTION, '', '')).toBe(
-      DISABLED_MODEL_SENTINEL,
-    );
-  });
-
-  it('returns custom model when custom option selected', () => {
-    expect(resolveMainModelSelectionValue(MAIN_MODEL_CUSTOM_OPTION, ' my/model ', 'fallback')).toBe(
-      'my/model',
-    );
-  });
-
-  it('falls back to configured model when custom is empty', () => {
-    expect(resolveMainModelSelectionValue(MAIN_MODEL_CUSTOM_OPTION, '', 'server-default')).toBe(
-      'server-default',
-    );
+    expect(resolveMainModelSelectionValue(MODEL_DISABLED_OPTION, '')).toBe(DISABLED_MODEL_SENTINEL);
   });
 
   it('returns configured model for loading placeholder', () => {
-    expect(
-      resolveMainModelSelectionValue(MODEL_DEFAULT_LOADING_PLACEHOLDER, '', 'server-model'),
-    ).toBe('server-model');
+    expect(resolveMainModelSelectionValue(MODEL_DEFAULT_LOADING_PLACEHOLDER, 'server-model')).toBe(
+      'server-model',
+    );
   });
 
   it('returns selection as-is for preset models', () => {
-    expect(resolveMainModelSelectionValue(MAIN_RECOMMENDED_MODEL, '', '')).toBe(
-      MAIN_RECOMMENDED_MODEL,
-    );
+    expect(resolveMainModelSelectionValue(MAIN_RECOMMENDED_MODEL, '')).toBe(MAIN_RECOMMENDED_MODEL);
   });
 });
 
@@ -209,28 +191,19 @@ describe('resolveMainModelSelectionValue', () => {
 // ---------------------------------------------------------------------------
 describe('resolveLiveModelSelectionValue', () => {
   it('returns sentinel when disabled', () => {
-    expect(resolveLiveModelSelectionValue(MODEL_DISABLED_OPTION, '', '', '')).toBe(
-      DISABLED_MODEL_SENTINEL,
-    );
+    expect(resolveLiveModelSelectionValue(MODEL_DISABLED_OPTION, '')).toBe(DISABLED_MODEL_SENTINEL);
   });
 
   it('returns resolved main model for same-as-main option', () => {
-    expect(
-      resolveLiveModelSelectionValue(LIVE_MODEL_SAME_AS_MAIN_OPTION, '', 'main-model', ''),
-    ).toBe('main-model');
-  });
-
-  it('returns custom model when custom option selected', () => {
-    expect(
-      resolveLiveModelSelectionValue(LIVE_MODEL_CUSTOM_OPTION, ' custom/live ', 'main', 'cfg'),
-    ).toBe('custom/live');
-  });
-
-  it('falls back through configured then main when custom is empty', () => {
-    expect(resolveLiveModelSelectionValue(LIVE_MODEL_CUSTOM_OPTION, '', 'main', 'cfg-live')).toBe(
-      'cfg-live',
+    expect(resolveLiveModelSelectionValue(LIVE_MODEL_SAME_AS_MAIN_OPTION, 'main-model')).toBe(
+      'main-model',
     );
-    expect(resolveLiveModelSelectionValue(LIVE_MODEL_CUSTOM_OPTION, '', 'main', '')).toBe('main');
+  });
+
+  it('returns selection as-is for preset models', () => {
+    expect(resolveLiveModelSelectionValue('Systran/faster-whisper-medium', 'main')).toBe(
+      'Systran/faster-whisper-medium',
+    );
   });
 });
 

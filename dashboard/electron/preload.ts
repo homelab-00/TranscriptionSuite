@@ -194,6 +194,9 @@ export interface ElectronAPI {
       | { status: 'error'; tags: [] }
     >;
     fetchRemoteTagDates: (tags: string[]) => Promise<Record<string, string | null>>;
+    listVariantTags: () => Promise<
+      Record<'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux', string[]>
+    >;
     pullImage: (tag: string) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;
@@ -216,6 +219,9 @@ export interface ElectronAPI {
       Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>
     >;
     checkModelsCached: (
+      modelIds: string[],
+    ) => Promise<Record<string, { exists: boolean; size?: string }>>;
+    checkModelsCachedOffline: (
       modelIds: string[],
     ) => Promise<Record<string, { exists: boolean; size?: string }>>;
     removeModelCache: (modelId: string) => Promise<void>;
@@ -447,6 +453,10 @@ export interface ElectronAPI {
       timeoutMs?: number;
     }) => Promise<boolean>;
   };
+  notificationLog: {
+    load: () => Promise<unknown[]>;
+    persist: (items: unknown[]) => Promise<void>;
+  };
   mlx: {
     start: (opts: {
       port: number;
@@ -554,6 +564,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('docker:fetchRemoteTagDates', tags) as Promise<
         Record<string, string | null>
       >,
+    listVariantTags: () =>
+      ipcRenderer.invoke('docker:listVariantTags') as Promise<
+        Record<'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux', string[]>
+      >,
     pullImage: (tag: string) => ipcRenderer.invoke('docker:pullImage', tag),
     cancelPull: () => ipcRenderer.invoke('docker:cancelPull'),
     isPulling: () => ipcRenderer.invoke('docker:isPulling'),
@@ -570,6 +584,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getVolumes: () => ipcRenderer.invoke('docker:getVolumes'),
     checkModelsCached: (modelIds: string[]) =>
       ipcRenderer.invoke('docker:checkModelsCached', modelIds) as Promise<
+        Record<string, { exists: boolean; size?: string }>
+      >,
+    checkModelsCachedOffline: (modelIds: string[]) =>
+      ipcRenderer.invoke('docker:checkModelsCachedOffline', modelIds) as Promise<
         Record<string, { exists: boolean; size?: string }>
       >,
     removeModelCache: (modelId: string) =>
@@ -804,6 +822,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   notifications: {
     show: (options: { title: string; body: string; silent?: boolean; timeoutMs?: number }) =>
       ipcRenderer.invoke('notifications:show', options) as Promise<boolean>,
+  },
+  notificationLog: {
+    load: () => ipcRenderer.invoke('notificationLog:load') as Promise<unknown[]>,
+    persist: (items: unknown[]) =>
+      ipcRenderer.invoke('notificationLog:persist', items) as Promise<void>,
   },
   mlx: {
     start: (opts: {

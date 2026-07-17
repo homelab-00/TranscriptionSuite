@@ -27,6 +27,7 @@ import {
 const execFileAsync = promisify(execFile);
 import Store from 'electron-store';
 import { CONTAINER_NAME, dockerManager, type StartContainerOptions } from './dockerManager.js';
+import { NotificationLog } from './notificationLog.js';
 import { StartupEventWatcher } from './startupEventWatcher.js';
 import { MLXServerManager, type MLXStartOptions } from './mlxServerManager.js';
 import { createMlxLogSink, type MlxLogSink } from './mlxLogSink.js';
@@ -120,6 +121,9 @@ if (process.platform === 'linux') {
 // would be lowercase because npm requires lowercase package names).
 app.setPath('userData', path.join(app.getPath('appData'), 'TranscriptionSuite'));
 app.setPath('crashDumps', path.join(app.getPath('appData'), 'TranscriptionSuite', 'Crashpad'));
+
+// Session notification log - wiped at boot and on quit (semi-persistent).
+const notificationLog = new NotificationLog(app.getPath('userData'));
 
 const isDev = !app.isPackaged;
 const CLIENT_LOG_DIR = 'logs';
@@ -530,11 +534,8 @@ const store = new Store({
     // the dashboard uses the `-legacy` GHCR repo for list/pull/tag operations.
     'server.useLegacyGpu': false,
     'server.mainModelSelection': 'nvidia/parakeet-tdt-0.6b-v3',
-    'server.mainCustomModel': '',
     'server.liveModelSelection': 'Systran/faster-whisper-medium',
-    'server.liveCustomModel': '',
     'server.diarizationModelSelection': 'pyannote/speaker-diarization-community-1',
-    'server.diarizationCustomModel': '',
     'shortcuts.startRecording': 'Alt+Ctrl+Z',
     'shortcuts.stopTranscribe': 'Alt+Ctrl+X',
     'app.pasteAtCursor': false,
@@ -1209,6 +1210,10 @@ ipcMain.handle('docker:listRemoteTags', async () => {
   return dockerManager.listRemoteTags();
 });
 
+ipcMain.handle('docker:listVariantTags', async () => {
+  return dockerManager.listVariantTags();
+});
+
 ipcMain.handle('docker:fetchRemoteTagDates', async (_event, tags: string[]) => {
   return dockerManager.fetchRemoteTagDates(tags);
 });
@@ -1255,7 +1260,7 @@ ipcMain.handle('docker:getContainerStatus', async () => {
 
 // ─── Startup Event Watcher ────────────────────────────────────────────────
 // Watches the bind-mounted startup-events.jsonl file and forwards parsed
-// events to the renderer via IPC for the activityStore.
+// events to the renderer via IPC for the notifications store.
 
 const startupEventWatcher = new StartupEventWatcher();
 
@@ -1290,6 +1295,10 @@ ipcMain.handle('docker:getVolumes', async () => {
 
 ipcMain.handle('docker:checkModelsCached', async (_event, modelIds: string[]) => {
   return dockerManager.checkModelsCached(modelIds);
+});
+
+ipcMain.handle('docker:checkModelsCachedOffline', async (_event, modelIds: string[]) => {
+  return dockerManager.checkModelsCachedOffline(modelIds);
 });
 
 ipcMain.handle('docker:removeModelCache', async (_event, modelId: string) => {
@@ -2247,6 +2256,7 @@ function gracefulShutdown(): Promise<void> {
     launchWatchdog.destroy();
     await mlxServerManager.destroy();
     await watcherManager.destroyAll();
+    notificationLog.clear();
     shutdownLog('[Shutdown] Cleanup complete.');
   })();
 
@@ -2288,6 +2298,13 @@ if (!gotLock) {
 }
 
 app.whenReady().then(async () => {
+  // Fresh app session: drop any notification log a crashed session left behind.
+  notificationLog.clear();
+  ipcMain.handle('notificationLog:load', async () => notificationLog.load());
+  ipcMain.handle('notificationLog:persist', async (_event, items: unknown) => {
+    if (Array.isArray(items)) notificationLog.persist(items);
+  });
+
   // ─── Certificate Error Handler (LAN profile) ────────────────────────────
   // Tailscale certs only cover *.ts.net FQDNs, not IP addresses. LAN
   // connections will always fail TLS hostname validation. Accept the cert
@@ -2377,7 +2394,10 @@ app.whenReady().then(async () => {
     const mainTranscriberModel =
       (store.get('server.mainModelSelection') as string) || 'mlx-community/whisper-small-asr-fp16';
 
-    // Resolve live transcriber model from stored selection sentinels.
+    // Resolve live transcriber model from stored selection sentinels. The
+    // Custom option was removed from the UI, but old stores may still hold its
+    // sentinel (plus the retired server.liveCustomModel text) until ServerView
+    // hydrates once and normalizes them — tolerate it here.
     const LIVE_SAME_AS_MAIN = 'Same as Main Transcriber';
     const LIVE_CUSTOM = 'Custom (HuggingFace repo)';
     const liveModelSelection = (store.get('server.liveModelSelection') as string) || '';
@@ -2400,7 +2420,8 @@ app.whenReady().then(async () => {
     // Resolve diarization selection sentinels the same way ServerView does. The
     // stored value is a UI label, not always a model id: CAM++, Sortformer and the
     // legacy Auto label all mean "let the server pick", which mlxServerManager
-    // expects as an empty model.
+    // expects as an empty model. The Custom sentinel is legacy-only (removed from
+    // the UI) but tolerated until ServerView normalizes the store.
     const DIARIZATION_CAMPP = 'CAM++ (fast, built-in)';
     const DIARIZATION_SORTFORMER = 'Sortformer (Metal; ≤ 4 speakers)';
     const DIARIZATION_CUSTOM = 'Custom (HuggingFace repo)';

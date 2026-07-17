@@ -2,8 +2,8 @@ export enum View {
   SESSION = 'SESSION',
   NOTEBOOK = 'NOTEBOOK',
   SERVER = 'SERVER',
-  MODEL_MANAGER = 'MODEL_MANAGER',
   LOGS = 'LOGS',
+  NOTIFICATIONS = 'NOTIFICATIONS',
 }
 
 export enum NotebookTab {

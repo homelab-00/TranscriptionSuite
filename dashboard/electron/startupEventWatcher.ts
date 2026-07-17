@@ -30,12 +30,22 @@ export interface StartupEvent {
   ts?: number;
 }
 
+/**
+ * How long to wait for the first event before warning that the channel looks
+ * dead (GH-207). A healthy startup emits its first event within seconds; 90s
+ * of silence while the container runs points at a broken STARTUP_EVENTS_DIR
+ * bind mount (suspected on Docker Desktop/WSL2 setups).
+ */
+const SILENT_CHANNEL_DIAGNOSTIC_MS = 90_000;
+
 export class StartupEventWatcher {
   private watcher: fs.FSWatcher | null = null;
   private offset = 0;
   private filePath: string | null = null;
   private onEvent: ((event: StartupEvent) => void) | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private diagnosticTimer: ReturnType<typeof setTimeout> | null = null;
+  private sawAnyEvent = false;
 
   /**
    * Start watching a file for new JSON Lines.
@@ -49,6 +59,16 @@ export class StartupEventWatcher {
     this.onEvent = onEvent;
     this.offset = 0;
 
+    this.sawAnyEvent = false;
+    this.diagnosticTimer = setTimeout(() => {
+      if (!this.sawAnyEvent) {
+        console.warn(
+          `[StartupEventWatcher] no startup events observed after ${SILENT_CHANNEL_DIAGNOSTIC_MS / 1000}s (file: ${this.filePath}). ` +
+            'If the container is running, the STARTUP_EVENTS_DIR bind mount may not be working on this platform.',
+        );
+      }
+    }, SILENT_CHANNEL_DIAGNOSTIC_MS);
+
     this.tryWatch();
   }
 
@@ -61,6 +81,10 @@ export class StartupEventWatcher {
     if (this.retryTimer) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
+    }
+    if (this.diagnosticTimer) {
+      clearTimeout(this.diagnosticTimer);
+      this.diagnosticTimer = null;
     }
     this.filePath = null;
     this.onEvent = null;
@@ -131,6 +155,13 @@ export class StartupEventWatcher {
       try {
         const event = JSON.parse(trimmed) as StartupEvent;
         if (event.id && event.category && event.label) {
+          if (!this.sawAnyEvent) {
+            this.sawAnyEvent = true;
+            if (this.diagnosticTimer) {
+              clearTimeout(this.diagnosticTimer);
+              this.diagnosticTimer = null;
+            }
+          }
           this.onEvent!(event);
         }
       } catch {

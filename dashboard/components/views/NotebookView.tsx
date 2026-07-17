@@ -50,6 +50,8 @@ import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useNotebookWatcher } from '../../src/hooks/useNotebookWatcher';
 import { apiClient } from '../../src/api/client';
 import type { AdminStatus, Recording } from '../../src/api/types';
+import { jobTrackerFromAdminStatus } from '../../src/api/types';
+import { describeJobProgress } from '../../src/services/jobProgress';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
 import {
   isCanaryModel,
@@ -60,7 +62,10 @@ import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { DeleteRecordingDialog } from '../recording/DeleteRecordingDialog';
 import { useActiveProfileStore } from '../../src/stores/activeProfileStore';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { getConfig, setConfig } from '../../src/config/store';
+import { useScrollFade } from '../../src/hooks/useScrollFade';
+import { ScrollFadeOverlay } from '../ui/ScrollFadeOverlay';
 
 // GH #92: same allow-list as AddNoteModal's <input accept="…"> below — keep
 // the two in sync so per-hour drag-drop and the modal's browse/drop accept
@@ -1030,6 +1035,10 @@ const CalendarTab: React.FC<{
   const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null);
   const [animKey, setAnimKey] = useState(0);
   const [visibleSlots, setVisibleSlots] = useState(3);
+
+  // Edge fades for the stacked layout, where this grid is the scroller.
+  const stackedScrollRef = useRef<HTMLDivElement>(null);
+  const stackedScrollState = useScrollFade(stackedScrollRef, [visibleSlots, refreshNonce]);
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -1165,154 +1174,181 @@ const CalendarTab: React.FC<{
   );
 
   return (
-    <div className="custom-scrollbar grid h-full min-h-0 grid-cols-1 gap-6 @max-[860px]:overflow-y-auto @min-[860px]:grid-cols-3">
-      <style>{`
+    // Below the 860px container breakpoint the two panels are pinned to 70vh each and
+    // this grid becomes the scroller, so it needs edge fades that the wide layout does
+    // not. They sit outside the scroller: an absolutely positioned child of a scrolling
+    // box is laid out against the scrolled content and would slide away with it.
+    // The scroller is also rounded in that mode so its overflow clip matches the rounded
+    // corners of the fade bars - without it, clipped content pokes out square past them.
+    <div className="relative h-full min-h-0">
+      <ScrollFadeOverlay
+        edge="top"
+        visible={stackedScrollState.top}
+        className="@min-[860px]:hidden"
+      />
+      <div
+        ref={stackedScrollRef}
+        className="custom-scrollbar grid h-full min-h-0 grid-cols-1 gap-6 @max-[860px]:overflow-y-auto @max-[860px]:rounded-2xl @min-[860px]:grid-cols-3"
+      >
+        <style>{`
                 @keyframes slideInRight { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
                 @keyframes slideInLeft { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
                 .anim-slide-right { animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
                 .anim-slide-left { animation: slideInLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
             `}</style>
-      <div className="flex min-h-0 flex-col @max-[860px]:h-[70vh] @max-[860px]:min-h-[440px] @min-[860px]:col-span-2">
-        <GlassCard
-          className="flex h-full flex-col"
-          title={calendarHeader}
-          action={
-            <div className="flex gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<Clock size={14} />}
-                onClick={() => {
-                  if (gridRef.current) {
-                    setTriggerRect(gridRef.current.getBoundingClientRect());
-                    setIsHistoryOpen(true);
-                  }
-                }}
-                className={isHistoryOpen ? 'bg-white/10 text-white' : ''}
-              >
-                Month/Year
-              </Button>
-            </div>
-          }
-        >
-          <div
-            ref={gridRef}
-            key={animKey}
-            className={`grid h-full grid-cols-7 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/5 ${slideDirection === 'right' ? 'anim-slide-right' : ''} ${slideDirection === 'left' ? 'anim-slide-left' : ''}`}
-            style={{ gridTemplateRows: `auto repeat(${gridRows}, 1fr)` }}
+        <div className="flex min-h-0 flex-col @max-[860px]:h-[70vh] @max-[860px]:min-h-[440px] @min-[860px]:col-span-2">
+          <GlassCard
+            className="flex h-full flex-col"
+            title={calendarHeader}
+            action={
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Clock size={14} />}
+                  onClick={() => {
+                    if (gridRef.current) {
+                      setTriggerRect(gridRef.current.getBoundingClientRect());
+                      setIsHistoryOpen(true);
+                    }
+                  }}
+                  className={isHistoryOpen ? 'bg-white/10 text-white' : ''}
+                >
+                  Month/Year
+                </Button>
+              </div>
+            }
           >
-            {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(
-              (d, i) => (
-                <div
-                  key={i}
-                  className="bg-glass-100/50 flex items-center justify-center border-b border-white/5 py-1 text-center text-[10px] font-bold tracking-widest text-slate-500 uppercase"
-                >
-                  {d.slice(0, 3)}
-                </div>
-              ),
-            )}
-            {emptyDays.map((_, i) => (
-              <div key={`empty-${i}`} className="border-t border-r border-white/5 bg-black/20 p-2">
-                <span className="text-xs text-slate-600">
-                  {prevMonthDays - startOffset + 1 + i}
-                </span>
-              </div>
-            ))}
-            {monthDays.map((_, i) => {
-              const dayNum = i + 1;
-              const dayEvents = eventsByDay[dayNum] || [];
-              const hasEvents = dayEvents.length > 0;
-              const count = dayEvents.length;
-              const dayKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-              const isSelected = selectedDay === dayKey;
-              const isToday = dayKey === todayKey;
-              return (
-                <div
-                  key={i}
-                  className={`bg-glass-100/30 hover:bg-glass-100 group relative flex min-h-0 cursor-pointer flex-col items-start overflow-hidden border-t border-r border-white/5 p-2 transition-colors ${isSelected ? 'ring-accent-cyan/50 bg-accent-cyan/5 ring-1' : ''}`}
-                  onClick={() => handleDayClick(dayNum)}
-                >
-                  <div className="mb-1 flex w-full items-center justify-between">
-                    <span
-                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs transition-all ${isSelected ? 'bg-accent-cyan font-bold text-black' : isToday ? 'bg-[rgb(230,230,230)] font-bold text-black' : 'text-slate-400 group-hover:text-white'}`}
-                    >
-                      {dayNum}
-                    </span>
-                    {hasEvents && (
-                      <div className="mr-1 flex h-4 min-w-6 items-center justify-center rounded-full bg-red-500 px-2 shadow-[0_0_5px_rgba(239,68,68,0.6)]">
-                        <span className="text-[9px] leading-none font-bold text-white">
-                          {count}
-                        </span>
-                      </div>
-                    )}
+            <div
+              ref={gridRef}
+              key={animKey}
+              className={`grid h-full grid-cols-7 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/5 ${slideDirection === 'right' ? 'anim-slide-right' : ''} ${slideDirection === 'left' ? 'anim-slide-left' : ''}`}
+              style={{ gridTemplateRows: `auto repeat(${gridRows}, 1fr)` }}
+            >
+              {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(
+                (d, i) => (
+                  <div
+                    key={i}
+                    className="bg-glass-100/50 flex items-center justify-center border-b border-white/5 py-1 text-center text-[10px] font-bold tracking-widest text-slate-500 uppercase"
+                  >
+                    {d.slice(0, 3)}
                   </div>
-                  <div className="flex min-h-0 w-full flex-1 flex-col gap-1 overflow-hidden pt-1">
-                    {dayEvents.slice(0, 2).map((evt) => (
-                      <button
-                        key={evt.id}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onNoteClick(evt);
-                        }}
-                        className="bg-accent-cyan w-full cursor-pointer truncate rounded-full px-2 py-0.5 text-left text-[10px] font-medium text-black shadow-sm transition-opacity hover:opacity-85"
+                ),
+              )}
+              {emptyDays.map((_, i) => (
+                <div
+                  key={`empty-${i}`}
+                  className="border-t border-r border-white/5 bg-black/20 p-2"
+                >
+                  <span className="text-xs text-slate-600">
+                    {prevMonthDays - startOffset + 1 + i}
+                  </span>
+                </div>
+              ))}
+              {monthDays.map((_, i) => {
+                const dayNum = i + 1;
+                const dayEvents = eventsByDay[dayNum] || [];
+                const hasEvents = dayEvents.length > 0;
+                const count = dayEvents.length;
+                const dayKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                const isSelected = selectedDay === dayKey;
+                const isToday = dayKey === todayKey;
+                return (
+                  <div
+                    key={i}
+                    className={`bg-glass-100/30 hover:bg-glass-100 group relative flex min-h-0 cursor-pointer flex-col items-start overflow-hidden border-t border-r border-white/5 p-2 transition-colors ${isSelected ? 'ring-accent-cyan/50 bg-accent-cyan/5 ring-1' : ''}`}
+                    onClick={() => handleDayClick(dayNum)}
+                  >
+                    <div className="mb-1 flex w-full items-center justify-between">
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs transition-all ${isSelected ? 'bg-accent-cyan font-bold text-black' : isToday ? 'bg-[rgb(230,230,230)] font-bold text-black' : 'text-slate-400 group-hover:text-white'}`}
                       >
-                        {evt.title}
-                      </button>
-                    ))}
-                    {dayEvents.length > 2 && (
-                      <div className="pl-2 text-[9px] text-slate-500">
-                        +{dayEvents.length - 2} more
-                      </div>
-                    )}
+                        {dayNum}
+                      </span>
+                      {hasEvents && (
+                        <div className="mr-1 flex h-4 min-w-6 items-center justify-center rounded-full bg-red-500 px-2 shadow-[0_0_5px_rgba(239,68,68,0.6)]">
+                          <span className="text-[9px] leading-none font-bold text-white">
+                            {count}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex min-h-0 w-full flex-1 flex-col gap-1 overflow-hidden pt-1">
+                      {dayEvents.slice(0, 2).map((evt) => (
+                        <button
+                          key={evt.id}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNoteClick(evt);
+                          }}
+                          className="bg-accent-cyan w-full cursor-pointer truncate rounded-full px-2 py-0.5 text-left text-[10px] font-medium text-black shadow-sm transition-opacity hover:opacity-85"
+                        >
+                          {evt.title}
+                        </button>
+                      ))}
+                      {dayEvents.length > 2 && (
+                        <div className="pl-2 text-[9px] text-slate-500">
+                          +{dayEvents.length - 2} more
+                        </div>
+                      )}
+                    </div>
                   </div>
+                );
+              })}
+              {trailingDays.map((_, i) => (
+                <div
+                  key={`trail-${i}`}
+                  className="border-t border-r border-white/5 bg-black/20 p-2"
+                >
+                  <span className="text-xs text-slate-600">{i + 1}</span>
                 </div>
-              );
-            })}
-            {trailingDays.map((_, i) => (
-              <div key={`trail-${i}`} className="border-t border-r border-white/5 bg-black/20 p-2">
-                <span className="text-xs text-slate-600">{i + 1}</span>
-              </div>
-            ))}
-          </div>
-        </GlassCard>
-      </div>
-      <div className="flex h-full min-h-0 flex-col space-y-4 overflow-hidden @max-[860px]:h-[70vh] @max-[860px]:min-h-[440px] @max-[860px]:motion-safe:animate-[reflowStackIn_0.3s_cubic-bezier(0.16,1,0.3,1)]">
-        <TimeSection
-          title="Morning"
-          headerColor="text-accent-orange"
-          headerGradient="bg-linear-to-r from-accent-orange/10 via-red-900/10 to-transparent"
-          startHour={0}
-          endHour={12}
-          events={morningEvents}
-          visibleSlots={visibleSlots}
-          onZoomChange={setVisibleSlots}
-          onNoteClick={onNoteClick}
-          onAddNote={(hour) => onAddNote(hour, addNoteDateKey)}
-          onDropFilesAtSlot={handleDropAtHour}
-          onRefresh={calendar.refresh}
+              ))}
+            </div>
+          </GlassCard>
+        </div>
+        <div className="flex h-full min-h-0 flex-col space-y-4 overflow-hidden @max-[860px]:h-[70vh] @max-[860px]:min-h-[440px] @max-[860px]:motion-safe:animate-[reflowStackIn_0.3s_cubic-bezier(0.16,1,0.3,1)]">
+          <TimeSection
+            title="Morning"
+            headerColor="text-accent-orange"
+            headerGradient="bg-linear-to-r from-accent-orange/10 via-red-900/10 to-transparent"
+            startHour={0}
+            endHour={12}
+            events={morningEvents}
+            visibleSlots={visibleSlots}
+            onZoomChange={setVisibleSlots}
+            onNoteClick={onNoteClick}
+            onAddNote={(hour) => onAddNote(hour, addNoteDateKey)}
+            onDropFilesAtSlot={handleDropAtHour}
+            onRefresh={calendar.refresh}
+          />
+          <TimeSection
+            title="Afternoon"
+            headerColor="text-indigo-400"
+            headerGradient="bg-linear-to-r from-indigo-500/10 via-blue-900/10 to-transparent"
+            startHour={12}
+            endHour={24}
+            events={afternoonEvents}
+            visibleSlots={visibleSlots}
+            onZoomChange={setVisibleSlots}
+            onNoteClick={onNoteClick}
+            onAddNote={(hour) => onAddNote(hour, addNoteDateKey)}
+            onDropFilesAtSlot={handleDropAtHour}
+            onRefresh={calendar.refresh}
+          />
+        </div>
+        <HistoryPicker
+          isOpen={isHistoryOpen}
+          onClose={() => setIsHistoryOpen(false)}
+          selectedDate={currentDate}
+          onSelect={setCurrentDate}
+          triggerRect={triggerRect}
         />
-        <TimeSection
-          title="Afternoon"
-          headerColor="text-indigo-400"
-          headerGradient="bg-linear-to-r from-indigo-500/10 via-blue-900/10 to-transparent"
-          startHour={12}
-          endHour={24}
-          events={afternoonEvents}
-          visibleSlots={visibleSlots}
-          onZoomChange={setVisibleSlots}
-          onNoteClick={onNoteClick}
-          onAddNote={(hour) => onAddNote(hour, addNoteDateKey)}
-          onDropFilesAtSlot={handleDropAtHour}
-          onRefresh={calendar.refresh}
-        />
       </div>
-      <HistoryPicker
-        isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
-        selectedDate={currentDate}
-        onSelect={setCurrentDate}
-        triggerRect={triggerRect}
+      <ScrollFadeOverlay
+        edge="bottom"
+        visible={stackedScrollState.bottom}
+        className="@min-[860px]:hidden"
       />
     </div>
   );
@@ -1567,6 +1603,15 @@ const ImportTab = ({
     adminStatus?.config?.main_transcriber?.model ??
     adminStatus?.config?.transcription?.model ??
     null;
+
+  // GH-209: gate the diarization toggle on the server-side feature flag
+  // (computed once at container startup — adding a token needs a restart).
+  const diarizationFeature = (adminStatus?.models as any)?.features?.diarization as
+    | { available: boolean; reason: string }
+    | undefined;
+  const diarizationUnavailable = diarizationFeature?.available === false;
+  const effectiveDiarization = diarizationUnavailable ? false : diarization;
+
   const { languages, loading: languagesLoading } = useLanguages(activeModel);
   const isCanaryMainBidi = isCanaryModel(activeModel) && mainLanguage === 'English';
   const canTranslate = supportsTranslation(activeModel);
@@ -1629,12 +1674,18 @@ const ImportTab = ({
   // handleFiles.
   useEffect(() => {
     updateNotebookConfig({
-      enableDiarization: diarization,
+      enableDiarization: effectiveDiarization,
       enableWordTimestamps: wordTimestamps,
       parallelDiarization,
       language: mainLanguage,
     });
-  }, [diarization, wordTimestamps, parallelDiarization, mainLanguage, updateNotebookConfig]);
+  }, [
+    effectiveDiarization,
+    wordTimestamps,
+    parallelDiarization,
+    mainLanguage,
+    updateNotebookConfig,
+  ]);
 
   // gh-102 #3 — push useLanguages() results into the global languagesCache so
   // handleFilesDetected (a non-React store action) can resolve display name →
@@ -1702,13 +1753,25 @@ const ImportTab = ({
         language: resolvedLang,
         translation_enabled: mainTranslateActive ? true : undefined,
         translation_target_language: mainTranslateActive ? mainTranslateTarget : undefined,
-        enable_diarization: diarization,
+        enable_diarization: effectiveDiarization,
         enable_word_timestamps: supportsExplicitWordTimestampToggle ? wordTimestamps : true,
-        parallel_diarization: diarization ? parallelDiarization : undefined,
+        parallel_diarization: effectiveDiarization ? parallelDiarization : undefined,
         // Sprint 4 deferred-work no. 2 — pass undefined (not null) when no
         // active profile is set so apiClient.uploadAndTranscribe's `!= null`
         // guard correctly omits the FormData field.
         profile_id: activeProfileId ?? undefined,
+      });
+
+      // Enqueue feedback for the Notebook import tab (parity with the Session
+      // import tab and AddNoteModal, which both surface a queued record).
+      useNotificationsStore.getState().notify({
+        id: `import-queued-${Date.now()}`,
+        category: 'import',
+        title:
+          files.length === 1
+            ? `Added "${files[0].name}" to the Import Queue`
+            : `${files.length} files added to the Import Queue`,
+        status: 'complete',
       });
 
       // 4.6 — track manual import count and possibly show hint
@@ -1724,7 +1787,7 @@ const ImportTab = ({
     [
       addFiles,
       activeProfileId,
-      diarization,
+      effectiveDiarization,
       parallelDiarization,
       supportsExplicitWordTimestampToggle,
       wordTimestamps,
@@ -1770,16 +1833,27 @@ const ImportTab = ({
       case 'pending':
         return 'Queued';
       case 'processing': {
-        const progress = (adminStatus?.models as any)?.job_tracker?.progress;
-        if (progress?.total > 0) {
-          return `Chunk ${progress.current}/${progress.total}`;
-        }
-        return 'Processing...';
+        // GH-211: phase/position label computed from the parent's polled prop.
+        // Do NOT call useJobProgress here — it would open a second admin poll
+        // that bypasses the parent's 403 circuit breaker.
+        const tracker = jobTrackerFromAdminStatus(adminStatus);
+        return describeJobProgress(
+          tracker?.progress ?? null,
+          tracker?.started_at ?? null,
+          Date.now() / 1000,
+        );
       }
       case 'writing':
         return 'Saving file...';
-      case 'success':
-        return `Done — ID ${job.result?.recording_id}`;
+      case 'success': {
+        const diar = job.diarizationOutcome;
+        const skipped = !!diar?.requested && !diar?.performed;
+        const base = `Done — ID ${job.result?.recording_id}`;
+        if (!skipped) return base;
+        const why =
+          diar?.reason === 'token_missing' ? 'no HF token' : (diar?.reason ?? 'unavailable');
+        return `${base} (diarization skipped: ${why})`;
+      }
       case 'error':
         return job.error ?? 'Failed';
     }
@@ -2054,12 +2128,19 @@ const ImportTab = ({
       <GlassCard title="Import Options">
         <div className="space-y-4">
           <AppleSwitch
-            checked={diarization}
+            checked={effectiveDiarization}
             onChange={handleDiarizationChange}
+            disabled={diarizationUnavailable}
             label="Speaker Diarization"
-            description="Identify distinct speakers in the audio"
+            description={
+              diarizationUnavailable
+                ? diarizationFeature?.reason === 'token_missing'
+                  ? 'Unavailable: no HuggingFace token configured. Add one in Settings, then restart the server.'
+                  : 'Unavailable on this server.'
+                : 'Identify distinct speakers in the audio'
+            }
           />
-          {diarization && (
+          {effectiveDiarization && (
             <>
               <div className="h-px bg-white/5"></div>
               <div className="pl-1">

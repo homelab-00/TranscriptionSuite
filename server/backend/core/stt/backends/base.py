@@ -154,6 +154,10 @@ class STTBackend(abc.ABC):
             translation_target_language: Target language code for translation
                 (e.g. "en", "fr"). Canary supports any EU language; Whisper
                 only supports "en".
+            progress_callback: Optional callback receiving
+                (processed_seconds, total_seconds) as the backend advances
+                through the audio (GH-211). Backends that cannot report
+                mid-call progress may ignore it.
 
         Returns:
             Tuple of (list of BackendSegment, BackendTranscriptionInfo).

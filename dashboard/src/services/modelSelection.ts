@@ -16,10 +16,14 @@ export const VULKAN_RECOMMENDED_MODEL = 'ggml-large-v3-turbo-q8_0.bin';
 export const DISABLED_MODEL_SENTINEL = '__none__';
 
 export const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
-export const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 export const LIVE_MODEL_SAME_AS_MAIN_OPTION = 'Same as Main Transcriber';
-export const LIVE_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 export const MODEL_DISABLED_OPTION = 'None (Disabled)';
+/**
+ * Sentinel of the retired "Custom (HuggingFace repo)" option. It is no longer
+ * selectable anywhere, but old electron-stores may still hold it as a persisted
+ * selection, so readers keep recognizing it and fall back to a preset.
+ */
+export const LEGACY_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 
 export const WHISPER_LARGE_V3 = 'Systran/faster-whisper-large-v3';
 export const WHISPER_DISTIL_LARGE_V3 = 'Systran/faster-distil-whisper-large-v3';
@@ -132,11 +136,7 @@ export function toBackendModelEnvValue(value: string | null | undefined): string
   if (normalized === MODEL_DISABLED_OPTION || normalized === DISABLED_MODEL_SENTINEL) {
     return DISABLED_MODEL_SENTINEL;
   }
-  if (
-    normalized === MODEL_DEFAULT_LOADING_PLACEHOLDER ||
-    normalized === MAIN_MODEL_CUSTOM_OPTION ||
-    normalized === LIVE_MODEL_CUSTOM_OPTION
-  ) {
+  if (normalized === MODEL_DEFAULT_LOADING_PLACEHOLDER || normalized === LEGACY_CUSTOM_OPTION) {
     return '';
   }
   return normalized;
@@ -144,14 +144,10 @@ export function toBackendModelEnvValue(value: string | null | undefined): string
 
 export function resolveMainModelSelectionValue(
   mainSelection: string,
-  mainCustomModel: string,
   configuredMainModel: string,
 ): string {
   if (mainSelection === MODEL_DISABLED_OPTION) {
     return DISABLED_MODEL_SENTINEL;
-  }
-  if (mainSelection === MAIN_MODEL_CUSTOM_OPTION) {
-    return mainCustomModel.trim() || configuredMainModel;
   }
   if (mainSelection === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
     return configuredMainModel || mainSelection;
@@ -161,18 +157,13 @@ export function resolveMainModelSelectionValue(
 
 export function resolveLiveModelSelectionValue(
   liveSelection: string,
-  liveCustomModel: string,
   resolvedMainModel: string,
-  configuredLiveModel: string,
 ): string {
   if (liveSelection === MODEL_DISABLED_OPTION) {
     return DISABLED_MODEL_SENTINEL;
   }
   if (liveSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION) {
     return resolvedMainModel;
-  }
-  if (liveSelection === LIVE_MODEL_CUSTOM_OPTION) {
-    return liveCustomModel.trim() || configuredLiveModel || resolvedMainModel;
   }
   return liveSelection;
 }

@@ -57,6 +57,23 @@ export const VULKAN_WSL2_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-ser
 export const VULKAN_LINUX_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux';
 
 /**
+ * Server image variants selectable from the Docker Image card. The active
+ * variant is a projection of existing settings — the runtime profile implies
+ * the vulkan repos, `server.useLegacyGpu` picks legacy vs default — so this
+ * type introduces no new persisted state. Pull/start wiring for every repo
+ * goes through resolveImageRepo() below, which routes the vulkan runtime
+ * profiles to their dedicated repos.
+ */
+export type ImageVariant = 'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux';
+
+export const IMAGE_VARIANT_REPOS: Record<ImageVariant, string> = {
+  cuda: IMAGE_REPO,
+  'cuda-legacy': LEGACY_IMAGE_REPO,
+  'vulkan-wsl2': VULKAN_WSL2_IMAGE_REPO,
+  'vulkan-linux': VULKAN_LINUX_IMAGE_REPO,
+};
+
+/**
  * Select the GHCR image repo for this session based on the persisted
  * `server.useLegacyGpu` setting (Issue #83 — Pascal/Maxwell support) and
  * the active runtime profile. Vulkan-WSL2 and Linux Vulkan each get their
@@ -3120,6 +3137,24 @@ export interface BootstrapDownloadEvent {
   type: DownloadEventType;
   label: string;
   error?: string;
+  progress?: number; // 0-100 (GH-207)
+  downloadedSize?: string; // human-readable, e.g. "312 MB"
+  totalSize?: string;
+}
+
+/**
+ * Human-readable byte size matching the server-side `_format_bytes` in
+ * `download_progress.py`, so both download pipelines render consistently
+ * in the dashboard (GH-207).
+ */
+function formatBytes(num: number): string {
+  for (const unit of ['B', 'KB', 'MB', 'GB']) {
+    if (num < 1024) {
+      return unit === 'B' ? `${Math.trunc(num)} ${unit}` : `${num.toFixed(1)} ${unit}`;
+    }
+    num /= 1024;
+  }
+  return `${num.toFixed(1)} TB`;
 }
 
 interface BootstrapPattern {
@@ -3264,10 +3299,15 @@ function bootstrapLogParser(line: string): void {
       event.error = line.slice(idx).trim() || 'Unknown error';
     }
 
-    for (const cb of downloadEventSubscribers) {
-      cb(event);
-    }
+    emitBootstrapDownloadEvent(event);
     return; // First match wins per line
+  }
+}
+
+/** Fan a download event out to all registered subscribers. */
+function emitBootstrapDownloadEvent(event: BootstrapDownloadEvent): void {
+  for (const cb of downloadEventSubscribers) {
+    cb(event);
   }
 }
 
@@ -3550,6 +3590,14 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
 
   const { net } = await import('electron');
 
+  const eventId = `ggml-download-${sanitized}`;
+  emitBootstrapDownloadEvent({
+    action: 'start',
+    id: eventId,
+    type: 'model-preload',
+    label: `Downloading ${sanitized}...`,
+  });
+
   await new Promise<void>((resolve, reject) => {
     const request = net.request({ url, redirect: 'follow' });
     const file = fs.createWriteStream(tmp);
@@ -3560,7 +3608,27 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
         reject(new Error(`HTTP ${response.statusCode} downloading ${sanitized}`));
         return;
       }
-      response.on('data', (chunk) => file.write(chunk));
+      const rawLength = response.headers['content-length'];
+      const totalBytes = Number(Array.isArray(rawLength) ? rawLength[0] : (rawLength ?? 0));
+      let downloadedBytes = 0;
+      let lastEmit = 0;
+      response.on('data', (chunk) => {
+        file.write(chunk);
+        downloadedBytes += chunk.length;
+        const now = Date.now();
+        if (totalBytes > 0 && now - lastEmit >= 1000) {
+          lastEmit = now;
+          emitBootstrapDownloadEvent({
+            action: 'start',
+            id: eventId,
+            type: 'model-preload',
+            label: `Downloading ${sanitized}...`,
+            progress: Math.min(100, Math.round((downloadedBytes / totalBytes) * 100)),
+            downloadedSize: formatBytes(downloadedBytes),
+            totalSize: formatBytes(totalBytes),
+          });
+        }
+      });
       response.on('end', () => file.close(() => resolve()));
       response.on('error', (err) => {
         file.destroy();
@@ -3579,10 +3647,23 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
     } catch {
       /* best-effort */
     }
+    emitBootstrapDownloadEvent({
+      action: 'fail',
+      id: eventId,
+      type: 'model-preload',
+      label: `Downloading ${sanitized}...`,
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   });
 
   fs.renameSync(tmp, dest);
+  emitBootstrapDownloadEvent({
+    action: 'complete',
+    id: eventId,
+    type: 'model-preload',
+    label: `${sanitized} downloaded`,
+  });
 }
 
 /**
@@ -3853,6 +3934,77 @@ async function checkModelsCached(modelIds: string[]): Promise<Record<string, Mod
   return result;
 }
 
+/**
+ * Check model cache state while the app container is stopped (GH-213), by
+ * mounting the models volume read-only into a throwaway container running the
+ * locally-present server image (one cheap `ls`, no `du`; sizes appear once
+ * the container runs). Image resolution mirrors the start-container path:
+ * persisted TAG from the compose .env, falling back to the newest local image.
+ * Returns {} on any failure; callers must treat missing entries as UNKNOWN,
+ * not as "not downloaded".
+ */
+async function checkModelsCachedOffline(
+  modelIds: string[],
+): Promise<Record<string, ModelCacheEntry>> {
+  try {
+    const bin = await runtimeBin();
+    const result: Record<string, ModelCacheEntry> = {};
+
+    const ggmlIds = modelIds.filter((id) => isGgmlFileName(id));
+    const hubIds = modelIds.filter((id) => !isGgmlFileName(id));
+
+    // On vulkan-wsl2 the GGML models live on the Windows host, not in the
+    // Docker volume, same branch as checkModelsCached above.
+    if (readRuntimeProfileFromStore() === 'vulkan-wsl2') {
+      for (const id of ggmlIds) {
+        const exists = await isGgmlModelDownloadedOnHost(id).catch(() => false);
+        result[id] = { exists };
+      }
+      ggmlIds.length = 0;
+    }
+
+    if (ggmlIds.length > 0 || hubIds.length > 0) {
+      const repo = resolveImageRepo(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
+      const tag = readComposeEnvValue('TAG') || (await listImages())[0]?.tag;
+      if (!tag) return result; // no local image to inspect with; leave state unknown
+      const image = `${repo}:${tag}`;
+      const output = await exec(bin, [
+        'run',
+        '--rm',
+        '-v',
+        `${VOLUME_NAMES.models}:/models:ro`,
+        '--entrypoint',
+        '/bin/sh',
+        image,
+        '-c',
+        'ls -1 /models 2>/dev/null; echo "---HUB---"; ls -1 /models/hub 2>/dev/null',
+      ]);
+      const [flatPart, hubPart] = output.split('---HUB---');
+      const flatEntries = new Set(
+        (flatPart ?? '')
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean),
+      );
+      const hubEntries = new Set(
+        hubPart
+          ?.split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean) ?? [],
+      );
+      for (const id of ggmlIds) {
+        result[id] = { exists: flatEntries.has(path.basename(id.trim())) };
+      }
+      for (const id of hubIds) {
+        result[id] = { exists: hubEntries.has(hfCacheDirName(id)) };
+      }
+    }
+    return result;
+  } catch {
+    return {}; // unknown, not "missing"
+  }
+}
+
 // ─── Model Cache Operations ─────────────────────────────────────────────────
 
 /**
@@ -3905,6 +4057,16 @@ async function downloadGgmlModel(fileName: string): Promise<void> {
   const tmp = `${dest}.tmp`;
   const bin = await runtimeBin();
 
+  // Coarse events only: byte counting is not available through docker exec
+  // + curl, but the card still shows start/complete/fail (GH-207).
+  const eventId = `ggml-download-${sanitized}`;
+  emitBootstrapDownloadEvent({
+    action: 'start',
+    id: eventId,
+    type: 'model-preload',
+    label: `Downloading ${sanitized}...`,
+  });
+
   try {
     await execFileAsync(bin, ['exec', CONTAINER_NAME, 'curl', '-fsSL', '-o', tmp, url], {
       maxBuffer: 1 * 1024 * 1024,
@@ -3912,6 +4074,12 @@ async function downloadGgmlModel(fileName: string): Promise<void> {
     });
     // Atomically rename temp file to final destination
     await exec(bin, ['exec', CONTAINER_NAME, 'mv', tmp, dest]);
+    emitBootstrapDownloadEvent({
+      action: 'complete',
+      id: eventId,
+      type: 'model-preload',
+      label: `${sanitized} downloaded`,
+    });
   } catch (err) {
     // Best-effort cleanup of partial download — ignore cleanup errors
     try {
@@ -3919,6 +4087,13 @@ async function downloadGgmlModel(fileName: string): Promise<void> {
     } catch {
       /* ignore */
     }
+    emitBootstrapDownloadEvent({
+      action: 'fail',
+      id: eventId,
+      type: 'model-preload',
+      label: `Downloading ${sanitized}...`,
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   }
 }
@@ -4153,6 +4328,52 @@ export async function listRemoteTags(): Promise<RemoteTagsResult> {
 }
 
 /**
+ * Version-tag lists per image variant, keyed by `ImageVariant`. An empty
+ * array means unpublished, private, or unreachable — callers treat the three
+ * identically (the variant cannot be pulled for any tag right now).
+ */
+export type VariantTags = Record<ImageVariant, string[]>;
+
+/**
+ * Fetch the tag lists of all four server image variants in parallel.
+ *
+ * Powers the per-version variant availability display in the Docker Image
+ * card: a variant tile renders as "Not published" when the selected version
+ * tag is missing from that variant's GHCR package. Read-only — pulling and
+ * starting still target the single repo resolved by `resolveImageRepo`.
+ *
+ * Failures are per-variant and non-fatal: a variant whose token or tags/list
+ * request fails simply reports an empty list. The renderer fails open when
+ * even the default repo comes back empty (that signals network trouble, not
+ * "nothing published" — the default repo has had tags since v0.4.4).
+ */
+export async function listVariantTags(): Promise<VariantTags> {
+  const variants = Object.keys(IMAGE_VARIANT_REPOS) as ImageVariant[];
+  const entries = await Promise.all(
+    variants.map(async (variant): Promise<[ImageVariant, string[]]> => {
+      try {
+        const { tokenUrl, tagsUrl } = buildGhcrUrlsForRepo(IMAGE_VARIANT_REPOS[variant]);
+        const signal = AbortSignal.timeout(5000);
+        const tokenResp = await fetch(tokenUrl, { signal });
+        if (!tokenResp.ok) return [variant, []];
+        const { token } = (await tokenResp.json()) as { token?: string };
+        if (!token) return [variant, []];
+        const resp = await fetch(tagsUrl, {
+          signal,
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!resp.ok) return [variant, []];
+        const data = (await resp.json()) as { tags?: string[] };
+        return [variant, (data.tags ?? []).filter((t) => TAG_RE.test(t))];
+      } catch {
+        return [variant, []];
+      }
+    }),
+  );
+  return Object.fromEntries(entries) as VariantTags;
+}
+
+/**
  * Fetch creation dates for the given tags from GHCR OCI manifests.
  * Called separately from listRemoteTags so the tag list appears instantly.
  * Returns a map of tag → ISO date string.
@@ -4231,6 +4452,7 @@ export const dockerManager = {
   stopBackgroundLogStream,
   getLogs,
   checkModelsCached,
+  checkModelsCachedOffline,
   removeModelCache,
   downloadModelToCache,
   isGgmlModelDownloaded,
@@ -4246,5 +4468,6 @@ export const dockerManager = {
   CONTAINER_NAME,
   IMAGE_REPO,
   listRemoteTags,
+  listVariantTags,
   fetchRemoteTagDates,
 };

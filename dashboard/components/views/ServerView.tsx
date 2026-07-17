@@ -18,6 +18,7 @@ import {
   Check,
   FolderOpen,
   Laptop,
+  Layers,
   Radio,
   SlidersHorizontal,
   Zap,
@@ -27,7 +28,6 @@ import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { ImageTagChips } from '../ui/ImageTagChips';
-import { AppleSwitch } from '../ui/AppleSwitch';
 import { SelectorGroup } from '../ui/SelectorGroup';
 import { SelectorTile } from '../ui/SelectorTile';
 import { NvidiaIcon } from '../ui/icons/NvidiaIcon';
@@ -38,11 +38,15 @@ import { GpuHealthCard } from './GpuHealthCard';
 import { GpuDiagnosticModal, type GpuDiagnosticResultProp } from './GpuDiagnosticModal';
 import { InstanceSettingsSelectors } from './server/InstanceSettingsSelectors';
 import { RemoteConnectionCard } from './server/RemoteConnectionCard';
+import { StartupActivityInline } from './server/StartupActivityInline';
 
-import { useActivityStore } from '../../src/stores/activityStore';
+import { useNotificationsStore } from '../../src/stores/notificationsStore';
+import { SERVER_START_ID } from '../../src/utils/startupEventMapping';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useServerStatus } from '../../src/hooks/useServerStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
+import { useModelCache } from '../../src/hooks/useModelCache';
+import { useModelDownloads } from '../../src/hooks/useModelDownloads';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { formatDateDMY, compareVersionTags } from '../../src/services/versionUtils';
@@ -55,13 +59,13 @@ import {
 import { getModelsByFamily } from '../../src/services/modelRegistry';
 import {
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
-  MAIN_MODEL_CUSTOM_OPTION,
+  LEGACY_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
-  LIVE_MODEL_CUSTOM_OPTION,
   MODEL_DISABLED_OPTION,
   DISABLED_MODEL_SENTINEL,
   WHISPER_MEDIUM,
   MAIN_MODEL_PRESETS,
+  MAIN_RECOMMENDED_MODEL,
   LIVE_MODEL_PRESETS,
   VULKAN_RECOMMENDED_MODEL,
   resolveMainModelSelectionValue,
@@ -71,14 +75,16 @@ import {
 import {
   DIARIZATION_CAMPP_OPTION,
   DIARIZATION_DEFAULT_MODEL,
-  DIARIZATION_MODEL_CUSTOM_OPTION,
   DIARIZATION_SORTFORMER_OPTION,
   MLX_DEFAULT_MODEL,
   defaultMainModelFor,
   familyChoiceForModel,
   isFamilyChoiceEnabledFor,
+  liveModelsFor,
+  modelsForFamilyChoice,
 } from '../../src/services/instanceMatrix';
 import { isRuntimeProfile, type RuntimeProfile } from '../../src/types/runtime';
+import type { ImageVariant } from '../../src/hooks/useDocker';
 
 interface ServerViewProps {
   onStartServer: (
@@ -119,29 +125,24 @@ const MAIN_MODEL_SELECTION_OPTIONS = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   ...MAIN_MODEL_PRESETS,
   MODEL_DISABLED_OPTION,
-  MAIN_MODEL_CUSTOM_OPTION,
 ]);
 const LIVE_MODEL_SELECTION_OPTIONS = new Set([
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   ...LIVE_MODEL_PRESETS,
   MODEL_DISABLED_OPTION,
-  LIVE_MODEL_CUSTOM_OPTION,
 ]);
 const DIARIZATION_MODEL_SELECTION_OPTIONS = new Set([
   DIARIZATION_CAMPP_OPTION,
   DIARIZATION_SORTFORMER_OPTION,
   DIARIZATION_DEFAULT_MODEL,
-  DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
 
 const UI_SENTINEL_VALUES = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
-  MAIN_MODEL_CUSTOM_OPTION,
+  LEGACY_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
-  LIVE_MODEL_CUSTOM_OPTION,
   DIARIZATION_CAMPP_OPTION,
   DIARIZATION_SORTFORMER_OPTION,
-  DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
 
 function sanitizeModelName(value: string): string {
@@ -192,25 +193,21 @@ function normalizeLiveModelToWhisper(modelName: string): string {
   return isLiveCompatibleModel(modelName) ? modelName : FALLBACK_LIVE_WHISPER_MODEL;
 }
 
-function mapMainModelToSelection(modelName: string): { selection: string; custom: string } {
+// Map server-reported model names to UI selections. The custom-repo option is
+// gone, so a model the pickers cannot represent falls back to a preset default
+// instead of a "Custom" selection.
+function mapMainModelToSelection(modelName: string): string {
   const normalizedModel = normalizeModelName(modelName);
   if (!normalizedModel || normalizedModel === normalizeModelName(DISABLED_MODEL_SENTINEL)) {
-    return { selection: MODEL_DISABLED_OPTION, custom: '' };
+    return MODEL_DISABLED_OPTION;
   }
-  const preset = findCaseInsensitivePreset(modelName, MAIN_MODEL_PRESETS);
-  if (preset) {
-    return { selection: preset, custom: '' };
-  }
-  return { selection: MAIN_MODEL_CUSTOM_OPTION, custom: modelName };
+  return findCaseInsensitivePreset(modelName, MAIN_MODEL_PRESETS) ?? MAIN_RECOMMENDED_MODEL;
 }
 
-function mapLiveModelToSelection(
-  modelName: string,
-  mainModelName: string,
-): { selection: string; custom: string } {
+function mapLiveModelToSelection(modelName: string, mainModelName: string): string {
   const normalizedModel = normalizeModelName(modelName);
   if (!normalizedModel || normalizedModel === normalizeModelName(DISABLED_MODEL_SENTINEL)) {
-    return { selection: MODEL_DISABLED_OPTION, custom: '' };
+    return MODEL_DISABLED_OPTION;
   }
 
   const normalizedLiveModel = normalizeLiveModelToWhisper(modelName);
@@ -218,25 +215,21 @@ function mapLiveModelToSelection(
     isLiveCompatibleModel(mainModelName) &&
     normalizeModelName(normalizedLiveModel) === normalizeModelName(mainModelName)
   ) {
-    return { selection: LIVE_MODEL_SAME_AS_MAIN_OPTION, custom: '' };
+    return LIVE_MODEL_SAME_AS_MAIN_OPTION;
   }
 
-  const preset = findCaseInsensitivePreset(normalizedLiveModel, LIVE_MODEL_PRESETS);
-  if (preset) {
-    return { selection: preset, custom: '' };
-  }
-  return { selection: LIVE_MODEL_CUSTOM_OPTION, custom: normalizedLiveModel };
+  return (
+    findCaseInsensitivePreset(normalizedLiveModel, LIVE_MODEL_PRESETS) ??
+    FALLBACK_LIVE_WHISPER_MODEL
+  );
 }
 
-function mapDiarizationModelToSelection(modelName: string): { selection: string; custom: string } {
+function mapDiarizationModelToSelection(modelName: string): string {
   const normalizedModel = normalizeModelName(modelName);
   if (!normalizedModel) {
-    return { selection: DIARIZATION_SORTFORMER_OPTION, custom: '' };
+    return DIARIZATION_SORTFORMER_OPTION;
   }
-  if (normalizedModel === normalizeModelName(DIARIZATION_DEFAULT_MODEL)) {
-    return { selection: DIARIZATION_DEFAULT_MODEL, custom: '' };
-  }
-  return { selection: DIARIZATION_MODEL_CUSTOM_OPTION, custom: modelName };
+  return DIARIZATION_DEFAULT_MODEL;
 }
 
 export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFlowPending }) => {
@@ -245,22 +238,18 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   // Model selection state
   const [mainModelSelection, setMainModelSelection] = useState(MODEL_DEFAULT_LOADING_PLACEHOLDER);
-  const [mainCustomModel, setMainCustomModel] = useState('');
   const [liveModelSelection, setLiveModelSelection] = useState(LIVE_MODEL_SAME_AS_MAIN_OPTION);
-  const [liveCustomModel, setLiveCustomModel] = useState('');
   const [localSelectionsHydrated, setLocalSelectionsHydrated] = useState(false);
   const [modelsHydrated, setModelsHydrated] = useState(false);
   const [diarizationModelSelection, setDiarizationModelSelection] = useState(
     DIARIZATION_SORTFORMER_OPTION,
   );
-  const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
   const [diarizationHydrated, setDiarizationHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
 
-  // Model download cache state (checks Docker volume for HF model dirs)
-  const [modelCacheStatus, setModelCacheStatus] = useState<
-    Record<string, { exists: boolean; size?: string }>
-  >({});
+  // Model download cache check debounce timer. The cache state itself lives
+  // in useModelCache (wired below, once isRunning/isMetal are defined) so it
+  // has exactly one owner shared with the Model Manager modal.
   const modelCacheCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Runtime profile (persisted in electron-store)
@@ -415,9 +404,18 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         ]: unknown[]) => {
           if (!active) return;
 
+          // ── Legacy custom-repo migration ──────────────────────────────────
+          // The "Custom (HuggingFace repo)" option was removed. If a stored
+          // selection is the old Custom sentinel, adopt the stored custom text
+          // as the candidate model name — it may match a preset (e.g. a repo
+          // that later became a registry model); anything else falls through
+          // the unknown-value fallbacks below. The retired custom keys are
+          // cleared afterwards so this can never re-fire.
           let nextMainSelection =
             getString(storedMainSelection) ?? MODEL_DEFAULT_LOADING_PLACEHOLDER;
-          let nextMainCustom = getString(storedMainCustom) ?? '';
+          if (nextMainSelection === LEGACY_CUSTOM_OPTION) {
+            nextMainSelection = getString(storedMainCustom) ?? '';
+          }
 
           if (!MAIN_MODEL_SELECTION_OPTIONS.has(nextMainSelection)) {
             if (
@@ -425,23 +423,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             ) {
               nextMainSelection = MODEL_DISABLED_OPTION;
             } else {
-              const preset = findCaseInsensitivePreset(nextMainSelection, MAIN_MODEL_PRESETS);
-              if (preset) {
-                nextMainSelection = preset;
-              } else if (nextMainSelection) {
-                nextMainCustom = nextMainSelection;
-                nextMainSelection = MAIN_MODEL_CUSTOM_OPTION;
-              } else {
-                nextMainSelection = MODEL_DEFAULT_LOADING_PLACEHOLDER;
-              }
+              nextMainSelection =
+                findCaseInsensitivePreset(nextMainSelection, MAIN_MODEL_PRESETS) ??
+                MODEL_DEFAULT_LOADING_PLACEHOLDER;
             }
-          }
-          if (nextMainSelection !== MAIN_MODEL_CUSTOM_OPTION) {
-            nextMainCustom = '';
           }
 
           let nextLiveSelection = getString(storedLiveSelection) ?? LIVE_MODEL_SAME_AS_MAIN_OPTION;
-          let nextLiveCustom = getString(storedLiveCustom) ?? '';
+          if (nextLiveSelection === LEGACY_CUSTOM_OPTION) {
+            nextLiveSelection = getString(storedLiveCustom) ?? '';
+          }
 
           if (!LIVE_MODEL_SELECTION_OPTIONS.has(nextLiveSelection)) {
             if (
@@ -449,38 +440,22 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             ) {
               nextLiveSelection = MODEL_DISABLED_OPTION;
             } else {
-              const preset = findCaseInsensitivePreset(nextLiveSelection, LIVE_MODEL_PRESETS);
-              if (preset) {
-                nextLiveSelection = preset;
-              } else if (nextLiveSelection) {
-                nextLiveCustom = nextLiveSelection;
-                nextLiveSelection = LIVE_MODEL_CUSTOM_OPTION;
-              } else {
-                nextLiveSelection = LIVE_MODEL_SAME_AS_MAIN_OPTION;
-              }
+              nextLiveSelection =
+                findCaseInsensitivePreset(nextLiveSelection, LIVE_MODEL_PRESETS) ??
+                LIVE_MODEL_SAME_AS_MAIN_OPTION;
             }
           }
-          if (nextLiveSelection !== LIVE_MODEL_CUSTOM_OPTION) {
-            nextLiveCustom = '';
-          }
 
-          const resolvedMainModel = resolveMainModelSelectionValue(
-            nextMainSelection,
-            nextMainCustom,
-            '',
-          );
+          const resolvedMainModel = resolveMainModelSelectionValue(nextMainSelection, '');
           const resolvedLiveModel = resolveLiveModelSelectionValue(
             nextLiveSelection,
-            nextLiveCustom,
             resolvedMainModel,
-            '',
           );
           if (
             resolvedLiveModel !== DISABLED_MODEL_SENTINEL &&
             !isLiveCompatibleModel(resolvedLiveModel)
           ) {
             nextLiveSelection = FALLBACK_LIVE_WHISPER_MODEL;
-            nextLiveCustom = '';
           }
 
           // ── Merged diarization control (one-shot migration) ──────────────
@@ -499,7 +474,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           const legacyEngineRaw = getString(storedSensevoiceEngine);
           let nextDiarizationSelection =
             getString(storedDiarizationSelection) ?? DIARIZATION_SORTFORMER_OPTION;
-          let nextDiarizationCustom = getString(storedDiarizationCustom) ?? '';
+          if (nextDiarizationSelection === LEGACY_CUSTOM_OPTION) {
+            nextDiarizationSelection = getString(storedDiarizationCustom) ?? '';
+          }
 
           if (legacyEngineRaw) {
             // Preserve EFFECTIVE behavior: pre-merge, a SenseVoice main plus
@@ -508,7 +485,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             // because engine=funasr was a no-op for non-SenseVoice mains.
             const migratedMainModel = resolveMainModelSelectionValue(
               nextMainSelection,
-              nextMainCustom,
               configuredMainModel,
             );
             if (
@@ -532,14 +508,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             ) {
               nextDiarizationSelection = DIARIZATION_DEFAULT_MODEL;
             } else if (nextDiarizationSelection) {
-              nextDiarizationCustom = nextDiarizationSelection;
-              nextDiarizationSelection = DIARIZATION_MODEL_CUSTOM_OPTION;
+              // Formerly a custom repo — fall back to the pyannote default.
+              nextDiarizationSelection = DIARIZATION_DEFAULT_MODEL;
             } else {
               nextDiarizationSelection = DIARIZATION_SORTFORMER_OPTION;
             }
-          }
-          if (nextDiarizationSelection !== DIARIZATION_MODEL_CUSTOM_OPTION) {
-            nextDiarizationCustom = '';
           }
 
           // Branch B migration: the dedicated "GGML Sidecar Model" selector is
@@ -558,15 +531,24 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   (isWhisperCppModel(storedGgml) ? storedGgml : undefined))) ??
               VULKAN_RECOMMENDED_MODEL;
             nextMainSelection = migratedId;
-            nextMainCustom = '';
+          }
+
+          // Consume the retired custom-repo keys (one-shot; see migration
+          // note above). Failures are benign — the same normalization simply
+          // re-runs on the next mount.
+          if (
+            getString(storedMainCustom) ||
+            getString(storedLiveCustom) ||
+            getString(storedDiarizationCustom)
+          ) {
+            void api.config.set('server.mainCustomModel', '').catch(() => {});
+            void api.config.set('server.liveCustomModel', '').catch(() => {});
+            void api.config.set('server.diarizationCustomModel', '').catch(() => {});
           }
 
           setMainModelSelection(nextMainSelection);
-          setMainCustomModel(nextMainCustom);
           setLiveModelSelection(nextLiveSelection);
-          setLiveCustomModel(nextLiveCustom);
           setDiarizationModelSelection(nextDiarizationSelection);
-          setDiarizationCustomModel(nextDiarizationCustom);
         },
       )
       .catch(() => {})
@@ -598,16 +580,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       // recommended default. Subsumes the old special cases (MLX ids off
       // Metal, NeMo on CPU — GH-125) and also covers GGML mains left over
       // from a Vulkan profile, which used to survive the switch.
-      const resolvedMain = resolveMainModelSelectionValue(mainModelSelection, mainCustomModel, '');
+      const resolvedMain = resolveMainModelSelectionValue(mainModelSelection, '');
       const mainFamily = familyChoiceForModel(resolvedMain);
       let mainAfterReset = resolvedMain;
       if (mainFamily && !isFamilyChoiceEnabledFor(mainFamily, profile)) {
         const nextDefault = defaultMainModelFor(profile);
         mainAfterReset = nextDefault;
         setMainModelSelection(nextDefault);
-        setMainCustomModel('');
         api?.config?.set('server.mainModelSelection', nextDefault);
-        api?.config?.set('server.mainCustomModel', '');
       }
       // Live picks are whisper/whispercpp-only; GGML live models are invalid
       // off Vulkan and MLX ids are never valid. Fall back to Same-as-main —
@@ -617,12 +597,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         liveModelSelection !== LIVE_MODEL_SAME_AS_MAIN_OPTION &&
         liveModelSelection !== MODEL_DISABLED_OPTION
       ) {
-        const resolvedLive = resolveLiveModelSelectionValue(
-          liveModelSelection,
-          liveCustomModel,
-          mainAfterReset,
-          '',
-        );
+        const resolvedLive = resolveLiveModelSelectionValue(liveModelSelection, mainAfterReset);
         const liveFamily = familyChoiceForModel(resolvedLive);
         const liveInvalid =
           liveFamily !== null &&
@@ -637,7 +612,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       // only ever kicked off from the Start Local click handler below.
       if (profile !== 'vulkan') {
         docker.cancelSidecarPull();
-        useActivityStore.getState().updateActivity('sidecar-vulkan', { status: 'dismissed' });
+        useNotificationsStore.getState().dismissToast('sidecar-vulkan');
       }
       // Warn if Metal selected on unsupported hardware (still allow the selection)
       if (
@@ -665,9 +640,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     },
     [
       mainModelSelection,
-      mainCustomModel,
       liveModelSelection,
-      liveCustomModel,
       isAppleSilicon,
       metalSupported,
       mlxFeature,
@@ -675,36 +648,88 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     ],
   );
 
-  // Pulls the Vulkan sidecar image, tracking progress in the global activity
+  // Pulls the Vulkan sidecar image, tracking progress in the notifications
   // store. Triggered from the Start Local click handler below — only for
   // runtimeProfile === 'vulkan', and never merely from selecting the tile.
-  const downloadVulkanSidecar = useCallback(async () => {
+  // Resolves with the pull error message (or null on success) so the caller
+  // can surface it without reading stale closure state.
+  const downloadVulkanSidecar = useCallback(async (): Promise<string | null> => {
     const dlId = 'sidecar-vulkan';
-    useActivityStore.getState().addActivity({
+    useNotificationsStore.getState().notify({
       id: dlId,
       category: 'download',
-      label: 'Vulkan Sidecar (whisper.cpp)',
-      legacyType: 'sidecar-image',
+      title: 'Vulkan Sidecar (whisper.cpp)',
+      detail: 'Pulling sidecar image',
+      status: 'active',
     });
-    try {
-      await docker.pullSidecarImage();
-      useActivityStore.getState().updateActivity(dlId, {
-        status: 'complete',
-        completedAt: Date.now(),
-      });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Pull failed';
-      useActivityStore.getState().updateActivity(dlId, {
-        status: 'error',
-        error: msg,
-        completedAt: Date.now(),
-      });
+    // withOperation never throws - it resolves with the error message (or
+    // null on success), so branch on the return value instead of try/catch.
+    const pullError = await docker.pullSidecarImage();
+    const store = useNotificationsStore.getState();
+    const newest = [...store.notifications].reverse().find((n) => n.id === dlId);
+    // A user cancel already closed the record - leave it alone.
+    if (newest?.status === 'active') {
+      if (pullError === null) {
+        store.notify({
+          id: dlId,
+          category: 'download',
+          title: 'Vulkan Sidecar (whisper.cpp) downloaded',
+          // Clear the stale 'Pulling sidecar image' active-phase detail.
+          detail: '',
+          status: 'complete',
+        });
+      } else {
+        store.updateNotification(dlId, { status: 'error', error: pullError });
+      }
     }
+    return pullError;
   }, [docker.pullSidecarImage]);
 
   const containerStatus = docker.container;
   const isRunning = containerStatus.running;
   const isRunningAndHealthy = isRunning && containerStatus.health === 'healthy';
+
+  // Single owner of the model-download cache and in-flight-download state,
+  // consumed by the Instance Settings selectors.
+  const { modelCacheStatus, refreshCacheStatus } = useModelCache({ isRunning, isMetal });
+
+  // Host-side GGML cache status (vulkan-wsl2 only - models live on the
+  // Windows filesystem, outside the Docker volume).
+  const [hostCacheStatus, setHostCacheStatus] = useState<Record<string, { exists: boolean }>>({});
+  const isVulkanWsl2 = runtimeProfile === 'vulkan-wsl2';
+
+  const refreshHostCacheStatus = useCallback(async (ids: readonly string[]) => {
+    const api = (window as any).electronAPI;
+    if (!api?.docker?.isGgmlModelDownloadedOnHost) return;
+    const entries = await Promise.all(
+      ids.map(async (id) => {
+        const exists = await api.docker.isGgmlModelDownloadedOnHost(id).catch(() => false);
+        return [id, { exists }] as const;
+      }),
+    );
+    setHostCacheStatus((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+  }, []);
+
+  useEffect(() => {
+    if (!isVulkanWsl2) return;
+    void refreshHostCacheStatus(GGML_MODELS.map((m) => m.id));
+  }, [isVulkanWsl2, refreshHostCacheStatus]);
+
+  const { downloadingIds, downloadModel, removeModel } = useModelDownloads({
+    isMetal,
+    runtimeProfile,
+    refreshCacheStatus,
+    refreshHostCacheStatus,
+  });
+
+  // vulkan-wsl2: GGML weights live on the Windows host filesystem, outside the
+  // Docker volume, so the container-side cache check can't see them. Overlay
+  // the host-side status (GGML ids only) so the model picker's cached/missing
+  // dots stay truthful for whisper.cpp models on that profile.
+  const effectiveModelCacheStatus = useMemo(
+    () => (isVulkanWsl2 ? { ...modelCacheStatus, ...hostCacheStatus } : modelCacheStatus),
+    [isVulkanWsl2, modelCacheStatus, hostCacheStatus],
+  );
 
   // MLX (native process) server state
   type MLXStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
@@ -789,13 +814,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     // away and returning would overwrite the user's selection with whatever model
     // the server happens to be running (which may be an older choice).
     if (mainModelSelection === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
-      const mappedMain = mapMainModelToSelection(configuredMainModel);
-      const mappedLive = mapLiveModelToSelection(configuredLiveModel, configuredMainModel);
-
-      setMainModelSelection(mappedMain.selection);
-      setMainCustomModel(mappedMain.custom);
-      setLiveModelSelection(mappedLive.selection);
-      setLiveCustomModel(mappedLive.custom);
+      setMainModelSelection(mapMainModelToSelection(configuredMainModel));
+      setLiveModelSelection(mapLiveModelToSelection(configuredLiveModel, configuredMainModel));
     }
 
     setModelsHydrated(true);
@@ -817,9 +837,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     // otherwise navigating away and returning would overwrite the user's
     // selection with whatever the server reports.
     if (diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION) {
-      const mappedDiarization = mapDiarizationModelToSelection(configuredDiarizationModel);
-      setDiarizationModelSelection(mappedDiarization.selection);
-      setDiarizationCustomModel(mappedDiarization.custom);
+      setDiarizationModelSelection(mapDiarizationModelToSelection(configuredDiarizationModel));
     }
 
     setDiarizationHydrated(true);
@@ -831,20 +849,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     localSelectionsHydrated,
   ]);
 
-  const activeTranscriber = resolveMainModelSelectionValue(
-    mainModelSelection,
-    mainCustomModel,
-    configuredMainModel,
-  );
+  const activeTranscriber = resolveMainModelSelectionValue(mainModelSelection, configuredMainModel);
   // SenseVoice-only: the diarization-engine selector is greyed unless the main
   // transcriber is a SenseVoice model.
   const isSenseVoiceMain = isSenseVoiceModel(activeTranscriber);
-  const activeLiveModel = resolveLiveModelSelectionValue(
-    liveModelSelection,
-    liveCustomModel,
-    activeTranscriber,
-    configuredLiveModel,
-  );
+  const activeLiveModel = resolveLiveModelSelectionValue(liveModelSelection, activeTranscriber);
   const normalizedLiveModel = normalizeLiveModelToWhisper(activeLiveModel);
   // Vulkan sidecar boot/launch model, derived from the Main Transcriber pick
   // (Branch B). The backend swaps to the live model at runtime via /load; this
@@ -864,12 +873,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // single-pass diarizer while leaving the config.yaml pyannote default in place
   // as the fallback if cam++ fails to load.
   const activeDiarizationModel =
-    diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION
-      ? diarizationCustomModel.trim() || configuredDiarizationModel || DIARIZATION_DEFAULT_MODEL
-      : diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION ||
-          diarizationModelSelection === DIARIZATION_CAMPP_OPTION
-        ? ''
-        : DIARIZATION_DEFAULT_MODEL;
+    diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION ||
+    diarizationModelSelection === DIARIZATION_CAMPP_OPTION
+      ? ''
+      : DIARIZATION_DEFAULT_MODEL;
 
   // SenseVoice diarization engine env value: 'funasr' only when the merged
   // dropdown is set to CAM++, else 'pyannote'. This is a harmless no-op unless
@@ -886,6 +893,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const handleMLXStart = useCallback(async () => {
     const api = (window as any).electronAPI;
     if (!api?.mlx) return;
+    useNotificationsStore.getState().notify({
+      id: SERVER_START_ID,
+      category: 'server',
+      title: 'Starting server...',
+      detail: 'Launching the Metal (MLX) server process',
+      status: 'active',
+      progress: 0,
+    });
     try {
       const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
       const hfToken = (await api.config?.get('server.hfToken').catch(() => '')) ?? '';
@@ -907,6 +922,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`Failed to start Metal server: ${msg}`);
+      useNotificationsStore.getState().updateNotification(SERVER_START_ID, {
+        title: 'Server failed to start',
+        status: 'error',
+        error: msg,
+      });
     }
   }, [activeTranscriber, normalizedLiveModel, activeDiarizationModel]);
 
@@ -1021,18 +1041,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     )
       return;
     setLiveModelSelection(FALLBACK_LIVE_WHISPER_MODEL);
-    setLiveCustomModel('');
   }, [activeLiveModel, localSelectionsHydrated]);
 
   // Metal mode: auto-switch a non-MLX main model to the MLX default.
   useEffect(() => {
     if (!localSelectionsHydrated || runtimeProfile !== 'metal') return;
-    const resolved = resolveMainModelSelectionValue(mainModelSelection, mainCustomModel, '');
+    const resolved = resolveMainModelSelectionValue(mainModelSelection, '');
     if (resolved && !isMLXModel(resolved) && resolved !== MODEL_DEFAULT_LOADING_PLACEHOLDER) {
       setMainModelSelection(MLX_DEFAULT_MODEL);
-      setMainCustomModel('');
     }
-  }, [runtimeProfile, localSelectionsHydrated, mainModelSelection, mainCustomModel]);
+  }, [runtimeProfile, localSelectionsHydrated, mainModelSelection]);
 
   useEffect(() => {
     // Sortformer is Metal/MLX-only; on any non-Metal runtime fall back to the
@@ -1089,22 +1107,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (!localSelectionsHydrated) return;
     const api = (window as any).electronAPI;
     if (!api?.config) return;
-    void api.config.set('server.mainCustomModel', mainCustomModel).catch(() => {});
-  }, [localSelectionsHydrated, mainCustomModel]);
-
-  useEffect(() => {
-    if (!localSelectionsHydrated) return;
-    const api = (window as any).electronAPI;
-    if (!api?.config) return;
     void api.config.set('server.liveModelSelection', liveModelSelection).catch(() => {});
   }, [localSelectionsHydrated, liveModelSelection]);
-
-  useEffect(() => {
-    if (!localSelectionsHydrated) return;
-    const api = (window as any).electronAPI;
-    if (!api?.config) return;
-    void api.config.set('server.liveCustomModel', liveCustomModel).catch(() => {});
-  }, [localSelectionsHydrated, liveCustomModel]);
 
   useEffect(() => {
     if (!localSelectionsHydrated) return;
@@ -1117,21 +1121,22 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       .catch(() => {});
   }, [localSelectionsHydrated, diarizationModelSelection]);
 
+  // Check model download cache whenever the active model names or container state
+  // change. GH-213: covers every option the selectors can show (not just the 3
+  // active ids), and keeps working while the container is STOPPED, exactly when
+  // the selectors are editable, via the offline volume check. Metal has no
+  // container at all, so it routes through the MLX host-filesystem checker.
   useEffect(() => {
-    if (!localSelectionsHydrated) return;
-    const api = (window as any).electronAPI;
-    if (!api?.config) return;
-    void api.config.set('server.diarizationCustomModel', diarizationCustomModel).catch(() => {});
-  }, [localSelectionsHydrated, diarizationCustomModel]);
-
-  // Check model download cache whenever the active model names or container state change
-  useEffect(() => {
-    const api = (window as any).electronAPI;
-    if (!api?.docker?.checkModelsCached || !isRunning) return;
-
-    // Collect unique model IDs to check
+    // Every model id the Main picker rows and the Live dropdown can currently
+    // offer, mirroring the option builders in InstanceSettingsSelectors, so
+    // each entry can show its own downloaded state (GH-213).
+    const familyForMain = familyChoiceForModel(activeTranscriber);
+    const optionIds = [
+      ...(familyForMain ? modelsForFamilyChoice(familyForMain).map((m) => m.id) : []),
+      ...liveModelsFor(isWhisperCppModel(activeLiveModel) ? 'vulkan' : 'gpu').map((m) => m.id),
+    ];
     const modelIds = [
-      ...new Set([activeTranscriber, normalizedLiveModel, diarizationStatusModelId]),
+      ...new Set([activeTranscriber, normalizedLiveModel, diarizationStatusModelId, ...optionIds]),
     ].filter(
       (id) => id && id !== MODEL_DEFAULT_LOADING_PLACEHOLDER && id !== DISABLED_MODEL_SENTINEL,
     );
@@ -1140,18 +1145,19 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     // Debounce the check
     if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
     modelCacheCheckRef.current = setTimeout(() => {
-      api.docker
-        .checkModelsCached(modelIds)
-        .then((result: Record<string, { exists: boolean; size?: string }>) => {
-          setModelCacheStatus((prev) => ({ ...prev, ...result }));
-        })
-        .catch(() => {});
+      refreshCacheStatus(modelIds);
     }, 500);
 
     return () => {
       if (modelCacheCheckRef.current) clearTimeout(modelCacheCheckRef.current);
     };
-  }, [activeTranscriber, normalizedLiveModel, diarizationStatusModelId, isRunning]);
+  }, [
+    activeTranscriber,
+    activeLiveModel,
+    normalizedLiveModel,
+    diarizationStatusModelId,
+    refreshCacheStatus,
+  ]);
 
   // ─── Image tag selection (merged remote + local) ─────────────────────────
 
@@ -1207,6 +1213,66 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Resolve display tag to the value Docker commands need (just the tag string)
   const selectedTagForActions = selectedImage;
   const selectedTagForStart = docker.images.length > 0 ? selectedTagForActions : undefined;
+
+  // ─── Image variant selection (Docker Image card) ──────────────────────────
+  // The active variant is a pure projection of existing settings — the
+  // runtime profile implies the vulkan repos, `useLegacyGpu` picks legacy vs
+  // default — so the selector adds no new persisted state or pull wiring:
+  // images are still only downloaded via "Fetch Fresh Image" or when the
+  // server starts. Note: the Vulkan Linux runtime is WIP; its tile mirrors
+  // the intended repo mapping, while actual pulls for that runtime keep
+  // targeting the default repo until the vulkan-linux wiring lands.
+
+  const activeImageVariant: ImageVariant =
+    runtimeProfile === 'vulkan-wsl2'
+      ? 'vulkan-wsl2'
+      : runtimeProfile === 'vulkan'
+        ? 'vulkan-linux'
+        : useLegacyGpu
+          ? 'cuda-legacy'
+          : 'cuda';
+
+  // Per-version availability from the four GHCR tag lists. Fail open: the
+  // default repo has been published since v0.4.4, so an empty `cuda` list
+  // means the probe itself failed (offline, GHCR down) — treat availability
+  // as unknown instead of disabling every tile.
+  const variantAvailability = useMemo(() => {
+    const vt = docker.variantTags;
+    if (!vt || (vt.cuda?.length ?? 0) === 0) return null;
+    return vt;
+  }, [docker.variantTags]);
+
+  const isVariantPublished = useCallback(
+    (variant: ImageVariant): boolean => {
+      if (!variantAvailability || !selectedImage) return true;
+      if (variantAvailability[variant]?.includes(selectedImage)) return true;
+      // A locally built/pulled tag counts for the active variant even when
+      // GHCR does not (or no longer) lists it — e.g. local dev builds.
+      return variant === activeImageVariant && localTagSet.has(selectedImage);
+    },
+    [variantAvailability, selectedImage, activeImageVariant, localTagSet],
+  );
+
+  // Switching image repos is blocked while a container exists — even a
+  // stopped container pins the runtime volume that the cuda ↔ cuda-legacy
+  // switch has to wipe (same rule as the retired Legacy GPU toggle).
+  const containerBlocksVariantSwitch = isRunning || containerStatus.exists;
+
+  // Variant tile click → the same confirmation flow the Legacy GPU toggle
+  // used (GH-83): the user acknowledges the restart + runtime-volume wipe
+  // before `server.useLegacyGpu` flips. The vulkan variants are implied by
+  // the Runtime selector, so their tiles never reach this handler.
+  const handleImageVariantSelect = useCallback(
+    (variant: ImageVariant) => {
+      if (variant !== 'cuda' && variant !== 'cuda-legacy') return;
+      const next = variant === 'cuda-legacy';
+      if (next === useLegacyGpu) return;
+      setPendingLegacyGpuValue(next);
+      setLegacyGpuWipeVolume(true);
+      setLegacyGpuDialogOpen(true);
+    },
+    [useLegacyGpu],
+  );
 
   // ─── Setup Checklist ────────────────────────────────────────────────────────
 
@@ -1375,7 +1441,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       if (!cur || cur === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
                         setMainModelSelection(MLX_DEFAULT_MODEL);
                         api.config?.set('server.mainModelSelection', MLX_DEFAULT_MODEL);
-                        api.config?.set('server.mainCustomModel', '');
                       }
                     })
                     .catch(() => {});
@@ -1545,6 +1610,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     refreshAdminStatus();
   }, [refreshAdminStatus]);
 
+  // Drives the Load/Unload Models control in the unified instance panel.
+  // undefined until the first admin-status poll lands.
+  const modelsLoaded = adminStatus?.models_loaded;
+
   const openCleanAllDialog = useCallback(() => {
     setKeepDataVolume(false);
     setKeepModelsVolume(false);
@@ -1563,32 +1632,38 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   // Issue 103: shared by the "Fetch Fresh Image" button and the in-banner
   // Retry button so a user can re-attempt without re-navigating after a
-  // failure. The activity-store entry tracks the same dlId for both paths.
+  // failure. The notification entry tracks the same dlId for both paths.
   // (Avoid issue-number references with a leading hash in scanned files —
   //  the UI-contract color regex matches 3-digit hex shorthand and would
   //  pollute the literal palette.)
   const handleFetchFreshImage = useCallback(async (): Promise<void> => {
     if (!selectedTagForActions) return;
     const dlId = `docker-image-${selectedTagForActions}`;
-    const store = useActivityStore.getState();
-    store.addActivity({
+    useNotificationsStore.getState().notify({
       id: dlId,
       category: 'download',
-      label: `Server Image (${selectedTagForActions})`,
-      legacyType: 'docker-image',
+      title: `Server Image (${selectedTagForActions})`,
+      detail: 'Pulling container image',
+      status: 'active',
     });
-    try {
-      await docker.pullImage(selectedTagForActions);
-      useActivityStore
-        .getState()
-        .updateActivity(dlId, { status: 'complete', completedAt: Date.now() });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Pull failed';
-      useActivityStore.getState().updateActivity(dlId, {
-        status: 'error',
-        error: msg,
-        completedAt: Date.now(),
+    // withOperation never throws - it resolves with the error message (or
+    // null on success), so branch on the return value instead of try/catch.
+    const pullError = await docker.pullImage(selectedTagForActions);
+    const store = useNotificationsStore.getState();
+    const newest = [...store.notifications].reverse().find((n) => n.id === dlId);
+    // A user cancel already closed the record - leave it alone.
+    if (newest?.status !== 'active') return;
+    if (pullError === null) {
+      store.notify({
+        id: dlId,
+        category: 'download',
+        title: `Server Image (${selectedTagForActions}) downloaded`,
+        // Clear the stale 'Pulling container image' active-phase detail.
+        detail: '',
+        status: 'complete',
       });
+    } else {
+      store.updateNotification(dlId, { status: 'error', error: pullError });
     }
   }, [docker, selectedTagForActions]);
 
@@ -1877,8 +1952,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       */}
                       {docker.remoteTagsStatus === 'not-published' && useLegacyGpu ? (
                         <div className="border-accent-amber/30 bg-accent-amber/5 rounded-lg border px-3 py-2 text-xs text-slate-400">
-                          Legacy image not yet published for this release. Pull a default image and
-                          toggle legacy mode off, or wait for the next release.
+                          Legacy image not yet published for this release. Switch the image variant
+                          below back to CUDA, or wait for the next release.
                         </div>
                       ) : (
                         <ImageTagChips
@@ -1921,9 +1996,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           onClick={() => {
                             docker.cancelPull();
                             const dlId = `docker-image-${selectedTagForActions}`;
-                            useActivityStore
-                              .getState()
-                              .updateActivity(dlId, { status: 'dismissed' });
+                            useNotificationsStore.getState().updateNotification(dlId, {
+                              status: 'complete',
+                              detail: 'Cancelled by user',
+                            });
                           }}
                         >
                           Cancel Pull
@@ -1940,6 +2016,119 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     </div>
                   </div>
                 </div>
+                {/*
+                  Image variant selector — same visual language as the
+                  Instance Settings matrix (SelectorGroup + SelectorTile).
+                  Only cuda ↔ cuda-legacy is user-switchable here (this
+                  replaces the retired Legacy GPU toggle); the vulkan
+                  variants are implied by the Runtime selector and render
+                  locked (active) or disabled (inactive) so the whole
+                  variant matrix stays readable at a glance. Availability
+                  is per selected version tag: a variant whose GHCR package
+                  has no such tag shows a "Not published" badge.
+                */}
+                <div className="mt-6 border-t border-white/5 pt-4">
+                  <SelectorGroup
+                    icon={<Layers size={16} className="text-accent-cyan" />}
+                    title="Image Variant"
+                    hint="Which server image build this version uses"
+                    columnsClass="grid-cols-2 lg:grid-cols-4"
+                  >
+                    {(
+                      [
+                        {
+                          variant: 'cuda',
+                          label: 'CUDA',
+                          sublabel: 'Standard image',
+                          accent: 'green',
+                          icon: <NvidiaIcon size={16} />,
+                          runtimeOk: runtimeProfile === 'gpu' || runtimeProfile === 'cpu',
+                          runtimeBadge: 'Requires CUDA or CPU runtime',
+                        },
+                        {
+                          variant: 'cuda-legacy',
+                          label: 'CUDA Legacy',
+                          sublabel: 'GTX 10-series / 900-series and older',
+                          accent: 'amber',
+                          icon: <NvidiaIcon size={16} />,
+                          runtimeOk: runtimeProfile === 'gpu',
+                          runtimeBadge: 'Requires CUDA runtime',
+                        },
+                        {
+                          variant: 'vulkan-wsl2',
+                          label: 'Vulkan Windows',
+                          sublabel: 'AMD / Intel · WSL2',
+                          accent: 'red',
+                          icon: (
+                            <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                              <AmdIcon size={30} />
+                              <IntelIcon size={30} />
+                            </span>
+                          ),
+                          runtimeOk: runtimeProfile === 'vulkan-wsl2',
+                          runtimeBadge: 'Requires Vulkan Windows runtime',
+                        },
+                        {
+                          variant: 'vulkan-linux',
+                          label: 'Vulkan Linux',
+                          sublabel: 'AMD / Intel',
+                          accent: 'red',
+                          icon: (
+                            <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                              <AmdIcon size={30} />
+                              <IntelIcon size={30} />
+                            </span>
+                          ),
+                          runtimeOk: runtimeProfile === 'vulkan',
+                          runtimeBadge: 'Requires Vulkan Linux runtime',
+                        },
+                      ] satisfies Array<{
+                        variant: ImageVariant;
+                        label: string;
+                        sublabel: string;
+                        accent: 'green' | 'amber' | 'red';
+                        icon: React.ReactNode;
+                        runtimeOk: boolean;
+                        runtimeBadge: string;
+                      }>
+                    ).map((t) => {
+                      const isActiveTile = activeImageVariant === t.variant;
+                      const published = isVariantPublished(t.variant);
+                      const vulkanVariant =
+                        t.variant === 'vulkan-wsl2' || t.variant === 'vulkan-linux';
+                      const disabled =
+                        !isActiveTile &&
+                        (vulkanVariant ||
+                          !t.runtimeOk ||
+                          !published ||
+                          containerBlocksVariantSwitch);
+                      // Badge priority: version availability is the most
+                      // version-specific signal, then the runtime constraint,
+                      // then the container-pins-the-volume rule.
+                      const badge = disabled
+                        ? !published
+                          ? 'Not published'
+                          : vulkanVariant || !t.runtimeOk
+                            ? t.runtimeBadge
+                            : 'Remove container to switch'
+                        : undefined;
+                      return (
+                        <SelectorTile
+                          key={t.variant}
+                          icon={t.icon}
+                          label={t.label}
+                          sublabel={t.sublabel}
+                          accent={t.accent}
+                          selected={isActiveTile}
+                          disabled={disabled}
+                          locked={isActiveTile && vulkanVariant}
+                          badge={badge}
+                          onSelect={() => handleImageVariantSelect(t.variant)}
+                        />
+                      );
+                    })}
+                  </SelectorGroup>
+                </div>
                 {docker.operationError && (
                   <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
                     <span className="min-w-0 flex-1">{docker.operationError}</span>
@@ -1953,153 +2142,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       >
                         Retry
                       </Button>
-                    )}
-                  </div>
-                )}
-                <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-white/5 pt-4">
-                  <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
-                    <StatusLight
-                      status={
-                        isRunningAndHealthy
-                          ? 'active'
-                          : containerStatus.exists
-                            ? 'warning'
-                            : 'inactive'
-                      }
-                      animate={isRunningAndHealthy}
-                    />
-                    <span
-                      className={`font-mono text-sm transition-colors ${
-                        isRunning
-                          ? 'text-slate-300'
-                          : containerStatus.exists
-                            ? 'text-accent-orange'
-                            : 'text-slate-500'
-                      }`}
-                    >
-                      {statusLabel}
-                    </span>
-                    {isRunning && serverMode && (
-                      <span
-                        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
-                      >
-                        {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
-                        {serverMode}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="secondary"
-                        className="h-9 px-4 whitespace-nowrap"
-                        onClick={async () => {
-                          // Vulkan's compose-up pulls a missing sidecar image
-                          // inline and can hit its 120s exec timeout on a
-                          // multi-GB image, so make sure the image is present
-                          // *before* starting the container rather than
-                          // racing it. This only runs for runtimeProfile ===
-                          // 'vulkan' — never on tile selection alone, and
-                          // never for cpu/gpu/metal/vulkan-wsl2.
-                          if (runtimeProfile === 'vulkan') {
-                            const exists = await docker.hasSidecarImage();
-                            if (!exists) {
-                              await downloadVulkanSidecar();
-                              const nowExists = await docker.hasSidecarImage();
-                              if (!nowExists) {
-                                toast.error(
-                                  docker.operationError
-                                    ? `Failed to download the Vulkan sidecar image: ${docker.operationError}`
-                                    : 'Failed to download the Vulkan sidecar image.',
-                                );
-                                return;
-                              }
-                            }
-                          }
-                          onStartServer('local', runtimeProfile, selectedTagForStart, {
-                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                            diarizationModel: sanitizeModelName(activeDiarizationModel),
-                            sensevoiceDiarizationEngine: sensevoiceEngineValue,
-                            ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
-                          });
-                        }}
-                        disabled={
-                          docker.operating ||
-                          isRunning ||
-                          startupFlowPending ||
-                          !liveModelWhisperOnlyCompatible ||
-                          (needsDocker && !docker.composeAvailable)
-                        }
-                      >
-                        {docker.operating || startupFlowPending ? (
-                          <Loader2 size={14} className="animate-spin" />
-                        ) : (
-                          'Start Local'
-                        )}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        className="h-9 px-4 whitespace-nowrap"
-                        onClick={() =>
-                          onStartServer('remote', runtimeProfile, selectedTagForStart, {
-                            mainTranscriberModel: sanitizeModelName(activeTranscriber),
-                            liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
-                            diarizationModel: sanitizeModelName(activeDiarizationModel),
-                            sensevoiceDiarizationEngine: sensevoiceEngineValue,
-                            ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
-                          })
-                        }
-                        disabled={
-                          docker.operating ||
-                          isRunning ||
-                          startupFlowPending ||
-                          !liveModelWhisperOnlyCompatible ||
-                          (needsDocker && !docker.composeAvailable)
-                        }
-                      >
-                        Start Remote
-                      </Button>
-                      <Button
-                        variant="danger"
-                        className="h-9 px-4 whitespace-nowrap"
-                        onClick={() => docker.stopContainer()}
-                        disabled={docker.operating || !isRunning}
-                      >
-                        Stop
-                      </Button>
-                    </div>
-                    <Button
-                      variant="danger"
-                      className="h-9 px-4 whitespace-nowrap"
-                      onClick={() => docker.removeContainer()}
-                      disabled={docker.operating || isRunning || !containerStatus.exists}
-                    >
-                      Remove Container
-                    </Button>
-                  </div>
-                </div>
-                {docker.operationError && (
-                  <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                    {docker.operationError}
-                  </div>
-                )}
-                {containerStatus.startedAt && isRunning && (
-                  <div className="mt-2 font-mono text-xs text-slate-500">
-                    Started: {new Date(containerStatus.startedAt).toLocaleString()}
-                    {containerStatus.health && (
-                      <span className="ml-3">
-                        Health:{' '}
-                        <span
-                          className={
-                            containerStatus.health === 'healthy'
-                              ? 'text-green-400'
-                              : 'text-accent-orange'
-                          }
-                        >
-                          {containerStatus.health}
-                        </span>
-                      </span>
                     )}
                   </div>
                 )}
@@ -2119,6 +2161,195 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy || mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
             >
               <div className="space-y-6">
+                {/* Unified instance control panel: container lifecycle controls
+                    (moved up from the Docker Image card) plus the model
+                    load/unload control (moved from the selectors footer), so
+                    everything that starts, stops, or resets this instance sits
+                    in one place above the settings it applies. On Metal the
+                    container controls are irrelevant (the native server has its
+                    own card above), so only the models control renders. */}
+                <div className="border-b border-white/5 pb-4">
+                  <div className="flex flex-wrap items-center gap-5">
+                    {!isMetal && (
+                      <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
+                        <StatusLight
+                          status={
+                            isRunningAndHealthy
+                              ? 'active'
+                              : containerStatus.exists
+                                ? 'warning'
+                                : 'inactive'
+                          }
+                          animate={isRunningAndHealthy}
+                        />
+                        <span
+                          className={`font-mono text-sm transition-colors ${
+                            isRunning
+                              ? 'text-slate-300'
+                              : containerStatus.exists
+                                ? 'text-accent-orange'
+                                : 'text-slate-500'
+                          }`}
+                        >
+                          {statusLabel}
+                        </span>
+                        {isRunning && serverMode && (
+                          <span
+                            className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                          >
+                            {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
+                            {serverMode}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
+                      {!isMetal && (
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="secondary"
+                            className="h-9 px-4 whitespace-nowrap"
+                            onClick={async () => {
+                              // Vulkan's compose-up pulls a missing sidecar image
+                              // inline and can hit its 120s exec timeout on a
+                              // multi-GB image, so make sure the image is present
+                              // *before* starting the container rather than
+                              // racing it. This only runs for runtimeProfile ===
+                              // 'vulkan' — never on tile selection alone, and
+                              // never for cpu/gpu/metal/vulkan-wsl2.
+                              if (runtimeProfile === 'vulkan') {
+                                const exists = await docker.hasSidecarImage();
+                                if (!exists) {
+                                  const pullError = await downloadVulkanSidecar();
+                                  const nowExists = await docker.hasSidecarImage();
+                                  if (!nowExists) {
+                                    toast.error(
+                                      pullError
+                                        ? `Failed to download the Vulkan sidecar image: ${pullError}`
+                                        : 'Failed to download the Vulkan sidecar image.',
+                                    );
+                                    return;
+                                  }
+                                }
+                              }
+                              onStartServer('local', runtimeProfile, selectedTagForStart, {
+                                mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                                liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                                diarizationModel: sanitizeModelName(activeDiarizationModel),
+                                sensevoiceDiarizationEngine: sensevoiceEngineValue,
+                                ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
+                              });
+                            }}
+                            disabled={
+                              docker.operating ||
+                              isRunning ||
+                              startupFlowPending ||
+                              !liveModelWhisperOnlyCompatible ||
+                              (needsDocker && !docker.composeAvailable)
+                            }
+                          >
+                            {docker.operating || startupFlowPending ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              'Start Local'
+                            )}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            className="h-9 px-4 whitespace-nowrap"
+                            onClick={() =>
+                              onStartServer('remote', runtimeProfile, selectedTagForStart, {
+                                mainTranscriberModel: sanitizeModelName(activeTranscriber),
+                                liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
+                                diarizationModel: sanitizeModelName(activeDiarizationModel),
+                                sensevoiceDiarizationEngine: sensevoiceEngineValue,
+                                ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
+                              })
+                            }
+                            disabled={
+                              docker.operating ||
+                              isRunning ||
+                              startupFlowPending ||
+                              !liveModelWhisperOnlyCompatible ||
+                              (needsDocker && !docker.composeAvailable)
+                            }
+                          >
+                            Start Remote
+                          </Button>
+                          <Button
+                            variant="danger"
+                            className="h-9 px-4 whitespace-nowrap"
+                            onClick={() => docker.stopContainer()}
+                            disabled={docker.operating || !isRunning}
+                          >
+                            Stop
+                          </Button>
+                        </div>
+                      )}
+                      <div className="ml-auto flex flex-wrap items-center gap-2">
+                        {modelsLoaded !== undefined && (
+                          <span
+                            className={`self-center font-mono text-xs ${modelsLoaded ? 'text-green-400' : 'text-slate-500'}`}
+                          >
+                            {modelsLoaded ? 'Models Loaded' : 'Models Not Loaded'}
+                          </span>
+                        )}
+                        <Button
+                          variant={modelsLoaded === false ? 'secondary' : 'danger'}
+                          className="h-9 px-4 whitespace-nowrap"
+                          onClick={modelsLoaded === false ? handleLoadModels : handleUnloadModels}
+                          disabled={modelsLoading || !isRunning}
+                        >
+                          {modelsLoading ? (
+                            <>
+                              <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
+                            </>
+                          ) : modelsLoaded === false ? (
+                            'Load Models'
+                          ) : (
+                            'Unload Models'
+                          )}
+                        </Button>
+                        {!isMetal && (
+                          <Button
+                            variant="danger"
+                            className="h-9 px-4 whitespace-nowrap"
+                            onClick={() => docker.removeContainer()}
+                            disabled={docker.operating || isRunning || !containerStatus.exists}
+                          >
+                            Remove Container
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {!isMetal && docker.operationError && (
+                    <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                      {docker.operationError}
+                    </div>
+                  )}
+                  {/* Active model downloads while the server is starting (GH-207) */}
+                  {!isMetal && isRunning && !isRunningAndHealthy && <StartupActivityInline />}
+                  {!isMetal && containerStatus.startedAt && isRunning && (
+                    <div className="mt-2 font-mono text-xs text-slate-500">
+                      Started: {new Date(containerStatus.startedAt).toLocaleString()}
+                      {containerStatus.health && (
+                        <span className="ml-3">
+                          Health:{' '}
+                          <span
+                            className={
+                              containerStatus.health === 'healthy'
+                                ? 'text-green-400'
+                                : 'text-accent-orange'
+                            }
+                          >
+                            {containerStatus.health}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {/* Runtime selector — tiles gated per host platform. hostPlatform
                     stays 'unknown' in jsdom/test mounts, which keeps every tile
                     enabled there (gating only engages on a known platform). */}
@@ -2158,6 +2389,37 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       badge={hostPlatform === 'darwin' ? 'Requires NVIDIA' : undefined}
                       onSelect={() => handleRuntimeProfileChange('gpu')}
                     />
+                    {/* Vulkan-WSL2 (GH-101 follow-up) — always rendered so the
+                        full runtime matrix stays readable; selectable only on
+                        Windows hosts where the main-process probe confirmed
+                        Docker Desktop runs on the WSL2 backend AND a tiny
+                        container could see /dev/dxg. */}
+                    <SelectorTile
+                      icon={
+                        <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                          <AmdIcon size={30} />
+                          <IntelIcon size={30} />
+                        </span>
+                      }
+                      label="GPU (Vulkan Windows)"
+                      sublabel="AMD / Intel · WSL2"
+                      accent="red"
+                      selected={runtimeProfile === 'vulkan-wsl2'}
+                      disabled={
+                        isRunning ||
+                        (hostPlatform !== 'unknown' && hostPlatform !== 'win32') ||
+                        (hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected)
+                      }
+                      badge={
+                        hostPlatform !== 'unknown' && hostPlatform !== 'win32'
+                          ? 'Windows only'
+                          : hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected
+                            ? 'Requires WSL2 GPU'
+                            : undefined
+                      }
+                      hint="Experimental"
+                      onSelect={() => handleRuntimeProfileChange('vulkan-wsl2')}
+                    />
                     <SelectorTile
                       icon={
                         <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
@@ -2178,27 +2440,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       hint="Experimental"
                       onSelect={() => handleRuntimeProfileChange('vulkan')}
                     />
-                    {/* Experimental Vulkan-WSL2 tile (GH-101 follow-up) — only
-                        rendered when the main-process probe confirms Docker
-                        Desktop runs on the WSL2 backend AND a tiny container
-                        could see /dev/dxg. */}
-                    {gpuInfo?.wslSupport?.gpuPassthroughDetected && hostPlatform === 'win32' && (
-                      <SelectorTile
-                        icon={
-                          <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
-                            <AmdIcon size={30} />
-                            <IntelIcon size={30} />
-                          </span>
-                        }
-                        label="GPU (Vulkan Windows)"
-                        sublabel="AMD / Intel · WSL2"
-                        accent="red"
-                        selected={runtimeProfile === 'vulkan-wsl2'}
-                        disabled={isRunning}
-                        hint="Experimental"
-                        onSelect={() => handleRuntimeProfileChange('vulkan-wsl2')}
-                      />
-                    )}
                     <SelectorTile
                       icon={<AppleIcon size={16} />}
                       label="GPU (Metal)"
@@ -2242,45 +2483,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   )}
                 </div>
 
-                {/*
-                  Legacy-GPU image toggle (Issue #83 — Pascal/Maxwell support).
-                  Gated to GPU (CUDA) runtime only: the cu126 wheels are
-                  pointless on Vulkan, CPU, or Metal, and surfacing the toggle
-                  there would invite confusion. Pascal/Maxwell users must
-                  pick GPU (CUDA) first — the README's §2.4 note tells them so.
-                  Switching repos requires a container restart and clears the
-                  runtime volume so the next bootstrap re-syncs wheels from the
-                  new PyTorch index — this is handled via a confirmation dialog.
-                */}
-                {runtimeProfile === 'gpu' && (
-                  <div className="flex items-center gap-3 border-b border-white/5 pb-4">
-                    <AppleSwitch
-                      checked={useLegacyGpu}
-                      // Disabled when the container exists at all — even stopped
-                      // containers still hold a reference to the runtime volume,
-                      // so the wipe-on-toggle would silently fail. User must
-                      // remove the container (Stop + cleanup) before switching.
-                      disabled={isRunning || containerStatus.exists}
-                      onChange={(next) => {
-                        // Don't apply immediately — show the confirmation
-                        // dialog so the user acknowledges the restart
-                        // requirement and chooses the wipe-volume option.
-                        setPendingLegacyGpuValue(next);
-                        setLegacyGpuWipeVolume(true);
-                        setLegacyGpuDialogOpen(true);
-                      }}
-                      size="sm"
-                    />
-                    <span className="text-sm font-medium text-slate-300">
-                      Use legacy-GPU image (GTX 10-series / 900-series and older)
-                    </span>
-                    <span className="text-xs text-slate-500 italic">
-                      {containerStatus.exists && !isRunning
-                        ? 'Remove the existing container to switch variants'
-                        : 'cu126 wheels — required for Pascal/Maxwell cards (GTX 1050–1080 Ti, GTX 900s, Tesla P/M, Quadro P/M)'}
-                    </span>
-                  </div>
-                )}
+                {/* The Legacy GPU image toggle used to live here (GH-83) —
+                    it is now the CUDA Legacy tile in the Docker Image card's
+                    Image Variant selector, which reuses the same confirmation
+                    dialog + runtime-volume wipe flow below. The old Vulkan
+                    sidecar-image banner is gone too - the Start Local click
+                    handler pre-pulls the sidecar image instead. */}
 
                 {/* Model / live / diarization selectors — all valid combinations
                     come from src/services/instanceMatrix.ts */}
@@ -2289,26 +2497,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   isRunning={isRunning}
                   mainModelSelection={mainModelSelection}
                   onMainModelSelectionChange={setMainModelSelection}
-                  mainCustomModel={mainCustomModel}
-                  onMainCustomModelChange={setMainCustomModel}
                   liveModelSelection={liveModelSelection}
                   onLiveModelSelectionChange={setLiveModelSelection}
-                  liveCustomModel={liveCustomModel}
-                  onLiveCustomModelChange={setLiveCustomModel}
                   diarizationModelSelection={diarizationModelSelection}
                   onDiarizationModelSelectionChange={setDiarizationModelSelection}
-                  diarizationCustomModel={diarizationCustomModel}
-                  onDiarizationCustomModelChange={setDiarizationCustomModel}
                   activeTranscriber={activeTranscriber}
                   activeLiveModel={activeLiveModel}
                   diarizationStatusModelId={diarizationStatusModelId}
-                  modelCacheStatus={modelCacheStatus}
+                  modelCacheStatus={effectiveModelCacheStatus}
                   liveModelWhisperOnlyCompatible={liveModelWhisperOnlyCompatible}
                   liveModeModelConstraintMessage={liveModeModelConstraintMessage}
-                  modelsLoaded={adminStatus?.models_loaded}
-                  modelsLoading={modelsLoading}
-                  onLoadModels={handleLoadModels}
-                  onUnloadModels={handleUnloadModels}
+                  canManage={isMetal || isRunning}
+                  downloadingIds={downloadingIds}
+                  onDownloadModel={downloadModel}
+                  onRemoveModel={removeModel}
                 />
               </div>
             </GlassCard>
@@ -2591,7 +2793,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           <DialogPanel className="border-accent-orange/25 blur-panel w-full max-w-lg overflow-hidden rounded-3xl border bg-black/75 shadow-2xl backdrop-blur-xl">
             <div className="border-accent-orange/20 bg-accent-orange/10 border-b px-6 py-4">
               <DialogTitle className="text-accent-orange text-lg font-semibold">
-                {pendingLegacyGpuValue ? 'Enable legacy-GPU image?' : 'Disable legacy-GPU image?'}
+                {pendingLegacyGpuValue
+                  ? 'Switch to the CUDA Legacy image?'
+                  : 'Switch to the standard CUDA image?'}
               </DialogTitle>
               <p className="mt-1 text-sm text-slate-300">
                 {pendingLegacyGpuValue
@@ -2671,7 +2875,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         // GHCR repo. Fire-and-forget — refresh errors surface
                         // through the existing `remoteTagsStatus` channel.
                         void docker.refreshRemoteTags?.();
-                        const base = `${next ? 'Enabled' : 'Disabled'} legacy-GPU image. `;
+                        const base = `Switched to the ${next ? 'CUDA Legacy' : 'standard CUDA'} image. `;
                         if (legacyGpuWipeVolume && !result.runtimeVolumeWiped) {
                           // Wipe was requested but failed — tell the user so
                           // they know the runtime volume still holds old wheels.

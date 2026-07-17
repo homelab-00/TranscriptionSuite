@@ -14,11 +14,10 @@
  */
 import type { RuntimeProfile } from '../types/runtime';
 import {
-  isCanaryModel,
   isMLXCanaryModel,
   isMLXModel,
   isMLXParakeetModel,
-  isParakeetModel,
+  isNemoModel,
   isSenseVoiceModel,
   isVibeVoiceASRModel,
   isWhisperCppModel,
@@ -37,7 +36,6 @@ import {
 // (server.diarizationModelSelection); values must never change.
 export const DIARIZATION_SORTFORMER_OPTION = 'Sortformer (Metal; ≤ 4 speakers)';
 export const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
-export const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 export const DIARIZATION_CAMPP_OPTION = 'CAM++ (fast, built-in)';
 export const DIARIZATION_BUILTIN_LABEL = 'Built-in';
 
@@ -45,14 +43,12 @@ export const MLX_DEFAULT_MODEL = 'mlx-community/parakeet-tdt-0.6b-v3';
 
 export const FAMILY_CHOICE_IDS = [
   'whisper',
-  'parakeet',
-  'canary',
+  'nemo',
   'sensevoice',
   'vibevoice',
   'whispercpp',
   'mlx-whisper',
-  'mlx-parakeet',
-  'mlx-canary',
+  'mlx-nemo',
   'mlx-vibevoice',
 ] as const;
 export type FamilyChoiceId = (typeof FAMILY_CHOICE_IDS)[number];
@@ -91,7 +87,7 @@ const FAMILY_META: Record<FamilyChoiceId, FamilyMeta> = {
   whisper: {
     label: 'Whisper',
     sublabel: 'faster-whisper / WhisperX',
-    accent: 'slate',
+    accent: 'purple',
     capabilities: {
       languages: '90+',
       translation: 'english',
@@ -100,22 +96,17 @@ const FAMILY_META: Record<FamilyChoiceId, FamilyMeta> = {
       requiresToken: true,
     },
   },
-  parakeet: {
-    label: 'Parakeet v3',
-    sublabel: 'NVIDIA NeMo',
+  // The two NeMo tiles each cover a Parakeet + a Canary; the model rows below
+  // disambiguate which one is actually selected. A merged tile advertises the
+  // family MAXIMUM, so that maximum must be read off the real models rather
+  // than assumed symmetric between the two tiles: the CUDA Canary translates,
+  // but the MLX port of it is ASR-only (backend capabilities.py
+  // supports_english_translation returns False for it). Hence 'multilingual'
+  // here and 'none' on mlx-nemo.
+  nemo: {
+    label: 'NeMo Models',
+    sublabel: 'NVIDIA Parakeet / Canary',
     accent: 'green',
-    capabilities: {
-      languages: '25',
-      translation: 'none',
-      live: false,
-      diarization: 'pyannote',
-      requiresToken: true,
-    },
-  },
-  canary: {
-    label: 'Canary v2',
-    sublabel: 'NVIDIA NeMo',
-    accent: 'yellow',
     capabilities: {
       languages: '25',
       translation: 'multilingual',
@@ -172,22 +163,12 @@ const FAMILY_META: Record<FamilyChoiceId, FamilyMeta> = {
       requiresToken: false,
     },
   },
-  'mlx-parakeet': {
-    label: 'MLX Parakeet',
+  // Both models behind this tile are ASR-only: the MLX Canary port does not
+  // ship the translation task. See the family-maximum note on nemo above.
+  'mlx-nemo': {
+    label: 'MLX NeMo',
     sublabel: 'Apple Silicon',
     accent: 'green',
-    capabilities: {
-      languages: '25',
-      translation: 'none',
-      live: false,
-      diarization: 'sortformer',
-      requiresToken: false,
-    },
-  },
-  'mlx-canary': {
-    label: 'MLX Canary',
-    sublabel: 'Apple Silicon',
-    accent: 'yellow',
     capabilities: {
       languages: '25',
       translation: 'none',
@@ -218,12 +199,7 @@ const REASON_REQUIRES_NVIDIA = 'Requires NVIDIA GPU';
 const HINT_SLOW_ON_CPU = 'Slow on CPU';
 const HINT_RUNS_ON_CPU = 'Runs on CPU';
 
-const MLX_FAMILIES: readonly FamilyChoiceId[] = [
-  'mlx-whisper',
-  'mlx-parakeet',
-  'mlx-canary',
-  'mlx-vibevoice',
-];
+const MLX_FAMILIES: readonly FamilyChoiceId[] = ['mlx-whisper', 'mlx-nemo', 'mlx-vibevoice'];
 
 function isVulkanProfile(runtime: RuntimeProfile): boolean {
   return runtime === 'vulkan' || runtime === 'vulkan-wsl2';
@@ -251,7 +227,7 @@ function familyAvailability(
   if (runtime === 'metal') return { enabled: false, reason: REASON_REQUIRES_DOCKER };
   if (isVulkanProfile(runtime)) return { enabled: false, reason: REASON_REQUIRES_CUDA };
   if (runtime === 'cpu') {
-    if (id === 'parakeet' || id === 'canary') {
+    if (id === 'nemo') {
       // dockerManager substitutes NeMo mains with faster-whisper on cpu;
       // surface that as an explicit disable instead of a silent swap.
       return { enabled: false, reason: REASON_REQUIRES_NVIDIA };
@@ -290,13 +266,11 @@ export function familyChoiceForModel(modelId: string | null | undefined): Family
   ) {
     return null;
   }
-  if (isMLXParakeetModel(name)) return 'mlx-parakeet';
-  if (isMLXCanaryModel(name)) return 'mlx-canary';
+  if (isMLXParakeetModel(name) || isMLXCanaryModel(name)) return 'mlx-nemo';
   if (isMLXModel(name)) {
     return /vibevoice/i.test(name) ? 'mlx-vibevoice' : 'mlx-whisper';
   }
-  if (isParakeetModel(name)) return 'parakeet';
-  if (isCanaryModel(name)) return 'canary';
+  if (isNemoModel(name)) return 'nemo';
   if (isSenseVoiceModel(name)) return 'sensevoice';
   if (isVibeVoiceASRModel(name)) return 'vibevoice';
   if (isWhisperCppModel(name)) return 'whispercpp';
@@ -315,8 +289,10 @@ export function modelsForFamilyChoice(choice: FamilyChoiceId): ModelInfo[] {
  */
 export function defaultModelForFamilyChoice(choice: FamilyChoiceId): string {
   if (choice === 'whispercpp') return VULKAN_RECOMMENDED_MODEL;
-  if (choice === 'parakeet') return MAIN_RECOMMENDED_MODEL;
-  if (choice === 'mlx-parakeet') return MLX_DEFAULT_MODEL;
+  // Parakeet is the ASR-only workhorse and the right default; Canary is the
+  // opt-in translation model, reachable from the model rows.
+  if (choice === 'nemo') return MAIN_RECOMMENDED_MODEL;
+  if (choice === 'mlx-nemo') return MLX_DEFAULT_MODEL;
   return modelsForFamilyChoice(choice)[0]?.id ?? '';
 }
 
@@ -392,7 +368,7 @@ export function liveModelsFor(runtime: RuntimeProfile): ModelInfo[] {
   );
 }
 
-export type DiarizationTileId = 'pyannote' | 'campp' | 'sortformer' | 'builtin' | 'custom';
+export type DiarizationTileId = 'pyannote' | 'campp' | 'sortformer' | 'builtin';
 
 export interface DiarizationTile {
   id: DiarizationTileId;
@@ -464,14 +440,6 @@ export function diarizationTilesFor(
       enabled: true,
       isDefault: defaultId === 'pyannote',
       hint: 'HuggingFace token required',
-    },
-    {
-      id: 'custom',
-      label: 'Custom',
-      storedValue: DIARIZATION_MODEL_CUSTOM_OPTION,
-      enabled: true,
-      isDefault: false,
-      hint: 'HuggingFace repo',
     },
   ];
 }

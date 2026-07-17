@@ -100,8 +100,13 @@ export const SelectorTile: React.FC<SelectorTileProps> = ({
   glyphs,
 }) => {
   const accentClasses = ACCENT_CLASSES[accent];
+  // A selected tile keeps its accent highlight even while disabled (e.g. the
+  // server is running and the matrix is read-only) — dimmed, but legible, so
+  // the active configuration stays readable at a glance.
   const stateClasses = disabled
-    ? 'cursor-not-allowed border-white/5 bg-white/[0.02] opacity-45'
+    ? selected
+      ? `cursor-not-allowed opacity-60 ${accentClasses.selected}`
+      : 'cursor-not-allowed border-white/5 bg-white/[0.02] opacity-45'
     : selected
       ? `${accentClasses.selected} ${locked ? 'cursor-default' : 'cursor-pointer'}`
       : 'cursor-pointer border-white/10 bg-white/5 hover:border-white/25 hover:bg-white/10';
@@ -118,13 +123,11 @@ export const SelectorTile: React.FC<SelectorTileProps> = ({
       className={`relative flex min-h-20 flex-col items-start gap-1 rounded-xl border p-3 text-left transition-all duration-200 ${stateClasses}`}
     >
       <span className="flex w-full items-center gap-2">
-        <span className={selected && !disabled ? accentClasses.icon : 'text-slate-300'}>
-          {icon}
-        </span>
+        <span className={selected ? accentClasses.icon : 'text-slate-300'}>{icon}</span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-white/90">{label}</span>
+          <span className="block text-sm font-medium break-words text-white/90">{label}</span>
           {sublabel && (
-            <span className="block truncate text-[10px] text-slate-400">{sublabel}</span>
+            <span className="block text-[10px] break-words text-slate-400">{sublabel}</span>
           )}
         </span>
         {locked && <Lock size={12} className="shrink-0 text-slate-400" />}

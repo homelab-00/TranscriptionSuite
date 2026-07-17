@@ -1,23 +1,30 @@
 meta:
-  spec_version: 1.2.0
+  spec_version: 1.11.2
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
   generated_from:
-    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
+    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/.claude/worktrees/warm-giggling-island/dashboard
     source_files:
       - App.tsx
       - components/__tests__/AddNoteModal.canary-language.test.tsx
       - components/__tests__/AddNoteModal.initialFiles.test.tsx
       - components/__tests__/AudioVisualizer.test.tsx
+      - components/__tests__/CustomSelect.test.tsx
+      - components/__tests__/HfTokenExplainer.test.tsx
       - components/__tests__/LogsView.test.tsx
       - components/__tests__/NotebookView.canary-language.test.tsx
       - components/__tests__/NotebookView.profile-id.test.tsx
       - components/__tests__/NotebookView.test.tsx
+      - components/__tests__/NotificationToasts.test.tsx
       - components/__tests__/ServerView.test.tsx
       - components/__tests__/SessionImportTab.canary-language.test.tsx
+      - components/__tests__/SessionImportTab.diarization-gate.test.tsx
+      - components/__tests__/SessionImportTab.drop-feedback.test.tsx
+      - components/__tests__/SessionImportTab.output-format.test.tsx
       - components/__tests__/SessionView.canary-language.test.tsx
       - components/__tests__/SessionView.test.tsx
+      - components/__tests__/StartupActivityInline.test.tsx
       - components/AriaLiveRegion.tsx
       - components/AudioVisualizer.tsx
       - components/editor/FindReplaceTextEditor.test.tsx
@@ -27,6 +34,12 @@ meta:
       - components/import/__tests__/DedupPromptModal.test.tsx
       - components/import/DedupChoiceContainer.tsx
       - components/import/DedupPromptModal.tsx
+      - components/models/__tests__/ModelCardPicker.test.tsx
+      - components/models/__tests__/ModelPickerRow.test.tsx
+      - components/models/__tests__/ModelRowDetails.test.tsx
+      - components/models/ModelCardPicker.tsx
+      - components/models/ModelPickerRow.tsx
+      - components/models/ModelRowDetails.tsx
       - components/PopOutWindow.tsx
       - components/profiles/__tests__/EmptyProfileForm.test.tsx
       - components/profiles/__tests__/ModelProfileSelector.test.tsx
@@ -52,22 +65,26 @@ meta:
       - components/recording/SpeakerRenameInput.tsx
       - components/Sidebar.tsx
       - components/ui/__tests__/PersistentInfoBanner.test.tsx
+      - components/ui/__tests__/ScrollFadeOverlay.test.tsx
       - components/ui/__tests__/UpdateBanner.test.tsx
       - components/ui/__tests__/UpdateModal.test.tsx
-      - components/ui/ActivityNotifications.tsx
       - components/ui/AppleSwitch.tsx
       - components/ui/Button.tsx
       - components/ui/CustomSelect.tsx
       - components/ui/ErrorFallback.tsx
       - components/ui/GlassCard.tsx
+      - components/ui/HfTokenExplainer.tsx
       - components/ui/icons/AmdIcon.tsx
       - components/ui/icons/AppleIcon.tsx
       - components/ui/icons/IntelIcon.tsx
       - components/ui/icons/NvidiaIcon.tsx
       - components/ui/ImageTagChips.tsx
       - components/ui/LogTerminal.tsx
+      - components/ui/NotificationToasts.tsx
+      - components/ui/notificationVisuals.tsx
       - components/ui/PersistentInfoBanner.tsx
       - components/ui/QueuePausedBanner.tsx
+      - components/ui/ScrollFadeOverlay.tsx
       - components/ui/SelectorGroup.tsx
       - components/ui/SelectorTile.tsx
       - components/ui/ShortcutCapture.tsx
@@ -87,11 +104,13 @@ meta:
       - components/views/GpuHealthCard.tsx
       - components/views/LiveTranscriptView.tsx
       - components/views/LogsView.tsx
-      - components/views/ModelManagerTab.tsx
-      - components/views/ModelManagerView.tsx
       - components/views/NotebookView.tsx
+      - components/views/NotificationsView.tsx
+      - components/views/server/__tests__/MainModelPicker.test.tsx
       - components/views/server/InstanceSettingsSelectors.tsx
+      - components/views/server/MainModelPicker.tsx
       - components/views/server/RemoteConnectionCard.tsx
+      - components/views/server/StartupActivityInline.tsx
       - components/views/ServerConfigEditor.tsx
       - components/views/ServerView.tsx
       - components/views/SessionImportTab.tsx
@@ -102,7 +121,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-07-14T08:05:41.637Z
+    generated_at: 2026-07-16T23:44:05.733Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -187,6 +206,9 @@ foundation:
         - hsla(339, 49%, 30%, 1)
         - hsla(339,49%,30%,1)
         - rgb(230,230,230)
+        - rgb(255 255 255 / 0.2)
+        - rgb(34 211 238 / 0.12)
+        - rgb(34 211 238 / 0.9)
         - rgba(${r}, ${g}, ${b}, ${alpha})
         - rgba(0, 0, 0, 0.3)
         - rgba(0, 0, 0, 0.4)
@@ -291,12 +313,13 @@ foundation:
         - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.5)]
-        - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_6px_rgba(34,197,94,0.5)]
+        - shadow-[0_0_6px_rgba(96,165,250,0.6)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
         - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - shadow-2xl
@@ -330,6 +353,7 @@ foundation:
         - ease-in-out
       keyframes:
         - dropdown-appear
+        - dropzone-flash
         - idle-wave-cyan
         - idle-wave-magenta
         - idle-wave-orange
@@ -396,12 +420,13 @@ foundation:
         - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.5)]
-        - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
         - shadow-[0_0_5px_rgba(239,68,68,0.6)]
         - shadow-[0_0_5px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_6px_rgba(34,197,94,0.5)]
+        - shadow-[0_0_6px_rgba(96,165,250,0.6)]
         - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
         - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
         - text-[10px]
@@ -505,6 +530,8 @@ utility_allowlist:
     - animate-ping
     - animate-pulse
     - aria-activedescendant
+    - aria-checked
+    - aria-expanded
     - aria-invalid
     - aria-label
     - aria-labels
@@ -526,7 +553,6 @@ utility_allowlist:
     - bg-accent-orange
     - bg-accent-orange/10
     - bg-accent-orange/20
-    - bg-accent-rose/5
     - bg-amber-400/10
     - bg-amber-400/20
     - bg-amber-400/5
@@ -541,7 +567,6 @@ utility_allowlist:
     - bg-black/50
     - bg-black/60
     - bg-black/70
-    - bg-black/75
     - bg-blue-400
     - bg-blue-400/10
     - bg-blue-400/20
@@ -572,17 +597,14 @@ utility_allowlist:
     - bg-orange-500/10
     - bg-purple-400/10
     - bg-purple-500
-    - bg-purple-500/10
     - bg-red-400/10
     - bg-red-500
     - bg-red-500/10
     - bg-red-500/20
-    - bg-red-500/25
     - bg-red-500/5
     - bg-slate-300/10
     - bg-slate-400/10
     - bg-slate-500
-    - bg-slate-500/10
     - bg-slate-500/20
     - bg-slate-700
     - bg-slate-800
@@ -613,8 +635,6 @@ utility_allowlist:
     - border-accent-magenta/5
     - border-accent-magenta/60
     - border-accent-orange/20
-    - border-accent-orange/25
-    - border-accent-rose/20
     - border-amber-400/20
     - border-amber-400/25
     - border-amber-400/30
@@ -639,24 +659,15 @@ utility_allowlist:
     - border-green-500/30
     - border-l
     - border-l-2
-    - border-l-accent-magenta
     - border-l-amber-400
-    - border-l-blue-400
-    - border-l-green-400
-    - border-l-orange-400
-    - border-l-purple-400
     - border-l-red-500
-    - border-l-slate-300
-    - border-l-slate-500
     - border-orange-400/60
     - border-orange-500/20
     - border-purple-400/60
     - border-r
     - border-red-400/20
-    - border-red-400/40
     - border-red-400/60
     - border-red-500/20
-    - border-red-500/25
     - border-slate-300/60
     - border-slate-400/30
     - border-slate-500/40
@@ -673,6 +684,7 @@ utility_allowlist:
     - bottom-1
     - bottom-4
     - bottom-6
+    - bottom-anchored
     - bottom-full
     - bottom-right
     - cursor-not-allowed
@@ -785,7 +797,6 @@ utility_allowlist:
     - hover:bg-red-500/10
     - hover:bg-red-500/20
     - hover:bg-red-500/30
-    - hover:bg-red-500/35
     - hover:bg-white/10
     - hover:bg-white/15
     - hover:bg-white/20
@@ -838,6 +849,7 @@ utility_allowlist:
     - left-8
     - lg:flex
     - lg:grid-cols-2
+    - lg:grid-cols-4
     - lg:grid-cols-5
     - lg:p-10
     - line-clamp-2
@@ -847,6 +859,7 @@ utility_allowlist:
     - max-h-40
     - max-h-48
     - max-h-60
+    - max-h-64
     - max-h-72
     - max-h-96
     - max-height
@@ -870,12 +883,9 @@ utility_allowlist:
     - mb-4
     - mb-6
     - mb-8
-    - md:flex-row
     - md:grid-cols-2
     - md:grid-cols-4
-    - md:items-center
     - md:items-end
-    - md:justify-between
     - min-h-0
     - min-h-20
     - min-h-32
@@ -886,14 +896,11 @@ utility_allowlist:
     - min-w-25
     - min-w-32.5
     - min-w-36
-    - min-w-42.5
     - min-w-6
     - ml-0.5
     - ml-1
     - ml-2
-    - ml-3
     - ml-auto
-    - ml-model
     - mr-1
     - mr-1.5
     - mr-2
@@ -916,6 +923,7 @@ utility_allowlist:
     - my-4
     - opacity-0
     - opacity-10
+    - opacity-100
     - opacity-30
     - opacity-40
     - opacity-45
@@ -945,7 +953,6 @@ utility_allowlist:
     - pb-0
     - pb-1
     - pb-10
-    - pb-2
     - pb-4
     - pb-8
     - pl-0
@@ -987,6 +994,7 @@ utility_allowlist:
     - py-1
     - py-1.5
     - py-12
+    - py-16
     - py-2
     - py-2.5
     - py-3
@@ -1040,7 +1048,6 @@ utility_allowlist:
     - slide-in-from-bottom-4
     - slide-in-from-right-4
     - slide-in-from-right-8
-    - slide-in-from-top-2
     - slide-in-from-top-4
     - sm:block
     - sm:grid-cols-3
@@ -1099,9 +1106,7 @@ utility_allowlist:
     - text-orange-400
     - text-orange-500
     - text-purple-400
-    - text-red-100
     - text-red-200
-    - text-red-200/90
     - text-red-300
     - text-red-400
     - text-red-400/80
@@ -1233,12 +1238,13 @@ utility_allowlist:
     - shadow-[0_0_15px_rgba(251,146,60,0.5)]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]
     - shadow-[0_0_15px_rgba(34,211,238,0.5)]
-    - shadow-[0_0_18px_rgba(239,68,68,0.35)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
     - shadow-[0_0_5px_rgba(239,22,238,0.5)]
     - shadow-[0_0_5px_rgba(239,68,68,0.6)]
     - shadow-[0_0_5px_rgba(34,211,238,0.5)]
+    - shadow-[0_0_6px_rgba(34,197,94,0.5)]
+    - shadow-[0_0_6px_rgba(96,165,250,0.6)]
     - shadow-[0_2px_8px_rgba(0,0,0,0.4)]
     - shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]
     - text-[10px]
@@ -1254,8 +1260,6 @@ inline_style_allowlist:
     - backgroundColor
     - backgroundImage
     - backgroundSize
-    - containIntrinsicSize
-    - contentVisibility
     - display
     - gridTemplateRows
     - height
@@ -1280,7 +1284,6 @@ inline_style_allowlist:
     - "1"
     - "100"
     - 100%
-    - 120px
     - 16%
     - 1px
     - 1rem
@@ -1295,8 +1298,6 @@ inline_style_allowlist:
     - 50%
     - 7%
     - "90"
-    - auto
-    - auto 120px
     - auto repeat(${gridRows}, 1fr)
     - fixed
     - "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)"
@@ -1308,9 +1309,9 @@ inline_style_allowlist:
     - radial-gradient(circle at top left, transparent 1rem, black 1rem)
     - slideUpFromBottomEdge 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards
     - translateY(${pillTop}px)
-    - visible
   keyframes:
     - dropdown-appear
+    - dropzone-flash
     - idle-wave-cyan
     - idle-wave-magenta
     - idle-wave-orange
@@ -1374,40 +1375,6 @@ component_contracts:
     state_rules:
       - id: profile-badge
         rule: Profile link indicator badge retains cyan accent and dark border treatment.
-  ActivityCard:
-    file: components/ui/ActivityNotifications.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  ActivityNotifications:
-    file: components/ui/ActivityNotifications.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   AddNoteModal:
     file: components/views/AddNoteModal.tsx
     required_tokens:
@@ -1718,7 +1685,7 @@ component_contracts:
       - id: jan-highlight
         rule: Highlighted January event count and selected-day treatment remain explicit in current mock data states.
   CapBadge:
-    file: components/views/ModelManagerTab.tsx
+    file: components/models/ModelRowDetails.tsx
     required_tokens:
       - colors
       - motion
@@ -1772,23 +1739,6 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   CopyableCommand:
     file: components/views/GpuHealthCard.tsx
-    required_tokens:
-      - colors
-      - motion
-      - radii
-      - shadows
-    allowed_variants: {}
-    structural_invariants:
-      - id: structure-stable
-        rule: Preserve current structural layout and region hierarchy for this component.
-    behavior_rules:
-      - id: motion-locked
-        rule: Use only approved motion tokens and classes from foundation token registry.
-    state_rules:
-      - id: closed-set-styles
-        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  CustomModelRow:
-    file: components/views/ModelManagerTab.tsx
     required_tokens:
       - colors
       - motion
@@ -2095,6 +2045,23 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  HfTokenExplainer:
+    file: components/ui/HfTokenExplainer.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   HistoryPicker:
     file: components/views/NotebookView.tsx
     required_tokens:
@@ -2287,8 +2254,8 @@ component_contracts:
     state_rules:
       - id: log-type-colors
         rule: Info/success/warning/error message coloring remains bound to approved text tokens.
-  ModelManagerTab:
-    file: components/views/ModelManagerTab.tsx
+  MainModelPicker:
+    file: components/views/server/MainModelPicker.tsx
     required_tokens:
       - colors
       - motion
@@ -2304,8 +2271,25 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  ModelManagerView:
-    file: components/views/ModelManagerView.tsx
+  ModelCardPicker:
+    file: components/models/ModelCardPicker.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  ModelPickerRow:
+    file: components/models/ModelPickerRow.tsx
     required_tokens:
       - colors
       - motion
@@ -2355,8 +2339,8 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  ModelRow:
-    file: components/views/ModelManagerTab.tsx
+  ModelRowDetails:
+    file: components/models/ModelRowDetails.tsx
     required_tokens:
       - colors
       - motion
@@ -2419,6 +2403,74 @@ component_contracts:
     state_rules:
       - id: tab-state-closed-set
         rule: Only CALENDAR, SEARCH, IMPORT tab states are allowed for notebook routing.
+  NotificationRow:
+    file: components/views/NotificationsView.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  NotificationStatusIcon:
+    file: components/ui/notificationVisuals.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  NotificationsView:
+    file: components/views/NotificationsView.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  NotificationToasts:
+    file: components/ui/NotificationToasts.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   NvidiaIcon:
     file: components/ui/icons/NvidiaIcon.tsx
     required_tokens:
@@ -2506,6 +2558,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   RemoteConnectionCard:
     file: components/views/server/RemoteConnectionCard.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  ScrollFadeOverlay:
+    file: components/ui/ScrollFadeOverlay.tsx
     required_tokens:
       - colors
       - motion
@@ -2816,8 +2885,8 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  StateIcon:
-    file: components/views/GpuHealthCard.tsx
+  StartupActivityInline:
+    file: components/views/server/StartupActivityInline.tsx
     required_tokens:
       - colors
       - motion
@@ -2833,8 +2902,8 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  StatusIcon:
-    file: components/ui/ActivityNotifications.tsx
+  StateIcon:
+    file: components/views/GpuHealthCard.tsx
     required_tokens:
       - colors
       - motion
@@ -2917,6 +2986,40 @@ component_contracts:
     state_rules:
       - id: compact-density-mode
         rule: Compact mode behavior is governed by visibleSlots threshold and keeps AI/duration collapse behavior.
+  ToastCard:
+    file: components/ui/NotificationToasts.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  TranscriptBlock:
+    file: components/views/NotificationsView.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   TranscriptStub:
     file: components/recording/__tests__/SpeakerLabelRendering.test.tsx
     required_tokens:

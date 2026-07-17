@@ -70,6 +70,9 @@ interface BootstrapDownloadEvent {
   type: DownloadEventType;
   label: string;
   error?: string;
+  progress?: number; // 0-100 (GH-207)
+  downloadedSize?: string; // human-readable, e.g. "312 MB"
+  totalSize?: string;
 }
 
 interface StartupActivityEvent {
@@ -141,6 +144,9 @@ interface ElectronAPI {
       | { status: 'error'; tags: [] }
     >;
     fetchRemoteTagDates: (tags: string[]) => Promise<Record<string, string | null>>;
+    listVariantTags: () => Promise<
+      Record<'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux', string[]>
+    >;
     pullImage: (tag: string) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;
@@ -163,6 +169,9 @@ interface ElectronAPI {
       Array<{ name: string; label: string; driver: string; mountpoint: string; size?: string }>
     >;
     checkModelsCached: (
+      modelIds: string[],
+    ) => Promise<Record<string, { exists: boolean; size?: string }>>;
+    checkModelsCachedOffline: (
       modelIds: string[],
     ) => Promise<Record<string, { exists: boolean; size?: string }>>;
     removeModelCache: (modelId: string) => Promise<void>;
@@ -265,6 +274,15 @@ interface ElectronAPI {
       silent?: boolean;
       timeoutMs?: number;
     }) => Promise<boolean>;
+  };
+  notificationLog?: {
+    load: () => Promise<unknown[]>;
+    persist: (items: unknown[]) => Promise<void>;
+  };
+  mlx?: {
+    onStatusChanged: (
+      callback: (status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error') => void,
+    ) => () => void;
   };
 }
 

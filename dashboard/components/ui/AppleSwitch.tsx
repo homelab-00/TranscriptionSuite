@@ -43,6 +43,7 @@ export const AppleSwitch: React.FC<AppleSwitchProps> = ({
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-label={label}
         disabled={disabled}
         onClick={() => {
           if (!disabled) onChange(!checked);

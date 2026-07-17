@@ -38,8 +38,12 @@ const mockDocker = {
   startLogStream: vi.fn(),
   stopLogStream: vi.fn(),
   clearLogs: vi.fn(),
-  remoteTags: [] as string[],
+  remoteTags: [] as Array<{ tag: string; created: string | null }>,
   remoteTagsStatus: 'ok' as 'ok' | 'not-published' | 'error' | null,
+  variantTags: null as Record<
+    'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux',
+    string[]
+  > | null,
   refreshImages: vi.fn(),
   refreshRemoteTags: vi.fn(),
   clearRemoteTags: vi.fn(),
@@ -74,14 +78,20 @@ vi.mock('../../src/hooks/useAdminStatus', () => ({
   useAdminStatus: () => mockAdminStatus,
 }));
 
-vi.mock('../../src/stores/activityStore', () => {
+vi.mock('../../src/stores/notificationsStore', () => {
   // zustand-style store mock: callable as a hook AND exposing getState()
-  // (handleRuntimeProfileChange calls useActivityStore.getState() directly).
-  const state = { items: [], addActivity: vi.fn(), updateActivity: vi.fn() };
-  const useActivityStore = (selector?: (s: Record<string, unknown>) => unknown) =>
+  // (handleRuntimeProfileChange and the pull handlers call
+  // useNotificationsStore.getState() directly).
+  const state = {
+    notifications: [],
+    notify: vi.fn(),
+    updateNotification: vi.fn(),
+    dismissToast: vi.fn(),
+  };
+  const useNotificationsStore = (selector?: (s: Record<string, unknown>) => unknown) =>
     typeof selector === 'function' ? selector(state) : state;
-  useActivityStore.getState = () => state;
-  return { useActivityStore };
+  useNotificationsStore.getState = () => state;
+  return { useNotificationsStore };
 });
 
 // apiClient
@@ -137,10 +147,9 @@ vi.mock('../../src/services/modelRegistry', () => ({
 // modelSelection
 vi.mock('../../src/services/modelSelection', () => ({
   MODEL_DEFAULT_LOADING_PLACEHOLDER: 'Loading…',
-  MAIN_MODEL_CUSTOM_OPTION: 'Custom (HuggingFace repo)',
+  LEGACY_CUSTOM_OPTION: 'Custom (HuggingFace repo)',
   MAIN_RECOMMENDED_MODEL: 'openai/whisper-large-v3-turbo',
   LIVE_MODEL_SAME_AS_MAIN_OPTION: 'Same as main model',
-  LIVE_MODEL_CUSTOM_OPTION: 'Custom live model',
   MODEL_DISABLED_OPTION: 'Disabled',
   DISABLED_MODEL_SENTINEL: '__disabled__',
   WHISPER_MEDIUM: 'openai/whisper-medium',
@@ -381,7 +390,8 @@ describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
       ).toBeDefined();
     });
     expect(screen.queryAllByText(PYANNOTE_TILE).length).toBeGreaterThanOrEqual(1);
-    expect(screen.queryAllByText(CUSTOM_TILE).length).toBeGreaterThanOrEqual(1);
+    // The custom-repo tile was removed entirely.
+    expect(screen.queryAllByText(CUSTOM_TILE).length).toBe(0);
     // The "not supported on Apple Silicon" inline reason is gone.
     expect(screen.queryByText(/pyannote\.audio MPS path/i)).toBeNull();
   });
@@ -408,25 +418,32 @@ describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
     // Sortformer stays visible on non-Metal, greyed with its reason badge.
     expect(screen.queryAllByText(SORTFORMER_TILE).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText('Requires Metal')).not.toBeNull();
-    expect(screen.queryAllByText(CUSTOM_TILE).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryAllByText(CUSTOM_TILE).length).toBe(0);
   });
 
-  it('on Mac Metal with Custom + pyannote-prefixed value, shows NO unsupported warning', async () => {
-    setupElectronAPI({
-      'server.runtimeProfile': 'metal',
+  it('migrates a legacy Custom diarization selection to the PyAnnote default', async () => {
+    // The custom-repo option was removed: a store persisted before the removal
+    // (Custom sentinel + retired custom text) must fall back to the pyannote
+    // default, render no custom input, and clear the retired key.
+    const setSpy = setupElectronAPI({
+      'server.runtimeProfile': 'cpu',
       'server.diarizationModelSelection': CUSTOM,
       'server.diarizationCustomModel': 'pyannote/some-fork',
     });
 
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
 
-    // The custom-repo input renders; the old amber "not supported" warning is gone.
     await waitFor(() => {
-      expect(screen.getByDisplayValue('pyannote/some-fork')).toBeDefined();
+      expect(
+        screen.getByRole('button', { name: new RegExp(PYANNOTE_TILE, 'i'), pressed: true }),
+      ).toBeDefined();
     });
-    expect(
-      screen.queryByText(/Custom pyannote repos are not supported on Apple Silicon/i),
-    ).toBeNull();
+    expect(screen.queryByDisplayValue('pyannote/some-fork')).toBeNull();
+    await waitFor(() => {
+      expect(
+        setSpy.mock.calls.some(([k, v]) => k === 'server.diarizationCustomModel' && v === ''),
+      ).toBe(true);
+    });
   });
 });
 
@@ -768,5 +785,136 @@ describe('Server tab matrix redesign', () => {
         'openai/whisper-large-v3-turbo',
       );
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Docker image variant selector — the Image Variant tile row in the Docker
+// Image card. Replaces the Legacy GPU toggle that used to live in Instance
+// Settings: cuda ↔ cuda-legacy switching goes through the same confirmation
+// dialog, the vulkan variants are implied by the Runtime selector, and
+// per-version availability comes from the four GHCR tag lists (fail-open
+// when the probe is unavailable).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Docker image variant selector', () => {
+  function setupVariantAPI(configMap: Record<string, unknown>) {
+    const setSpy = vi.fn().mockResolvedValue(undefined);
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockImplementation(async (key: string) => configMap[key]),
+        set: setSpy,
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+        checkModelCache: vi.fn().mockResolvedValue({}),
+      },
+      app: {
+        getArch: vi.fn().mockReturnValue('x64'),
+        getConfigDir: vi.fn().mockResolvedValue('/mock/config'),
+      },
+      mlx: {
+        getStatus: vi.fn().mockResolvedValue('stopped'),
+        onStatusChanged: vi.fn().mockReturnValue(vi.fn()),
+      },
+      tailscale: {
+        getHostname: vi.fn().mockResolvedValue('my-server.tail1234.ts.net'),
+      },
+      server: {
+        checkFirewallPort: vi.fn().mockResolvedValue(null),
+        checkGpu: vi.fn().mockResolvedValue({ gpu: false, toolkit: false, vulkan: false }),
+      },
+    };
+    return { setSpy };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDocker.available = true;
+    mockDocker.images = [];
+    mockDocker.remoteTags = [];
+    mockDocker.variantTags = null;
+    mockDocker.container = { exists: false, running: false, status: 'unknown', health: undefined };
+    mockDocker.operationError = null;
+    mockDocker.operating = false;
+    mockDocker.composeAvailable = true;
+    mockAdminStatus.status = { models: {} };
+  });
+
+  it('renders the four variant tiles and drops the Legacy GPU toggle', async () => {
+    setupVariantAPI({ 'server.runtimeProfile': 'gpu' });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    expect(screen.getByText('Image Variant')).toBeDefined();
+    // Label text nodes are exact-matched, so the variant tiles don't collide
+    // with the runtime tiles ('GPU (CUDA)', 'GPU (Vulkan Windows)', …).
+    expect(screen.getByText('CUDA').closest('button')).not.toBeNull();
+    expect(screen.getByText('CUDA Legacy').closest('button')).not.toBeNull();
+    expect(screen.getByText('Vulkan Windows').closest('button')).not.toBeNull();
+    expect(screen.getByText('Vulkan Linux').closest('button')).not.toBeNull();
+    expect(screen.queryByText('Legacy GPU image')).toBeNull();
+  });
+
+  it('clicking CUDA Legacy on the CUDA runtime opens the variant confirmation dialog', async () => {
+    setupVariantAPI({ 'server.runtimeProfile': 'gpu' });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    const legacyTile = screen.getByText('CUDA Legacy').closest('button') as HTMLButtonElement;
+    // Enabled only after the persisted gpu profile hydrates (initial state is cpu).
+    await waitFor(() => {
+      expect(legacyTile.disabled).toBe(false);
+    });
+    fireEvent.click(legacyTile);
+    expect(screen.getByText('Switch to the CUDA Legacy image?')).toBeDefined();
+  });
+
+  it('gates CUDA Legacy to the GPU (CUDA) runtime', async () => {
+    setupVariantAPI({ 'server.runtimeProfile': 'cpu' });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    const legacyTile = screen.getByText('CUDA Legacy').closest('button') as HTMLButtonElement;
+    expect(legacyTile.disabled).toBe(true);
+    expect(screen.getByText('Requires CUDA runtime')).toBeDefined();
+  });
+
+  it('blocks variant switching while a container exists (volume-wipe rule)', async () => {
+    mockDocker.container = { exists: true, running: false, status: 'exited', health: undefined };
+    setupVariantAPI({ 'server.runtimeProfile': 'gpu' });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    // Badge flips from the runtime reason to the container reason once the
+    // persisted gpu profile hydrates.
+    await waitFor(() => {
+      expect(screen.getByText('Remove container to switch')).toBeDefined();
+    });
+    const legacyTile = screen.getByText('CUDA Legacy').closest('button') as HTMLButtonElement;
+    expect(legacyTile.disabled).toBe(true);
+  });
+
+  it('shows "Not published" for variants missing the selected version tag', async () => {
+    mockDocker.remoteTags = [{ tag: 'v1.3.7', created: null }];
+    mockDocker.variantTags = {
+      cuda: ['v1.3.7'],
+      'cuda-legacy': [],
+      'vulkan-wsl2': ['v1.3.7'],
+      'vulkan-linux': [],
+    };
+    setupVariantAPI({ 'server.runtimeProfile': 'gpu' });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    // cuda-legacy and vulkan-linux lack v1.3.7 → "Not published" wins over
+    // their runtime badges; vulkan-wsl2 has the tag → keeps its runtime badge.
+    await waitFor(() => {
+      expect(screen.getAllByText('Not published').length).toBe(2);
+    });
+    expect(screen.getByText('Requires Vulkan Windows runtime')).toBeDefined();
+    expect(screen.queryByText('Requires Vulkan Linux runtime')).toBeNull();
+  });
+
+  it('fails open when the variant probe is unavailable (variantTags null)', async () => {
+    mockDocker.remoteTags = [{ tag: 'v1.3.7', created: null }];
+    mockDocker.variantTags = null;
+    setupVariantAPI({ 'server.runtimeProfile': 'gpu' });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    const legacyTile = screen.getByText('CUDA Legacy').closest('button') as HTMLButtonElement;
+    await waitFor(() => {
+      expect(legacyTile.disabled).toBe(false);
+    });
+    expect(screen.queryByText('Not published')).toBeNull();
   });
 });

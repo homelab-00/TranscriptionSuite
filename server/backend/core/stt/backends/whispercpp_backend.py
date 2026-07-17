@@ -607,18 +607,13 @@ class WhisperCppBackend(STTBackend):
             try:
                 resp = client.get(health_url, timeout=_SIDECAR_HEALTH_POLL_INTERVAL)
                 if resp.status_code == 200:
-                    logger.info(
-                        "WhisperCppBackend: sidecar healthy after %d poll(s)", attempt
-                    )
+                    logger.info("WhisperCppBackend: sidecar healthy after %d poll(s)", attempt)
                     return
             except (httpx.HTTPError, OSError) as exc:
-                logger.debug(
-                    "WhisperCppBackend: sidecar /health not ready yet: %s", repr(exc)
-                )
+                logger.debug("WhisperCppBackend: sidecar /health not ready yet: %s", repr(exc))
             if time.monotonic() >= deadline:
                 logger.warning(
-                    "WhisperCppBackend: sidecar not healthy after %ds; "
-                    "proceeding to /load anyway",
+                    "WhisperCppBackend: sidecar not healthy after %ds; proceeding to /load anyway",
                     timeout_s,
                 )
                 return
@@ -761,7 +756,8 @@ class WhisperCppBackend(STTBackend):
         #     English; non-English targets are rejected upstream in
         #     capabilities.py::validate_translation_request.
         # ``progress_callback`` IS honoured for chunked (long) audio — one tick
-        # per chunk (GH #168). Short audio goes out in a single POST and so still
+        # per chunk (GH #168), reporting (processed_seconds, total_seconds)
+        # (GH-211). Short audio goes out in a single POST and so still
         # cannot report sub-call progress.
         # ``cancellation_check`` IS honoured, and is now the ONLY interrupt:
         # inference itself has no time limit. It is polled between chunks AND
@@ -884,7 +880,7 @@ class WhisperCppBackend(STTBackend):
             all_segments.extend(segments)
             offset += len(chunk) / audio_sample_rate
             if progress_callback is not None:
-                progress_callback(i + 1, num_chunks)
+                progress_callback(int(offset), int(total_samples / audio_sample_rate))
 
         return all_segments, (
             first_info or BackendTranscriptionInfo(language=None, language_probability=0.0)

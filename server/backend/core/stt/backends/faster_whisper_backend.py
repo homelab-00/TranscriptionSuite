@@ -96,7 +96,6 @@ class FasterWhisperBackend(STTBackend):
         translation_target_language: str | None = None,
         progress_callback: Any | None = None,
     ) -> tuple[list[BackendSegment], BackendTranscriptionInfo]:
-        del audio_sample_rate, progress_callback
         if self._model is None:
             raise RuntimeError("faster-whisper model is not loaded")
 
@@ -123,6 +122,10 @@ class FasterWhisperBackend(STTBackend):
         t0 = time.perf_counter()
         segments_gen, info = self._model.transcribe(audio, **kwargs)
 
+        # Segment end times are audio-position seconds, so the lazily consumed
+        # generator doubles as a progress source (GH-211).
+        total_seconds = int(len(audio) / audio_sample_rate) if audio_sample_rate else 0
+
         result_segments: list[BackendSegment] = []
         for seg in segments_gen:
             words: list[dict[str, Any]] = []
@@ -144,6 +147,11 @@ class FasterWhisperBackend(STTBackend):
                     words=words,
                 )
             )
+            if progress_callback is not None and total_seconds > 0:
+                try:
+                    progress_callback(min(int(seg.end), total_seconds), total_seconds)
+                except Exception:
+                    logger.debug("progress_callback failed", exc_info=True)
 
         logger.info("faster-whisper transcribe took %.2fs", time.perf_counter() - t0)
 

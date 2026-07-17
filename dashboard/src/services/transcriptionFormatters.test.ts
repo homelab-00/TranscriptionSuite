@@ -7,6 +7,7 @@ import {
   renderAss,
   renderTxt,
   resolveTranscriptionOutput,
+  resolveTranscriptionOutputs,
 } from './transcriptionFormatters';
 
 /* ------------------------------------------------------------------ */
@@ -170,5 +171,55 @@ describe('resolveTranscriptionOutput', () => {
     });
     expect(result.outputFilename).toBe('recording.txt');
     expect(result.content).toBe('Hello world. Goodbye world.');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  resolveTranscriptionOutputs — explicit format (GH-212)            */
+/* ------------------------------------------------------------------ */
+
+describe('resolveTranscriptionOutputs (explicit format, GH-212)', () => {
+  it('outputFormat=txt → single .txt file', () => {
+    const outs = resolveTranscriptionOutputs('memo.m4a', timedResponse, {
+      outputFormat: 'txt',
+      subtitleFormat: 'srt',
+    });
+    expect(outs).toHaveLength(1);
+    expect(outs[0].outputFilename).toBe('memo.txt');
+    expect(outs[0].content).toBe(timedResponse.text);
+  });
+
+  it('outputFormat=subtitles + srt → single .srt file', () => {
+    const outs = resolveTranscriptionOutputs('memo.m4a', timedResponse, {
+      outputFormat: 'subtitles',
+      subtitleFormat: 'srt',
+    });
+    expect(outs).toHaveLength(1);
+    expect(outs[0].outputFilename).toBe('memo.srt');
+  });
+
+  it('outputFormat=subtitles + ass → single .ass file', () => {
+    const outs = resolveTranscriptionOutputs('memo.m4a', timedResponse, {
+      outputFormat: 'subtitles',
+      subtitleFormat: 'ass',
+    });
+    expect(outs[0].outputFilename).toBe('memo.ass');
+  });
+
+  it('outputFormat=both → .txt AND subtitle file', () => {
+    const outs = resolveTranscriptionOutputs('memo.m4a', timedResponse, {
+      outputFormat: 'both',
+      subtitleFormat: 'srt',
+    });
+    expect(outs.map((o) => o.outputFilename)).toEqual(['memo.txt', 'memo.srt']);
+  });
+
+  it('falls back to .txt only when the response has no usable segments, regardless of format', () => {
+    const outs = resolveTranscriptionOutputs('memo.m4a', textOnlyResponse, {
+      outputFormat: 'subtitles',
+      subtitleFormat: 'srt',
+    });
+    expect(outs).toHaveLength(1);
+    expect(outs[0].outputFilename).toBe('memo.txt');
   });
 });

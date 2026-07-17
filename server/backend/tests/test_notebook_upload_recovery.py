@@ -61,6 +61,9 @@ class _JobTracker:
     def update_progress(self, *_a, **_kw):
         pass
 
+    def set_phase(self, *_a, **_kw):
+        pass
+
     def is_cancelled(self):
         return self.cancelled
 

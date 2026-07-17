@@ -4,14 +4,11 @@ import {
   Bird,
   Boxes,
   Ear,
-  Feather,
   KeyRound,
   Languages,
   Link2,
-  Loader2,
   Mic,
   MicOff,
-  PenLine,
   Radio,
   Sparkles,
   Speech,
@@ -20,13 +17,12 @@ import {
 } from 'lucide-react';
 
 import { AppleIcon } from '../../ui/icons/AppleIcon';
-import { Button } from '../../ui/Button';
-import { CustomSelect } from '../../ui/CustomSelect';
 import { SelectorGroup } from '../../ui/SelectorGroup';
 import { SelectorTile } from '../../ui/SelectorTile';
 import type { TileAccent } from '../../ui/SelectorTile';
+import { MainModelPicker } from './MainModelPicker';
+import { ModelCardPicker } from '../../models/ModelCardPicker';
 import {
-  DIARIZATION_MODEL_CUSTOM_OPTION,
   type FamilyChoiceId,
   defaultModelForFamilyChoice,
   diarizationTilesFor,
@@ -35,14 +31,11 @@ import {
   liveModelsFor,
   liveTilesFor,
   type LiveTileId,
-  modelsForFamilyChoice,
 } from '../../../src/services/instanceMatrix';
 import {
   DISABLED_MODEL_SENTINEL,
-  LIVE_MODEL_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   LIVE_RECOMMENDED_MODEL,
-  MAIN_MODEL_CUSTOM_OPTION,
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   MODEL_DISABLED_OPTION,
   VULKAN_RECOMMENDED_MODEL,
@@ -60,38 +53,30 @@ interface InstanceSettingsSelectorsProps {
   isRunning: boolean;
   mainModelSelection: string;
   onMainModelSelectionChange: (value: string) => void;
-  mainCustomModel: string;
-  onMainCustomModelChange: (value: string) => void;
   liveModelSelection: string;
   onLiveModelSelectionChange: (value: string) => void;
-  liveCustomModel: string;
-  onLiveCustomModelChange: (value: string) => void;
   diarizationModelSelection: string;
   onDiarizationModelSelectionChange: (value: string) => void;
-  diarizationCustomModel: string;
-  onDiarizationCustomModelChange: (value: string) => void;
   activeTranscriber: string;
   activeLiveModel: string;
   diarizationStatusModelId: string;
   modelCacheStatus: Record<string, ModelCacheStatus>;
   liveModelWhisperOnlyCompatible: boolean;
   liveModeModelConstraintMessage: string;
-  modelsLoaded: boolean | undefined;
-  modelsLoading: boolean;
-  onLoadModels: () => void;
-  onUnloadModels: () => void;
+  canManage: boolean;
+  downloadingIds: ReadonlySet<string>;
+  onDownloadModel: (id: string) => void;
+  onRemoveModel: (id: string) => void;
 }
 
 const FAMILY_ICONS: Record<FamilyChoiceId, React.ReactNode> = {
   whisper: <AudioLines size={16} />,
-  parakeet: <Bird size={16} />,
-  canary: <Feather size={16} />,
+  nemo: <Bird size={16} />,
   sensevoice: <Ear size={16} />,
   vibevoice: <Speech size={16} />,
   whispercpp: <Boxes size={16} />,
   'mlx-whisper': <AudioLines size={16} />,
-  'mlx-parakeet': <Bird size={16} />,
-  'mlx-canary': <Feather size={16} />,
+  'mlx-nemo': <Bird size={16} />,
   'mlx-vibevoice': <Speech size={16} />,
 };
 
@@ -104,7 +89,7 @@ const LIVE_TILE_ICONS: Record<LiveTileId, React.ReactNode> = {
 
 const LIVE_TILE_ACCENTS: Record<LiveTileId, TileAccent> = {
   'same-as-main': 'cyan',
-  whisper: 'slate',
+  whisper: 'purple',
   whispercpp: 'purple',
   disabled: 'slate',
 };
@@ -114,7 +99,6 @@ const DIARIZATION_TILE_ICONS: Record<string, React.ReactNode> = {
   campp: <Zap size={16} />,
   sortformer: <AppleIcon size={16} />,
   builtin: <Sparkles size={16} />,
-  custom: <PenLine size={16} />,
 };
 
 const DIARIZATION_TILE_ACCENTS: Record<string, TileAccent> = {
@@ -122,7 +106,6 @@ const DIARIZATION_TILE_ACCENTS: Record<string, TileAccent> = {
   campp: 'amber',
   sortformer: 'slate',
   builtin: 'blue',
-  custom: 'cyan',
 };
 
 function CacheBadge({ status }: { status: ModelCacheStatus | undefined }) {
@@ -156,48 +139,28 @@ export function InstanceSettingsSelectors({
   isRunning,
   mainModelSelection,
   onMainModelSelectionChange,
-  mainCustomModel,
-  onMainCustomModelChange,
   liveModelSelection,
   onLiveModelSelectionChange,
-  liveCustomModel,
-  onLiveCustomModelChange,
   diarizationModelSelection,
   onDiarizationModelSelectionChange,
-  diarizationCustomModel,
-  onDiarizationCustomModelChange,
   activeTranscriber,
   activeLiveModel,
   diarizationStatusModelId,
   modelCacheStatus,
   liveModelWhisperOnlyCompatible,
   liveModeModelConstraintMessage,
-  modelsLoaded,
-  modelsLoading,
-  onLoadModels,
-  onUnloadModels,
+  canManage,
+  downloadingIds,
+  onDownloadModel,
+  onRemoveModel,
 }: InstanceSettingsSelectorsProps) {
   const familyChoices = useMemo(() => familyChoicesFor(runtimeProfile), [runtimeProfile]);
 
-  // The family tile that should light up: derived from the dropdown value
-  // (or the custom text when the Custom option is active).
-  const selectedFamily = useMemo(() => {
-    if (mainModelSelection === MAIN_MODEL_CUSTOM_OPTION) {
-      return familyChoiceForModel(mainCustomModel) ?? 'whisper';
-    }
-    return familyChoiceForModel(mainModelSelection);
-  }, [mainModelSelection, mainCustomModel]);
-
-  const mainDropdownOptions = useMemo(() => {
-    if (!selectedFamily) return [MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
-    const ids = modelsForFamilyChoice(selectedFamily).map((m) => m.id);
-    // Vulkan GGML: Custom is omitted — only registry GGML files exist on disk
-    // for the sidecar to load (matches the pre-redesign dropdown).
-    if (selectedFamily === 'whispercpp') {
-      return [...ids, MODEL_DISABLED_OPTION];
-    }
-    return [...ids, MODEL_DISABLED_OPTION, MAIN_MODEL_CUSTOM_OPTION];
-  }, [selectedFamily]);
+  // The family tile that should light up, derived from the selected model id.
+  const selectedFamily = useMemo(
+    () => familyChoiceForModel(mainModelSelection),
+    [mainModelSelection],
+  );
 
   const liveTiles = useMemo(
     () => liveTilesFor(runtimeProfile, activeTranscriber),
@@ -211,11 +174,9 @@ export function InstanceSettingsSelectors({
     return 'whisper';
   }, [liveModelSelection]);
 
-  const liveDropdownOptions = useMemo(() => {
+  const liveModels = useMemo(() => {
     if (activeLiveTile === 'same-as-main' || activeLiveTile === 'disabled') return [];
-    const ids = liveModelsFor(activeLiveTile === 'whispercpp' ? 'vulkan' : 'gpu').map((m) => m.id);
-    if (activeLiveTile === 'whispercpp') return ids;
-    return [...ids, LIVE_MODEL_CUSTOM_OPTION];
+    return liveModelsFor(activeLiveTile === 'whispercpp' ? 'vulkan' : 'gpu');
   }, [activeLiveTile]);
 
   const diarizationTiles = useMemo(
@@ -257,10 +218,7 @@ export function InstanceSettingsSelectors({
             disabled={!choice.enabled || isRunning}
             badge={choice.reason}
             hint={choice.hint}
-            onSelect={() => {
-              onMainModelSelectionChange(defaultModelForFamilyChoice(choice.id));
-              onMainCustomModelChange('');
-            }}
+            onSelect={() => onMainModelSelectionChange(defaultModelForFamilyChoice(choice.id))}
             glyphs={
               <>
                 <span
@@ -301,43 +259,17 @@ export function InstanceSettingsSelectors({
         ))}
       </SelectorGroup>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <label className="text-xs font-medium tracking-wider text-slate-500 uppercase">
-            Model Variant
-          </label>
-          <CustomSelect
-            value={mainModelSelection}
-            onChange={onMainModelSelectionChange}
-            options={mainDropdownOptions}
-            accentColor="magenta"
-            className="focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-            disabled={isRunning}
-          />
-          {mainModelSelection === MAIN_MODEL_CUSTOM_OPTION && (
-            <input
-              type="text"
-              value={mainCustomModel}
-              onChange={(e) => onMainCustomModelChange(e.target.value)}
-              placeholder="owner/model-name"
-              disabled={isRunning}
-              className={`focus:ring-accent-magenta h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-            />
-          )}
-          {selectedFamily === 'whispercpp' && (
-            <p className="text-xs text-slate-500 italic">
-              This GGML model runs on the AMD/Intel GPU via the whisper.cpp sidecar. Switching
-              models requires a server restart.
-            </p>
-          )}
-          {selectedFamily?.startsWith('mlx') && (
-            <p className="flex items-center gap-1 text-xs text-violet-400">
-              <Zap size={10} />
-              Metal / MLX accelerated
-            </p>
-          )}
-        </div>
-      </div>
+      <MainModelPicker
+        selectedFamily={selectedFamily}
+        mainModelSelection={mainModelSelection}
+        isRunning={isRunning}
+        canManage={canManage}
+        modelCacheStatus={modelCacheStatus}
+        downloadingIds={downloadingIds}
+        onMainModelSelectionChange={onMainModelSelectionChange}
+        onDownload={onDownloadModel}
+        onRemove={onRemoveModel}
+      />
 
       {/* Live Mode model */}
       <SelectorGroup
@@ -365,28 +297,19 @@ export function InstanceSettingsSelectors({
           />
         ))}
       </SelectorGroup>
-      {liveDropdownOptions.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <CustomSelect
-              value={liveModelSelection}
-              onChange={onLiveModelSelectionChange}
-              options={liveDropdownOptions}
-              className="focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white transition-shadow outline-none focus:ring-1"
-              disabled={isRunning}
-            />
-            {liveModelSelection === LIVE_MODEL_CUSTOM_OPTION && (
-              <input
-                type="text"
-                value={liveCustomModel}
-                onChange={(e) => onLiveCustomModelChange(e.target.value)}
-                placeholder="owner/model-name"
-                disabled={isRunning}
-                className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-              />
-            )}
-          </div>
-        </div>
+      {liveModels.length > 0 && (
+        <ModelCardPicker
+          models={liveModels}
+          selection={liveModelSelection}
+          badgeLabel="Live"
+          isRunning={isRunning}
+          canManage={canManage}
+          modelCacheStatus={modelCacheStatus}
+          downloadingIds={downloadingIds}
+          onSelectionChange={onLiveModelSelectionChange}
+          onDownload={onDownloadModel}
+          onRemove={onRemoveModel}
+        />
       )}
       {!liveModelWhisperOnlyCompatible && (
         <p className="text-accent-orange text-xs">{liveModeModelConstraintMessage}</p>
@@ -424,46 +347,6 @@ export function InstanceSettingsSelectors({
           Diarization is not available for whisper.cpp (GGML) models.
         </p>
       )}
-      {diarizationTiles.length > 0 &&
-        diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION && (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <input
-              type="text"
-              value={diarizationCustomModel}
-              onChange={(e) => onDiarizationCustomModelChange(e.target.value)}
-              placeholder="owner/model-name"
-              disabled={isRunning}
-              className={`focus:ring-accent-cyan h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white placeholder-slate-500 transition-shadow outline-none focus:ring-1${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
-            />
-          </div>
-        )}
-
-      {/* Load / unload models */}
-      <div className="flex gap-2 border-t border-white/5 pt-2">
-        <Button
-          variant={modelsLoaded === false ? 'secondary' : 'danger'}
-          className="h-9 px-4 whitespace-nowrap"
-          onClick={modelsLoaded === false ? onLoadModels : onUnloadModels}
-          disabled={modelsLoading || !isRunning}
-        >
-          {modelsLoading ? (
-            <>
-              <Loader2 size={14} className="mr-2 animate-spin" /> Loading...
-            </>
-          ) : modelsLoaded === false ? (
-            'Load Models'
-          ) : (
-            'Unload Models'
-          )}
-        </Button>
-        {modelsLoaded !== undefined && (
-          <span
-            className={`ml-auto self-center font-mono text-xs ${modelsLoaded ? 'text-green-400' : 'text-slate-500'}`}
-          >
-            {modelsLoaded ? 'Models Loaded' : 'Models Not Loaded'}
-          </span>
-        )}
-      </div>
     </div>
   );
 }
