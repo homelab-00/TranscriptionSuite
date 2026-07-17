@@ -133,6 +133,14 @@ def mock_httpx():
     ):
         # Reachable via _inf(); keeps the 70-odd existing call sites unchanged.
         mock_client.post_inference = mock_post_inference
+        # /load polls GET /health via this same client BEFORE the /load POST
+        # (WhisperCppBackend._wait_for_sidecar_ready). Model a sidecar that is
+        # already ready so the poll returns on its first attempt. WITHOUT this,
+        # client.get() returns a bare MagicMock whose .status_code is never 200,
+        # so every load() burns the full _SIDECAR_READY_TIMEOUT_WARM (~16s) — the
+        # gap that once blew this file's suite from seconds to ~21 minutes on CI.
+        # test_healthy_sidecar_load_does_not_block_on_health_poll pins this seam.
+        mock_client.get.return_value = MagicMock(status_code=200)
         yield mock_client
 
 
@@ -593,6 +601,40 @@ class TestLifecycle:
             with pytest.raises(RuntimeError):
                 backend.load("ggml-base.bin", "cpu")
         assert backend._client is None
+
+    def test_healthy_sidecar_load_does_not_block_on_health_poll(
+        self, backend: WhisperCppBackend, mock_httpx: MagicMock
+    ):
+        """Regression guard (perf): a healthy /health poll returns on the first
+        attempt and load() must never sleep.
+
+        ``load()`` calls ``_wait_for_sidecar_ready()``, which polls
+        ``GET /health`` via the sync client until it returns 200 or the warm
+        deadline (``_SIDECAR_READY_TIMEOUT_WARM``) elapses, sleeping
+        ``_SIDECAR_HEALTH_POLL_INTERVAL`` between attempts. If the ``mock_httpx``
+        fixture stops stubbing ``.get`` healthy — or a refactor adds an
+        un-stubbed poll seam — ``client.get()`` returns a bare MagicMock whose
+        ``.status_code`` is never 200, so every ``load()`` burns the full ~16s
+        warm budget. That single gap once turned this file's suite from seconds
+        into ~21 minutes on CI (the whole backend job went 3m -> 24m). Pin both
+        the seam (poll goes through the mocked .get, hitting /health) and the
+        no-sleep fast path so the regression fails loudly and instantly.
+        """
+        mock_httpx.post.return_value = MagicMock(status_code=200)
+        with (
+            patch.dict("os.environ", {"WHISPERCPP_SERVER_URL": "http://test:8080"}),
+            patch("server.core.stt.backends.whispercpp_backend.time.sleep") as mock_sleep,
+        ):
+            backend.load("ggml-base.bin", "cpu")
+
+        assert backend.is_loaded()
+        # The readiness poll must have gone through the mocked .get seam.
+        mock_httpx.get.assert_called_once()
+        health_call = mock_httpx.get.call_args
+        health_url = health_call.args[0] if health_call.args else health_call.kwargs.get("url", "")
+        assert health_url.endswith("/health")
+        # A ready sidecar answers on the first poll, so load() must never sleep.
+        mock_sleep.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
