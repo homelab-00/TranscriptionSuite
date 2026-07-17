@@ -231,6 +231,7 @@ class SenseVoiceBackend(STTBackend):
             try:
                 os.remove(wav_path)
             except OSError:
+                # Best-effort temp-WAV cleanup; a missing/locked file is non-fatal.
                 pass
 
         duration_s = float(len(audio)) / float(audio_sample_rate) if audio_sample_rate else 0.0
@@ -286,6 +287,7 @@ class SenseVoiceBackend(STTBackend):
             try:
                 os.remove(wav_path)
             except OSError:
+                # Best-effort temp-WAV cleanup; a missing/locked file is non-fatal.
                 pass
 
         return self._parse_diarized_result(result, duration_s, forced_language=lang)

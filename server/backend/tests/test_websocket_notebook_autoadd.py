@@ -28,8 +28,6 @@ from server.api.routes import websocket as ws_mod
 from server.core import model_manager as mm_mod
 from starlette.websockets import WebSocketState
 
-_BYTES_PER_SECOND = 16000 * 2
-
 
 @dataclass
 class _FakeResult:

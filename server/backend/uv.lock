@@ -180,6 +180,28 @@ wheels = [
 ]
 
 [[package]]
+name = "aliyun-python-sdk-core"
+version = "2.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "jmespath" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3e/09/da9f58eb38b4fdb97ba6523274fbf445ef6a06be64b433693da8307b4bec/aliyun-python-sdk-core-2.16.0.tar.gz", hash = "sha256:651caad597eb39d4fad6cf85133dffe92837d53bdf62db9d8f37dab6508bb8f9", size = 449555, upload-time = "2024-10-09T06:01:01.762Z" }
+
+[[package]]
+name = "aliyun-python-sdk-kms"
+version = "2.16.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aliyun-python-sdk-core" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a8/2c/9877d0e6b18ecf246df671ac65a5d1d9fecbf85bdcb5d43efbde0d4662eb/aliyun-python-sdk-kms-2.16.5.tar.gz", hash = "sha256:f328a8a19d83ecbb965ffce0ec1e9930755216d104638cd95ecd362753b813b3", size = 12018, upload-time = "2024-08-30T09:01:20.104Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/5c/0132193d7da2c735669a1ed103b142fd63c9455984d48c5a88a1a516efaa/aliyun_python_sdk_kms-2.16.5-py2.py3-none-any.whl", hash = "sha256:24b6cdc4fd161d2942619479c8d050c63ea9cd22b044fe33b60bbb60153786f0", size = 99495, upload-time = "2024-08-30T09:01:18.462Z" },
+]
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -500,11 +522,17 @@ wheels = [
 ]
 
 [[package]]
+name = "crcmod"
+version = "1.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/b0/e595ce2a2527e169c3bcd6c33d2473c1918e0b7f6826a043ca1245dd4e5b/crcmod-1.7.tar.gz", hash = "sha256:dc7051a0db5f2bd48665a990d3ec1cc305a466a77358ca4492826f41f283601e", size = 89670, upload-time = "2010-06-27T14:35:29.538Z" }
+
+[[package]]
 name = "cryptography"
 version = "49.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "(platform_python_implementation != 'PyPy' and sys_platform != 'darwin') or (platform_python_implementation != 'PyPy' and extra != 'extra-25-transcriptionsuite-server-mlx') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
+    { name = "cffi", marker = "platform_python_implementation != 'PyPy' or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1f/99/d1c90d6041656cc6ee229dc99cd67fd0cd5aec3c5f7d72fffc27cc750054/cryptography-49.0.0.tar.gz", hash = "sha256:f89660a348f4f78a92366240a61404e337586ef7f5909a2fef59ca88ef505493", size = 854345, upload-time = "2026-06-12T20:02:30.512Z" }
 wheels = [
@@ -678,6 +706,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/60/8b/32f9823da46cde7df2087faa08cd98d01b908f8dcab982cdba9c84e85355/decorator-5.3.1.tar.gz", hash = "sha256:4cbcdd55a6efadb9dbea26b858f4fb3264567b52d69ca0d25b721b553f60ea82", size = 58084, upload-time = "2026-05-18T06:03:28.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/05/7f/798705f5296a58ca505d600456748d1be48078eac8a7050d8a98bc9edb89/decorator-5.3.1-py3-none-any.whl", hash = "sha256:f47fe6fdbd2edd623ecfe36875d37aba411624e2670dd395dddae1358689bb3c", size = 10365, upload-time = "2026-05-18T06:03:26.517Z" },
+]
+
+[[package]]
+name = "defusedxml"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124974bfe172b4daf3c984ebd9c2a06e2b8a4dc7331c72/defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69", size = 75520, upload-time = "2021-03-08T10:59:26.269Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61", size = 25604, upload-time = "2021-03-08T10:59:24.45Z" },
 ]
 
 [[package]]
@@ -901,6 +938,43 @@ wheels = [
 [package.optional-dependencies]
 http = [
     { name = "aiohttp" },
+]
+
+[[package]]
+name = "funasr"
+version = "1.3.15"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "huggingface-hub", version = "0.36.2", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "huggingface-hub", version = "1.21.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "hydra-core" },
+    { name = "jaconv" },
+    { name = "jamo" },
+    { name = "jieba" },
+    { name = "kaldiio" },
+    { name = "librosa" },
+    { name = "modelscope" },
+    { name = "numpy" },
+    { name = "omegaconf" },
+    { name = "oss2" },
+    { name = "pyyaml" },
+    { name = "rapidfuzz" },
+    { name = "requests" },
+    { name = "safetensors" },
+    { name = "scipy" },
+    { name = "sentencepiece" },
+    { name = "soundfile" },
+    { name = "tensorboardx" },
+    { name = "tiktoken" },
+    { name = "torch-complex" },
+    { name = "tqdm" },
+    { name = "transformers", version = "4.57.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "transformers", version = "5.12.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "umap-learn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a1/bd/06a601b1504fcb4e5f19a5c89001ae27fa689e20c67763e080548920212a/funasr-1.3.15.tar.gz", hash = "sha256:fec01a880eca5c0fc305d0bb2483b21c1e1be867326280aba5bb16bc73f70faf", size = 787077, upload-time = "2026-07-17T10:50:54.203Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/0c/c3445afd8cda3ba185cee719f53bf1866ff084a02354be54ef0b95d7f0d9/funasr-1.3.15-py3-none-any.whl", hash = "sha256:b08f60f5385b834e163aa234fc128081218e6582559238b2808e7ddf46728ab9", size = 936840, upload-time = "2026-07-17T10:50:41.986Z" },
 ]
 
 [[package]]
@@ -1338,6 +1412,24 @@ wheels = [
 ]
 
 [[package]]
+name = "jaconv"
+version = "0.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/91/0e/9fffaacda59bdfa479372c71d18d72968d2af5a36a5a2086b02a60124b98/jaconv-0.5.0.tar.gz", hash = "sha256:53f6f968276846716f0f37100a6d5c7308cfa1e0c714eb41287d5bb09345c40f", size = 21816, upload-time = "2026-02-08T11:15:57.07Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/da/9657d637bcacdbaf6a914ce504000da5639f9d945f8d3552a940f021d6c0/jaconv-0.5.0-py3-none-any.whl", hash = "sha256:2914114fe761ca49fc7089e25e6ad4a400c26f262ffce84e13b176916b71610a", size = 16831, upload-time = "2026-02-08T11:15:55.322Z" },
+]
+
+[[package]]
+name = "jamo"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b1/a2/bda770579809726e929ca6356743f9f50f64a2cbaee578fa9d4824afb00e/jamo-0.4.1.tar.gz", hash = "sha256:ea65cf9d35338d0e0af48d75ff426d8a369b0ebde6f07051c3ac37256f56d025", size = 7386, upload-time = "2017-11-06T19:28:51.729Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ac/cc/49812faae67f9a24be6ddaf58a2cf7e8c3cbfcf5b762d9414f7103d2ea2c/jamo-0.4.1-py3-none-any.whl", hash = "sha256:d4b94fd23324c606ed2fbc4037c603e2c3a7ae9390c05d3473aea1ccb6b1c3fb", size = 9543, upload-time = "2017-11-06T19:28:49.624Z" },
+]
+
+[[package]]
 name = "jaraco-classes"
 version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1392,6 +1484,12 @@ wheels = [
 ]
 
 [[package]]
+name = "jieba"
+version = "0.42.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/cb/18eeb235f833b726522d7ebed54f2278ce28ba9438e3135ab0278d9792a2/jieba-0.42.1.tar.gz", hash = "sha256:055ca12f62674fafed09427f176506079bc135638a14e23e25be909131928db2", size = 19214172, upload-time = "2020-01-20T14:27:23.5Z" }
+
+[[package]]
 name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
@@ -1414,6 +1512,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/85/3e/71b95cf0e2179fb5de8744a79fd36c8bd4e02e1803129a16d423884b6654/jiwer-3.1.0.tar.gz", hash = "sha256:dc492d09e570f1baba98c76aba09baf8e09c06e6808a4ba412dd4bde67fb79ac", size = 103187, upload-time = "2025-01-31T12:14:10.86Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/f4/35634d9eeff3b0bab51f5b9474ee569b1186bf29cf0d9d67b84acc80c53d/jiwer-3.1.0-py3-none-any.whl", hash = "sha256:5a14b5bba4692e1946ca3c6946435f7d90b1b526076ccb6c12be763e2146237d", size = 22303, upload-time = "2025-01-31T12:14:08.893Z" },
+]
+
+[[package]]
+name = "jmespath"
+version = "0.10.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3c/56/3f325b1eef9791759784aa5046a8f6a1aff8f7c898a2e34506771d3b99d8/jmespath-0.10.0.tar.gz", hash = "sha256:b85d0567b8666149a93172712e68920734333c0ce7e89b78b3e987f71e5ed4f9", size = 21607, upload-time = "2020-05-12T22:03:47.267Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/cb/5f001272b6faeb23c1c9e0acc04d48eaaf5c862c17709d20e3469c6e0139/jmespath-0.10.0-py2.py3-none-any.whl", hash = "sha256:cdf6525904cc597730141d61b36f2e4b8ecc257c420fa2f4549bac2c2d0cb72f", size = 24489, upload-time = "2020-05-12T22:03:45.643Z" },
 ]
 
 [[package]]
@@ -1454,6 +1561,18 @@ source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/da/32/a565d6828502782fc31d07d7676dc39adb16df5b64eec11f2225ac8a2d21/kaldialign-0.9.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9b6e8122ca31f1bab2690d225f74cf0493387c4e6794ff02d2425d2800117fd4", size = 92152, upload-time = "2025-05-14T19:40:03.882Z" },
     { url = "https://files.pythonhosted.org/packages/c4/e1/940a24ce5f164fa53fcb07ff9889dbb2ad131784e3fab4085ad6f3e13b5c/kaldialign-0.9.1-cp313-cp313-win_amd64.whl", hash = "sha256:2bd9647cc76d294fa0e35cc27f2fb96f88077c5a03f07475fd80a7216f6b334b", size = 74749, upload-time = "2025-05-14T19:41:20.461Z" },
+]
+
+[[package]]
+name = "kaldiio"
+version = "2.18.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8d/85/92435e8e62eb3d43eded9f24643fc2a6dbce031cebceed11528147c7873f/kaldiio-2.18.1.tar.gz", hash = "sha256:0283d197fac6ac683f7a9e6af8d18aad9dbd2c4a997f22e45294f2ac1ee3c432", size = 35570, upload-time = "2025-03-06T15:57:52.375Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ae/e3/6c3b42233225f398f7a72988b524f654ae818cca0d441db847a2761203e9/kaldiio-2.18.1-py3-none-any.whl", hash = "sha256:397a4cd18977acaae7acabfba6807ee0a6978c620064381a266eac15b3c1a0a0", size = 29330, upload-time = "2025-03-06T15:57:50.82Z" },
 ]
 
 [[package]]
@@ -1939,6 +2058,39 @@ wheels = [
 ]
 
 [[package]]
+name = "modelscope"
+version = "1.38.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "filelock" },
+    { name = "modelscope-hub" },
+    { name = "packaging" },
+    { name = "requests" },
+    { name = "setuptools" },
+    { name = "tqdm" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/33/72/b37f46f8e1900c64485420b210eecda1f758cbd0fe8ade60c5bbf883b25e/modelscope-1.38.1.tar.gz", hash = "sha256:a81f3685b1545f52b415d88a763456416aa65170e622f9dcc02eadb3f8e1cfa0", size = 4542886, upload-time = "2026-07-06T15:13:56.427Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5d/f3/caf5ef8c4adc99cd66607639642ae503ac190a3358f782776687200a7c36/modelscope-1.38.1-py3-none-any.whl", hash = "sha256:7d65be96999144ca045386d27a8ea057b8777504c538d9755d60ec2c8906fe72", size = 6034052, upload-time = "2026-07-06T15:13:53.923Z" },
+]
+
+[[package]]
+name = "modelscope-hub"
+version = "0.1.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "filelock" },
+    { name = "requests" },
+    { name = "tqdm" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b6/cb/6b9d3fcbcd09db6cdd7f1e0fd60be2998c99db07be28f37982c0dbd14496/modelscope_hub-0.1.7.tar.gz", hash = "sha256:b78730f3923cf13d5fbc56c6224a5ba617bf111a562fe3808c03e34c3c07840f", size = 126616, upload-time = "2026-07-07T07:35:36.465Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/19/3554c99cfc633cca2ffab2cfc3c8cb064fa17f88bcb68afee7a81957ccc8/modelscope_hub-0.1.7-py3-none-any.whl", hash = "sha256:907e5da4d8b050277a3cbd79d1c2df4f723b549ba38f573f4ffb6d1cd1525349", size = 135758, upload-time = "2026-07-07T07:35:35.283Z" },
+]
+
+[[package]]
 name = "more-itertools"
 version = "11.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2131,17 +2283,18 @@ wheels = [
 
 [[package]]
 name = "nltk"
-version = "3.9.4"
+version = "3.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
+    { name = "defusedxml" },
     { name = "joblib" },
     { name = "regex" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/74/a1/b3b4adf15585a5bc4c357adde150c01ebeeb642173ded4d871e89468767c/nltk-3.9.4.tar.gz", hash = "sha256:ed03bc098a40481310320808b2db712d95d13ca65b27372f8a403949c8b523d0", size = 2946864, upload-time = "2026-03-24T06:13:40.641Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/96/02/df4f105b28a7c16b0e41423bc09cf0f1b8a305df4ef0b10ca74a2e4c648c/nltk-3.10.0.tar.gz", hash = "sha256:4fbac1d98203cbcd1b5d94a2877fb822300072d80604a5e7fae49d2c5f84e8c1", size = 3089244, upload-time = "2026-07-08T02:39:13.562Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9d/91/04e965f8e717ba0ab4bdca5c112deeab11c9e750d94c4d4602f050295d39/nltk-3.9.4-py3-none-any.whl", hash = "sha256:f2fa301c3a12718ce4a0e9305c5675299da5ad9e26068218b69d692fda84828f", size = 1552087, upload-time = "2026-03-24T06:13:38.47Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/89/a0b0f35e2820d6a99d75ea1c11977ee6d5c9e6658eceb45b0c7620881faa/nltk-3.10.0-py3-none-any.whl", hash = "sha256:54ff84d4916d3ef127e8953bee0023f6a6b320b75d634a19e06ef056d3d244bf", size = 1716144, upload-time = "2026-07-08T02:39:09.753Z" },
 ]
 
 [[package]]
@@ -2307,7 +2460,7 @@ name = "nvidia-cudnn-cu12"
 version = "9.10.2.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform != 'darwin' or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
+    { name = "nvidia-cublas-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fa/41/e79269ce215c857c935fd86bcfe91a451a584dfc27f1e068f568b9ad1ab7/nvidia_cudnn_cu12-9.10.2.21-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:c9132cc3f8958447b4910a1720036d9eff5928cc3179b0a51fb6d167c6cc87d8", size = 705026878, upload-time = "2025-06-06T21:52:51.348Z" },
@@ -2320,7 +2473,7 @@ name = "nvidia-cufft-cu12"
 version = "11.4.1.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'darwin' or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9b/2b/76445b0af890da61b501fde30650a1a4bd910607261b209cccb5235d3daa/nvidia_cufft_cu12-11.4.1.4-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:1a28c9b12260a1aa7a8fd12f5ebd82d027963d635ba82ff39a1acfa7c4c0fbcf", size = 200822453, upload-time = "2025-06-05T20:05:27.889Z" },
@@ -2352,9 +2505,9 @@ name = "nvidia-cusolver-cu12"
 version = "11.7.5.82"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform != 'darwin' or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
-    { name = "nvidia-cusparse-cu12", marker = "sys_platform != 'darwin' or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'darwin' or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
+    { name = "nvidia-cublas-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
+    { name = "nvidia-cusparse-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/03/99/686ff9bf3a82a531c62b1a5c614476e8dfa24a9d89067aeedf3592ee4538/nvidia_cusolver_cu12-11.7.5.82-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:62efa83e4ace59a4c734d052bb72158e888aa7b770e1a5f601682f16fe5b4fd2", size = 337869834, upload-time = "2025-06-05T20:06:53.125Z" },
@@ -2367,7 +2520,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.5.10.65"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform != 'darwin' or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (platform_python_implementation != 'CPython' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'linux' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5e/6f/8710fbd17cdd1d0fc3fea7d36d5b65ce1933611c31e1861da330206b253a/nvidia_cusparse_cu12-12.5.10.65-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:221c73e7482dd93eda44e65ce567c031c07e2f93f6fa0ecd3ba876a195023e83", size = 366359408, upload-time = "2025-06-05T20:07:42.501Z" },
@@ -2620,6 +2773,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/67/bd/2775ff28bfe883b9aa1ff348300542eb2ef1ee18d8ae0e3a49846817a865/orjson-3.11.9-cp313-cp313-win_amd64.whl", hash = "sha256:051b102c93b4f634e89f3866b07b9a9a98915ada541f4ec30f177067b2694979", size = 127086, upload-time = "2026-05-06T15:10:41.262Z" },
     { url = "https://files.pythonhosted.org/packages/91/2b/d26799e580939e32a7da9a39531bc9e58e15ca32ffaa6a8cb3e9bb0d22cd/orjson-3.11.9-cp313-cp313-win_arm64.whl", hash = "sha256:cce9127885941bd28f080cecf1f1d288336b7e0d812c345b08be88b572796254", size = 126696, upload-time = "2026-05-06T15:10:42.651Z" },
 ]
+
+[[package]]
+name = "oss2"
+version = "2.19.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aliyun-python-sdk-core" },
+    { name = "aliyun-python-sdk-kms" },
+    { name = "crcmod" },
+    { name = "pycryptodome" },
+    { name = "requests" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/df/b5/f2cb1950dda46ac2284d6c950489fdacd0e743c2d79a347924d3cc44b86f/oss2-2.19.1.tar.gz", hash = "sha256:a8ab9ee7eb99e88a7e1382edc6ea641d219d585a7e074e3776e9dec9473e59c1", size = 298845, upload-time = "2024-10-25T11:37:46.638Z" }
 
 [[package]]
 name = "overrides"
@@ -3097,6 +3264,36 @@ wheels = [
 ]
 
 [[package]]
+name = "pycryptodome"
+version = "3.23.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/a6/8452177684d5e906854776276ddd34eca30d1b1e15aa1ee9cefc289a33f5/pycryptodome-3.23.0.tar.gz", hash = "sha256:447700a657182d60338bab09fdb27518f8856aecd80ae4c6bdddb67ff5da44ef", size = 4921276, upload-time = "2025-05-17T17:21:45.242Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/5d/bdb09489b63cd34a976cc9e2a8d938114f7a53a74d3dd4f125ffa49dce82/pycryptodome-3.23.0-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:0011f7f00cdb74879142011f95133274741778abba114ceca229adbf8e62c3e4", size = 2495152, upload-time = "2025-05-17T17:20:20.833Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/ce/7840250ed4cc0039c433cd41715536f926d6e86ce84e904068eb3244b6a6/pycryptodome-3.23.0-cp313-cp313t-macosx_10_13_x86_64.whl", hash = "sha256:90460fc9e088ce095f9ee8356722d4f10f86e5be06e2354230a9880b9c549aae", size = 1639348, upload-time = "2025-05-17T17:20:23.171Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/f0/991da24c55c1f688d6a3b5a11940567353f74590734ee4a64294834ae472/pycryptodome-3.23.0-cp313-cp313t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4764e64b269fc83b00f682c47443c2e6e85b18273712b98aa43bcb77f8570477", size = 2184033, upload-time = "2025-05-17T17:20:25.424Z" },
+    { url = "https://files.pythonhosted.org/packages/54/16/0e11882deddf00f68b68dd4e8e442ddc30641f31afeb2bc25588124ac8de/pycryptodome-3.23.0-cp313-cp313t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:eb8f24adb74984aa0e5d07a2368ad95276cf38051fe2dc6605cbcf482e04f2a7", size = 2270142, upload-time = "2025-05-17T17:20:27.808Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/fc/4347fea23a3f95ffb931f383ff28b3f7b1fe868739182cb76718c0da86a1/pycryptodome-3.23.0-cp313-cp313t-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:d97618c9c6684a97ef7637ba43bdf6663a2e2e77efe0f863cce97a76af396446", size = 2309384, upload-time = "2025-05-17T17:20:30.765Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/d9/c5261780b69ce66d8cfab25d2797bd6e82ba0241804694cd48be41add5eb/pycryptodome-3.23.0-cp313-cp313t-musllinux_1_2_aarch64.whl", hash = "sha256:9a53a4fe5cb075075d515797d6ce2f56772ea7e6a1e5e4b96cf78a14bac3d265", size = 2183237, upload-time = "2025-05-17T17:20:33.736Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/6f/3af2ffedd5cfa08c631f89452c6648c4d779e7772dfc388c77c920ca6bbf/pycryptodome-3.23.0-cp313-cp313t-musllinux_1_2_i686.whl", hash = "sha256:763d1d74f56f031788e5d307029caef067febf890cd1f8bf61183ae142f1a77b", size = 2343898, upload-time = "2025-05-17T17:20:36.086Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/dc/9060d807039ee5de6e2f260f72f3d70ac213993a804f5e67e0a73a56dd2f/pycryptodome-3.23.0-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:954af0e2bd7cea83ce72243b14e4fb518b18f0c1649b576d114973e2073b273d", size = 2269197, upload-time = "2025-05-17T17:20:38.414Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/34/e6c8ca177cb29dcc4967fef73f5de445912f93bd0343c9c33c8e5bf8cde8/pycryptodome-3.23.0-cp313-cp313t-win32.whl", hash = "sha256:257bb3572c63ad8ba40b89f6fc9d63a2a628e9f9708d31ee26560925ebe0210a", size = 1768600, upload-time = "2025-05-17T17:20:40.688Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/1d/89756b8d7ff623ad0160f4539da571d1f594d21ee6d68be130a6eccb39a4/pycryptodome-3.23.0-cp313-cp313t-win_amd64.whl", hash = "sha256:6501790c5b62a29fcb227bd6b62012181d886a767ce9ed03b303d1f22eb5c625", size = 1799740, upload-time = "2025-05-17T17:20:42.413Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/61/35a64f0feaea9fd07f0d91209e7be91726eb48c0f1bfc6720647194071e4/pycryptodome-3.23.0-cp313-cp313t-win_arm64.whl", hash = "sha256:9a77627a330ab23ca43b48b130e202582e91cc69619947840ea4d2d1be21eb39", size = 1703685, upload-time = "2025-05-17T17:20:44.388Z" },
+    { url = "https://files.pythonhosted.org/packages/db/6c/a1f71542c969912bb0e106f64f60a56cc1f0fabecf9396f45accbe63fa68/pycryptodome-3.23.0-cp37-abi3-macosx_10_9_universal2.whl", hash = "sha256:187058ab80b3281b1de11c2e6842a357a1f71b42cb1e15bce373f3d238135c27", size = 2495627, upload-time = "2025-05-17T17:20:47.139Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/4e/a066527e079fc5002390c8acdd3aca431e6ea0a50ffd7201551175b47323/pycryptodome-3.23.0-cp37-abi3-macosx_10_9_x86_64.whl", hash = "sha256:cfb5cd445280c5b0a4e6187a7ce8de5a07b5f3f897f235caa11f1f435f182843", size = 1640362, upload-time = "2025-05-17T17:20:50.392Z" },
+    { url = "https://files.pythonhosted.org/packages/50/52/adaf4c8c100a8c49d2bd058e5b551f73dfd8cb89eb4911e25a0c469b6b4e/pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:67bd81fcbe34f43ad9422ee8fd4843c8e7198dd88dd3d40e6de42ee65fbe1490", size = 2182625, upload-time = "2025-05-17T17:20:52.866Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/e9/a09476d436d0ff1402ac3867d933c61805ec2326c6ea557aeeac3825604e/pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c8987bd3307a39bc03df5c8e0e3d8be0c4c3518b7f044b0f4c15d1aa78f52575", size = 2268954, upload-time = "2025-05-17T17:20:55.027Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/c5/ffe6474e0c551d54cab931918127c46d70cab8f114e0c2b5a3c071c2f484/pycryptodome-3.23.0-cp37-abi3-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:aa0698f65e5b570426fc31b8162ed4603b0c2841cbb9088e2b01641e3065915b", size = 2308534, upload-time = "2025-05-17T17:20:57.279Z" },
+    { url = "https://files.pythonhosted.org/packages/18/28/e199677fc15ecf43010f2463fde4c1a53015d1fe95fb03bca2890836603a/pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:53ecbafc2b55353edcebd64bf5da94a2a2cdf5090a6915bcca6eca6cc452585a", size = 2181853, upload-time = "2025-05-17T17:20:59.322Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/ea/4fdb09f2165ce1365c9eaefef36625583371ee514db58dc9b65d3a255c4c/pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_i686.whl", hash = "sha256:156df9667ad9f2ad26255926524e1c136d6664b741547deb0a86a9acf5ea631f", size = 2342465, upload-time = "2025-05-17T17:21:03.83Z" },
+    { url = "https://files.pythonhosted.org/packages/22/82/6edc3fc42fe9284aead511394bac167693fb2b0e0395b28b8bedaa07ef04/pycryptodome-3.23.0-cp37-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:dea827b4d55ee390dc89b2afe5927d4308a8b538ae91d9c6f7a5090f397af1aa", size = 2267414, upload-time = "2025-05-17T17:21:06.72Z" },
+    { url = "https://files.pythonhosted.org/packages/59/fe/aae679b64363eb78326c7fdc9d06ec3de18bac68be4b612fc1fe8902693c/pycryptodome-3.23.0-cp37-abi3-win32.whl", hash = "sha256:507dbead45474b62b2bbe318eb1c4c8ee641077532067fec9c1aa82c31f84886", size = 1768484, upload-time = "2025-05-17T17:21:08.535Z" },
+    { url = "https://files.pythonhosted.org/packages/54/2f/e97a1b8294db0daaa87012c24a7bb714147c7ade7656973fd6c736b484ff/pycryptodome-3.23.0-cp37-abi3-win_amd64.whl", hash = "sha256:c75b52aacc6c0c260f204cbdd834f76edc9fb0d8e0da9fbf8352ef58202564e2", size = 1799636, upload-time = "2025-05-17T17:21:10.393Z" },
+    { url = "https://files.pythonhosted.org/packages/18/3d/f9441a0d798bf2b1e645adc3265e55706aead1255ccdad3856dbdcffec14/pycryptodome-3.23.0-cp37-abi3-win_arm64.whl", hash = "sha256:11eeeb6917903876f134b56ba11abe95c0b0fd5e3330def218083c7d98bbcb3c", size = 1703675, upload-time = "2025-05-17T17:21:13.146Z" },
+]
+
+[[package]]
 name = "pydantic"
 version = "2.13.4"
 source = { registry = "https://pypi.org/simple" }
@@ -3200,6 +3397,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/23/00/f915eaa75326f4209941179c2b93ac477f2040e4aeff5bb21d16eb8058f9/pyloudnorm-0.2.0.tar.gz", hash = "sha256:8bf597658ea4e1975c275adf490f6deb5369ea409f2901f939915efa4b681b16", size = 14037, upload-time = "2026-01-04T11:43:35.265Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/aa/b6/65a49a05614b2548edbba3aab118f2ebe7441dfd778accdcdce9f6567f20/pyloudnorm-0.2.0-py3-none-any.whl", hash = "sha256:9bb69afb904f59d007a7f9ba3d75d16fb8aeef35c44d6df822a9f192d69cf13f", size = 10879, upload-time = "2026-01-04T11:43:34.534Z" },
+]
+
+[[package]]
+name = "pynndescent"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "joblib" },
+    { name = "llvmlite" },
+    { name = "numba" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4a/fb/7f58c397fb31666756457ee2ac4c0289ef2daad57f4ae4be8dec12f80b03/pynndescent-0.6.0.tar.gz", hash = "sha256:7ffde0fb5b400741e055a9f7d377e3702e02250616834231f6c209e39aac24f5", size = 2992987, upload-time = "2026-01-08T21:29:58.943Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/e6/94145d714402fd5ade00b5661f2d0ab981219e07f7db9bfa16786cdb9c04/pynndescent-0.6.0-py3-none-any.whl", hash = "sha256:dc8c74844e4c7f5cbd1e0cd6909da86fdc789e6ff4997336e344779c3d5538ef", size = 73511, upload-time = "2026-01-08T21:29:57.306Z" },
 ]
 
 [[package]]
@@ -3660,8 +3873,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography", marker = "sys_platform != 'darwin' or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
-    { name = "jeepney", marker = "sys_platform != 'darwin' or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
+    { name = "cryptography", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
+    { name = "jeepney", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
@@ -3989,6 +4202,20 @@ wheels = [
 ]
 
 [[package]]
+name = "tensorboardx"
+version = "2.6.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/48/a9/fc520ea91ab1f3ba51cbf3fe24f2b6364ed3b49046969e0868d46d6da372/tensorboardx-2.6.5.tar.gz", hash = "sha256:ca176db3997ee8c07d2eb77381225956a3fd1c10c91beafab1f17069adc47017", size = 4770195, upload-time = "2026-04-03T15:40:23.803Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/0f/69fbab4c30b2f3a76e6de67585ea72a8eccf381751f5c0046b966fde9658/tensorboardx-2.6.5-py3-none-any.whl", hash = "sha256:c10b891d00af306537cb8b58a039b2ba41571f0da06f433a41c4ca8d6abe1373", size = 87510, upload-time = "2026-04-03T15:40:22.111Z" },
+]
+
+[[package]]
 name = "text-unidecode"
 version = "1.3"
 source = { registry = "https://pypi.org/simple" }
@@ -4004,6 +4231,32 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b7/4d/08c89e34946fce2aec4fbb45c9016efd5f4d7f24af8e5d93296e935631d8/threadpoolctl-3.6.0.tar.gz", hash = "sha256:8ab8b4aa3491d812b623328249fab5302a68d2d71745c8a4c719a2fcaba9f44e", size = 21274, upload-time = "2025-03-13T13:49:23.031Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/32/d5/f9a850d79b0851d1d4ef6456097579a9005b31fea68726a4ae5f2d82ddd9/threadpoolctl-3.6.0-py3-none-any.whl", hash = "sha256:43a0b8fd5a2928500110039e43a5eed8480b918967083ea48dc3ab9f13c4a7fb", size = 18638, upload-time = "2025-03-13T13:49:21.846Z" },
+]
+
+[[package]]
+name = "tiktoken"
+version = "0.13.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "regex" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e4/e5/5f3cb2159769d0f4324c0e9e87f9de3c4b1cd45848a96b2eb3566ad5ca77/tiktoken-0.13.0.tar.gz", hash = "sha256:c9435714c3a84c2319499de9a300c0e604449dd0799ff246458b3bb6a7f433c1", size = 38986, upload-time = "2026-05-15T04:51:27.153Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/83/b096c859c2a47c11731bf2f5885f4028b809dfe2396582883eed9cae372f/tiktoken-0.13.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:5df5d1507bd245f1ccad4a074698240021239e455eb0bb4ced4e3d7181872154", size = 1034228, upload-time = "2026-05-15T04:50:40.988Z" },
+    { url = "https://files.pythonhosted.org/packages/53/61/c68e123b6d753e3fc2751e9b18e732c9d8bf1e1926762e736eee935d931c/tiktoken-0.13.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:8fe806a50664e83a6ffd56cbd1e4f5dcc6cd32a3e7538f70dc38b1a271384545", size = 982978, upload-time = "2026-05-15T04:50:42.195Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/8b/96cc178cc584e65d363134500f297790b06cd48cdeb1e8fcf7bbe60f4715/tiktoken-0.13.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:125bc05005e747f993a83dc67934249932d6e4209854452cd4c0b1d53fba3ba2", size = 1116355, upload-time = "2026-05-15T04:50:43.564Z" },
+    { url = "https://files.pythonhosted.org/packages/86/f5/bab735d2c72ea55404b295d02d092644eb5f7cc6205e34d35eb9abfb9ab2/tiktoken-0.13.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:5e6358911cab4adee6712da27d65573496a4f68cf8a2b5fca6a4ad10fc5748cf", size = 1135772, upload-time = "2026-05-15T04:50:44.782Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/b9/6de04ebdf904edfaad87788011b3735087a0c9ea671b9027e1e4e965e8c8/tiktoken-0.13.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:975cbd78d085d75d26b59660e262736dcaed1e35f8f142cd6291025c01d25486", size = 1182415, upload-time = "2026-05-15T04:50:46.422Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/9c/470a05f3b1caf038f44880e334d47ab674e0c80d514c66b375d14d5afa10/tiktoken-0.13.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:75ab9bc99fa020a4c283424590ecd7f3afd70c1c281cb3fa3192a6c3af9f9615", size = 1239879, upload-time = "2026-05-15T04:50:48.052Z" },
+    { url = "https://files.pythonhosted.org/packages/42/a6/c1936d16055436cb32e6c6128d68629622e00f4768562f55653752d34768/tiktoken-0.13.0-cp313-cp313-win_amd64.whl", hash = "sha256:6b1615f0ff71953d19729ceb18865429c185b0a23c5353f1bbca34a394bf60f7", size = 874829, upload-time = "2026-05-15T04:50:49.202Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/07/acb5992c3772b5a36284f742cfb7a5895aa4471d1848ac31464ad50d7fdf/tiktoken-0.13.0-cp313-cp313t-macosx_10_13_x86_64.whl", hash = "sha256:6eb4a5bfbc6426938026b1a334e898ac53541360d62d8c689870160cc80abd67", size = 1033600, upload-time = "2026-05-15T04:50:50.4Z" },
+    { url = "https://files.pythonhosted.org/packages/14/e9/742e9aec30f59b9f161f7ff7cd072e02ea836c9e1c0854a8076dfcd40d5c/tiktoken-0.13.0-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:43cee3e5400573b2046fbf092cc7a5bc30164f9e4c95ce20714da929df48737a", size = 982516, upload-time = "2026-05-15T04:50:52.03Z" },
+    { url = "https://files.pythonhosted.org/packages/72/74/ca1541b053e7648254d2e4b42a253e1bb4359f2c91a0a8d49228c794e1a0/tiktoken-0.13.0-cp313-cp313t-manylinux_2_28_aarch64.whl", hash = "sha256:7de52e3f566d19b3b11bd37eea552c6c305ad74081f736882bd44d148ed4c48d", size = 1115518, upload-time = "2026-05-15T04:50:53.543Z" },
+    { url = "https://files.pythonhosted.org/packages/46/e3/93825eaf5a4a504795b787e5d5dea07fbeb3dabf97aa7b450be8bde59c89/tiktoken-0.13.0-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:51384448aa508e4df84c0f7c1dc3211c7f7b8096325660ee5fc82f3e11b381ce", size = 1136867, upload-time = "2026-05-15T04:50:55.191Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/46/002b68de6827091d5ae90b048f326e8aad8d953520950e5ce1508879414f/tiktoken-0.13.0-cp313-cp313t-musllinux_1_2_aarch64.whl", hash = "sha256:e28157350f7ebf35008dd8e9e0fdb621f976e4230c881099c85e8cf07eaa50e2", size = 1181826, upload-time = "2026-05-15T04:50:56.296Z" },
+    { url = "https://files.pythonhosted.org/packages/db/c6/d393e3185a276505182f7abd93fe714f3c444a2be9180798fa052347504e/tiktoken-0.13.0-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:165cf1820ea4a354985c2490a5205d4cc74661c934aca79dd0368232fff94e0f", size = 1239489, upload-time = "2026-05-15T04:50:57.918Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/4d/bc07d1f1635d4897a202acc0ae11c2886eaa7325c359ba4741b47bf8e225/tiktoken-0.13.0-cp313-cp313t-win_amd64.whl", hash = "sha256:6c43a675ca14f6f2749ba7f12075d37456015a24b859f2517b9beb4ef30807ec", size = 873820, upload-time = "2026-05-15T04:50:59.528Z" },
 ]
 
 [[package]]
@@ -4146,6 +4399,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/31/8d/2f8fd7e34c75f5ee8de4310c3bd3f22270acd44d1f809e2fe7c12fbf35f8/torch_audiomentations-0.12.0.tar.gz", hash = "sha256:b02d4c5eb86376986a53eb405cca5e34f370ea9284411237508e720c529f7888", size = 52094, upload-time = "2025-01-15T09:07:01.071Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/21/9d/1ee04f49c15d2d632f6f7102061d7c07652858e6d91b58a091531034e84f/torch_audiomentations-0.12.0-py3-none-any.whl", hash = "sha256:1b80b91d2016ccf83979622cac8f702072a79b7dcc4c2bee40f00b26433a786b", size = 48506, upload-time = "2025-01-15T09:06:59.687Z" },
+]
+
+[[package]]
+name = "torch-complex"
+version = "0.4.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bf/2b/17cb15a383cf2135330371e034d13b9043dc6d8bd07c871b5aa3064fbed1/torch_complex-0.4.4.tar.gz", hash = "sha256:4153fd6b24a0bad689e6f193bfbd00f38283b1890d808bef684ddc6d1f63fd3f", size = 10025, upload-time = "2024-06-28T07:10:28.136Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f4/c5/9b4d756a7ada951e9b17dcc636f98ed1073c737ae809b150ef408afb6298/torch_complex-0.4.4-py3-none-any.whl", hash = "sha256:6ab4ecd4f3a16e3adb70a7f7cd2e769a9dfd07d7a8e27d04ff9c621ebbe34b13", size = 9125, upload-time = "2024-06-28T07:10:26.651Z" },
 ]
 
 [[package]]
@@ -4336,12 +4602,16 @@ mlx = [
 nemo = [
     { name = "nemo-toolkit", extra = ["asr"], marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
 ]
+sensevoice = [
+    { name = "funasr" },
+]
 vibevoice-asr = [
     { name = "vibevoice" },
 ]
 whisper = [
     { name = "ctranslate2" },
     { name = "faster-whisper" },
+    { name = "nltk" },
     { name = "whisperx" },
 ]
 
@@ -4371,9 +4641,11 @@ requires-dist = [
     { name = "faster-whisper", marker = "extra == 'whisper'", specifier = ">=1.2.1" },
     { name = "ffmpeg-python", specifier = ">=0.2.0" },
     { name = "filelock", specifier = ">=3.25.0" },
+    { name = "funasr", marker = "extra == 'sensevoice'", specifier = ">=1.3.12" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mlx-audio", marker = "extra == 'mlx'", specifier = ">=0.4.1" },
     { name = "nemo-toolkit", extras = ["asr"], marker = "extra == 'nemo'", specifier = ">=2.7.0" },
+    { name = "nltk", marker = "extra == 'whisper'", specifier = ">=3.10.0" },
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "parakeet-mlx", marker = "extra == 'mlx'", specifier = ">=0.2.0" },
     { name = "psutil", specifier = ">=7.2.2" },
@@ -4398,7 +4670,7 @@ requires-dist = [
     { name = "websockets", specifier = ">=16.0" },
     { name = "whisperx", marker = "extra == 'whisper'", specifier = ">=3.8.1" },
 ]
-provides-extras = ["whisper", "nemo", "vibevoice-asr", "mlx"]
+provides-extras = ["whisper", "nemo", "vibevoice-asr", "sensevoice", "mlx"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -4424,16 +4696,16 @@ resolution-markers = [
     "sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "filelock" },
-    { name = "huggingface-hub", version = "0.36.2", source = { registry = "https://pypi.org/simple" } },
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "pyyaml" },
-    { name = "regex" },
-    { name = "requests" },
-    { name = "safetensors" },
-    { name = "tokenizers" },
-    { name = "tqdm" },
+    { name = "filelock", marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "huggingface-hub", version = "0.36.2", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "numpy", marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "packaging", marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "pyyaml", marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "regex", marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "requests", marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "safetensors", marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "tokenizers", marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "tqdm", marker = "extra == 'extra-25-transcriptionsuite-server-nemo' or extra == 'extra-25-transcriptionsuite-server-vibevoice-asr' or extra == 'extra-25-transcriptionsuite-server-whisper' or extra != 'extra-25-transcriptionsuite-server-mlx'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c4/35/67252acc1b929dc88b6602e8c4a982e64f31e733b804c14bc24b47da35e6/transformers-4.57.6.tar.gz", hash = "sha256:55e44126ece9dc0a291521b7e5492b572e6ef2766338a610b9ab5afbb70689d3", size = 10134912, upload-time = "2026-01-16T10:38:39.284Z" }
 wheels = [
@@ -4452,15 +4724,15 @@ resolution-markers = [
     "sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "huggingface-hub", version = "1.21.0", source = { registry = "https://pypi.org/simple" } },
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "pyyaml" },
-    { name = "regex" },
-    { name = "safetensors" },
-    { name = "tokenizers" },
-    { name = "tqdm" },
-    { name = "typer", version = "0.25.1", source = { registry = "https://pypi.org/simple" } },
+    { name = "huggingface-hub", version = "1.21.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "numpy", marker = "extra == 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "packaging", marker = "extra == 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "pyyaml", marker = "extra == 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "regex", marker = "extra == 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "safetensors", marker = "extra == 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "tokenizers", marker = "extra == 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "tqdm", marker = "extra == 'extra-25-transcriptionsuite-server-mlx'" },
+    { name = "typer", version = "0.25.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-25-transcriptionsuite-server-mlx'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/aa/7c/8240f612819718100a9346dc28dea6a11370c3ca9c8c6eabadd3dea4ef29/transformers-5.12.1.tar.gz", hash = "sha256:679ee731c8225347889ad4fb3b2c926a62e9da3b7d284e9d12c791da7272466b", size = 8924054, upload-time = "2026-06-15T17:27:50.604Z" }
 wheels = [
@@ -4472,7 +4744,7 @@ name = "triton"
 version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "setuptools", marker = "sys_platform != 'darwin' or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
+    { name = "setuptools", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'darwin' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'emscripten' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-nemo') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-vibevoice-asr') or (sys_platform == 'win32' and extra == 'extra-25-transcriptionsuite-server-mlx' and extra == 'extra-25-transcriptionsuite-server-whisper')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/30/7b/0a685684ed5322d2af0bddefed7906674f67974aa88b0fae6e82e3b766f6/triton-3.4.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:00be2964616f4c619193cb0d1b29a99bd4b001d7dc333816073f92cf2a8ccdeb", size = 155569223, upload-time = "2025-07-30T19:58:44.017Z" },
@@ -4563,6 +4835,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ba/19/1b9b0e29f30c6d35cb345486df41110984ea67ae69dddbc0e8a100999493/tzdata-2026.2.tar.gz", hash = "sha256:9173fde7d80d9018e02a662e168e5a2d04f87c41ea174b139fbef642eda62d10", size = 198254, upload-time = "2026-04-24T15:22:08.651Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ce/e4/dccd7f47c4b64213ac01ef921a1337ee6e30e8c6466046018326977efd95/tzdata-2026.2-py2.py3-none-any.whl", hash = "sha256:bbe9af844f658da81a5f95019480da3a89415801f6cc966806612cc7169bffe7", size = 349321, upload-time = "2026-04-24T15:22:05.876Z" },
+]
+
+[[package]]
+name = "umap-learn"
+version = "0.5.12"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numba" },
+    { name = "numpy" },
+    { name = "pynndescent" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/02/ee/af4171241117f85c74b5ca6448ea1033cc28d599c13651d67289bacd4083/umap_learn-0.5.12.tar.gz", hash = "sha256:6aff02ecac5f2aad9f3c65ee518d7ae93e1a985ae38721fdcffceee4232c33c7", size = 96672, upload-time = "2026-04-08T20:03:54.012Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1b/98/f63318ccbe75c810011fe9233884c5d348d94d90005de1b79e5f93bef9c0/umap_learn-0.5.12-py3-none-any.whl", hash = "sha256:f2a85d2a2adcb52b541bed9b27a23ca169b56bb1b23283abeebfb8dfb8a42fe5", size = 91849, upload-time = "2026-04-08T20:03:52.561Z" },
 ]
 
 [[package]]
