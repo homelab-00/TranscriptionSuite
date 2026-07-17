@@ -3702,7 +3702,7 @@ function ensureWhisperDirectories(): void {
  * GHCR OCI repo that hosts the whisper-server.exe Windows binary as a package
  * blob, pushed with:
  *
- *   oras push ghcr.io/homelab-00/whisper-server:latest \
+ *   oras push ghcr.io/homelab-00/whisper-cpp-windows:latest \
  *     --artifact-type application/vnd.transcriptionsuite.whisper-server \
  *     --annotation "org.opencontainers.image.source=https://github.com/homelab-00/TranscriptionSuite" \
  *     whisper-server/whisper-server.exe:application/vnd.microsoft.portable-executable
@@ -3711,7 +3711,7 @@ function ensureWhisperDirectories(): void {
  * image-source annotation and must be a *public* package so the app can pull
  * it anonymously.
  */
-const WHISPER_SERVER_BLOB_REPO = 'ghcr.io/homelab-00/whisper-server';
+const WHISPER_SERVER_BLOB_REPO = 'ghcr.io/homelab-00/whisper-cpp-windows';
 /**
  * Tag to pull. Each release is pushed as both `latest` and `vX.Y.Z`, so
  * `latest` always resolves to the newest binary.
