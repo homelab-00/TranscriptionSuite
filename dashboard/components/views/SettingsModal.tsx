@@ -810,7 +810,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               }`}
             >
               <NvidiaIcon size={14} />
-              GPU (CUDA)
+              CUDA
             </button>
             <button
               onClick={() => {
@@ -827,7 +827,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <AmdIcon size={30} />
                 <IntelIcon size={30} />
               </span>
-              GPU (Vulkan)
+              Vulkan Linux
             </button>
             <button
               onClick={() => {
@@ -841,7 +841,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               }`}
             >
               <AppleIcon size={14} />
-              GPU (Metal)
+              Metal
             </button>
             <button
               onClick={() => {
@@ -878,7 +878,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <AmdIcon size={30} />
                 <IntelIcon size={30} />
               </span>
-              GPU (Vulkan WSL2)
+              Vulkan Windows
               <span className="bg-accent-orange/20 text-accent-orange ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
                 Experimental
               </span>
@@ -909,13 +909,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               Vulkan requires Linux — Docker Desktop on Windows/macOS has no{' '}
               <span className="font-mono">/dev/dri</span> GPU passthrough.{' '}
               {platform === 'win32' && gpuInfo?.wslSupport?.gpuPassthroughDetected
-                ? 'Try the experimental "GPU (Vulkan WSL2)" profile below, or '
+                ? 'Try the experimental "Vulkan Windows" profile below, or '
                 : 'Select '}
-              CPU
+              CPU Only
               {platform === 'win32'
-                ? ', or GPU (CUDA) if you have NVIDIA hardware'
+                ? ', or CUDA if you have NVIDIA hardware'
                 : platform === 'darwin'
-                  ? ', GPU (Metal) on Apple Silicon, or GPU (CUDA) if you dual-boot with NVIDIA hardware'
+                  ? ', Metal on Apple Silicon, or CUDA if you dual-boot with NVIDIA hardware'
                   : ''}
               .
             </p>
@@ -923,7 +923,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           {appSettings.runtimeProfile === 'vulkan-wsl2' && platform !== 'win32' && (
             <p className="text-xs text-red-400">
               The Vulkan WSL2 profile only applies to Windows + Docker Desktop with the WSL2
-              backend. Switch to {platform === 'linux' ? '"GPU (Vulkan)"' : 'CPU or GPU (Metal)'}.
+              backend. Switch to {platform === 'linux' ? '"Vulkan Linux"' : 'CPU Only or Metal'}.
             </p>
           )}
           {appSettings.runtimeProfile === 'vulkan-wsl2' &&

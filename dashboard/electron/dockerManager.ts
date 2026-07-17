@@ -230,7 +230,7 @@ export function checkVulkanSupport(opts: CheckVulkanSupportOptions): string | nu
     return (
       'Vulkan runtime is only supported on Linux. Docker Desktop on Windows/macOS ' +
       'runs containers in a VM without /dev/dri GPU passthrough. ' +
-      'Switch the Runtime Profile to "CPU" (or "GPU (CUDA)" with NVIDIA hardware) and try again.'
+      'Switch the Runtime Profile to "CPU Only" (or "CUDA" with NVIDIA hardware) and try again.'
     );
   }
   if (!exists('/dev/dri') || !exists('/dev/dri/renderD128')) {
@@ -238,7 +238,7 @@ export function checkVulkanSupport(opts: CheckVulkanSupportOptions): string | nu
       '/dev/dri was not found on this system (or has no render node). ' +
       'The Vulkan runtime profile requires a DRI-capable GPU with kernel driver support. ' +
       'This is common on WSL2 or systems without AMD/Intel GPU drivers. ' +
-      'Switch the Runtime Profile to "CPU" and try again.'
+      'Switch the Runtime Profile to "CPU Only" and try again.'
     );
   }
   return null;
@@ -2263,7 +2263,7 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
         );
       }
       hints.push(
-        'Switch the Runtime Profile to "Vulkan" (for AMD/Intel GPUs) or "CPU" and try again.',
+        'Switch the Runtime Profile to "Vulkan Linux" (for AMD/Intel GPUs) or "CPU Only" and try again.',
       );
       throw new Error(hints.join(' '));
     }

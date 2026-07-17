@@ -1331,7 +1331,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     }
   }, [gpuError, gpuErrorRecoveryHint]);
 
-  // CPU-fallback mismatch: GPU (CUDA) is the selected runtime, the server is up
+  // CPU-fallback mismatch: CUDA is the selected runtime, the server is up
   // and reachable, but the running container reports CUDA is NOT available
   // inside it (started without GPU passthrough → silently transcribing on CPU).
   // `=== false` (not falsy) so older servers / pre-init responses that omit the
@@ -1515,6 +1515,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Setup checks — gated by the currently selected runtime profile
   const rtName = docker.runtimeKind ?? 'Docker';
   const gpuSatisfied = gpuInfo?.gpu ?? false;
+  // NVIDIA-detected hosts should run the CUDA stack: the Vulkan runtimes are
+  // disabled so a slower backend cannot be picked by accident. Fails open
+  // while detection is pending (gpuInfo === null) and in jsdom test mounts.
+  const nvidiaDetected = gpuInfo?.gpu ?? false;
   // Hardware check (arm64 mac) passes immediately via Electron; server report only
   // refines whether mlx_whisper is actually installed.
   const metalSatisfied = isAppleSilicon && (mlxFeature === undefined || metalSupported);
@@ -1854,7 +1858,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 >
                   <SelectorTile
                     icon={<NvidiaIcon size={16} />}
-                    label="GPU (CUDA)"
+                    label="CUDA"
                     sublabel="NVIDIA"
                     accent="green"
                     selected={runtimeProfile === 'gpu'}
@@ -1874,21 +1878,24 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         <IntelIcon size={30} />
                       </span>
                     }
-                    label="GPU (Vulkan Windows)"
+                    label="Vulkan Windows"
                     sublabel="AMD / Intel · WSL2"
                     accent="red"
                     selected={runtimeProfile === 'vulkan-wsl2'}
                     disabled={
                       isRunning ||
+                      nvidiaDetected ||
                       (hostPlatform !== 'unknown' && hostPlatform !== 'win32') ||
                       (hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected)
                     }
                     badge={
                       hostPlatform !== 'unknown' && hostPlatform !== 'win32'
                         ? 'Windows only'
-                        : hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected
-                          ? 'Requires WSL2 GPU'
-                          : undefined
+                        : nvidiaDetected
+                          ? 'NVIDIA detected'
+                          : hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected
+                            ? 'Requires WSL2 GPU'
+                            : undefined
                     }
                     hint="Experimental"
                     onSelect={() => handleRuntimeProfileChange('vulkan-wsl2')}
@@ -1900,32 +1907,42 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         <IntelIcon size={30} />
                       </span>
                     }
-                    label="GPU (Vulkan Linux)"
+                    label="Vulkan Linux"
                     sublabel="AMD / Intel"
                     accent="red"
                     selected={runtimeProfile === 'vulkan'}
-                    disabled={isRunning || hostPlatform === 'win32' || hostPlatform === 'darwin'}
+                    disabled={
+                      isRunning ||
+                      nvidiaDetected ||
+                      hostPlatform === 'win32' ||
+                      hostPlatform === 'darwin'
+                    }
                     badge={
                       hostPlatform === 'win32' || hostPlatform === 'darwin'
                         ? 'Linux only'
-                        : undefined
+                        : nvidiaDetected
+                          ? 'NVIDIA detected'
+                          : undefined
                     }
-                    hint="Experimental"
                     onSelect={() => handleRuntimeProfileChange('vulkan')}
                   />
                   <SelectorTile
                     icon={<AppleIcon size={16} />}
-                    label="GPU (Metal)"
+                    label="Metal"
                     sublabel="Apple Silicon"
                     accent="purple"
                     selected={runtimeProfile === 'metal'}
                     disabled={
-                      isRunning || (hostPlatform !== 'unknown' && hostPlatform !== 'darwin')
+                      isRunning ||
+                      nvidiaDetected ||
+                      (hostPlatform !== 'unknown' && hostPlatform !== 'darwin')
                     }
                     badge={
                       hostPlatform !== 'unknown' && hostPlatform !== 'darwin'
                         ? 'Requires Apple Silicon'
-                        : undefined
+                        : nvidiaDetected
+                          ? 'NVIDIA detected'
+                          : undefined
                     }
                     onSelect={() => handleRuntimeProfileChange('metal')}
                   />
