@@ -78,6 +78,20 @@ export function useLiveMode(): LiveModeState {
   // a stale reference. Updated on every render (see the effect below).
   const retargetRef = useRef<(() => void) | null>(null);
   const isRetargetingRef = useRef(false);
+  // Mirror of `status` so the socket callbacks (created once in start()) can
+  // read the CURRENT status without a stale closure — mirrors useTranscription.
+  const statusRef = useRef<LiveStatus>('idle');
+  const setStatusTracked = useCallback((s: LiveStatus) => {
+    statusRef.current = s;
+    setStatus(s);
+  }, []);
+  // GH-237: gate the `start` re-send across auto-reconnects (same rationale as
+  // useTranscription). The server cannot resume a dropped live session, so
+  // re-sending `start` on reconnect resurrects it in the background. Flipped
+  // true on the first `state` message (engine acknowledged our start); stays
+  // true across a server STOPPED + reconnect so nothing resurrects; reopened
+  // only by a user-initiated start()/stop().
+  const sessionEstablishedRef = useRef(false);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -97,115 +111,126 @@ export function useLiveMode(): LiveModeState {
     });
   }, []);
 
-  const handleMessage = useCallback((msg: ServerMessage) => {
-    switch (msg.type) {
-      case 'auth_ok':
-        // Authenticated — send start with config
-        setStatus('starting');
-        socketRef.current?.sendJSON({
-          type: 'start',
-          data: {
-            config: {
-              language: startOptsRef.current.language,
-              model: startOptsRef.current.model,
-              translation_enabled: startOptsRef.current.translate ?? false,
-              translation_target_language: startOptsRef.current.translationTarget ?? 'en',
-              post_speech_silence_duration: startOptsRef.current.gracePeriodSeconds,
+  const handleMessage = useCallback(
+    (msg: ServerMessage) => {
+      switch (msg.type) {
+        case 'auth_ok':
+          // GH-237: only send `start` on the FIRST connect of a user session.
+          // After the engine has acknowledged us, an auth_ok is an auto-reconnect
+          // and re-sending `start` would resurrect the session (see
+          // sessionEstablishedRef).
+          if (sessionEstablishedRef.current) break;
+          // Authenticated — send start with config
+          setStatusTracked('starting');
+          socketRef.current?.sendJSON({
+            type: 'start',
+            data: {
+              config: {
+                language: startOptsRef.current.language,
+                model: startOptsRef.current.model,
+                translation_enabled: startOptsRef.current.translate ?? false,
+                translation_target_language: startOptsRef.current.translationTarget ?? 'en',
+                post_speech_silence_duration: startOptsRef.current.gracePeriodSeconds,
+              },
             },
-          },
-        });
-        break;
+          });
+          break;
 
-      case 'status':
-        // Model loading/swapping progress
-        setStatusMessage((msg.data?.message as string) ?? null);
-        break;
+        case 'status':
+          // Model loading/swapping progress
+          setStatusMessage((msg.data?.message as string) ?? null);
+          break;
 
-      case 'state': {
-        const state = msg.data?.state as string;
-        if (state === 'LISTENING') {
-          setStatus('listening');
-          setStatusMessage(null);
-          // Start audio capture once engine is ready. Stop any previous
-          // instance first — GH-230: replacing a still-starting capture
-          // without stopping it would orphan its loopback hold and stream.
-          if (!captureRef.current?.isCapturing) {
-            captureRef.current?.stop();
-            captureRef.current = new AudioCapture((chunk) => {
-              socketRef.current?.sendAudio(chunk);
-            });
-            captureRef.current
-              .start({
-                deviceId: startOptsRef.current.deviceId,
-                systemAudio: startOptsRef.current.systemAudio,
-                monitorSinkName: startOptsRef.current.monitorSinkName,
-              })
-              .then(() => {
-                setAnalyser(captureRef.current?.analyser ?? null);
-              })
-              .catch((err) => {
-                // A stop() that raced the start — the stop already put the
-                // state machine where it belongs; don't flip to error.
-                if (err instanceof Error && err.name === 'AbortError') return;
-                setError(err instanceof Error ? err.message : 'Audio capture failed');
-                setStatus('error');
-                socketRef.current?.disconnect();
+        case 'state': {
+          // GH-237: the engine has acknowledged our start — close the start-gate
+          // so a later auto-reconnect cannot resurrect the session.
+          sessionEstablishedRef.current = true;
+          const state = msg.data?.state as string;
+          if (state === 'LISTENING') {
+            setStatusTracked('listening');
+            setStatusMessage(null);
+            // Start audio capture once engine is ready. Stop any previous
+            // instance first — GH-230: replacing a still-starting capture
+            // without stopping it would orphan its loopback hold and stream.
+            if (!captureRef.current?.isCapturing) {
+              captureRef.current?.stop();
+              captureRef.current = new AudioCapture((chunk) => {
+                socketRef.current?.sendAudio(chunk);
               });
+              captureRef.current
+                .start({
+                  deviceId: startOptsRef.current.deviceId,
+                  systemAudio: startOptsRef.current.systemAudio,
+                  monitorSinkName: startOptsRef.current.monitorSinkName,
+                })
+                .then(() => {
+                  setAnalyser(captureRef.current?.analyser ?? null);
+                })
+                .catch((err) => {
+                  // A stop() that raced the start — the stop already put the
+                  // state machine where it belongs; don't flip to error.
+                  if (err instanceof Error && err.name === 'AbortError') return;
+                  setError(err instanceof Error ? err.message : 'Audio capture failed');
+                  setStatusTracked('error');
+                  socketRef.current?.disconnect();
+                });
+            }
+          } else if (state === 'PROCESSING') {
+            setStatusTracked('processing');
+          } else if (state === 'STOPPED') {
+            // GH-230: a server-initiated stop must tear down capture too —
+            // leaving it running kept streaming audio into a dead session and
+            // stranded the Linux loopback module (mic indicator stayed lit).
+            captureRef.current?.stop();
+            setAnalyser(null);
+            setStatusTracked('idle');
+            setStatusMessage(null);
           }
-        } else if (state === 'PROCESSING') {
-          setStatus('processing');
-        } else if (state === 'STOPPED') {
-          // GH-230: a server-initiated stop must tear down capture too —
-          // leaving it running kept streaming audio into a dead session and
-          // stranded the Linux loopback module (mic indicator stayed lit).
+          break;
+        }
+
+        case 'sentence':
+          setSentences((prev) => [
+            ...prev,
+            {
+              text: (msg.data?.text as string) ?? '',
+              timestamp: Date.now(),
+            },
+          ]);
+          setPartial(''); // Clear partial when sentence completes
+          break;
+
+        case 'partial':
+          setPartial((msg.data?.text as string) ?? '');
+          break;
+
+        case 'history':
+          // Restore history from server
+          if (Array.isArray(msg.data?.sentences)) {
+            setSentences(
+              (msg.data.sentences as string[]).map((text) => ({
+                text,
+                timestamp: Date.now(),
+              })),
+            );
+          }
+          break;
+
+        case 'history_cleared':
+          setSentences([]);
+          break;
+
+        case 'error':
+          setError((msg.data?.message as string) ?? 'Live mode error');
+          setStatusTracked('error');
           captureRef.current?.stop();
           setAnalyser(null);
-          setStatus('idle');
           setStatusMessage(null);
-        }
-        break;
+          break;
       }
-
-      case 'sentence':
-        setSentences((prev) => [
-          ...prev,
-          {
-            text: (msg.data?.text as string) ?? '',
-            timestamp: Date.now(),
-          },
-        ]);
-        setPartial(''); // Clear partial when sentence completes
-        break;
-
-      case 'partial':
-        setPartial((msg.data?.text as string) ?? '');
-        break;
-
-      case 'history':
-        // Restore history from server
-        if (Array.isArray(msg.data?.sentences)) {
-          setSentences(
-            (msg.data.sentences as string[]).map((text) => ({
-              text,
-              timestamp: Date.now(),
-            })),
-          );
-        }
-        break;
-
-      case 'history_cleared':
-        setSentences([]);
-        break;
-
-      case 'error':
-        setError((msg.data?.message as string) ?? 'Live mode error');
-        setStatus('error');
-        captureRef.current?.stop();
-        setAnalyser(null);
-        setStatusMessage(null);
-        break;
-    }
-  }, []);
+    },
+    [setStatusTracked],
+  );
 
   const start = useCallback(
     (options?: LiveStartOptions) => {
@@ -220,15 +245,17 @@ export function useLiveMode(): LiveModeState {
       }
       setStatusMessage(null);
       startOptsRef.current = options ?? {};
+      // GH-237: a user-initiated session reopens the start-gate.
+      sessionEstablishedRef.current = false;
 
-      setStatus('connecting');
+      setStatusTracked('connecting');
 
       socketRef.current?.disconnect();
       socketRef.current = new TranscriptionSocket('/ws/live', {
         onMessage: handleMessage,
         onError: (err) => {
           setError(err);
-          setStatus('error');
+          setStatusTracked('error');
           captureRef.current?.stop();
           setAnalyser(null);
         },
@@ -240,7 +267,19 @@ export function useLiveMode(): LiveModeState {
           captureRef.current?.stop();
           setAnalyser(null);
           setStatusMessage(null);
-          setStatus('idle');
+          // GH-237: if the drop happened while a session was actively running
+          // (listening/processing), it is an unrecoverable interruption — the
+          // server cannot resume, and the start-gate now blocks the reconnect
+          // from resurrecting it. Fail loudly and halt the reconnect. A drop
+          // before the engine acknowledged us (connecting/starting) or after a
+          // clean STOPPED (idle) is not fatal: let the reconnect re-establish.
+          if (statusRef.current === 'listening' || statusRef.current === 'processing') {
+            setError('Connection to the server was lost. Live mode stopped.');
+            setStatusTracked('error');
+            socketRef.current?.disconnect();
+            return;
+          }
+          setStatusTracked('idle');
         },
         onHostMismatch: () => {
           // Drain + retarget for EC-6: the user changed hosts while live mode
@@ -270,7 +309,7 @@ export function useLiveMode(): LiveModeState {
       });
       socketRef.current.connect();
     },
-    [handleMessage],
+    [handleMessage, setStatusTracked],
   );
 
   // Keep the retarget ref pointed at the latest `start` closure. Updated every
@@ -286,8 +325,10 @@ export function useLiveMode(): LiveModeState {
     captureRef.current?.stop();
     setAnalyser(null);
     setStatusMessage(null);
-    setStatus('idle');
-  }, []);
+    // GH-237: user stop reopens the start-gate for the next session.
+    sessionEstablishedRef.current = false;
+    setStatusTracked('idle');
+  }, [setStatusTracked]);
 
   const toggleMute = useCallback(() => {
     setMuted((prev) => {

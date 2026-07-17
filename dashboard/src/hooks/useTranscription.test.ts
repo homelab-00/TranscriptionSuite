@@ -927,4 +927,112 @@ describe('[P1] useTranscription', () => {
       expect(lastSocket.disconnect).not.toHaveBeenCalled();
     });
   });
+
+  // ── GH-237: WS reconnect must not spawn zombie server sessions ────────
+  //
+  // The server assigns a NEW session_id + job_id per WS connection and cannot
+  // resume a dropped session. The socket auto-reconnects unintentional closes,
+  // so a `start` re-sent on every reconnect used to silently abandon the
+  // original job and spin up a fresh one for a new slice of audio — a
+  // truncated transcript passed off as complete (data-loss invariant breach).
+
+  describe('GH-237: reconnect start-gate + fail-loudly', () => {
+    /** Count the `start` messages sent over a given socket instance. */
+    const startSends = (s: typeof lastSocket = lastSocket): number =>
+      s.sendJSON.mock.calls.filter((c) => (c[0] as { type?: string })?.type === 'start').length;
+
+    it('does not re-send start when auth_ok fires again after the session is established', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      expect(startSends()).toBe(1);
+
+      // A reconnect re-runs the auth handshake on the same socket instance.
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+
+      // Gate held — otherwise the server would have spawned a second job.
+      expect(startSends()).toBe(1);
+    });
+
+    it('re-sends start on a reconnect that lands before the session was established', () => {
+      const { result } = renderHook(() => useTranscription());
+      act(() => {
+        result.current.start();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      expect(startSends()).toBe(1);
+
+      // Dropped mid-handshake (still 'connecting', no session_started yet).
+      act(() => {
+        lastSocketCbs.onClose!(1001, 'drop before session');
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+
+      // No job existed yet, so re-establishing the first session is correct.
+      expect(startSends()).toBe(2);
+      expect(result.current.status).not.toBe('error');
+    });
+
+    it('fails loudly when the socket closes unexpectedly while recording', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.disconnect.mockClear();
+      lastCapture.stop.mockClear();
+
+      act(() => {
+        lastSocketCbs.onClose!(1001, 'server going away');
+      });
+
+      expect(result.current.status).toBe('error');
+      expect(result.current.error).toMatch(/connection.*lost/i);
+      expect(lastCapture.stop).toHaveBeenCalled();
+      // Auto-reconnect is halted so no zombie session is created.
+      expect(lastSocket.disconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not re-send start on a reconnect during processing (poll owns recovery)', async () => {
+      (apiClient.fetchTranscriptionResult as Mock).mockResolvedValue({ status: 202 });
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      act(() => {
+        result.current.stop();
+      });
+      expect(result.current.status).toBe('processing');
+      expect(startSends()).toBe(1);
+
+      // Socket drops mid-processing, then auto-reconnects and re-authenticates.
+      await act(async () => {
+        lastSocketCbs.onClose!(1001, 'drop during processing');
+        await Promise.resolve();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+
+      // No phantom job: the poll-for-result fallback recovers the real one.
+      expect(startSends()).toBe(1);
+      expect(result.current.status).toBe('processing');
+    });
+
+    it('reopens the gate on a fresh start() so the next session sends its own start', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'final', data: { text: 'one', words: [] } });
+      });
+      expect(result.current.status).toBe('complete');
+
+      // A brand-new user-initiated session builds a fresh socket instance.
+      await driveToRecording(result);
+
+      // lastSocket is now the second socket — it sent exactly one start.
+      expect(startSends()).toBe(1);
+      expect(result.current.status).toBe('recording');
+    });
+  });
 });
