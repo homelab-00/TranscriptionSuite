@@ -275,6 +275,7 @@ durability:
 - **Python 3.13 lhotse patch**: `_patch_sampler_for_python313()` in ParakeetBackend — required for NeMo compatibility
 - **VibeVoice OOM**: `DEFAULT_MAX_CHUNK_DURATION_S = 60` (1 minute) — was 600s, caused CUDA OOM on 12GB GPU. Never increase without GPU memory testing
 - **NeMo requires `INSTALL_NEMO=true`** env var in Docker — not installed by default
+- **NeMo Greek final sigma (ς)**: canary-1b-v2 and parakeet-tdt-0.6b-v3 tokenizers lack U+03C2 entirely (upstream defect, huggingface.co/nvidia/canary-1b-v2/discussions/26). Canary emits a recoverable " ⁇ " unk marker, repaired in `core/stt/greek_sigma.py` when the output language is `el`; Parakeet emits nothing (irrecoverable), so the backend logs a warning and the dashboard warns on Greek + Parakeet. Do NOT try to fix Parakeet by rewriting word-final σ to ς: the model never emits a trailing σ, the letter is simply gone
 - **SenseVoice (FunASR) requires `INSTALL_FUNASR=true`** env var in Docker — not installed by default; Linux/NVIDIA only
 
 #### GPU Crash Resilience

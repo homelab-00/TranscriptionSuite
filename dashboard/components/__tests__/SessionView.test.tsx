@@ -151,6 +151,8 @@ vi.mock('../../src/services/modelCapabilities', () => ({
   supportsAutoDetect: () => true,
   pickDefaultLanguage: (options: string[]) =>
     options.includes('English') ? 'English' : (options[0] ?? 'Auto Detect'),
+  // Whisper models have full Greek support - no final-sigma warning surface.
+  truncatesGreekFinalSigma: () => false,
   CANARY_TRANSLATION_TARGETS: [],
 }));
 

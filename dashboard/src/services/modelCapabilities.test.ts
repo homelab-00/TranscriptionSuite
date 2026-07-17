@@ -13,6 +13,7 @@ import {
   supportsAutoDetect,
   supportsTranslation,
   supportsDiarization,
+  truncatesGreekFinalSigma,
   NEMO_LANGUAGES,
   CANARY_TRANSLATION_TARGETS,
   SENSEVOICE_LANGUAGES,
@@ -547,5 +548,30 @@ describe('supportsAutoDetect', () => {
     expect(supportsAutoDetect(null)).toBe(true);
     expect(supportsAutoDetect(undefined)).toBe(true);
     expect(supportsAutoDetect('')).toBe(true);
+  });
+});
+
+describe('truncatesGreekFinalSigma', () => {
+  it('returns true for NVIDIA Parakeet models (silent final-sigma drop)', () => {
+    expect(truncatesGreekFinalSigma('nvidia/parakeet-tdt-0.6b-v3')).toBe(true);
+  });
+
+  it('returns true for nemotron-speech models (same NeMo tokenizer defect)', () => {
+    expect(truncatesGreekFinalSigma('nvidia/nemotron-speech-streaming-en-0.6b')).toBe(true);
+  });
+
+  it('returns true for MLX Parakeet ports', () => {
+    expect(truncatesGreekFinalSigma('mlx-community/parakeet-tdt-0.6b-v3')).toBe(true);
+  });
+
+  it('returns false for Canary models (server repairs their unk marker)', () => {
+    expect(truncatesGreekFinalSigma('nvidia/canary-1b-v2')).toBe(false);
+    expect(truncatesGreekFinalSigma('Mediform/canary-1b-v2-mlx-q8')).toBe(false);
+  });
+
+  it('returns false for Whisper models and empty values', () => {
+    expect(truncatesGreekFinalSigma('large-v3')).toBe(false);
+    expect(truncatesGreekFinalSigma(null)).toBe(false);
+    expect(truncatesGreekFinalSigma(undefined)).toBe(false);
   });
 });

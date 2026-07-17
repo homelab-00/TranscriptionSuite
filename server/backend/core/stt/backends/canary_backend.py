@@ -26,6 +26,7 @@ from server.core.stt.backends.parakeet_backend import (
     SAMPLE_RATE,
     ParakeetBackend,
 )
+from server.core.stt.greek_sigma import repair_segments_greek_final_sigma
 
 logger = logging.getLogger(__name__)
 
@@ -139,20 +140,30 @@ class CanaryBackend(ParakeetBackend):
                 source_lang=source_lang,
                 target_lang=target_lang,
             )
-            return self._transcribe_long(
+            segments, info = self._transcribe_long(
                 audio,
                 word_timestamps=word_timestamps,
                 transcribe_fn=canary_fn,
                 language=source_lang,
                 progress_callback=progress_callback,
             )
+        else:
+            segments, info = self._transcribe_short_canary(
+                audio,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                word_timestamps=word_timestamps,
+            )
 
-        return self._transcribe_short_canary(
-            audio,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            word_timestamps=word_timestamps,
-        )
+        # Canary's tokenizer has no ς (U+03C2): the model emits <unk> at every
+        # Greek final-sigma position, rendered as " ⁇ " in the decoded text.
+        # Deterministically restore the sigma whenever Greek is the OUTPUT
+        # language (el transcription, or translation into el). See
+        # greek_sigma.py and https://huggingface.co/nvidia/canary-1b-v2/discussions/26
+        if target_lang == "el":
+            segments = repair_segments_greek_final_sigma(segments)
+
+        return segments, info
 
     def supports_translation(self) -> bool:
         return True

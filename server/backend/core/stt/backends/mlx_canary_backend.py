@@ -37,6 +37,7 @@ from server.core.stt.backends.base import (
     STTBackend,
 )
 from server.core.stt.backends.mlx_thread_pin import MLXThreadAffinityMixin, mlx_pinned
+from server.core.stt.greek_sigma import repair_greek_final_sigma
 
 SAMPLE_RATE = 16000
 
@@ -436,9 +437,16 @@ class MLXCanaryBackend(MLXThreadAffinityMixin, STTBackend):
                     logger.debug("mlx cache clear failed (non-critical)", exc_info=True)
 
             if isinstance(text, str) and text.strip():
+                chunk_text = text.strip()
+                if lang_code == "el":
+                    # Same canary-1b-v2 weights as the NVIDIA backend: the
+                    # tokenizer has no ς (U+03C2) and renders it as an unk
+                    # marker. No-op when the marker is absent. Unverified on
+                    # Metal hardware - see greek_sigma.py.
+                    chunk_text = repair_greek_final_sigma(chunk_text)
                 segments.append(
                     BackendSegment(
-                        text=text.strip(),
+                        text=chunk_text,
                         start=chunk_start_s,
                         end=chunk_end_s,
                         words=[],
