@@ -64,8 +64,6 @@ interface InstanceSettingsSelectorsProps {
   liveModelWhisperOnlyCompatible: boolean;
   liveModeModelConstraintMessage: string;
   canManage: boolean;
-  downloadingIds: ReadonlySet<string>;
-  onDownloadModel: (id: string) => void;
   onRemoveModel: (id: string) => void;
 }
 
@@ -150,8 +148,6 @@ export function InstanceSettingsSelectors({
   liveModelWhisperOnlyCompatible,
   liveModeModelConstraintMessage,
   canManage,
-  downloadingIds,
-  onDownloadModel,
   onRemoveModel,
 }: InstanceSettingsSelectorsProps) {
   const familyChoices = useMemo(() => familyChoicesFor(runtimeProfile), [runtimeProfile]);
@@ -265,9 +261,7 @@ export function InstanceSettingsSelectors({
         isRunning={isRunning}
         canManage={canManage}
         modelCacheStatus={modelCacheStatus}
-        downloadingIds={downloadingIds}
         onMainModelSelectionChange={onMainModelSelectionChange}
-        onDownload={onDownloadModel}
         onRemove={onRemoveModel}
       />
 
@@ -305,9 +299,7 @@ export function InstanceSettingsSelectors({
           isRunning={isRunning}
           canManage={canManage}
           modelCacheStatus={modelCacheStatus}
-          downloadingIds={downloadingIds}
           onSelectionChange={onLiveModelSelectionChange}
-          onDownload={onDownloadModel}
           onRemove={onRemoveModel}
         />
       )}

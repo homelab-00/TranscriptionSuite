@@ -225,7 +225,6 @@ export interface ElectronAPI {
       modelIds: string[],
     ) => Promise<Record<string, { exists: boolean; size?: string }>>;
     removeModelCache: (modelId: string) => Promise<void>;
-    downloadModelToCache: (modelId: string) => Promise<void>;
     isGgmlModelDownloadedOnHost: (fileName: string) => Promise<boolean>;
     downloadGgmlModelToHost: (fileName: string) => Promise<void>;
     removeVolume: (name: string) => Promise<string>;
@@ -468,7 +467,6 @@ export interface ElectronAPI {
     stop: () => Promise<void>;
     getStatus: () => Promise<'stopped' | 'starting' | 'running' | 'stopping' | 'error'>;
     getLogs: (tail?: number) => Promise<string[]>;
-    downloadModelToCache: (modelId: string) => Promise<void>;
     checkModelsCached: (
       modelIds: string[],
     ) => Promise<Record<string, { exists: boolean; size?: string }>>;
@@ -592,8 +590,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       >,
     removeModelCache: (modelId: string) =>
       ipcRenderer.invoke('docker:removeModelCache', modelId) as Promise<void>,
-    downloadModelToCache: (modelId: string) =>
-      ipcRenderer.invoke('docker:downloadModelToCache', modelId) as Promise<void>,
     isGgmlModelDownloadedOnHost: (fileName: string) =>
       ipcRenderer.invoke('docker:isGgmlModelDownloadedOnHost', fileName) as Promise<boolean>,
     downloadGgmlModelToHost: (fileName: string) =>
@@ -842,8 +838,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
         'stopped' | 'starting' | 'running' | 'stopping' | 'error'
       >,
     getLogs: (tail?: number) => ipcRenderer.invoke('mlx:getLogs', tail) as Promise<string[]>,
-    downloadModelToCache: (modelId: string) =>
-      ipcRenderer.invoke('mlx:downloadModelToCache', modelId) as Promise<void>,
     checkModelsCached: (modelIds: string[]) =>
       ipcRenderer.invoke('mlx:checkModelsCached', modelIds) as Promise<
         Record<string, { exists: boolean; size?: string }>

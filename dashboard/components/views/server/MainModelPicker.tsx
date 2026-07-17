@@ -12,9 +12,7 @@ interface MainModelPickerProps {
   isRunning: boolean;
   canManage: boolean;
   modelCacheStatus: ModelCacheStatus;
-  downloadingIds: ReadonlySet<string>;
   onMainModelSelectionChange: (value: string) => void;
-  onDownload: (id: string) => void;
   onRemove: (id: string) => void;
 }
 
@@ -25,9 +23,9 @@ interface MainModelPickerProps {
  * two separate, individually selectable cards instead of being flattened
  * into one option.
  *
- * This picker is the only model-management surface: each card carries its own
- * download/remove actions, so downloading a family that is not currently
- * selected means selecting that family tile first.
+ * This picker is the only model-management surface: clicking a card selects
+ * that model, and cached cards carry a Remove action. There is no Download
+ * action — missing weights are fetched automatically at server start.
  */
 export function MainModelPicker({
   selectedFamily,
@@ -35,9 +33,7 @@ export function MainModelPicker({
   isRunning,
   canManage,
   modelCacheStatus,
-  downloadingIds,
   onMainModelSelectionChange,
-  onDownload,
   onRemove,
 }: MainModelPickerProps) {
   const models = selectedFamily ? modelsForFamilyChoice(selectedFamily) : [];
@@ -53,9 +49,7 @@ export function MainModelPicker({
         isRunning={isRunning}
         canManage={canManage}
         modelCacheStatus={modelCacheStatus}
-        downloadingIds={downloadingIds}
         onSelectionChange={onMainModelSelectionChange}
-        onDownload={onDownload}
         onRemove={onRemove}
       />
 

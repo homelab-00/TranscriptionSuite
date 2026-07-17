@@ -44,9 +44,7 @@ function setup(overrides: Partial<React.ComponentProps<typeof ModelCardPicker>> 
     isRunning: false,
     canManage: true,
     modelCacheStatus: {},
-    downloadingIds: new Set<string>(),
     onSelectionChange: vi.fn(),
-    onDownload: vi.fn(),
     onRemove: vi.fn(),
     ...overrides,
   };
@@ -114,10 +112,13 @@ describe('ModelCardPicker', () => {
   });
 
   it('still allows browsing the list while the server is running', () => {
-    setup({ isRunning: true });
+    const props = setup({ isRunning: true });
     expand();
 
     expect(screen.getByText('Faster Whisper Small')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /select faster whisper small/i })).toBeDisabled();
+    const card = screen.getByRole('button', { name: /select faster whisper small/i });
+    expect(card).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(card);
+    expect(props.onSelectionChange).not.toHaveBeenCalled();
   });
 });

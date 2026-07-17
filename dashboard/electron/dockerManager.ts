@@ -39,7 +39,7 @@ import {
   getRuntimePathAdditions,
 } from './containerRuntime.js';
 import { type WslSupport, resetWslSupportCache } from './wslDetect.js';
-import { hfCacheDirName, resolveHfRepoId } from './hfRepoAliases.js';
+import { hfCacheDirName } from './hfRepoAliases.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -4037,138 +4037,6 @@ function isGgmlFileName(name: string): boolean {
   return /(?:(?:^|\/)ggml-.*\.bin$|\.gguf$)/i.test(name.trim());
 }
 
-/**
- * Download a GGML flat-file model from the ggerganov/whisper.cpp HuggingFace repo
- * directly into `/models/` on the models volume inside the running container.
- *
- * Uses `curl` inside the container so no Python huggingface_hub dependency is needed.
- * Downloads to a `.tmp` suffix first; renames to the final name on success.
- * On failure, the partial `.tmp` file is deleted before re-throwing.
- */
-async function downloadGgmlModel(fileName: string): Promise<void> {
-  // Sanitize: accept only the basename to prevent path traversal
-  const sanitized = path.basename(fileName.trim());
-  if (!isGgmlFileName(sanitized)) {
-    throw new Error(`Invalid GGML file name: ${fileName}`);
-  }
-
-  const url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${sanitized}`;
-  const dest = `/models/${sanitized}`;
-  const tmp = `${dest}.tmp`;
-  const bin = await runtimeBin();
-
-  // Coarse events only: byte counting is not available through docker exec
-  // + curl, but the card still shows start/complete/fail (GH-207).
-  const eventId = `ggml-download-${sanitized}`;
-  emitBootstrapDownloadEvent({
-    action: 'start',
-    id: eventId,
-    type: 'model-preload',
-    label: `Downloading ${sanitized}...`,
-  });
-
-  try {
-    await execFileAsync(bin, ['exec', CONTAINER_NAME, 'curl', '-fsSL', '-o', tmp, url], {
-      maxBuffer: 1 * 1024 * 1024,
-      timeout: 1_800_000, // 30 minutes for large models
-    });
-    // Atomically rename temp file to final destination
-    await exec(bin, ['exec', CONTAINER_NAME, 'mv', tmp, dest]);
-    emitBootstrapDownloadEvent({
-      action: 'complete',
-      id: eventId,
-      type: 'model-preload',
-      label: `${sanitized} downloaded`,
-    });
-  } catch (err) {
-    // Best-effort cleanup of partial download — ignore cleanup errors
-    try {
-      await exec(bin, ['exec', CONTAINER_NAME, 'rm', '-f', tmp]);
-    } catch {
-      /* ignore */
-    }
-    emitBootstrapDownloadEvent({
-      action: 'fail',
-      id: eventId,
-      type: 'model-preload',
-      label: `Downloading ${sanitized}...`,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
-  }
-}
-
-/**
- * Check whether a GGML flat-file model exists in `/models/` on the models volume.
- */
-async function isGgmlModelDownloaded(fileName: string): Promise<boolean> {
-  const sanitized = path.basename(fileName.trim());
-  if (!isGgmlFileName(sanitized)) return false;
-  try {
-    await exec(await runtimeBin(), ['exec', CONTAINER_NAME, 'test', '-f', `/models/${sanitized}`]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Download a model's weights to the models volume inside the container
- * (without GPU-loading it).
- *
- * GGML flat-file models (ggml-*.bin / *.gguf) are downloaded via direct HTTP
- * from huggingface.co/ggerganov/whisper.cpp into `/models/`.
- *
- * All other models use `huggingface_hub.snapshot_download` into `/models/hub/`.
- * The download timeout is extended to 10 minutes for HuggingFace hub models.
- */
-async function downloadModelToCache(modelId: string): Promise<void> {
-  const trimmedModelId = modelId.trim();
-  if (!trimmedModelId) {
-    throw new Error('Model ID is required');
-  }
-
-  // Route GGML flat-file models to the dedicated download path
-  if (isGgmlFileName(trimmedModelId)) {
-    return downloadGgmlModel(trimmedModelId);
-  }
-
-  // Pass the model ID as an argv value instead of interpolating it into code.
-  // Use the runtime venv's Python, which has huggingface_hub installed.
-  // Resolve the ModelScope→HF alias so the download uses the HF repo id
-  // (the bare "iic/…" id 404s on HuggingFace).
-  const hfRepoId = resolveHfRepoId(trimmedModelId);
-  const pyCmd =
-    "import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1], cache_dir='/models/hub')";
-  const bin = await runtimeBin();
-  try {
-    await execFileAsync(
-      bin,
-      ['exec', CONTAINER_NAME, '/runtime/.venv/bin/python3', '-c', pyCmd, hfRepoId],
-      {
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: 600_000, // 10 minutes for large models
-      },
-    );
-  } catch (err: any) {
-    const stderr: string = err?.stderr ?? '';
-    if (stderr.includes('ModuleNotFoundError') || stderr.includes('No module named')) {
-      throw new Error(
-        'Server is still starting up (installing dependencies). ' +
-          'Please wait for the server to finish initializing before downloading models.',
-      );
-    }
-    if (stderr.includes('GatedRepoError') || stderr.includes('403 Client Error')) {
-      throw new Error(
-        `Access denied for "${trimmedModelId}". This is a gated model — ` +
-          `visit https://huggingface.co/${trimmedModelId} to accept the license, ` +
-          `then add your HuggingFace token in Settings.`,
-      );
-    }
-    throw err;
-  }
-}
-
 // ─── Remote Tag Listing ─────────────────────────────────────────────────────
 
 /**
@@ -4454,8 +4322,6 @@ export const dockerManager = {
   checkModelsCached,
   checkModelsCachedOffline,
   removeModelCache,
-  downloadModelToCache,
-  isGgmlModelDownloaded,
   isGgmlModelDownloadedOnHost,
   downloadGgmlModelToHost,
   ensureWhisperDirectories,

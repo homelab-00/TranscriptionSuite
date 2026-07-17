@@ -46,7 +46,7 @@ import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useServerStatus } from '../../src/hooks/useServerStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { useModelCache } from '../../src/hooks/useModelCache';
-import { useModelDownloads } from '../../src/hooks/useModelDownloads';
+import { useModelRemoval } from '../../src/hooks/useModelRemoval';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { formatDateDMY, compareVersionTags } from '../../src/services/versionUtils';
@@ -715,11 +715,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     void refreshHostCacheStatus(GGML_MODELS.map((m) => m.id));
   }, [isVulkanWsl2, refreshHostCacheStatus]);
 
-  const { downloadingIds, downloadModel, removeModel } = useModelDownloads({
+  const { removeModel } = useModelRemoval({
     isMetal,
     runtimeProfile,
     refreshCacheStatus,
-    refreshHostCacheStatus,
   });
 
   // vulkan-wsl2: GGML weights live on the Windows host filesystem, outside the
@@ -2536,8 +2535,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   liveModelWhisperOnlyCompatible={liveModelWhisperOnlyCompatible}
                   liveModeModelConstraintMessage={liveModeModelConstraintMessage}
                   canManage={isMetal || isRunning}
-                  downloadingIds={downloadingIds}
-                  onDownloadModel={downloadModel}
                   onRemoveModel={removeModel}
                 />
               </div>

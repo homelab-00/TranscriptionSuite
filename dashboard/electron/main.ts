@@ -1317,10 +1317,6 @@ ipcMain.handle('docker:removeModelCache', async (_event, modelId: string) => {
   return dockerManager.removeModelCache(modelId);
 });
 
-ipcMain.handle('docker:downloadModelToCache', async (_event, modelId: string) => {
-  return dockerManager.downloadModelToCache(modelId);
-});
-
 ipcMain.handle('docker:isGgmlModelDownloadedOnHost', async (_event, fileName: string) => {
   return dockerManager.isGgmlModelDownloadedOnHost(fileName);
 });
@@ -2602,12 +2598,6 @@ ipcMain.handle('mlx:getLogs', (_event, tail?: number) => {
 });
 
 // Native model-cache ops for the Metal/MLX profile (no Docker container).
-ipcMain.handle('mlx:downloadModelToCache', async (_event, modelId: string) => {
-  // GH #124 — forward the stored HF token so gated models download while stopped.
-  const hfToken = (store.get('server.hfToken') as string) || undefined;
-  await mlxServerManager.downloadModelToCache(modelId, hfToken);
-});
-
 ipcMain.handle('mlx:checkModelsCached', async (_event, modelIds: string[]) => {
   return mlxServerManager.checkModelsCached(modelIds);
 });

@@ -285,71 +285,12 @@ export class MLXServerManager {
   // ──────────────────────────────────────────────────────────────────────────
   // Native model-cache operations (Docker-free, for the Metal/MLX profile)
   //
-  // These mirror dockerManager's downloadModelToCache/checkModelsCached/
-  // removeModelCache but run directly on the host: the HuggingFace cache lives
-  // at <HF_HOME>/hub on the local filesystem, and the download is a
-  // `snapshot_download` via the MLX venv's Python. None of these require the
-  // Metal server process to be running.
+  // These mirror dockerManager's checkModelsCached/removeModelCache but run
+  // directly on the host: the HuggingFace cache lives at <HF_HOME>/hub on the
+  // local filesystem. Neither requires the Metal server process to be running.
+  // There is no download counterpart — missing weights are fetched by the MLX
+  // server itself at start (snapshot_download / from_pretrained on load).
   // ──────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Download a model's weights into the local HuggingFace cache
-   * (<HF_HOME>/hub) without GPU-loading it. Runs `snapshot_download` via the
-   * MLX venv's Python as an independent subprocess, so it works whether or not
-   * the Metal server is running.
-   */
-  async downloadModelToCache(modelId: string, hfToken?: string): Promise<void> {
-    const trimmed = this._assertSafeModelId(modelId);
-
-    const python = this._resolveVenvPython();
-    if (!python) {
-      throw new Error(
-        'The Metal Python environment was not found, so models cannot be ' +
-          `downloaded. Reinstall from "${this._metalDmgName()}".`,
-      );
-    }
-
-    const hfHome = this._resolveHfHome();
-    const hubDir = path.join(hfHome, 'hub');
-    // Pass the model ID and cache dir as argv values — never interpolated into
-    // the Python source — to avoid any code-injection surface.
-    const pyCmd =
-      'import sys; from huggingface_hub import snapshot_download; ' +
-      'snapshot_download(sys.argv[1], cache_dir=sys.argv[2])';
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      HF_HOME: hfHome,
-    };
-    // GH #124 — forward the user's HuggingFace token so GATED models (e.g. the
-    // pyannote diarization repo) can be downloaded while the server is stopped.
-    // The token is otherwise injected only at server start, so this standalone
-    // subprocess never saw it and the "add your token in Settings" hint below was
-    // a dead end for gated repos.
-    if (hfToken) env.HF_TOKEN = hfToken;
-    try {
-      await execFileAsync(python, ['-c', pyCmd, trimmed, hubDir], {
-        maxBuffer: 10 * 1024 * 1024,
-        timeout: 600_000, // 10 minutes for large models
-        env,
-      });
-    } catch (err: unknown) {
-      const stderr: string = (err as { stderr?: string })?.stderr ?? '';
-      if (stderr.includes('ModuleNotFoundError') || stderr.includes('No module named')) {
-        throw new Error(
-          'The Metal Python environment is incomplete (huggingface_hub was not ' +
-            `found). The app bundle may be damaged — reinstall from "${this._metalDmgName()}".`,
-        );
-      }
-      if (stderr.includes('GatedRepoError') || stderr.includes('403 Client Error')) {
-        throw new Error(
-          `Access denied for "${trimmed}". This is a gated model — ` +
-            `visit https://huggingface.co/${trimmed} to accept the license, ` +
-            `then add your HuggingFace token in Settings.`,
-        );
-      }
-      throw err;
-    }
-  }
 
   /**
    * Check which HuggingFace repos already exist in the local cache.
@@ -408,20 +349,6 @@ export class MLXServerManager {
   // ──────────────────────────────────────────────────────────────────────────
   // Private helpers
   // ──────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Locate the MLX venv's Python interpreter (python3 preferred). Derived from
-   * the same venv that hosts uvicorn, so huggingface_hub is guaranteed present.
-   * Returns null when no venv is found (e.g. the dashboard-only "thin" build).
-   */
-  private _resolveVenvPython(): string | null {
-    const uvicornPath = this._uvicornCandidates().find((c) => fs.existsSync(c));
-    if (!uvicornPath) return null;
-    const binDir = path.dirname(uvicornPath);
-    return (
-      (['python3', 'python'] as const).map((n) => path.join(binDir, n)).find(fs.existsSync) ?? null
-    );
-  }
 
   /**
    * Validate a model ID before it influences a host filesystem path or a
