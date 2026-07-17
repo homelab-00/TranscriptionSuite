@@ -674,4 +674,106 @@ describe('[P1] useLiveMode', () => {
       );
     });
   });
+
+  // ── GH-237: WS reconnect must not resurrect a dead live session ───────
+  //
+  // Same root cause as the longform hook: the server cannot resume a dropped
+  // session, so re-sending `start` on an auto-reconnect used to silently
+  // resurrect the session in the background (reconnect → start → LISTENING
+  // flipped the UI back to active after it had already gone idle).
+
+  describe('GH-237: reconnect start-gate + fail-loudly', () => {
+    /** Count the `start` messages sent over a given socket instance. */
+    const startSends = (s: typeof lastSocket = lastSocket): number =>
+      s.sendJSON.mock.calls.filter((c) => (c[0] as { type?: string })?.type === 'start').length;
+
+    it('does not re-send start when auth_ok fires again after LISTENING', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+      expect(startSends()).toBe(1);
+
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+
+      expect(startSends()).toBe(1);
+    });
+
+    it('re-sends start on a reconnect before the engine acknowledged (still starting)', () => {
+      const { result } = renderHook(() => useLiveMode());
+      act(() => {
+        result.current.start();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      expect(startSends()).toBe(1);
+
+      // Dropped during the model swap, before any `state` arrived.
+      act(() => {
+        lastSocketCbs.onClose!(1001, 'drop while starting');
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+
+      expect(startSends()).toBe(2);
+    });
+
+    it('fails loudly when the socket closes unexpectedly while listening', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+      lastSocket.disconnect.mockClear();
+      lastCapture.stop.mockClear();
+
+      act(() => {
+        lastSocketCbs.onClose!(1001, 'server going away');
+      });
+
+      expect(result.current.status).toBe('error');
+      expect(result.current.error).toMatch(/connection.*lost/i);
+      expect(lastCapture.stop).toHaveBeenCalled();
+      expect(lastSocket.disconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it('a server STOPPED followed by an unintentional close stays idle and does not resurrect', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+      expect(startSends()).toBe(1);
+
+      // Server stops the engine (grace-period expiry / client link stop).
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'state', data: { state: 'STOPPED' } });
+      });
+      expect(result.current.status).toBe('idle');
+
+      // The socket then drops and auto-reconnects.
+      act(() => {
+        lastSocketCbs.onClose!(1001, 'closed after stop');
+      });
+      // Nothing was capturing, so this is not a loud failure.
+      expect(result.current.status).toBe('idle');
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+
+      // Gate still closed — no background resurrection.
+      expect(startSends()).toBe(1);
+      expect(result.current.status).toBe('idle');
+    });
+
+    it('reopens the gate on a fresh start()', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+      act(() => {
+        result.current.stop();
+      });
+
+      await driveToListening(result);
+
+      // lastSocket is the second socket instance — it sent its own start.
+      expect(startSends()).toBe(1);
+      expect(result.current.status).toBe('listening');
+    });
+  });
 });

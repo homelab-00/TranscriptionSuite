@@ -127,6 +127,16 @@ export function useTranscription(): TranscriptionState {
   const [jobId, setJobId] = useState<string | null>(null);
   const jobIdRef = useRef<string | null>(null);
   const statusRef = useRef<TranscriptionStatus>('idle');
+  // GH-237: gate the `start` re-send. The socket auto-reconnects unintentional
+  // closes and re-runs the auth handshake, but the server assigns a NEW
+  // session_id + job_id per connection and cannot resume — so re-sending
+  // `start` after a session already exists spawns a zombie job for a fresh
+  // slice of audio. Flipped true on `session_started`; reopened only by a
+  // user-initiated start()/reset(). Deliberately NOT reset on stop(): the
+  // processing phase still needs the gate closed so a drop-during-processing
+  // reconnect can't spawn a phantom job while the poll-for-result fallback
+  // recovers the real one.
+  const sessionEstablishedRef = useRef(false);
   // Ref-based cancel flag for the disconnect poll loop — accessible from the
   // useEffect cleanup on unmount (a plain `let cancelled` in the onClose closure
   // cannot be reached from the cleanup function).
@@ -250,6 +260,10 @@ export function useTranscription(): TranscriptionState {
     (msg: ServerMessage) => {
       switch (msg.type) {
         case 'auth_ok':
+          // GH-237: only send `start` on the FIRST connect of a user session.
+          // Once a session is established, an auth_ok is an auto-reconnect —
+          // re-sending `start` would spawn a zombie job (see sessionEstablishedRef).
+          if (sessionEstablishedRef.current) break;
           // Auth succeeded — now send start
           socketRef.current?.sendJSON({
             type: 'start',
@@ -266,6 +280,9 @@ export function useTranscription(): TranscriptionState {
           break;
 
         case 'session_started':
+          // GH-237: a real job now exists — close the start-gate so any later
+          // auto-reconnect cannot spawn a second one.
+          sessionEstablishedRef.current = true;
           if (msg.data?.job_id) {
             const id = msg.data.job_id as string;
             jobIdRef.current = id;
@@ -463,6 +480,8 @@ export function useTranscription(): TranscriptionState {
       setMuted(false);
       jobIdRef.current = null;
       setJobId(null);
+      // GH-237: a user-initiated session reopens the start-gate.
+      sessionEstablishedRef.current = false;
       stopPreview();
       // The old socket is being replaced — any in-flight preview response is
       // lost with it, so the wire flag must not carry into the new session.
@@ -492,6 +511,19 @@ export function useTranscription(): TranscriptionState {
           // guard would block every future refresh — even across a reconnect.
           stopPreview();
           previewLoadingRef.current = false;
+
+          // GH-237: a drop WHILE recording is an unrecoverable interruption.
+          // The server cannot resume a dropped session, and the start-gate now
+          // stops the auto-reconnect from spawning a fresh job — which would
+          // leave the UI frozen in a false 'recording' state. Fail loudly
+          // instead of silently truncating: surface the interruption and halt
+          // the reconnect so no zombie session is created. (Data-loss invariant.)
+          if (statusRef.current === 'recording') {
+            setError('Connection to the server was lost. The recording was interrupted.');
+            setStatusTracked('error');
+            socketRef.current?.disconnect();
+            return;
+          }
 
           // If we were processing when the socket closed, poll for the result
           const currentJobId = jobIdRef.current;
@@ -584,6 +616,8 @@ export function useTranscription(): TranscriptionState {
     setProcessingProgress(null);
     jobIdRef.current = null;
     setJobId(null);
+    // GH-237: back to idle — reopen the start-gate for the next session.
+    sessionEstablishedRef.current = false;
     stopPreview();
     // reset() disconnects the socket — the in-flight response (if any) is lost.
     previewLoadingRef.current = false;
