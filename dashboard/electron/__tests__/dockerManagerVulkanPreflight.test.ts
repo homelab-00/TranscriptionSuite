@@ -51,7 +51,7 @@ describe('[GH-101] checkVulkanSupport', () => {
     const err = checkVulkanSupport({ platform: 'linux', exists: existsFor(nothing) });
     expect(err).toMatch(/\/dev\/dri was not found/);
     expect(err).toMatch(/WSL2 or systems without AMD\/Intel GPU drivers/);
-    expect(err).toMatch(/Switch the Runtime Profile to "CPU"/);
+    expect(err).toMatch(/Switch the Runtime Profile to "CPU Only"/);
   });
 
   it('Linux + DRI directory but no renderD128: returns DRI-missing message', () => {
@@ -69,7 +69,7 @@ describe('[GH-101] checkVulkanSupport', () => {
     expect(err).toMatch(/Vulkan runtime is only supported on Linux/);
     expect(err).toMatch(/Docker Desktop on Windows\/macOS/);
     expect(err).toMatch(/without \/dev\/dri GPU passthrough/);
-    expect(err).toMatch(/CPU.*GPU \(CUDA\)/);
+    expect(err).toMatch(/"CPU Only".*"CUDA"/);
   });
 
   it('macOS: returns non-Linux message regardless of DRI predicate', () => {

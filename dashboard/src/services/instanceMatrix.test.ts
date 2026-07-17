@@ -146,7 +146,9 @@ describe('instanceMatrix: modelsForFamilyChoice consistency with MODEL_REGISTRY'
 });
 
 describe('instanceMatrix: liveTilesFor (full cross-product)', () => {
-  const LIVE_CAPABLE_MAINS: FamilyChoiceId[] = ['whisper', 'whispercpp'];
+  // Same-as-main is whisper-only: a whisper.cpp main must pick its GGML model
+  // explicitly via the Whisper.cpp tile.
+  const SAME_AS_MAIN_CAPABLE: FamilyChoiceId[] = ['whisper'];
   for (const runtime of RUNTIMES) {
     for (const mainId of FAMILY_CHOICE_IDS) {
       if (!EXPECTED_FAMILY_MATRIX[mainId][runtime]) continue; // impossible combo
@@ -154,7 +156,7 @@ describe('instanceMatrix: liveTilesFor (full cross-product)', () => {
       it(`${runtime} + main=${mainId}`, () => {
         const tiles = liveTilesFor(runtime, mainModel);
         const byId = new Map(tiles.map((t) => [t.id, t]));
-        expect(byId.get('same-as-main')!.enabled).toBe(LIVE_CAPABLE_MAINS.includes(mainId));
+        expect(byId.get('same-as-main')!.enabled).toBe(SAME_AS_MAIN_CAPABLE.includes(mainId));
         expect(byId.get('disabled')!.enabled).toBe(true);
         // faster-whisper live decoding works everywhere (CPU fallback on
         // vulkan/metal — server/backend/pyproject.toml mlx extra ships it).
@@ -174,6 +176,13 @@ describe('instanceMatrix: liveTilesFor (full cross-product)', () => {
     const same = tiles.find((t) => t.id === 'same-as-main')!;
     expect(same.enabled).toBe(false);
     expect(same.reason).toBeTruthy();
+  });
+
+  it('disables same-as-main for a whisper.cpp main even on Vulkan (whisper-only tile)', () => {
+    const tiles = liveTilesFor('vulkan', REPRESENTATIVE_MODEL.whispercpp);
+    const same = tiles.find((t) => t.id === 'same-as-main')!;
+    expect(same.enabled).toBe(false);
+    expect(same.reason).toMatch(/whisper main/i);
   });
 });
 

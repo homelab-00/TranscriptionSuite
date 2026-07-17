@@ -29,7 +29,7 @@ export interface GpuHealthCardProps {
   /** When true, the Run Full Diagnostic button is disabled and shows a "Running…" label. */
   running?: boolean;
   /**
-   * True when the GPU (CUDA) runtime is selected but the *running container* is
+   * True when the CUDA runtime is selected but the *running container* is
    * actually transcribing on CPU (host preflight can be green while the
    * container was started without GPU passthrough). Forces a warning state so
    * a silent CPU fallback cannot masquerade as "CUDA operational".
@@ -59,7 +59,7 @@ const STATE_LABEL: Record<CardState, string> = {
 // Distinct, actionable message for the runtime-mismatch case: host CUDA is fine
 // but the running container is on CPU (e.g. started under the wrong overlay).
 const CPU_FALLBACK_LABEL =
-  'GPU (CUDA) is selected, but the running server is on CPU — stop and restart the server to apply the GPU runtime.';
+  'The CUDA runtime is selected, but the running server is on CPU — stop and restart the server to apply the GPU runtime.';
 
 const STATE_CONTAINER: Record<CardState, string> = {
   green: 'border-green-500/20 bg-green-500/10',

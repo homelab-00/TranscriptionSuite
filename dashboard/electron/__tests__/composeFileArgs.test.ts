@@ -209,11 +209,9 @@ describe('composeFileEnvValue (COMPOSE_FILE for bare compose stop/down)', () => 
     const value = composeFileEnvValue('vulkan', 'docker', null);
 
     expect(value).toBe(
-      [
-        'docker-compose.yml',
-        'docker-compose.linux-host.yml',
-        'docker-compose.vulkan.yml',
-      ].join(path.delimiter),
+      ['docker-compose.yml', 'docker-compose.linux-host.yml', 'docker-compose.vulkan.yml'].join(
+        path.delimiter,
+      ),
     );
     // The sidecar overlay MUST be present — that is what makes bare
     // `docker compose stop` also stop whisper-server.

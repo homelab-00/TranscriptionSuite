@@ -46,7 +46,7 @@ import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useServerStatus } from '../../src/hooks/useServerStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { useModelCache } from '../../src/hooks/useModelCache';
-import { useModelDownloads } from '../../src/hooks/useModelDownloads';
+import { useModelRemoval } from '../../src/hooks/useModelRemoval';
 import { apiClient } from '../../src/api/client';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { formatDateDMY, compareVersionTags } from '../../src/services/versionUtils';
@@ -211,8 +211,10 @@ function mapLiveModelToSelection(modelName: string, mainModelName: string): stri
   }
 
   const normalizedLiveModel = normalizeLiveModelToWhisper(modelName);
+  // Same-as-main requires a Whisper (faster-whisper) main; a whisper.cpp main
+  // with live==main maps to the explicit GGML preset below instead.
   if (
-    isLiveCompatibleModel(mainModelName) &&
+    isWhisperModel(mainModelName) &&
     normalizeModelName(normalizedLiveModel) === normalizeModelName(mainModelName)
   ) {
     return LIVE_MODEL_SAME_AS_MAIN_OPTION;
@@ -715,11 +717,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     void refreshHostCacheStatus(GGML_MODELS.map((m) => m.id));
   }, [isVulkanWsl2, refreshHostCacheStatus]);
 
-  const { downloadingIds, downloadModel, removeModel } = useModelDownloads({
+  const { removeModel } = useModelRemoval({
     isMetal,
     runtimeProfile,
     refreshCacheStatus,
-    refreshHostCacheStatus,
   });
 
   // vulkan-wsl2: GGML weights live on the Windows host filesystem, outside the
@@ -1032,16 +1033,26 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   ]);
 
   // Hard-reset any non-Live-compatible model selection to the default whisper model.
-  // Live Mode accepts faster-whisper and whisper.cpp (GGML) backends.
+  // Live Mode accepts faster-whisper and whisper.cpp (GGML) backends, but the
+  // Same-as-main tile additionally requires a faster-whisper main: with a
+  // whisper.cpp main, Same-as-main is demoted to an explicit GGML pick of the
+  // same model (or the whisper default if that GGML has no live role).
   useEffect(() => {
+    if (!localSelectionsHydrated || activeLiveModel === DISABLED_MODEL_SENTINEL) return;
     if (
-      !localSelectionsHydrated ||
-      activeLiveModel === DISABLED_MODEL_SENTINEL ||
-      isLiveCompatibleModel(activeLiveModel)
-    )
+      liveModelSelection === LIVE_MODEL_SAME_AS_MAIN_OPTION &&
+      isWhisperCppModel(activeLiveModel)
+    ) {
+      setLiveModelSelection(
+        LIVE_MODEL_PRESETS.includes(activeLiveModel)
+          ? activeLiveModel
+          : FALLBACK_LIVE_WHISPER_MODEL,
+      );
       return;
+    }
+    if (isLiveCompatibleModel(activeLiveModel)) return;
     setLiveModelSelection(FALLBACK_LIVE_WHISPER_MODEL);
-  }, [activeLiveModel, localSelectionsHydrated]);
+  }, [activeLiveModel, liveModelSelection, localSelectionsHydrated]);
 
   // Metal mode: auto-switch a non-MLX main model to the MLX default.
   useEffect(() => {
@@ -1331,7 +1342,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     }
   }, [gpuError, gpuErrorRecoveryHint]);
 
-  // CPU-fallback mismatch: GPU (CUDA) is the selected runtime, the server is up
+  // CPU-fallback mismatch: CUDA is the selected runtime, the server is up
   // and reachable, but the running container reports CUDA is NOT available
   // inside it (started without GPU passthrough → silently transcribing on CPU).
   // `=== false` (not falsy) so older servers / pre-init responses that omit the
@@ -1515,6 +1526,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Setup checks — gated by the currently selected runtime profile
   const rtName = docker.runtimeKind ?? 'Docker';
   const gpuSatisfied = gpuInfo?.gpu ?? false;
+  // NVIDIA-detected hosts should run the CUDA stack: the Vulkan runtimes are
+  // disabled so a slower backend cannot be picked by accident. Fails open
+  // while detection is pending (gpuInfo === null) and in jsdom test mounts.
+  const nvidiaDetected = gpuInfo?.gpu ?? false;
   // Hardware check (arm64 mac) passes immediately via Electron; server report only
   // refines whether mlx_whisper is actually installed.
   const metalSatisfied = isAppleSilicon && (mlxFeature === undefined || metalSupported);
@@ -1814,7 +1829,164 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             onClose={handleCloseDiagnostic}
           />
 
-          {/* 1. Docker Image or Inference Server (metal) Card */}
+          {/* 1. Runtime Settings Card — the Runtime selector moved out of the
+              Instance Settings card so hardware selection leads the wizard:
+              the detected runtime drives which Docker image variants below
+              are available for download. */}
+          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+            <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
+              <Zap size={14} />
+            </div>
+            <GlassCard title="1. Runtime Settings">
+              {/* Runtime selector — tiles gated per host platform. hostPlatform
+                  stays 'unknown' in jsdom/test mounts, which keeps every tile
+                  enabled there (gating only engages on a known platform). */}
+              <div>
+                <SelectorGroup
+                  icon={<Zap size={16} className="text-accent-cyan" />}
+                  title="Runtime"
+                  hint="Which hardware runs the inference server"
+                  action={
+                    /* GH-101 follow-up: re-run GPU detection without restarting
+                       Electron. Hidden until initial detection completes
+                       (gpuInfo !== null) so it never appears in the loading flicker. */
+                    gpuInfo !== null ? (
+                      <button
+                        type="button"
+                        onClick={handleRedetectGpu}
+                        disabled={gpuRedetecting || isRunning}
+                        title="Re-run GPU detection (use after toggling Docker Desktop's WSL2/Hyper-V backend)"
+                        className={`text-xs whitespace-nowrap underline ${
+                          gpuRedetecting || isRunning
+                            ? 'cursor-not-allowed text-slate-600'
+                            : 'cursor-pointer text-slate-500 hover:text-slate-200'
+                        }`}
+                      >
+                        {gpuRedetecting ? 'Detecting...' : 'Re-detect'}
+                      </button>
+                    ) : undefined
+                  }
+                >
+                  <SelectorTile
+                    icon={<NvidiaIcon size={16} />}
+                    label="CUDA"
+                    sublabel="NVIDIA"
+                    accent="green"
+                    selected={runtimeProfile === 'gpu'}
+                    disabled={isRunning || hostPlatform === 'darwin'}
+                    badge={hostPlatform === 'darwin' ? 'Requires NVIDIA' : undefined}
+                    onSelect={() => handleRuntimeProfileChange('gpu')}
+                  />
+                  {/* Vulkan-WSL2 (GH-101 follow-up) — always rendered so the
+                      full runtime matrix stays readable; selectable only on
+                      Windows hosts where the main-process probe confirmed
+                      Docker Desktop runs on the WSL2 backend AND a tiny
+                      container could see /dev/dxg. */}
+                  <SelectorTile
+                    icon={
+                      <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                        <AmdIcon size={30} />
+                        <IntelIcon size={30} />
+                      </span>
+                    }
+                    label="Vulkan Windows"
+                    sublabel="AMD / Intel · WSL2"
+                    accent="red"
+                    selected={runtimeProfile === 'vulkan-wsl2'}
+                    disabled={
+                      isRunning ||
+                      nvidiaDetected ||
+                      (hostPlatform !== 'unknown' && hostPlatform !== 'win32') ||
+                      (hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected)
+                    }
+                    badge={
+                      hostPlatform !== 'unknown' && hostPlatform !== 'win32'
+                        ? 'Windows only'
+                        : nvidiaDetected
+                          ? 'NVIDIA detected'
+                          : hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected
+                            ? 'Requires WSL2 GPU'
+                            : undefined
+                    }
+                    hint="Experimental"
+                    onSelect={() => handleRuntimeProfileChange('vulkan-wsl2')}
+                  />
+                  <SelectorTile
+                    icon={
+                      <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
+                        <AmdIcon size={30} />
+                        <IntelIcon size={30} />
+                      </span>
+                    }
+                    label="Vulkan Linux"
+                    sublabel="AMD / Intel"
+                    accent="red"
+                    selected={runtimeProfile === 'vulkan'}
+                    disabled={
+                      isRunning ||
+                      nvidiaDetected ||
+                      hostPlatform === 'win32' ||
+                      hostPlatform === 'darwin'
+                    }
+                    badge={
+                      hostPlatform === 'win32' || hostPlatform === 'darwin'
+                        ? 'Linux only'
+                        : nvidiaDetected
+                          ? 'NVIDIA detected'
+                          : undefined
+                    }
+                    onSelect={() => handleRuntimeProfileChange('vulkan')}
+                  />
+                  <SelectorTile
+                    icon={<AppleIcon size={16} />}
+                    label="Metal"
+                    sublabel="Apple Silicon"
+                    accent="purple"
+                    selected={runtimeProfile === 'metal'}
+                    disabled={
+                      isRunning ||
+                      nvidiaDetected ||
+                      (hostPlatform !== 'unknown' && hostPlatform !== 'darwin')
+                    }
+                    badge={
+                      hostPlatform !== 'unknown' && hostPlatform !== 'darwin'
+                        ? 'Requires Apple Silicon'
+                        : nvidiaDetected
+                          ? 'NVIDIA detected'
+                          : undefined
+                    }
+                    onSelect={() => handleRuntimeProfileChange('metal')}
+                  />
+                  <SelectorTile
+                    icon={<Cpu size={16} />}
+                    label="CPU Only"
+                    sublabel="Universal"
+                    accent="orange"
+                    selected={runtimeProfile === 'cpu'}
+                    disabled={isRunning}
+                    onSelect={() => handleRuntimeProfileChange('cpu')}
+                  />
+                </SelectorGroup>
+                {runtimeProfile === 'vulkan' && !isRunning && (
+                  <p className="mt-2 text-xs text-slate-500 italic">
+                    AMD/Intel GPU via whisper.cpp — no diarization; live mode via GGML models
+                  </p>
+                )}
+                {runtimeProfile === 'vulkan-wsl2' && !isRunning && (
+                  <p className="text-accent-orange mt-2 text-xs italic">
+                    Experimental: AMD/Intel GPU via WSL2 + Mesa dzn — see README §2.5.2
+                  </p>
+                )}
+                {runtimeProfile === 'cpu' && !isRunning && (
+                  <p className="mt-2 text-xs text-slate-500 italic">
+                    Slower transcription, no NVIDIA GPU required
+                  </p>
+                )}
+              </div>
+            </GlassCard>
+          </div>
+
+          {/* 2. Docker Image or Inference Server (metal) Card */}
           {runtimeProfile === 'metal' ? (
             <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
               <div
@@ -1823,7 +1995,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <Zap size={14} />
               </div>
               <GlassCard
-                title="1. Inference Server"
+                title="2. Inference Server"
                 className={`transition-all duration-500 ease-in-out ${mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
               >
                 <div className="flex flex-wrap items-center gap-5">
@@ -1908,7 +2080,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <Download size={14} />
               </div>
               <GlassCard
-                title="1. Docker Image"
+                title="2. Docker Image"
                 className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
               >
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
@@ -2038,7 +2210,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       [
                         {
                           variant: 'cuda',
-                          label: 'CUDA',
+                          label: 'CUDA / CPU Only',
                           sublabel: 'Standard image',
                           accent: 'green',
                           icon: <NvidiaIcon size={16} />,
@@ -2149,7 +2321,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             </div>
           )}
 
-          {/* 2. Instance Settings Card */}
+          {/* 3. Instance Settings Card */}
           <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
             <div
               className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning || mlxStatus === 'running' ? `bg-accent-cyan text-slate-900 ${isRunningAndHealthy || mlxStatus === 'running' ? 'shadow-[0_0_15px_rgba(34,211,238,0.5)]' : ''}` : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
@@ -2157,7 +2329,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               <SlidersHorizontal size={16} />
             </div>
             <GlassCard
-              title="2. Instance Settings"
+              title="3. Instance Settings"
               className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy || mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
             >
               <div className="space-y-6">
@@ -2350,139 +2522,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     </div>
                   )}
                 </div>
-                {/* Runtime selector — tiles gated per host platform. hostPlatform
-                    stays 'unknown' in jsdom/test mounts, which keeps every tile
-                    enabled there (gating only engages on a known platform). */}
-                <div className="border-b border-white/5 pb-4">
-                  <SelectorGroup
-                    icon={<Zap size={16} className="text-accent-cyan" />}
-                    title="Runtime"
-                    hint="Which hardware runs the inference server"
-                    action={
-                      /* GH-101 follow-up: re-run GPU detection without restarting
-                         Electron. Hidden until initial detection completes
-                         (gpuInfo !== null) so it never appears in the loading flicker. */
-                      gpuInfo !== null ? (
-                        <button
-                          type="button"
-                          onClick={handleRedetectGpu}
-                          disabled={gpuRedetecting || isRunning}
-                          title="Re-run GPU detection (use after toggling Docker Desktop's WSL2/Hyper-V backend)"
-                          className={`text-xs whitespace-nowrap underline ${
-                            gpuRedetecting || isRunning
-                              ? 'cursor-not-allowed text-slate-600'
-                              : 'cursor-pointer text-slate-500 hover:text-slate-200'
-                          }`}
-                        >
-                          {gpuRedetecting ? 'Detecting...' : 'Re-detect'}
-                        </button>
-                      ) : undefined
-                    }
-                  >
-                    <SelectorTile
-                      icon={<NvidiaIcon size={16} />}
-                      label="GPU (CUDA)"
-                      sublabel="NVIDIA"
-                      accent="green"
-                      selected={runtimeProfile === 'gpu'}
-                      disabled={isRunning || hostPlatform === 'darwin'}
-                      badge={hostPlatform === 'darwin' ? 'Requires NVIDIA' : undefined}
-                      onSelect={() => handleRuntimeProfileChange('gpu')}
-                    />
-                    {/* Vulkan-WSL2 (GH-101 follow-up) — always rendered so the
-                        full runtime matrix stays readable; selectable only on
-                        Windows hosts where the main-process probe confirmed
-                        Docker Desktop runs on the WSL2 backend AND a tiny
-                        container could see /dev/dxg. */}
-                    <SelectorTile
-                      icon={
-                        <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
-                          <AmdIcon size={30} />
-                          <IntelIcon size={30} />
-                        </span>
-                      }
-                      label="GPU (Vulkan Windows)"
-                      sublabel="AMD / Intel · WSL2"
-                      accent="red"
-                      selected={runtimeProfile === 'vulkan-wsl2'}
-                      disabled={
-                        isRunning ||
-                        (hostPlatform !== 'unknown' && hostPlatform !== 'win32') ||
-                        (hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected)
-                      }
-                      badge={
-                        hostPlatform !== 'unknown' && hostPlatform !== 'win32'
-                          ? 'Windows only'
-                          : hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected
-                            ? 'Requires WSL2 GPU'
-                            : undefined
-                      }
-                      hint="Experimental"
-                      onSelect={() => handleRuntimeProfileChange('vulkan-wsl2')}
-                    />
-                    <SelectorTile
-                      icon={
-                        <span className="flex h-5 w-10 flex-col items-center justify-center -space-y-1">
-                          <AmdIcon size={30} />
-                          <IntelIcon size={30} />
-                        </span>
-                      }
-                      label="GPU (Vulkan Linux)"
-                      sublabel="AMD / Intel"
-                      accent="red"
-                      selected={runtimeProfile === 'vulkan'}
-                      disabled={isRunning || hostPlatform === 'win32' || hostPlatform === 'darwin'}
-                      badge={
-                        hostPlatform === 'win32' || hostPlatform === 'darwin'
-                          ? 'Linux only'
-                          : undefined
-                      }
-                      hint="Experimental"
-                      onSelect={() => handleRuntimeProfileChange('vulkan')}
-                    />
-                    <SelectorTile
-                      icon={<AppleIcon size={16} />}
-                      label="GPU (Metal)"
-                      sublabel="Apple Silicon"
-                      accent="purple"
-                      selected={runtimeProfile === 'metal'}
-                      disabled={
-                        isRunning || (hostPlatform !== 'unknown' && hostPlatform !== 'darwin')
-                      }
-                      badge={
-                        hostPlatform !== 'unknown' && hostPlatform !== 'darwin'
-                          ? 'Requires Apple Silicon'
-                          : undefined
-                      }
-                      onSelect={() => handleRuntimeProfileChange('metal')}
-                    />
-                    <SelectorTile
-                      icon={<Cpu size={16} />}
-                      label="CPU Only"
-                      sublabel="Universal"
-                      accent="orange"
-                      selected={runtimeProfile === 'cpu'}
-                      disabled={isRunning}
-                      onSelect={() => handleRuntimeProfileChange('cpu')}
-                    />
-                  </SelectorGroup>
-                  {runtimeProfile === 'vulkan' && !isRunning && (
-                    <p className="mt-2 text-xs text-slate-500 italic">
-                      AMD/Intel GPU via whisper.cpp — no diarization; live mode via GGML models
-                    </p>
-                  )}
-                  {runtimeProfile === 'vulkan-wsl2' && !isRunning && (
-                    <p className="text-accent-orange mt-2 text-xs italic">
-                      Experimental: AMD/Intel GPU via WSL2 + Mesa dzn — see README §2.5.2
-                    </p>
-                  )}
-                  {runtimeProfile === 'cpu' && !isRunning && (
-                    <p className="mt-2 text-xs text-slate-500 italic">
-                      Slower transcription, no NVIDIA GPU required
-                    </p>
-                  )}
-                </div>
-
                 {/* The Legacy GPU image toggle used to live here (GH-83) —
                     it is now the CUDA Legacy tile in the Docker Image card's
                     Image Variant selector, which reuses the same confirmation
@@ -2508,15 +2547,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   liveModelWhisperOnlyCompatible={liveModelWhisperOnlyCompatible}
                   liveModeModelConstraintMessage={liveModeModelConstraintMessage}
                   canManage={isMetal || isRunning}
-                  downloadingIds={downloadingIds}
-                  onDownloadModel={downloadModel}
                   onRemoveModel={removeModel}
                 />
               </div>
             </GlassCard>
           </div>
 
-          {/* 3. Remote Connection Card */}
+          {/* 4. Remote Connection Card */}
           <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
             <div
               className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunningAndHealthy && serverMode === 'remote' ? 'bg-accent-magenta text-slate-900 shadow-[0_0_15px_rgba(232,121,249,0.5)]' : 'bg-slate-800 text-slate-300'}`}
@@ -2524,18 +2561,18 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               <Globe size={14} />
             </div>
             <RemoteConnectionCard
-              title="3. Remote Connection"
+              title="4. Remote Connection"
               isRunningAndHealthy={isRunningAndHealthy}
             />
           </div>
 
-          {/* 4. Volumes Card */}
+          {/* 5. Volumes Card */}
           <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
             <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
               <HardDrive size={14} />
             </div>
             <GlassCard
-              title="4. Persistent Volumes"
+              title="5. Persistent Volumes"
               action={
                 !isMetal ? (
                   <Button
@@ -2655,12 +2692,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             </GlassCard>
           </div>
 
-          {/* 5. Clean Up */}
+          {/* 6. Clean Up */}
           <div className="relative shrink-0 border-l-2 border-white/10 pb-2 pl-8 last:border-0 last:pb-0">
             <div className="absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 bg-slate-800 text-slate-300">
               <AlertTriangle size={14} />
             </div>
-            <GlassCard title="5. Clean Up">
+            <GlassCard title="6. Clean Up">
               <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">

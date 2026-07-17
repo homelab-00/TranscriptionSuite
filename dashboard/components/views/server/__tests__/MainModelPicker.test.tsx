@@ -9,9 +9,7 @@ function setup(overrides: Partial<React.ComponentProps<typeof MainModelPicker>> 
     isRunning: false,
     canManage: true,
     modelCacheStatus: {},
-    downloadingIds: new Set<string>(),
     onMainModelSelectionChange: vi.fn(),
-    onDownload: vi.fn(),
     onRemove: vi.fn(),
     ...overrides,
   };
@@ -86,21 +84,29 @@ describe('MainModelPicker', () => {
     setup();
     expand();
 
-    // Parakeet is selected: badge in the summary and on its card, no Select button.
+    // Parakeet is selected: badge in the summary and a pressed card.
     expect(screen.getAllByText('Main').length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: /select parakeet/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /select canary/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /select parakeet/i })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: /select canary/i })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
   });
 
-  it('locks every Select button while the server is running', () => {
-    setup({ isRunning: true });
+  it('locks every card against selection while the server is running', () => {
+    const props = setup({ isRunning: true });
     expand();
 
-    const selectButtons = screen.getAllByRole('button', { name: /^select /i });
-    expect(selectButtons.length).toBeGreaterThan(0);
-    for (const button of selectButtons) {
-      expect(button).toBeDisabled();
+    const cards = screen.getAllByRole('button', { name: /^select /i });
+    expect(cards.length).toBeGreaterThan(0);
+    for (const card of cards) {
+      expect(card).toHaveAttribute('aria-disabled', 'true');
+      fireEvent.click(card);
     }
+    expect(props.onMainModelSelectionChange).not.toHaveBeenCalled();
   });
 
   it('reflects cached state per model', () => {
@@ -109,9 +115,10 @@ describe('MainModelPicker', () => {
     });
     expand();
 
-    // Canary is cached, so it offers Remove. Parakeet is not, so it offers Download.
+    // Canary is cached, so it offers Remove. Parakeet is not — and there is no
+    // Download action; missing models are fetched at server start.
     expect(screen.getByRole('button', { name: /remove/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /download/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument();
   });
 
   it('renders an empty list when no family is selected', () => {

@@ -13,9 +13,7 @@ interface ModelCardPickerProps {
   isRunning: boolean;
   canManage: boolean;
   modelCacheStatus: ModelCacheStatus;
-  downloadingIds: ReadonlySet<string>;
   onSelectionChange: (value: string) => void;
-  onDownload: (id: string) => void;
   onRemove: (id: string) => void;
 }
 
@@ -31,9 +29,7 @@ export function ModelCardPicker({
   isRunning,
   canManage,
   modelCacheStatus,
-  downloadingIds,
   onSelectionChange,
-  onDownload,
   onRemove,
 }: ModelCardPickerProps) {
   const [expanded, setExpanded] = useState(false);
@@ -41,11 +37,9 @@ export function ModelCardPicker({
   const selectedModel = models.find((model) => model.id === selection);
   const summaryName = selectedModel ? selectedModel.displayName : 'Select a model';
 
-  const summaryDotClass = downloadingIds.has(selection)
-    ? 'animate-pulse bg-blue-400 shadow-[0_0_6px_rgba(96,165,250,0.6)]'
-    : modelCacheStatus[selection]?.exists
-      ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]'
-      : 'bg-slate-500';
+  const summaryDotClass = modelCacheStatus[selection]?.exists
+    ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]'
+    : 'bg-slate-500';
 
   return (
     <div className="space-y-2">
@@ -84,14 +78,15 @@ export function ModelCardPicker({
               badgeLabel={badgeLabel}
               cached={Boolean(modelCacheStatus[model.id]?.exists)}
               cacheSize={modelCacheStatus[model.id]?.size}
-              downloading={downloadingIds.has(model.id)}
               canManage={canManage}
               disabled={isRunning}
               onSelect={onSelectionChange}
-              onDownload={onDownload}
               onRemove={onRemove}
             />
           ))}
+          <p className="text-xs text-slate-500 italic">
+            Missing models are downloaded automatically when the server starts.
+          </p>
         </div>
       )}
     </div>

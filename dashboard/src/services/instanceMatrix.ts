@@ -325,21 +325,23 @@ export interface LiveTile {
  * Live Mode options for a runtime + main model. Only whisper-family and
  * whisper.cpp backends may serve Live Mode (live.py gate); faster-whisper
  * decodes on CPU where CUDA is absent — the Metal venv ships it for exactly
- * this purpose.
+ * this purpose. The Same-as-main tile is stricter: it requires a Whisper
+ * (faster-whisper) main. A whisper.cpp main picks its GGML model explicitly
+ * via the Whisper.cpp tile instead.
  */
 export function liveTilesFor(
   runtime: RuntimeProfile,
   mainModelId: string | null | undefined,
 ): LiveTile[] {
   const mainChoice = familyChoiceForModel(mainModelId);
-  const mainIsLiveCapable = mainChoice === 'whisper' || mainChoice === 'whispercpp';
+  const mainIsWhisper = mainChoice === 'whisper';
   const cpuDecode = runtime === 'metal' || isVulkanProfile(runtime);
   return [
     {
       id: 'same-as-main',
       label: 'Same as main',
-      enabled: mainIsLiveCapable,
-      reason: mainIsLiveCapable ? undefined : 'Main model has no Live Mode',
+      enabled: mainIsWhisper,
+      reason: mainIsWhisper ? undefined : 'Requires a Whisper main model',
     },
     {
       id: 'whisper',

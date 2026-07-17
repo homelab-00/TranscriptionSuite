@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -719,14 +719,15 @@ describe('Server tab matrix redesign', () => {
     mockAdminStatus.status = { models: {} };
   });
 
-  it('renders the five renumbered cards and drops the old standalone model cards', async () => {
+  it('renders the six renumbered cards and drops the old standalone model cards', async () => {
     setupRedesignAPI({ 'server.runtimeProfile': 'cpu' });
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
-    expect(screen.getByText('1. Docker Image')).toBeDefined();
-    expect(screen.getByText('2. Instance Settings')).toBeDefined();
-    expect(screen.getByText('3. Remote Connection')).toBeDefined();
-    expect(screen.getByText('4. Persistent Volumes')).toBeDefined();
-    expect(screen.getByText('5. Clean Up')).toBeDefined();
+    expect(screen.getByText('1. Runtime Settings')).toBeDefined();
+    expect(screen.getByText('2. Docker Image')).toBeDefined();
+    expect(screen.getByText('3. Instance Settings')).toBeDefined();
+    expect(screen.getByText('4. Remote Connection')).toBeDefined();
+    expect(screen.getByText('5. Persistent Volumes')).toBeDefined();
+    expect(screen.getByText('6. Clean Up')).toBeDefined();
     expect(screen.queryByText(/ASR Models Configuration/)).toBeNull();
     expect(screen.queryByText(/Diarization Models Configuration/)).toBeNull();
   });
@@ -743,7 +744,7 @@ describe('Server tab matrix redesign', () => {
   it('selecting the Metal runtime does NOT start the MLX server (deferred downloads)', async () => {
     const { setSpy, mlxStart } = setupRedesignAPI({ 'server.runtimeProfile': 'cpu' }, 'arm64');
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
-    fireEvent.click(screen.getByRole('button', { name: /GPU \(Metal\)/i }));
+    fireEvent.click(screen.getByText('Metal').closest('button') as HTMLButtonElement);
     await waitFor(() => {
       expect(setSpy).toHaveBeenCalledWith('server.runtimeProfile', 'metal');
     });
@@ -756,7 +757,9 @@ describe('Server tab matrix redesign', () => {
       'running',
     );
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
-    fireEvent.click(screen.getByRole('button', { name: /CPU Only/i }));
+    // Exact text match: the accessible-name regex would also hit the
+    // "CUDA / CPU Only" image-variant tile.
+    fireEvent.click(screen.getByText('CPU Only').closest('button') as HTMLButtonElement);
     await waitFor(() => {
       expect(setSpy).toHaveBeenCalledWith('server.runtimeProfile', 'cpu');
     });
@@ -777,7 +780,9 @@ describe('Server tab matrix redesign', () => {
     await waitFor(() => {
       expect(setSpy).toHaveBeenCalledWith('server.mainModelSelection', 'ggml-large-v3-turbo.bin');
     });
-    fireEvent.click(screen.getByRole('button', { name: /GPU \(CUDA\)/i }));
+    // Exact text match: 'CUDA' only hits the runtime tile label ('CUDA / CPU
+    // Only' and 'CUDA Legacy' are different full strings).
+    fireEvent.click(screen.getByText('CUDA').closest('button') as HTMLButtonElement);
     await waitFor(() => {
       // Runtime default for gpu in the mocked world = MAIN_RECOMMENDED_MODEL.
       expect(setSpy).toHaveBeenCalledWith(
@@ -785,6 +790,22 @@ describe('Server tab matrix redesign', () => {
         'openai/whisper-large-v3-turbo',
       );
     });
+  });
+
+  it('renames the runtime tiles and drops the Experimental tag from Vulkan Linux', async () => {
+    setupRedesignAPI({ 'server.runtimeProfile': 'cpu' });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    // The vulkan runtime labels are identical to the image-variant tiles, so
+    // scope queries to the Runtime SelectorGroup (.space-y-2 root).
+    const runtimeGroup = within(screen.getByText('Runtime').closest('.space-y-2') as HTMLElement);
+    for (const label of ['CUDA', 'Vulkan Windows', 'Vulkan Linux', 'Metal', 'CPU Only']) {
+      expect(runtimeGroup.getByText(label).closest('button')).not.toBeNull();
+    }
+    expect(screen.queryByText('GPU (CUDA)')).toBeNull();
+    expect(screen.queryByText('GPU (Vulkan Linux)')).toBeNull();
+    // Only the Vulkan Windows tile keeps its Experimental hint (hints render
+    // only on enabled tiles; both vulkan tiles are enabled on 'unknown' host).
+    expect(screen.getAllByText('Experimental').length).toBe(1);
   });
 });
 
@@ -845,12 +866,16 @@ describe('Docker image variant selector', () => {
     setupVariantAPI({ 'server.runtimeProfile': 'gpu' });
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
     expect(screen.getByText('Image Variant')).toBeDefined();
-    // Label text nodes are exact-matched, so the variant tiles don't collide
-    // with the runtime tiles ('GPU (CUDA)', 'GPU (Vulkan Windows)', …).
-    expect(screen.getByText('CUDA').closest('button')).not.toBeNull();
-    expect(screen.getByText('CUDA Legacy').closest('button')).not.toBeNull();
-    expect(screen.getByText('Vulkan Windows').closest('button')).not.toBeNull();
-    expect(screen.getByText('Vulkan Linux').closest('button')).not.toBeNull();
+    // The vulkan variant labels are identical to the renamed runtime tiles
+    // ('Vulkan Windows', 'Vulkan Linux'), so scope queries to the Image
+    // Variant SelectorGroup (its root is the .space-y-2 wrapper).
+    const variantGroup = within(
+      screen.getByText('Image Variant').closest('.space-y-2') as HTMLElement,
+    );
+    expect(variantGroup.getByText('CUDA / CPU Only').closest('button')).not.toBeNull();
+    expect(variantGroup.getByText('CUDA Legacy').closest('button')).not.toBeNull();
+    expect(variantGroup.getByText('Vulkan Windows').closest('button')).not.toBeNull();
+    expect(variantGroup.getByText('Vulkan Linux').closest('button')).not.toBeNull();
     expect(screen.queryByText('Legacy GPU image')).toBeNull();
   });
 
@@ -866,7 +891,7 @@ describe('Docker image variant selector', () => {
     expect(screen.getByText('Switch to the CUDA Legacy image?')).toBeDefined();
   });
 
-  it('gates CUDA Legacy to the GPU (CUDA) runtime', async () => {
+  it('gates CUDA Legacy to the CUDA runtime', async () => {
     setupVariantAPI({ 'server.runtimeProfile': 'cpu' });
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
     const legacyTile = screen.getByText('CUDA Legacy').closest('button') as HTMLButtonElement;
@@ -916,5 +941,88 @@ describe('Docker image variant selector', () => {
       expect(legacyTile.disabled).toBe(false);
     });
     expect(screen.queryByText('Not published')).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NVIDIA runtime gating — when checkGpu() reports an NVIDIA GPU, only the
+// CUDA and CPU Only runtimes stay selectable; the Vulkan and Metal tiles are
+// disabled with an 'NVIDIA detected' badge.
+//
+// MUST STAY THE LAST DESCRIBE IN THIS FILE: ServerView module-caches the
+// checkGpu result (cachedGpuInfo), so the gpu:true probe below leaks into the
+// initial state of every mount that follows it. Earlier describes never
+// provide docker.checkGpu, which keeps the cache unset until this point.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('NVIDIA runtime gating', () => {
+  function setupNvidiaAPI() {
+    const setSpy = vi.fn().mockResolvedValue(undefined);
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockImplementation(async (key: string) => {
+          if (key === 'server.runtimeProfile') return 'gpu';
+          // Keep the one-shot hardware auto-detection from firing so the
+          // persisted profile is what the tiles reflect.
+          if (key === 'server.gpuAutoDetectDone') return true;
+          return undefined;
+        }),
+        set: setSpy,
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+        checkModelCache: vi.fn().mockResolvedValue({}),
+        checkGpu: vi.fn().mockResolvedValue({ gpu: true, toolkit: true, vulkan: false }),
+      },
+      app: {
+        getArch: vi.fn().mockReturnValue('x64'),
+        getConfigDir: vi.fn().mockResolvedValue('/mock/config'),
+      },
+      mlx: {
+        getStatus: vi.fn().mockResolvedValue('stopped'),
+        onStatusChanged: vi.fn().mockReturnValue(vi.fn()),
+      },
+      tailscale: {
+        getHostname: vi.fn().mockResolvedValue('my-server.tail1234.ts.net'),
+      },
+      server: {
+        checkFirewallPort: vi.fn().mockResolvedValue(null),
+      },
+    };
+    return { setSpy };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDocker.available = true;
+    mockDocker.images = [];
+    mockDocker.remoteTags = [];
+    mockDocker.variantTags = null;
+    mockDocker.container = { exists: false, running: false, status: 'unknown', health: undefined };
+    mockDocker.operationError = null;
+    mockDocker.operating = false;
+    mockDocker.composeAvailable = true;
+    mockAdminStatus.status = { models: {} };
+  });
+
+  it('disables the Vulkan and Metal runtimes when an NVIDIA GPU is detected', async () => {
+    setupNvidiaAPI();
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    // Runtime labels collide with the image-variant tiles, so scope to the
+    // Runtime SelectorGroup.
+    const runtimeGroup = within(screen.getByText('Runtime').closest('.space-y-2') as HTMLElement);
+    await waitFor(() => {
+      expect(runtimeGroup.getAllByText('NVIDIA detected').length).toBe(3);
+    });
+    for (const label of ['Vulkan Windows', 'Vulkan Linux', 'Metal']) {
+      const tile = runtimeGroup.getByText(label).closest('button') as HTMLButtonElement;
+      expect(tile.disabled).toBe(true);
+    }
+    expect((runtimeGroup.getByText('CUDA').closest('button') as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    expect(
+      (runtimeGroup.getByText('CPU Only').closest('button') as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 });
