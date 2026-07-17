@@ -290,7 +290,7 @@ hash-match-skip path. Users flipping to cu126 still rebuild — only the
 non-flipping cu129 path is zero-cost.
 
 ### AMD/Intel Vulkan
-- **Linux:** Vulkan-capable GPU with `/dev/dri` access; whisper.cpp sidecar (`ghcr.io/ggml-org/whisper.cpp:main-vulkan`)
+- **Linux:** Vulkan-capable GPU with `/dev/dri` access; whisper.cpp sidecar (`ghcr.io/homelab-00/whisper-cpp-linux` — our no-AVX2 rebuild of upstream `main-vulkan`, so the sidecar runs on pre-Haswell CPUs too)
 - **Windows + WSL2 (experimental, opt-in):** GPU paravirtualization via `/dev/dxg`; forces Mesa's `dzn` (Vulkan-on-D3D12)
   ICD to avoid silent CPU fallback. Requires the locally-built `vulkan-wsl2` sidecar image and Docker Desktop's WSL2 backend.
   The dashboard surfaces a separate "GPU (Vulkan WSL2 — experimental)" option only when WSL2 + `/dev/dxg` are both detected.

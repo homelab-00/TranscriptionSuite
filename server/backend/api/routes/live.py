@@ -251,23 +251,38 @@ class LiveModeSession:
             # compatible model-level load params).
             can_share = False
             if is_same_model:
-                main_params = model_manager.get_transcription_load_params()
-                if main_params:
-                    can_share = (
-                        main_params.get("device") == config.device
-                        and main_params.get("compute_type") == config.compute_type
-                        and main_params.get("gpu_device_index") == config.gpu_device_index
-                        and main_params.get("batch_size") == config.batch_size
-                    )
-                    if not can_share:
-                        logger.info(
-                            "Same model but load params differ — falling back to "
-                            f"full reload (main={main_params}, live={{"
-                            f"device={config.device!r}, "
-                            f"compute_type={config.compute_type!r}, "
-                            f"gpu_device_index={config.gpu_device_index!r}, "
-                            f"batch_size={config.batch_size!r}}})"
+                if detect_backend_type(config.model) == "whispercpp":
+                    # whisper.cpp is a pure HTTP client to the sidecar container —
+                    # device/compute_type/gpu_device_index/batch_size are inert
+                    # (WhisperCppBackend.load() accepts but never reads them; the
+                    # sidecar container owns the actual GPU/CPU selection). Gating
+                    # sharing on those params compares LiveModeConfig's unrelated
+                    # defaults (device defaults to "cuda") against whatever the
+                    # main model happened to load with (e.g. "cpu" on the Vulkan
+                    # path), which always mismatches and forces a full reload —
+                    # re-running the sidecar's up-to-180s /health wait on every
+                    # single Live Mode start for no reason, since the same
+                    # whisper-server process keeps serving the same model the
+                    # whole time regardless.
+                    can_share = True
+                else:
+                    main_params = model_manager.get_transcription_load_params()
+                    if main_params:
+                        can_share = (
+                            main_params.get("device") == config.device
+                            and main_params.get("compute_type") == config.compute_type
+                            and main_params.get("gpu_device_index") == config.gpu_device_index
+                            and main_params.get("batch_size") == config.batch_size
                         )
+                        if not can_share:
+                            logger.info(
+                                "Same model but load params differ — falling back to "
+                                f"full reload (main={main_params}, live={{"
+                                f"device={config.device!r}, "
+                                f"compute_type={config.compute_type!r}, "
+                                f"gpu_device_index={config.gpu_device_index!r}, "
+                                f"batch_size={config.batch_size!r}}})"
+                            )
 
             shared_backend = None
 

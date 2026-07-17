@@ -330,9 +330,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   const [keepModelsVolume, setKeepModelsVolume] = useState(false);
   const [keepConfigDirectory, setKeepConfigDirectory] = useState(false);
 
-  // Vulkan sidecar image prompt state
-  const [sidecarNeeded, setSidecarNeeded] = useState<boolean | null>(null); // null = not checked
-
   // Server mode badge (local vs remote)
   const [serverMode, setServerMode] = useState<'local' | 'remote' | null>(null);
 
@@ -359,12 +356,6 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             setRuntimeProfile(normalized);
             if (normalized !== val) {
               api.config?.set?.('server.runtimeProfile', normalized).catch(() => {});
-            }
-            if (normalized === 'vulkan') {
-              docker
-                .hasSidecarImage()
-                .then((exists) => setSidecarNeeded(!exists))
-                .catch(() => {});
             }
           }
         })
@@ -572,11 +563,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     };
   }, []);
 
-  // Persist runtime profile changes, reset selections the new runtime cannot
-  // run, and check sidecar availability for Vulkan. Selecting a runtime never
-  // downloads anything: even Metal only persists the profile — the native MLX
-  // server (whose startup pre-downloads models) starts from the Inference
-  // Server card's Start button.
+  // Persist runtime profile changes and reset selections the new runtime
+  // cannot run. The Vulkan sidecar image is only ever pulled from the Start
+  // Local click handler below, never merely from selecting the tile. Metal
+  // only persists the profile here — the native MLX server (whose startup
+  // pre-downloads models) starts from the Inference Server card's Start
+  // button.
   const handleRuntimeProfileChange = useCallback(
     async (profile: RuntimeProfile) => {
       setRuntimeProfile(profile);
@@ -616,15 +608,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           api?.config?.set('server.liveModelSelection', LIVE_MODEL_SAME_AS_MAIN_OPTION);
         }
       }
-      // Handle Vulkan sidecar image check (read-only — the actual pull is an
-      // explicit button in the sidecar banner).
-      if (profile === 'vulkan') {
-        docker
-          .hasSidecarImage()
-          .then((exists) => setSidecarNeeded(!exists))
-          .catch(() => {});
-      } else {
-        setSidecarNeeded(null);
+      // Cancel any in-flight sidecar pull when leaving Vulkan — the pull is
+      // only ever kicked off from the Start Local click handler below.
+      if (profile !== 'vulkan') {
         docker.cancelSidecarPull();
         useNotificationsStore.getState().dismissToast('sidecar-vulkan');
       }
@@ -658,10 +644,47 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       isAppleSilicon,
       metalSupported,
       mlxFeature,
-      docker.hasSidecarImage,
       docker.cancelSidecarPull,
     ],
   );
+
+  // Pulls the Vulkan sidecar image, tracking progress in the notifications
+  // store. Triggered from the Start Local click handler below — only for
+  // runtimeProfile === 'vulkan', and never merely from selecting the tile.
+  // Resolves with the pull error message (or null on success) so the caller
+  // can surface it without reading stale closure state.
+  const downloadVulkanSidecar = useCallback(async (): Promise<string | null> => {
+    const dlId = 'sidecar-vulkan';
+    useNotificationsStore.getState().notify({
+      id: dlId,
+      category: 'download',
+      title: 'Vulkan Sidecar (whisper.cpp)',
+      detail: 'Pulling sidecar image',
+      status: 'active',
+    });
+    // withOperation never throws - it resolves with the error message (or
+    // null on success), so branch on the return value instead of try/catch.
+    const pullError = await docker.pullSidecarImage();
+    const store = useNotificationsStore.getState();
+    const newest = [...store.notifications].reverse().find((n) => n.id === dlId);
+    // A user cancel already closed the record - leave it alone.
+    if (newest?.status === 'active') {
+      if (pullError === null) {
+        store.notify({
+          id: dlId,
+          category: 'download',
+          title: 'Vulkan Sidecar (whisper.cpp) downloaded',
+          // Clear the stale 'Pulling sidecar image' active-phase detail.
+          detail: '',
+          status: 'complete',
+        });
+      } else {
+        store.updateNotification(dlId, { status: 'error', error: pullError });
+      }
+    }
+    return pullError;
+  }, [docker.pullSidecarImage]);
+
   const containerStatus = docker.container;
   const isRunning = containerStatus.running;
   const isRunningAndHealthy = isRunning && containerStatus.health === 'healthy';
@@ -2186,15 +2209,37 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           <Button
                             variant="secondary"
                             className="h-9 px-4 whitespace-nowrap"
-                            onClick={() =>
+                            onClick={async () => {
+                              // Vulkan's compose-up pulls a missing sidecar image
+                              // inline and can hit its 120s exec timeout on a
+                              // multi-GB image, so make sure the image is present
+                              // *before* starting the container rather than
+                              // racing it. This only runs for runtimeProfile ===
+                              // 'vulkan' — never on tile selection alone, and
+                              // never for cpu/gpu/metal/vulkan-wsl2.
+                              if (runtimeProfile === 'vulkan') {
+                                const exists = await docker.hasSidecarImage();
+                                if (!exists) {
+                                  const pullError = await downloadVulkanSidecar();
+                                  const nowExists = await docker.hasSidecarImage();
+                                  if (!nowExists) {
+                                    toast.error(
+                                      pullError
+                                        ? `Failed to download the Vulkan sidecar image: ${pullError}`
+                                        : 'Failed to download the Vulkan sidecar image.',
+                                    );
+                                    return;
+                                  }
+                                }
+                              }
                               onStartServer('local', runtimeProfile, selectedTagForStart, {
                                 mainTranscriberModel: sanitizeModelName(activeTranscriber),
                                 liveTranscriberModel: sanitizeModelName(normalizedLiveModel),
                                 diarizationModel: sanitizeModelName(activeDiarizationModel),
                                 sensevoiceDiarizationEngine: sensevoiceEngineValue,
                                 ...(isVulkan ? { whispercppModel: vulkanSidecarModelPath } : {}),
-                              })
-                            }
+                              });
+                            }}
                             disabled={
                               docker.operating ||
                               isRunning ||
@@ -2441,90 +2486,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 {/* The Legacy GPU image toggle used to live here (GH-83) —
                     it is now the CUDA Legacy tile in the Docker Image card's
                     Image Variant selector, which reuses the same confirmation
-                    dialog + runtime-volume wipe flow below. */}
-                {runtimeProfile === 'vulkan' && !isRunning && sidecarNeeded && (
-                  <div className="border-accent-rose/20 bg-accent-rose/5 flex items-center gap-3 rounded-lg border px-4 py-3">
-                    {docker.sidecarPulling ? (
-                      <>
-                        <Loader2 size={14} className="text-accent-rose animate-spin" />
-                        <span className="text-sm text-slate-300">
-                          Downloading Vulkan sidecar image...
-                        </span>
-                        <button
-                          onClick={() => {
-                            docker.cancelSidecarPull();
-                            useNotificationsStore.getState().updateNotification('sidecar-vulkan', {
-                              status: 'complete',
-                              detail: 'Cancelled by user',
-                            });
-                          }}
-                          className="ml-auto text-xs text-slate-400 underline hover:text-slate-200"
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <Download size={14} className="text-accent-rose" />
-                        <span className="text-sm text-slate-300">
-                          {docker.operationError
-                            ? `Download failed: ${docker.operationError}`
-                            : 'Vulkan mode requires the whisper.cpp sidecar image.'}
-                        </span>
-                        <Button
-                          variant="secondary"
-                          className="ml-auto h-8 px-3 text-xs"
-                          disabled={docker.operating}
-                          onClick={async () => {
-                            const dlId = 'sidecar-vulkan';
-                            useNotificationsStore.getState().notify({
-                              id: dlId,
-                              category: 'download',
-                              title: 'Vulkan Sidecar (whisper.cpp)',
-                              detail: 'Pulling sidecar image',
-                              status: 'active',
-                            });
-                            // withOperation resolves with the error message (or
-                            // null on success) rather than throwing.
-                            const pullError = await docker.pullSidecarImage();
-                            const store = useNotificationsStore.getState();
-                            const newest = [...store.notifications]
-                              .reverse()
-                              .find((n) => n.id === dlId);
-                            // A user cancel already closed the record - leave it.
-                            if (newest?.status === 'active') {
-                              if (pullError === null) {
-                                store.notify({
-                                  id: dlId,
-                                  category: 'download',
-                                  title: 'Vulkan Sidecar (whisper.cpp) downloaded',
-                                  // Clear the stale 'Pulling sidecar image' detail.
-                                  detail: '',
-                                  status: 'complete',
-                                });
-                              } else {
-                                store.updateNotification(dlId, {
-                                  status: 'error',
-                                  error: pullError,
-                                });
-                              }
-                            }
-                            const hasIt = await docker.hasSidecarImage();
-                            if (hasIt) setSidecarNeeded(false);
-                          }}
-                        >
-                          Download
-                        </Button>
-                        <button
-                          onClick={() => setSidecarNeeded(false)}
-                          className="text-xs text-slate-500 hover:text-slate-300"
-                        >
-                          Skip
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
+                    dialog + runtime-volume wipe flow below. The old Vulkan
+                    sidecar-image banner is gone too - the Start Local click
+                    handler pre-pulls the sidecar image instead. */}
 
                 {/* Model / live / diarization selectors — all valid combinations
                     come from src/services/instanceMatrix.ts */}

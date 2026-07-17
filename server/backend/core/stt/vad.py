@@ -19,6 +19,13 @@ import warnings
 import numpy as np
 import torch
 
+# NNPACK's runtime hardware check re-fires its "Unsupported hardware" warning on
+# EVERY conv op, not just once — on CPUs that lack the required instructions this
+# floods the log with one line per Silero VAD forward pass (i.e. continuously
+# during Live Mode). It's cosmetic (torch just falls back to a different CPU conv
+# path), so disable the backend outright rather than let every VAD call retry it.
+torch.backends.nnpack.set_flags(False)
+
 # Suppress pkg_resources deprecation warning from webrtcvad
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=UserWarning, module="pkg_resources")

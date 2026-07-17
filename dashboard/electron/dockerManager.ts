@@ -60,9 +60,9 @@ export const VULKAN_LINUX_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-se
  * Server image variants selectable from the Docker Image card. The active
  * variant is a projection of existing settings — the runtime profile implies
  * the vulkan repos, `server.useLegacyGpu` picks legacy vs default — so this
- * type introduces no new persisted state. Pull/start wiring for the
- * `vulkan-linux` repo is intentionally not hooked up yet (the Vulkan Linux
- * runtime is WIP); the variant only participates in the availability display.
+ * type introduces no new persisted state. Pull/start wiring for every repo
+ * goes through resolveImageRepo() below, which routes the vulkan runtime
+ * profiles to their dedicated repos.
  */
 export type ImageVariant = 'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux';
 
@@ -76,15 +76,17 @@ export const IMAGE_VARIANT_REPOS: Record<ImageVariant, string> = {
 /**
  * Select the GHCR image repo for this session based on the persisted
  * `server.useLegacyGpu` setting (Issue #83 — Pascal/Maxwell support) and
- * the active runtime profile. Vulkan-WSL2 gets its own dedicated repo so
- * its tag list never mixes with the standard or legacy-GPU variants.
- * The dashboard uses exactly one repo at a time — never mixes the two.
+ * the active runtime profile. Vulkan-WSL2 and Linux Vulkan each get their
+ * own dedicated repo so their tag lists never mix with the standard or
+ * legacy-GPU variants. The dashboard uses exactly one repo at a time — never
+ * mixes repos within a single session.
  */
 export function resolveImageRepo(
   useLegacyGpu: boolean,
   runtimeProfile?: RuntimeProfile | null,
 ): string {
   if (runtimeProfile === 'vulkan-wsl2') return VULKAN_WSL2_IMAGE_REPO;
+  if (runtimeProfile === 'vulkan') return VULKAN_LINUX_IMAGE_REPO;
   return useLegacyGpu ? LEGACY_IMAGE_REPO : IMAGE_REPO;
 }
 
@@ -142,8 +144,16 @@ function getStartupEventsFilePath(): string | null {
   return _startupEventsFilePath;
 }
 
-/** Vulkan sidecar image — upstream whisper.cpp with Vulkan GPU acceleration. */
-const VULKAN_SIDECAR_IMAGE = 'ghcr.io/ggml-org/whisper.cpp:main-vulkan';
+/**
+ * Vulkan sidecar image — our no-AVX2 rebuild of whisper.cpp's `main-vulkan`
+ * (built from `server/docker/whisper-cpp-linux.Dockerfile`, published to
+ * GHCR). Lowers the CPU instruction baseline to AVX+F16C so the sidecar's
+ * CPU-side ops don't SIGILL on pre-Haswell CPUs (e.g. Ivy Bridge), while the
+ * GPU handles inference via Vulkan. Modern CPUs run it fine too, so it replaces
+ * the upstream image for all Linux Vulkan users. Must match the `image:` in
+ * `docker-compose.vulkan.yml`.
+ */
+const VULKAN_SIDECAR_IMAGE = 'ghcr.io/homelab-00/whisper-cpp-linux:latest';
 
 /**
  * Vulkan-WSL2 sidecar image — locally-built variant adding Mesa's `dzn`
@@ -1377,6 +1387,41 @@ export function composeFileArgs(
   return files.flatMap((f) => ['-f', f]);
 }
 
+/**
+ * The `COMPOSE_FILE` env value for a runtime profile — the same overlay set
+ * `composeFileArgs` produces, as a path-separator-joined string for the compose
+ * `.env`. Persisting this lets bare `docker compose stop/down/logs` (which
+ * stopContainer/removeContainer run WITHOUT explicit -f overlays) operate on
+ * the full stack, including the Vulkan `whisper-server` sidecar — so the
+ * sidecar's lifetime stays coupled to the server's instead of being orphaned
+ * (it carries `restart: unless-stopped`). Uses the OS path separator
+ * (path.delimiter), matching Compose's default COMPOSE_PATH_SEPARATOR.
+ */
+export function composeFileEnvValue(
+  runtimeProfile: RuntimeProfile,
+  runtimeKind: ContainerRuntimeKind = 'docker',
+  gpuMode: 'cdi' | 'legacy' | null = detectedGpuMode,
+): string {
+  return composeFileArgs(runtimeProfile, runtimeKind, gpuMode)
+    .filter((arg) => arg !== '-f')
+    .join(path.delimiter);
+}
+
+/**
+ * Compose args that stop-and-remove the Vulkan `whisper-server` sidecar so a
+ * subsequent `up` recreates it fresh. Run at the start of a `vulkan` launch to
+ * discard any orphaned/stale sidecar left by an ungraceful prior shutdown
+ * (crash, kill -9, power loss) where the stop-coupling could not run: the
+ * sidecar loads its model once at startup and is stateless, so recreating it is
+ * the reliable way to guarantee it matches the current model config rather than
+ * silently reusing a container serving a stale model. `-s` stops before
+ * removing; `-f` skips the confirmation prompt and makes a missing sidecar a
+ * harmless no-op.
+ */
+export function vulkanSidecarResetArgs(fileArgs: string[]): string[] {
+  return ['compose', ...fileArgs, 'rm', '-sf', 'whisper-server'];
+}
+
 function buildProcessEnv(
   extraEnv?: Record<string, string>,
   runtimeKind?: ContainerRuntimeKind,
@@ -2426,6 +2471,20 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   // now-retired containerised whisper-server sidecar (docker-compose.vulkan-wsl2.yml).
   envUpdates['MESA_D3D12_DEFAULT_ADAPTER_NAME'] = '';
 
+  // Persist COMPOSE_FILE so bare `docker compose stop/down/logs` (which
+  // stopContainer/removeContainer run WITHOUT -f overlays) act on the SAME
+  // service set that start used — crucially including the Vulkan
+  // `whisper-server` sidecar. Without this, bare compose sees only the base
+  // `transcriptionsuite` service and leaves the sidecar running as an orphan
+  // (it carries `restart: unless-stopped`), decoupling its lifetime from the
+  // server's. Start itself is unaffected: it passes explicit `-f` args on the
+  // CLI, which override COMPOSE_FILE.
+  envUpdates['COMPOSE_FILE'] = composeFileEnvValue(
+    runtimeProfile,
+    detectedRuntimeKind ?? undefined,
+    detectedGpuMode,
+  );
+
   upsertComposeEnvValues(envUpdates);
 
   // Create host directory for startup events file (bind-mounted into container).
@@ -2485,6 +2544,27 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     detectedRuntimeKind ?? undefined,
     detectedGpuMode,
   );
+
+  // If a previous server was killed ungracefully (crash, kill -9, power loss),
+  // its Vulkan sidecar can survive as an orphan (restart: unless-stopped),
+  // still serving a stale model or wedged in its wait-loop. `compose up` would
+  // silently adopt that container instead of giving us a clean one, so remove
+  // it first and let `up` recreate it fresh — re-reading the model env and
+  // reloading from the read-only model volume. The sidecar is stateless, so
+  // this loses nothing. Best-effort: a missing sidecar makes `rm` a no-op, and
+  // a failure here must not block the server from starting. Only the Linux
+  // `vulkan` profile has a Docker sidecar; `vulkan-wsl2` uses a native
+  // whisper-server.exe cleaned up separately in stopContainer.
+  if (runtimeProfile === 'vulkan') {
+    try {
+      await exec(await runtimeBin(), vulkanSidecarResetArgs(fileArgs), {
+        cwd: getComposeDir(),
+        env: composeEnv,
+      });
+    } catch (err) {
+      console.warn('[DockerManager] Vulkan sidecar pre-start cleanup failed (continuing):', err);
+    }
+  }
 
   const upArgs = ['compose', ...fileArgs, 'up', '-d'];
   // --no-build: the build section is for manual dev builds only; the packaged

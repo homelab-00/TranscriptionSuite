@@ -1355,9 +1355,9 @@ TranscriptionSuite supports AMD and Intel GPU acceleration via a **whisper.cpp s
 │  transcriptionsuite     │ ──────────────────────── │  whisper-server          │
 │  (FastAPI backend)      │    POST /inference        │  (whisper.cpp + Vulkan)  │
 │                         │ ◄──────────────────────── │                          │
-│  WhisperCppBackend      │    JSON response          │  ghcr.io/ggerganov/      │
-│  (httpx HTTP client)    │                           │  whisper.cpp:main-       │
-│                         │                           │  server-vulkan           │
+│  WhisperCppBackend      │    JSON response          │  ghcr.io/homelab-00/     │
+│  (httpx HTTP client)    │                           │  whisper-cpp-vulkan-     │
+│                         │                           │  noavx2                  │
 └─────────────────────────┘                           └──────────────────────────┘
          │                                                      │
          │ network_mode: host (Linux)                           │ /dev/dri passthrough
@@ -1406,7 +1406,10 @@ The Vulkan overlay (`docker-compose.vulkan.yml`) adds a `whisper-server` service
 ```yaml
 services:
   whisper-server:
-    image: ghcr.io/ggml-org/whisper.cpp:main-vulkan
+    # Our no-AVX2 rebuild of whisper.cpp's main-vulkan (built from
+    # whisper-cpp-linux.Dockerfile) — AVX+F16C CPU baseline so the
+    # sidecar's CPU-side ops don't SIGILL on pre-Haswell CPUs.
+    image: ghcr.io/homelab-00/whisper-cpp-linux:latest
     restart: unless-stopped
     volumes:
       - huggingface-models:/models:ro    # Shared model volume (read-only)

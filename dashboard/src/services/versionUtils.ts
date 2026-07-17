@@ -28,17 +28,27 @@ export const LEGACY_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-l
 export const VULKAN_WSL2_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2';
 
 /**
+ * Separate GHCR repo for the native Linux Vulkan image variant (AMD/Intel GPU
+ * acceleration via Mesa RADV, `vulkan` runtime profile). Gets its own
+ * dedicated repo so its tag list never mixes with the standard, legacy-GPU,
+ * or Vulkan-WSL2 variants. Kept in sync with `dockerManager.ts`.
+ */
+export const VULKAN_LINUX_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux';
+
+/**
  * Return the GHCR repo URL the dashboard should use for this session, based on
  * the user's `useLegacyGpu` setting (Issue #83) and the active runtime profile.
- * Vulkan-WSL2 gets its own dedicated repo. Never mixes repos within a single
- * session — the dashboard uses exactly one repo at a time. Kept in sync with
- * the `resolveImageRepo` twin in `dashboard/electron/dockerManager.ts`.
+ * Vulkan-WSL2 and Linux Vulkan each get their own dedicated repo. Never mixes
+ * repos within a single session — the dashboard uses exactly one repo at a
+ * time. Kept in sync with the `resolveImageRepo` twin in
+ * `dashboard/electron/dockerManager.ts`.
  */
 export function resolveImageRepo(
   useLegacyGpu: boolean,
   runtimeProfile?: RuntimeProfile | null,
 ): string {
   if (runtimeProfile === 'vulkan-wsl2') return VULKAN_WSL2_IMAGE_REPO;
+  if (runtimeProfile === 'vulkan') return VULKAN_LINUX_IMAGE_REPO;
   return useLegacyGpu ? LEGACY_IMAGE_REPO : IMAGE_REPO;
 }
 

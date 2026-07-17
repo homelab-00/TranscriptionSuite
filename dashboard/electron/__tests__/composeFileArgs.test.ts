@@ -31,7 +31,8 @@ vi.mock('electron-store', () => ({
   },
 }));
 
-import { composeFileArgs } from '../dockerManager.js';
+import path from 'node:path';
+import { composeFileArgs, composeFileEnvValue } from '../dockerManager.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -192,5 +193,46 @@ describe('[P1] composeFileArgs', () => {
       const args = composeFileArgs(profile, 'docker', 'legacy');
       expect(args[1]).toBe('docker-compose.yml');
     }
+  });
+});
+
+// ─── COMPOSE_FILE persistence (sidecar lifecycle coupling) ──────────────────
+//
+// composeFileEnvValue() derives the COMPOSE_FILE .env value from the same
+// overlay set as composeFileArgs(). Persisting it makes bare `docker compose
+// stop/down` (run without -f by stopContainer/removeContainer) act on the full
+// stack — including the Vulkan whisper-server sidecar — so the sidecar is not
+// left orphaned when the server stops.
+describe('composeFileEnvValue (COMPOSE_FILE for bare compose stop/down)', () => {
+  it('Linux + Vulkan: includes the sidecar overlay, path-separator-joined', () => {
+    setPlatform('linux');
+    const value = composeFileEnvValue('vulkan', 'docker', null);
+
+    expect(value).toBe(
+      [
+        'docker-compose.yml',
+        'docker-compose.linux-host.yml',
+        'docker-compose.vulkan.yml',
+      ].join(path.delimiter),
+    );
+    // The sidecar overlay MUST be present — that is what makes bare
+    // `docker compose stop` also stop whisper-server.
+    expect(value).toContain('docker-compose.vulkan.yml');
+  });
+
+  it('matches composeFileArgs exactly (just without the -f flags)', () => {
+    setPlatform('linux');
+    for (const profile of ['cpu', 'gpu', 'vulkan'] as const) {
+      const expected = composeFileArgs(profile, 'docker', 'legacy')
+        .filter((arg) => arg !== '-f')
+        .join(path.delimiter);
+      expect(composeFileEnvValue(profile, 'docker', 'legacy')).toBe(expected);
+    }
+  });
+
+  it('non-Vulkan profiles carry no sidecar overlay', () => {
+    setPlatform('linux');
+    expect(composeFileEnvValue('cpu', 'docker', null)).not.toContain('docker-compose.vulkan.yml');
+    expect(composeFileEnvValue('gpu', 'docker', 'cdi')).not.toContain('docker-compose.vulkan.yml');
   });
 });
