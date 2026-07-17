@@ -719,14 +719,15 @@ describe('Server tab matrix redesign', () => {
     mockAdminStatus.status = { models: {} };
   });
 
-  it('renders the five renumbered cards and drops the old standalone model cards', async () => {
+  it('renders the six renumbered cards and drops the old standalone model cards', async () => {
     setupRedesignAPI({ 'server.runtimeProfile': 'cpu' });
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
-    expect(screen.getByText('1. Docker Image')).toBeDefined();
-    expect(screen.getByText('2. Instance Settings')).toBeDefined();
-    expect(screen.getByText('3. Remote Connection')).toBeDefined();
-    expect(screen.getByText('4. Persistent Volumes')).toBeDefined();
-    expect(screen.getByText('5. Clean Up')).toBeDefined();
+    expect(screen.getByText('1. Runtime Settings')).toBeDefined();
+    expect(screen.getByText('2. Docker Image')).toBeDefined();
+    expect(screen.getByText('3. Instance Settings')).toBeDefined();
+    expect(screen.getByText('4. Remote Connection')).toBeDefined();
+    expect(screen.getByText('5. Persistent Volumes')).toBeDefined();
+    expect(screen.getByText('6. Clean Up')).toBeDefined();
     expect(screen.queryByText(/ASR Models Configuration/)).toBeNull();
     expect(screen.queryByText(/Diarization Models Configuration/)).toBeNull();
   });
@@ -756,7 +757,9 @@ describe('Server tab matrix redesign', () => {
       'running',
     );
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
-    fireEvent.click(screen.getByRole('button', { name: /CPU Only/i }));
+    // Exact text match: the accessible-name regex would also hit the
+    // "CUDA / CPU Only" image-variant tile.
+    fireEvent.click(screen.getByText('CPU Only').closest('button') as HTMLButtonElement);
     await waitFor(() => {
       expect(setSpy).toHaveBeenCalledWith('server.runtimeProfile', 'cpu');
     });
@@ -847,7 +850,7 @@ describe('Docker image variant selector', () => {
     expect(screen.getByText('Image Variant')).toBeDefined();
     // Label text nodes are exact-matched, so the variant tiles don't collide
     // with the runtime tiles ('GPU (CUDA)', 'GPU (Vulkan Windows)', …).
-    expect(screen.getByText('CUDA').closest('button')).not.toBeNull();
+    expect(screen.getByText('CUDA / CPU Only').closest('button')).not.toBeNull();
     expect(screen.getByText('CUDA Legacy').closest('button')).not.toBeNull();
     expect(screen.getByText('Vulkan Windows').closest('button')).not.toBeNull();
     expect(screen.getByText('Vulkan Linux').closest('button')).not.toBeNull();

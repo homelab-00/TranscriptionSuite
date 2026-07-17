@@ -1,10 +1,10 @@
 meta:
-  spec_version: 1.11.2
+  spec_version: 1.12.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
   generated_from:
-    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/.claude/worktrees/warm-giggling-island/dashboard
+    repo_path: /home/Bill/Code_Projects/Python_Projects/TranscriptionSuite/dashboard
     source_files:
       - App.tsx
       - components/__tests__/AddNoteModal.canary-language.test.tsx
@@ -23,6 +23,7 @@ meta:
       - components/__tests__/SessionImportTab.drop-feedback.test.tsx
       - components/__tests__/SessionImportTab.output-format.test.tsx
       - components/__tests__/SessionView.canary-language.test.tsx
+      - components/__tests__/SessionView.client-link-stop.test.tsx
       - components/__tests__/SessionView.test.tsx
       - components/__tests__/StartupActivityInline.test.tsx
       - components/AriaLiveRegion.tsx
@@ -121,7 +122,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-07-16T23:44:05.733Z
+    generated_at: 2026-07-17T12:30:20.759Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -313,6 +314,7 @@ foundation:
         - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
@@ -420,6 +422,7 @@ foundation:
         - shadow-[0_0_15px_rgba(251,146,60,0.5)]
         - shadow-[0_0_15px_rgba(34,211,238,0.2)]
         - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+        - shadow-[0_0_18px_rgba(239,68,68,0.35)]
         - shadow-[0_0_20px_rgba(255,255,255,0.3)]
         - shadow-[0_0_5px_rgba(217,70,239,0.5)]
         - shadow-[0_0_5px_rgba(239,22,238,0.5)]
@@ -567,6 +570,7 @@ utility_allowlist:
     - bg-black/50
     - bg-black/60
     - bg-black/70
+    - bg-black/75
     - bg-blue-400
     - bg-blue-400/10
     - bg-blue-400/20
@@ -601,6 +605,7 @@ utility_allowlist:
     - bg-red-500
     - bg-red-500/10
     - bg-red-500/20
+    - bg-red-500/25
     - bg-red-500/5
     - bg-slate-300/10
     - bg-slate-400/10
@@ -635,6 +640,7 @@ utility_allowlist:
     - border-accent-magenta/5
     - border-accent-magenta/60
     - border-accent-orange/20
+    - border-accent-orange/25
     - border-amber-400/20
     - border-amber-400/25
     - border-amber-400/30
@@ -666,8 +672,10 @@ utility_allowlist:
     - border-purple-400/60
     - border-r
     - border-red-400/20
+    - border-red-400/40
     - border-red-400/60
     - border-red-500/20
+    - border-red-500/25
     - border-slate-300/60
     - border-slate-400/30
     - border-slate-500/40
@@ -797,6 +805,7 @@ utility_allowlist:
     - hover:bg-red-500/10
     - hover:bg-red-500/20
     - hover:bg-red-500/30
+    - hover:bg-red-500/35
     - hover:bg-white/10
     - hover:bg-white/15
     - hover:bg-white/20
@@ -883,9 +892,12 @@ utility_allowlist:
     - mb-4
     - mb-6
     - mb-8
+    - md:flex-row
     - md:grid-cols-2
     - md:grid-cols-4
+    - md:items-center
     - md:items-end
+    - md:justify-between
     - min-h-0
     - min-h-20
     - min-h-32
@@ -953,6 +965,7 @@ utility_allowlist:
     - pb-0
     - pb-1
     - pb-10
+    - pb-2
     - pb-4
     - pb-8
     - pl-0
@@ -1106,7 +1119,9 @@ utility_allowlist:
     - text-orange-400
     - text-orange-500
     - text-purple-400
+    - text-red-100
     - text-red-200
+    - text-red-200/90
     - text-red-300
     - text-red-400
     - text-red-400/80
@@ -1238,6 +1253,7 @@ utility_allowlist:
     - shadow-[0_0_15px_rgba(251,146,60,0.5)]
     - shadow-[0_0_15px_rgba(34,211,238,0.2)]
     - shadow-[0_0_15px_rgba(34,211,238,0.5)]
+    - shadow-[0_0_18px_rgba(239,68,68,0.35)]
     - shadow-[0_0_20px_rgba(255,255,255,0.3)]
     - shadow-[0_0_5px_rgba(217,70,239,0.5)]
     - shadow-[0_0_5px_rgba(239,22,238,0.5)]
