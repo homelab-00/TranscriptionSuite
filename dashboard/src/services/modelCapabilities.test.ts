@@ -564,9 +564,9 @@ describe('truncatesGreekFinalSigma', () => {
     expect(truncatesGreekFinalSigma('mlx-community/parakeet-tdt-0.6b-v3')).toBe(true);
   });
 
-  it('returns false for Canary models (server repairs their unk marker)', () => {
-    expect(truncatesGreekFinalSigma('nvidia/canary-1b-v2')).toBe(false);
-    expect(truncatesGreekFinalSigma('Mediform/canary-1b-v2-mlx-q8')).toBe(false);
+  it('returns true for Canary models (real speech emits no repairable marker)', () => {
+    expect(truncatesGreekFinalSigma('nvidia/canary-1b-v2')).toBe(true);
+    expect(truncatesGreekFinalSigma('Mediform/canary-1b-v2-mlx-q8')).toBe(true);
   });
 
   it('returns false for Whisper models and empty values', () => {

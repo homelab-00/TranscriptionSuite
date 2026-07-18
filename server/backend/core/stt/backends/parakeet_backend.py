@@ -466,16 +466,16 @@ class ParakeetBackend(STTBackend):
         if self._model is None:
             raise RuntimeError("Parakeet model is not loaded")
 
-        # Parakeet's tokenizer has no ς (U+03C2) and, unlike Canary, the model
-        # emits nothing at Greek final-sigma positions - word endings are
-        # silently truncated ("σας" -> "σα") and cannot be restored from the
-        # token stream. Upstream defect, unacknowledged:
+        # Parakeet's tokenizer has no ς (U+03C2): the model emits nothing at
+        # Greek final-sigma positions, so word endings are silently truncated
+        # ("σας" -> "σα") and cannot be restored from the token stream.
+        # Upstream defect, unacknowledged:
         # https://huggingface.co/nvidia/canary-1b-v2/discussions/26
         if language == "el" and not self._greek_sigma_warning_logged:
             logger.warning(
                 "Parakeet cannot write the Greek final sigma (ς): its tokenizer "
                 "lacks U+03C2, so Greek word endings are silently truncated. "
-                "Prefer a Canary (auto-repaired) or Whisper model for Greek."
+                "Prefer a Whisper model for Greek."
             )
             self._greek_sigma_warning_logged = True
 

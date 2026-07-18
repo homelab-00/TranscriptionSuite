@@ -2,10 +2,10 @@
  * SessionView - Greek final-sigma warning for Parakeet-family models.
  *
  * NVIDIA's NeMo models were trained with SentencePiece vocabularies that lack
- * ς (U+03C2). Parakeet models silently truncate Greek word endings ("σας"
- * becomes "σα") with no recoverable trace, so the UI must warn when Greek is
- * selected with a Parakeet model. Canary models carry the same tokenizer
- * defect but the server repairs their output automatically - no warning.
+ * ς (U+03C2), so every NeMo model (Parakeet AND Canary, CUDA and MLX alike)
+ * truncates Greek word endings ("σας" becomes "σα"). Unfixable at the app
+ * level - the UI must warn whenever Greek is selected with a NeMo model and
+ * steer users toward Whisper.
  *
  * Upstream defect: https://huggingface.co/nvidia/canary-1b-v2/discussions/26
  */
@@ -277,18 +277,15 @@ describe('SessionView - Greek final-sigma warning', () => {
     expect(warning.textContent).toMatch(/final sigma|ς/);
   });
 
-  it('does not warn for a Canary main model with Greek selected', async () => {
+  it('warns for a Canary main model too (real speech emits no repairable marker)', async () => {
     mockModels.main = CANARY_MODEL;
     mockModels.live = CANARY_MODEL;
     setPersistedLanguages('Greek');
 
     renderSessionView();
 
-    // Wait for the persisted language to be applied, then assert absence.
-    await waitFor(() => {
-      expect(mockGetConfig).toHaveBeenCalledWith('session.mainLanguage');
-    });
-    expect(screen.queryByTestId('greek-sigma-warning-main')).toBeNull();
+    const warning = await screen.findByTestId('greek-sigma-warning-main');
+    expect(warning.textContent).toMatch(/final sigma|ς/);
   });
 
   it('does not warn when a non-Greek language is selected', async () => {
