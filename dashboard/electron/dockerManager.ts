@@ -2461,11 +2461,26 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
       composeEnv['WHISPERCPP_MODEL'] = whispercppModel;
       envUpdates['WHISPERCPP_MODEL'] = whispercppModel;
     }
+
+    // vulkan-wsl2 only: the whisper-server runs natively on the Windows host and
+    // serves a SINGLE model chosen at launch (`--model`). It cannot hot-swap via
+    // the containerised `/load` path — that receives an in-container `/models/...`
+    // path the native exe cannot open (different filesystem namespace), so a
+    // main→live model switch would fail to load. Instead Electron relaunches the
+    // exe with the new model (see `switchWhisperServerModel`), and this flag tells
+    // the backend to SKIP its own `/load` POST + container-side GGML download and
+    // simply wait for the (externally managed) sidecar to be healthy. The Linux
+    // `vulkan` profile keeps the containerised sidecar, whose `/load` works, so it
+    // must NOT get this flag.
+    const externalMgmt = runtimeProfile === 'vulkan-wsl2' ? '1' : '';
+    composeEnv['WHISPERCPP_EXTERNAL_MODEL_MGMT'] = externalMgmt;
+    envUpdates['WHISPERCPP_EXTERNAL_MODEL_MGMT'] = externalMgmt;
   } else {
     // Clear stale vulkan env vars from a previous profile switch so they
     // don't linger in the .env file.
     envUpdates['WHISPERCPP_SERVER_URL'] = '';
     envUpdates['WHISPERCPP_MODEL'] = '';
+    envUpdates['WHISPERCPP_EXTERNAL_MODEL_MGMT'] = '';
   }
   // Always clear MESA_D3D12_DEFAULT_ADAPTER_NAME — it was only used by the
   // now-retired containerised whisper-server sidecar (docker-compose.vulkan-wsl2.yml).
@@ -2537,6 +2552,11 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
       await downloadGgmlModelToHost(ggmlFilename);
     }
     await launchWhisperServerNative(hostModelPath);
+    // Record what the native exe is now serving. `_whisperServerDefaultModel` is
+    // the main-transcription model to restore to after a Live Mode session that
+    // relaunched the exe onto a different live model (see switchWhisperServerModel).
+    _whisperServerDefaultModel = ggmlFilename;
+    _whisperServerCurrentModel = ggmlFilename;
   }
 
   const fileArgs = composeFileArgs(
@@ -2593,6 +2613,10 @@ async function stopContainer(): Promise<string> {
   await killExistingWhisperServer().catch((err) => {
     console.warn('[DockerManager] killExistingWhisperServer on stop failed:', err?.message ?? err);
   });
+  // The exe is gone — forget which model it was serving so a later
+  // switchWhisperServerModel() before the next start doesn't act on stale state.
+  _whisperServerDefaultModel = null;
+  _whisperServerCurrentModel = null;
   try {
     return await exec(await runtimeBin(), ['compose', 'stop'], { cwd: getComposeDir() });
   } catch (composeErr: any) {
@@ -3490,6 +3514,143 @@ async function hasVulkanWsl2SidecarImage(): Promise<boolean> {
 
 // ─── Native whisper-server.exe (vulkan-wsl2) ────────────────────────────────
 
+// The native exe serves ONE model, fixed at launch via `--model`. These track
+// what it is currently serving and what to restore to. `_default` is the
+// main-transcription model set at start; `_current` is whatever a Live Mode
+// switch last relaunched it onto. Both null when no exe is running.
+let _whisperServerDefaultModel: string | null = null;
+let _whisperServerCurrentModel: string | null = null;
+
+/**
+ * How long to wait for a freshly relaunched whisper-server.exe to start
+ * listening on :8080 before returning. This only covers the process/socket
+ * coming up — the backend separately waits for the model to finish loading onto
+ * the GPU (`_wait_for_sidecar_ready`), so we don't need to block that long here.
+ */
+const WHISPER_RELAUNCH_LISTEN_TIMEOUT_MS = 15_000;
+const WHISPER_RELAUNCH_LISTEN_POLL_MS = 250;
+
+// Hard ceiling on a host-side GGML download during a model switch. Generous
+// enough for a large model over a slow link, but bounded so a stalled
+// connection (electron `net.request` has no inactivity timeout of its own)
+// can't wedge the Live Mode start that awaits it.
+const WHISPER_MODEL_DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** Reject with a labelled error if `promise` hasn't settled within `ms`. */
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms: ${label}`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Poll until whisper-server.exe is accepting connections on :8080, or timeout. */
+async function waitForWhisperServerListening(): Promise<void> {
+  const deadline = Date.now() + WHISPER_RELAUNCH_LISTEN_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (!(await isPort8080Free())) return; // something is listening → up
+    await new Promise((r) => setTimeout(r, WHISPER_RELAUNCH_LISTEN_POLL_MS));
+  }
+  console.warn(
+    '[DockerManager] whisper-server.exe not listening on :8080 after relaunch wait; ' +
+      'continuing anyway (backend has its own readiness wait).',
+  );
+}
+
+/**
+ * Relaunch the native whisper-server.exe (vulkan-wsl2 only) so it serves a
+ * different GGML model, since it cannot hot-swap models over HTTP the way the
+ * containerised Linux sidecar can (its `/load` receives an in-container
+ * `/models/...` path that the native Windows exe cannot open).
+ *
+ * The dashboard drives this around Live Mode: it switches to the live model
+ * before starting the session and restores the main model (pass `null`) after
+ * stopping. Because the backend's own `/load` is disabled in this mode
+ * (WHISPERCPP_EXTERNAL_MODEL_MGMT), this relaunch is the ONLY thing that changes
+ * the served model — so it must complete before the backend transcribes.
+ *
+ * No-ops (returns `{ switched: false }`) when:
+ *  - the active profile is not `vulkan-wsl2` (no native exe in play);
+ *  - `model` is a non-GGML name (faster-whisper live models don't use the exe);
+ *  - the exe is already serving the requested model (idempotent).
+ *
+ * @param model GGML filename to serve, or `null`/`undefined` to restore the
+ *   main-transcription model captured at container start.
+ */
+export async function switchWhisperServerModel(
+  model: string | null | undefined,
+): Promise<{ switched: boolean; model: string | null }> {
+  const profile = readRuntimeProfileFromStore();
+  if (profile !== 'vulkan-wsl2') {
+    return { switched: false, model: null };
+  }
+
+  // Resolve the target filename. A null/empty request means "restore the main
+  // model"; anything else must be a bare GGML filename the exe can load.
+  let target: string | null;
+  if (model && model.trim()) {
+    const sanitized = path.basename(model.trim().replace(/^\/models\//, ''));
+    if (!isGgmlFileName(sanitized)) {
+      // Not a whisper.cpp model (e.g. a faster-whisper live model) — the native
+      // exe isn't involved, so there is nothing to switch.
+      console.log(
+        `[DockerManager] switchWhisperServerModel: '${model}' is not a GGML model — no switch`,
+      );
+      return { switched: false, model: null };
+    }
+    target = sanitized;
+  } else {
+    target = _whisperServerDefaultModel;
+  }
+
+  console.log(
+    `[DockerManager] switchWhisperServerModel: request=${JSON.stringify(model)} ` +
+      `resolved-target=${target} current=${_whisperServerCurrentModel} default=${_whisperServerDefaultModel}`,
+  );
+
+  if (!target) {
+    // No default recorded (exe not started by us) — nothing safe to do.
+    return { switched: false, model: null };
+  }
+
+  if (target === _whisperServerCurrentModel) {
+    console.log('[DockerManager] switchWhisperServerModel: already serving target — no relaunch');
+    return { switched: false, model: target };
+  }
+
+  console.log(
+    `[DockerManager] Switching native whisper-server.exe model: ${_whisperServerCurrentModel} → ${target}`,
+  );
+
+  const hostModelPath = path.join(getWhisperModelsDir(), target);
+  if (!fs.existsSync(hostModelPath)) {
+    console.log(`[DockerManager] Model not found at ${hostModelPath} — downloading...`);
+    // Bound the download so a stalled connection can never wedge the caller
+    // (the renderer defers the live WebSocket connect on this promise).
+    await withTimeout(
+      downloadGgmlModelToHost(target),
+      WHISPER_MODEL_DOWNLOAD_TIMEOUT_MS,
+      `download ${target}`,
+    );
+    console.log(`[DockerManager] Downloaded ${target} to host`);
+  } else {
+    console.log(`[DockerManager] Model already present at ${hostModelPath} — no download`);
+  }
+
+  await killExistingWhisperServer();
+  await launchWhisperServerNative(hostModelPath);
+  _whisperServerCurrentModel = target;
+  await waitForWhisperServerListening();
+  console.log(`[DockerManager] Native whisper-server.exe now serving ${target}`);
+
+  return { switched: true, model: target };
+}
+
 function getWhisperServerExePath(): string {
   return path.join(
     app.getPath('appData'),
@@ -4324,6 +4485,7 @@ export const dockerManager = {
   removeModelCache,
   isGgmlModelDownloadedOnHost,
   downloadGgmlModelToHost,
+  switchWhisperServerModel,
   ensureWhisperDirectories,
   downloadWhisperServerExe,
   checkTailscaleCertsExist,

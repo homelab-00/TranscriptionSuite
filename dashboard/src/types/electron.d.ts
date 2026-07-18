@@ -175,6 +175,9 @@ interface ElectronAPI {
       modelIds: string[],
     ) => Promise<Record<string, { exists: boolean; size?: string }>>;
     removeModelCache: (modelId: string) => Promise<void>;
+    switchWhisperServerModel: (
+      model: string | null,
+    ) => Promise<{ switched: boolean; model: string | null }>;
     removeVolume: (name: string) => Promise<string>;
     readComposeEnvValue: (key: string) => Promise<string | null>;
     volumeExists: (name: string) => Promise<boolean>;

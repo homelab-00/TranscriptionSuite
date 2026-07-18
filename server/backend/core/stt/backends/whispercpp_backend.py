@@ -191,6 +191,28 @@ def _read_whispercpp_setting(env_key: str, cfg_key: str) -> str | None:
     return text or None
 
 
+def _external_model_management() -> bool:
+    """True when the whisper-server model is managed OUTSIDE this backend.
+
+    On the Windows ``vulkan-wsl2`` profile the whisper-server runs natively on
+    the host and serves a SINGLE model chosen at launch (``--model``). It cannot
+    hot-swap via ``/load``: that endpoint would receive this container's
+    ``/models/...`` path, which the native exe cannot open (different filesystem
+    namespace), so a main→live model switch fails to load. Instead the dashboard
+    (Electron) relaunches the exe onto the requested model before transcription
+    (see ``dockerManager.switchWhisperServerModel``).
+
+    When this flag is set (``WHISPERCPP_EXTERNAL_MODEL_MGMT=1``, exported by the
+    dashboard for ``vulkan-wsl2`` only), ``load()`` therefore skips BOTH its own
+    ``/load`` POST and the container-side GGML download (the model lives on the
+    host, not in this container's ``/models``), and only waits for the
+    externally managed sidecar to become healthy. The Linux ``vulkan`` profile
+    keeps the containerised sidecar whose ``/load`` works, so it never sets this.
+    """
+    raw = os.environ.get("WHISPERCPP_EXTERNAL_MODEL_MGMT", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 def _resolve_chunk_duration_config() -> int:
     """Max chunk duration (seconds) from env → config → default, floored at 60s."""
     raw = _read_whispercpp_setting("WHISPERCPP_CHUNK_DURATION_S", "chunk_duration_s")
@@ -636,6 +658,23 @@ class WhisperCppBackend(STTBackend):
             self._server_url,
             self._max_chunk_duration_s,
         )
+
+        # vulkan-wsl2: the native host exe owns model loading (relaunched by the
+        # dashboard onto this model before we get here). The GGML lives on the
+        # host, not in this container, and a /load POST would hand the exe an
+        # unopenable /models/... path — so skip both the container download and
+        # the /load, and just wait for the externally managed sidecar to be
+        # healthy. A fresh host-side relaunch is a genuine cold start, so use the
+        # full ready budget rather than the warm one.
+        if _external_model_management():
+            logger.info(
+                "WhisperCppBackend: external model management (vulkan-wsl2) — "
+                "skipping container download and /load; waiting for host sidecar to be ready"
+            )
+            self._wait_for_sidecar_ready(_SIDECAR_READY_TIMEOUT)
+            self._loaded = True
+            logger.info("WhisperCppBackend: model ready (external management)")
+            return
 
         # GGML models are not auto-fetched by the sidecar (it only reads + waits),
         # so download into the shared volume ourselves — this is what breaks the
