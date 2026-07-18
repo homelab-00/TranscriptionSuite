@@ -972,6 +972,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
             translationTarget: liveTranslateTarget,
             gracePeriodSeconds,
             systemAudio: isSystemAudio,
+            // vulkan-wsl2: relaunch the native whisper-server.exe onto the live
+            // model before connecting (no-op on other profiles / non-GGML models).
+            whisperServerModel: activeLiveModel ?? undefined,
             // Linux system audio: AudioCapture owns the loopback module
             // lifecycle via loopbackOwner (GH-230).
             monitorSinkName: isSystemAudio && isLinux ? sinkNameMap[sysDevice] : undefined,

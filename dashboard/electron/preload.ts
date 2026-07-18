@@ -227,6 +227,9 @@ export interface ElectronAPI {
     removeModelCache: (modelId: string) => Promise<void>;
     isGgmlModelDownloadedOnHost: (fileName: string) => Promise<boolean>;
     downloadGgmlModelToHost: (fileName: string) => Promise<void>;
+    switchWhisperServerModel: (
+      model: string | null,
+    ) => Promise<{ switched: boolean; model: string | null }>;
     removeVolume: (name: string) => Promise<string>;
     readComposeEnvValue: (key: string) => Promise<string | null>;
     volumeExists: (name: string) => Promise<boolean>;
@@ -594,6 +597,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('docker:isGgmlModelDownloadedOnHost', fileName) as Promise<boolean>,
     downloadGgmlModelToHost: (fileName: string) =>
       ipcRenderer.invoke('docker:downloadGgmlModelToHost', fileName) as Promise<void>,
+    switchWhisperServerModel: (model: string | null) =>
+      ipcRenderer.invoke('whisper:switchModel', model) as Promise<{
+        switched: boolean;
+        model: string | null;
+      }>,
     removeVolume: (name: string) => ipcRenderer.invoke('docker:removeVolume', name),
     readComposeEnvValue: (key: string) =>
       ipcRenderer.invoke('docker:readComposeEnvValue', key) as Promise<string | null>,

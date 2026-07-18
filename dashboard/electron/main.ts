@@ -1254,6 +1254,14 @@ ipcMain.handle('docker:pullSidecarImage', async () => {
   return dockerManager.pullSidecarImage();
 });
 
+// Relaunch the native whisper-server.exe (vulkan-wsl2) onto a different GGML
+// model. Driven by Live Mode: switch to the live model before starting, restore
+// the main model (model = null) after stopping. No-ops on non-vulkan-wsl2
+// profiles and for non-GGML models. See dockerManager.switchWhisperServerModel.
+ipcMain.handle('whisper:switchModel', async (_event, model: string | null) => {
+  return dockerManager.switchWhisperServerModel(model);
+});
+
 ipcMain.handle('docker:cancelSidecarPull', () => {
   return dockerManager.cancelSidecarPull();
 });

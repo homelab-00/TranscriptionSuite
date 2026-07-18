@@ -59,6 +59,14 @@ export interface LiveStartOptions {
   model?: string;
   systemAudio?: boolean;
   monitorSinkName?: string;
+  /**
+   * GGML filename of the live model, used ONLY on the Windows `vulkan-wsl2`
+   * profile to relaunch the native whisper-server.exe onto this model before
+   * connecting (it serves one model per launch and cannot hot-swap). Ignored by
+   * the server and a no-op on every other profile / non-GGML model. See
+   * dockerManager.switchWhisperServerModel.
+   */
+  whisperServerModel?: string;
 }
 
 export function useLiveMode(): LiveModeState {
@@ -307,7 +315,37 @@ export function useLiveMode(): LiveModeState {
           });
         },
       });
-      socketRef.current.connect();
+
+      // vulkan-wsl2 (Windows): the native whisper-server.exe serves ONE model
+      // per launch and can't hot-swap, so relaunch it onto the live model BEFORE
+      // connecting — otherwise the backend would transcribe against the main
+      // model. The IPC self-gates (no-op off vulkan-wsl2 / for non-GGML models),
+      // so this only defers the connect when a native switch is actually in play.
+      // When the IPC is absent (web build, or already-correct model), connect
+      // synchronously to preserve existing behaviour.
+      const sock = socketRef.current;
+      const switchModel = window.electronAPI?.docker?.switchWhisperServerModel;
+      if (switchModel) {
+        const requested = startOptsRef.current.whisperServerModel ?? null;
+        console.info('[useLiveMode] requesting whisper-server model switch:', requested);
+        void switchModel(requested)
+          .then((res) => {
+            console.info('[useLiveMode] whisper-server model switch result:', res);
+          })
+          .catch((err) => {
+            // A relaunch failure is not fatal here: the backend has its own
+            // sidecar-readiness wait, and connecting still surfaces a clear
+            // server-side error if the model truly can't serve. Log and proceed.
+            console.warn('[useLiveMode] whisper-server model switch failed:', err);
+          })
+          .finally(() => {
+            // Only connect if this socket is still current — a stop()/retarget
+            // between the switch call and its resolution supersedes it.
+            if (socketRef.current === sock) sock.connect();
+          });
+      } else {
+        sock.connect();
+      }
     },
     [handleMessage, setStatusTracked],
   );
@@ -328,6 +366,14 @@ export function useLiveMode(): LiveModeState {
     // GH-237: user stop reopens the start-gate for the next session.
     sessionEstablishedRef.current = false;
     setStatusTracked('idle');
+    // vulkan-wsl2: restore the native whisper-server.exe to the main model the
+    // live session displaced (pass null → the launch/default model). Best-effort
+    // and self-gating; a no-op off vulkan-wsl2. Runs in the background — the next
+    // main transcription won't begin until the user initiates it, by which time
+    // the (few-second) relaunch has completed.
+    void window.electronAPI?.docker?.switchWhisperServerModel?.(null).catch((err) => {
+      console.warn('[useLiveMode] whisper-server main-model restore failed:', err);
+    });
   }, [setStatusTracked]);
 
   const toggleMute = useCallback(() => {

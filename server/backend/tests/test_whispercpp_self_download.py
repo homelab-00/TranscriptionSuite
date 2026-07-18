@@ -106,3 +106,40 @@ def test_load_tolerates_remote_protocol_error(monkeypatch) -> None:
 
     backend.load(model_name="ggml-small.en.bin", device="cpu")
     assert backend.is_loaded() is True
+
+
+def test_external_model_management_skips_download_and_load(monkeypatch) -> None:
+    """vulkan-wsl2: load() must NOT download or POST /load — the host exe owns
+    model loading. It should only wait for the sidecar and mark itself loaded."""
+    backend = wb.WhisperCppBackend()
+    monkeypatch.setenv("WHISPERCPP_EXTERNAL_MODEL_MGMT", "1")
+
+    def _fail_download(*_a, **_k):
+        raise AssertionError("must not download the GGML in external management mode")
+
+    def _fail_client(*_a, **_k):
+        raise AssertionError("must not POST /load in external management mode")
+
+    monkeypatch.setattr(wb, "_ensure_ggml_model_present", _fail_download)
+    monkeypatch.setattr(backend, "_ensure_client", _fail_client)
+
+    waited: list[float] = []
+    monkeypatch.setattr(
+        backend, "_wait_for_sidecar_ready", lambda timeout_s: waited.append(timeout_s)
+    )
+
+    backend.load(model_name="ggml-small.en.bin", device="cpu")
+
+    assert backend.is_loaded() is True
+    # Waited exactly once, with the full cold-start budget (host relaunch).
+    assert waited == [wb._SIDECAR_READY_TIMEOUT]
+
+
+def test_external_model_management_disabled_by_default(monkeypatch) -> None:
+    """Absent the env flag, the normal download + /load path runs."""
+    monkeypatch.delenv("WHISPERCPP_EXTERNAL_MODEL_MGMT", raising=False)
+    assert wb._external_model_management() is False
+    monkeypatch.setenv("WHISPERCPP_EXTERNAL_MODEL_MGMT", "1")
+    assert wb._external_model_management() is True
+    monkeypatch.setenv("WHISPERCPP_EXTERNAL_MODEL_MGMT", "0")
+    assert wb._external_model_management() is False
