@@ -144,13 +144,12 @@ export function isMLXCanaryModel(modelName: string | null | undefined): boolean 
  *
  * NVIDIA's NeMo models were trained with SentencePiece vocabularies that lack
  * U+03C2 entirely (upstream defect, unacknowledged:
- * https://huggingface.co/nvidia/canary-1b-v2/discussions/26), so on real
- * speech every NeMo family - Parakeet, nemotron-speech, Canary, and the MLX
- * ports - drops the character with no recoverable trace and Greek word
- * endings come out truncated ("σας" becomes "σα"). The server restores the
- * endings through the configured AI provider (local_llm.greek_sigma_repair);
- * the UI surfaces this helper's result so users know Greek output depends on
- * that provider. Whisper models are unaffected.
+ * https://huggingface.co/nvidia/canary-1b-v2/discussions/26), so every NeMo
+ * family - Parakeet, nemotron-speech, Canary, and the MLX ports - truncates
+ * Greek word endings ("σας" becomes "σα"), occasionally leaving a stray " ⁇ "
+ * unk marker in their place. Unfixable at the app level; the UI surfaces this
+ * helper's result to steer Greek users toward Whisper models, which are
+ * unaffected.
  */
 export function truncatesGreekFinalSigma(modelName: string | null | undefined): boolean {
   return isNemoModel(modelName) || isMLXParakeetModel(modelName) || isMLXCanaryModel(modelName);

@@ -436,27 +436,3 @@ class TestMLXCanaryResampling:
         # First positional arg is a temp file path (str) — audio conversion is
         # implicit before sf.write; no dtype assertion needed on the path itself.
         assert isinstance(segments, list)
-
-
-# ---------------------------------------------------------------------------
-# Greek final-sigma repair (shared canary-1b-v2 tokenizer defect)
-# ---------------------------------------------------------------------------
-
-
-class TestGreekFinalSigmaRepair:
-    """canary-1b-v2 cannot emit ς (U+03C2); its unk marker must be repaired
-    for Greek output. See server/core/stt/greek_sigma.py."""
-
-    def test_greek_output_is_repaired(self) -> None:
-        backend, _, _ = _loaded_backend("Καλησπέρα σα ⁇ !")
-
-        segments, _ = backend.transcribe(np.zeros(16000, dtype=np.float32), language="el")
-
-        assert segments[0].text == "Καλησπέρα σας!"
-
-    def test_non_greek_output_untouched(self) -> None:
-        backend, _, _ = _loaded_backend("Hello ⁇ world.")
-
-        segments, _ = backend.transcribe(np.zeros(16000, dtype=np.float32), language="en")
-
-        assert segments[0].text == "Hello ⁇ world."

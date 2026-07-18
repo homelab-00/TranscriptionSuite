@@ -3,10 +3,9 @@
  *
  * NVIDIA's NeMo models were trained with SentencePiece vocabularies that lack
  * ς (U+03C2), so every NeMo model (Parakeet AND Canary, CUDA and MLX alike)
- * truncates Greek word endings on real speech ("σας" becomes "σα"). The
- * server restores the endings through the configured AI provider when it is
- * reachable, but the UI must still surface the caveat whenever Greek is
- * selected with a NeMo model.
+ * truncates Greek word endings ("σας" becomes "σα"). Unfixable at the app
+ * level - the UI must warn whenever Greek is selected with a NeMo model and
+ * steer users toward Whisper.
  *
  * Upstream defect: https://huggingface.co/nvidia/canary-1b-v2/discussions/26
  */
