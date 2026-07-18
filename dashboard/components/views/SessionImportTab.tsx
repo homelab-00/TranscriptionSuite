@@ -20,6 +20,7 @@ import {
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
+import { CustomSelect } from '../ui/CustomSelect';
 import { useShallow } from 'zustand/react/shallow';
 import {
   useImportQueueStore,
@@ -872,20 +873,22 @@ export const SessionImportTab: React.FC = () => {
               <p className="text-sm font-medium text-white">Output Format</p>
               <p className="text-xs text-slate-400">Applies to every imported file</p>
             </div>
-            <select
+            <CustomSelect
               aria-label="Output Format"
               value={outputFormat}
-              onChange={(e) => {
-                const v = e.target.value as SessionOutputFormat;
-                setOutputFormat(v);
-                void setConfig('sessionImport.outputFormat', v);
+              onChange={(v) => {
+                const format = v as SessionOutputFormat;
+                setOutputFormat(format);
+                void setConfig('sessionImport.outputFormat', format);
               }}
-              className="focus:border-accent-cyan/50 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white scheme-dark outline-none"
-            >
-              <option value="txt">Plain text (.txt)</option>
-              <option value="subtitles">Subtitles (.srt/.ass)</option>
-              <option value="both">Both</option>
-            </select>
+              options={['txt', 'subtitles', 'both']}
+              optionLabel={{
+                txt: 'Plain text (.txt)',
+                subtitles: 'Subtitles (.srt/.ass)',
+                both: 'Both',
+              }}
+              className="focus:ring-accent-cyan w-52 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white transition-all outline-none hover:border-white/20 focus:ring-1"
+            />
           </div>
           {outputFormat !== 'txt' && (
             <div className="flex items-center justify-between gap-4 pl-1">
@@ -893,15 +896,14 @@ export const SessionImportTab: React.FC = () => {
                 <p className="text-sm font-medium text-white">Subtitle format</p>
                 <p className="text-xs text-slate-400">File type for subtitle output</p>
               </div>
-              <select
+              <CustomSelect
                 aria-label="Subtitle format"
                 value={diarizedFormat}
-                onChange={(e) => setDiarizedFormat(e.target.value as 'srt' | 'ass')}
-                className="focus:border-accent-cyan/50 shrink-0 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white scheme-dark outline-none"
-              >
-                <option value="srt">.srt</option>
-                <option value="ass">.ass</option>
-              </select>
+                onChange={(v) => setDiarizedFormat(v as 'srt' | 'ass')}
+                options={['srt', 'ass']}
+                optionLabel={{ srt: '.srt', ass: '.ass' }}
+                className="focus:ring-accent-cyan w-52 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white transition-all outline-none hover:border-white/20 focus:ring-1"
+              />
             </div>
           )}
           <div className="h-px bg-white/5"></div>
