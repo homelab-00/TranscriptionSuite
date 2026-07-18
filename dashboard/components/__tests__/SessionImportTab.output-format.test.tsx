@@ -142,6 +142,63 @@ vi.mock('sonner', () => ({
   },
 }));
 
+// headlessui — the Output Format / Subtitle format controls are CustomSelect
+// (a Listbox). Same render-prop mock convention as ServerView.test.tsx, plus:
+//   * ListboxButton forwards aria-label so getByRole('button', { name }) works.
+//   * ListboxOption is a role="option" that wires its click to the Listbox's
+//     onChange (via context), so selecting an option drives the component.
+vi.mock('@headlessui/react', () => {
+  const renderChildren = (
+    children: React.ReactNode | ((args: any) => React.ReactNode),
+    args: Record<string, unknown> = {},
+  ): React.ReactNode =>
+    typeof children === 'function' ? (children as (a: any) => React.ReactNode)(args) : children;
+  const passthrough = ({ children }: { children?: React.ReactNode }) =>
+    React.createElement('div', null, renderChildren(children));
+  const OnChangeCtx = React.createContext<(value: unknown) => void>(() => {});
+  return {
+    Listbox: ({
+      children,
+      value,
+      onChange,
+    }: {
+      children: React.ReactNode;
+      value: unknown;
+      onChange: (value: unknown) => void;
+    }) =>
+      React.createElement(
+        OnChangeCtx.Provider,
+        { value: onChange },
+        React.createElement(
+          'div',
+          { 'data-value': value },
+          renderChildren(children, { open: true }),
+        ),
+      ),
+    ListboxButton: ({
+      children,
+      ['aria-label']: ariaLabel,
+    }: {
+      children: React.ReactNode;
+      'aria-label'?: string;
+    }) =>
+      React.createElement(
+        'button',
+        { type: 'button', 'aria-label': ariaLabel },
+        renderChildren(children, { open: true, focus: false, hover: false }),
+      ),
+    ListboxOptions: passthrough,
+    ListboxOption: ({ children, value }: { children: React.ReactNode; value: unknown }) => {
+      const onChange = React.useContext(OnChangeCtx);
+      return React.createElement(
+        'div',
+        { role: 'option', 'data-value': value, onClick: () => onChange(value) },
+        renderChildren(children, { selected: false, focus: false, active: false }),
+      );
+    },
+  };
+});
+
 import { SessionImportTab } from '../views/SessionImportTab';
 
 async function renderTab() {
@@ -154,12 +211,23 @@ async function renderTab() {
   return result;
 }
 
-function outputFormatSelect(): HTMLSelectElement {
-  return screen.getByRole('combobox', { name: /output format/i }) as HTMLSelectElement;
+function outputFormatButton(): HTMLElement {
+  return screen.getByRole('button', { name: /output format/i });
 }
 
-function querySubtitleFormatSelect(): HTMLSelectElement | null {
-  return screen.queryByRole('combobox', { name: /subtitle format/i }) as HTMLSelectElement | null;
+function querySubtitleFormatButton(): HTMLElement | null {
+  return screen.queryByRole('button', { name: /subtitle format/i });
+}
+
+// Open the CustomSelect (mock renders options inline) and click the option
+// whose visible label matches `optionName`.
+async function pickOutputFormat(optionName: string): Promise<void> {
+  await act(async () => {
+    fireEvent.click(outputFormatButton());
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('option', { name: optionName }));
+  });
 }
 
 describe('SessionImportTab — explicit output-format selector (GH-212)', () => {
@@ -194,32 +262,26 @@ describe('SessionImportTab — explicit output-format selector (GH-212)', () => 
     });
 
     expect(diarizationSwitch).toHaveAttribute('aria-checked', 'false');
-    expect(outputFormatSelect()).toBeInTheDocument();
+    expect(outputFormatButton()).toBeInTheDocument();
   });
 
   it('hides the Subtitle format select for Plain text and shows it for Both', async () => {
     await renderTab();
 
     // Default 'subtitles' → the subtitle-flavor select is visible.
-    expect(querySubtitleFormatSelect()).not.toBeNull();
+    expect(querySubtitleFormatButton()).not.toBeNull();
 
-    await act(async () => {
-      fireEvent.change(outputFormatSelect(), { target: { value: 'txt' } });
-    });
-    expect(querySubtitleFormatSelect()).toBeNull();
+    await pickOutputFormat('Plain text (.txt)');
+    expect(querySubtitleFormatButton()).toBeNull();
 
-    await act(async () => {
-      fireEvent.change(outputFormatSelect(), { target: { value: 'both' } });
-    });
-    expect(querySubtitleFormatSelect()).not.toBeNull();
+    await pickOutputFormat('Both');
+    expect(querySubtitleFormatButton()).not.toBeNull();
   });
 
   it('persists the selection under sessionImport.outputFormat', async () => {
     await renderTab();
 
-    await act(async () => {
-      fireEvent.change(outputFormatSelect(), { target: { value: 'txt' } });
-    });
+    await pickOutputFormat('Plain text (.txt)');
 
     expect(mockSetConfig).toHaveBeenCalledWith('sessionImport.outputFormat', 'txt');
   });

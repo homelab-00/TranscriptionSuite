@@ -25,6 +25,8 @@ interface CustomSelectProps {
   placeholder?: string;
   accentColor?: 'cyan' | 'magenta';
   disabled?: boolean;
+  /** Accessible label forwarded to the trigger button (for screen readers / tests). */
+  'aria-label'?: string;
 }
 
 export const CustomSelect: React.FC<CustomSelectProps> = ({
@@ -38,6 +40,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   placeholder = 'Select...',
   accentColor = 'cyan',
   disabled = false,
+  'aria-label': ariaLabel,
 }) => {
   // Extract layout classes from className to apply to the container div
   const isFlex = className.includes('flex-1');
@@ -62,6 +65,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     <Listbox value={value} onChange={onChange} disabled={disabled}>
       <div className={containerClasses}>
         <ListboxButton
+          aria-label={ariaLabel}
           title={value || placeholder}
           className={`flex h-full w-full min-w-0 items-center justify-between text-left ${disabled ? 'cursor-not-allowed opacity-50' : ''} ${className}`}
         >
