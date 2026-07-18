@@ -67,6 +67,7 @@ Technical documentation for developing and building TranscriptionSuite.
       - [How It Works](#how-it-works)
       - [GGML Model Detection](#ggml-model-detection)
       - [Docker Compose Setup](#docker-compose-setup)
+      - [Building \& Publishing the Sidecar Images](#building--publishing-the-sidecar-images)
     - [6.10 Legacy-GPU image variant (Issue #83)](#610-legacy-gpu-image-variant-issue-83)
       - [Networking by Platform](#networking-by-platform)
       - [Configuration](#configuration)
@@ -1356,8 +1357,8 @@ TranscriptionSuite supports AMD and Intel GPU acceleration via a **whisper.cpp s
 │  (FastAPI backend)      │    POST /inference        │  (whisper.cpp + Vulkan)  │
 │                         │ ◄──────────────────────── │                          │
 │  WhisperCppBackend      │    JSON response          │  ghcr.io/homelab-00/     │
-│  (httpx HTTP client)    │                           │  whisper-cpp-vulkan-     │
-│                         │                           │  noavx2                  │
+│  (httpx HTTP client)    │                           │  whisper-cpp-linux       │
+│                         │                           │                          │
 └─────────────────────────┘                           └──────────────────────────┘
          │                                                      │
          │ network_mode: host (Linux)                           │ /dev/dri passthrough
@@ -1379,7 +1380,11 @@ The sidecar pattern keeps Vulkan dependencies isolated from the main CUDA contai
 
 3. **Response parsing**: The whisper-server returns verbose JSON with segments and token-level timestamps (`t0`/`t1` in centiseconds). The backend maps these to standard `BackendSegment` objects with word-level timing.
 
-4. **Model loading**: On `load()`, the backend sends `POST /load` to whisper-server. If the server pre-loads the model via the `WHISPER_MODEL` environment variable (the default), this call may fail gracefully - the backend continues regardless.
+4. **GGML self-download**: The sidecar only *reads* the model file and waits for it to appear — it never fetches one itself. So on `load()`, `WhisperCppBackend` downloads the GGML model into the shared volume if it isn't already there (mirroring `dockerManager.ts::downloadGgmlModel` — same HF repo + URL), breaking the first-run chicken-and-egg where the Models tab download needs a running server that can't start without the model. Skipped on Windows `vulkan-wsl2` (see point 6).
+
+5. **Sidecar readiness wait**: Before `/load`, the backend polls the sidecar's `/health` — up to 180s if this call just downloaded the model (a genuine cold start: the sidecar's model-wait loop plus GPU load), or a short 15s if the file was already present (no reason to expect a slow start). A timeout here is not fatal — `/load` has its own reachable/timeout/disconnect handling.
+
+6. **Model loading**: `POST /load` is sent as `multipart/form-data` with a `model` file part holding the absolute in-container path — whisper-server's `/load` reads the model path via `req.get_file_value("model")` and requires that exact shape; a JSON body always fails its `has_file()` check and 400s before ever loading. On the Windows `vulkan-wsl2` profile the native host exe owns model loading instead (the dashboard relaunches it onto the requested model before transcription — see `WHISPERCPP_EXTERNAL_MODEL_MGMT` in Configuration below), so the backend skips both the container-side download and the `/load` POST, and only waits for the externally-managed sidecar to become healthy.
 
 #### GGML Model Detection
 
@@ -1410,6 +1415,21 @@ services:
     # whisper-cpp-linux.Dockerfile) — AVX+F16C CPU baseline so the
     # sidecar's CPU-side ops don't SIGILL on pre-Haswell CPUs.
     image: ghcr.io/homelab-00/whisper-cpp-linux:latest
+    # Polls for the model file — WhisperCppBackend downloads it into the shared
+    # volume on the main container's first load() — before launching
+    # whisper-server, instead of crash-looping when it isn't there yet.
+    command:
+      - >-
+        n=0;
+        until test -f "$$WHISPER_MODEL"; do
+        n=$$((n+1));
+        if [ "$$n" -ge 180 ]; then
+        echo '[whisper-server] ERROR: Model not found after 30 minutes — exiting so Docker can restart.' >&2;
+        exit 1;
+        fi;
+        sleep 10;
+        done;
+        exec whisper-server --model "$$WHISPER_MODEL" --host 0.0.0.0 --port 8080 --convert
     restart: unless-stopped
     volumes:
       - huggingface-models:/models:ro    # Shared model volume (read-only)
@@ -1429,15 +1449,46 @@ services:
   transcriptionsuite:
     depends_on:
       whisper-server:
-        condition: service_healthy
+        condition: service_started   # NOT service_healthy — see below
 ```
 
 Key design decisions:
 
 - **Port mapping `127.0.0.1:8080:8080`**: On Linux, the main container runs with `network_mode: host` (via `docker-compose.linux-host.yml`), which disables Docker DNS. The port mapping exposes whisper-server on `localhost:8080` so the host-networked main container can reach it. On macOS/Windows with bridge networking, Docker DNS resolves `whisper-server` directly and the port mapping is harmless.
 - **Read-only volume mount**: whisper-server only needs to read GGML model files from the shared HuggingFace models volume.
-- **Health check**: The main container waits for whisper-server to be healthy before starting (`depends_on` with `condition: service_healthy`).
+- **`depends_on: condition: service_started`, not `service_healthy`** (Issue #62): the sidecar's own `/health` can't pass until a model is loaded, but nothing downloads that model until the main container's `WhisperCppBackend.load()` runs — which can't happen before the main container starts. Depending on `service_healthy` here deadlocks on a fresh install (main container waits on sidecar health; sidecar waits on a model only the main container can fetch). `service_started` only waits for the sidecar process to exist; the `command:` wait-loop above and the backend's own pre-`/load` `/health` polling cover the rest.
 - **`/dev/dri` passthrough**: Provides access to GPU render nodes for Vulkan (Mesa RADV for AMD, Intel ANV for Intel).
+
+#### Building & Publishing the Sidecar Images
+
+Linux and Windows use two completely different artifact shapes for the Vulkan-capable whisper.cpp binary, and both are built and published **by hand** — neither is wired into `release.yml`.
+
+**Linux (`whisper-cpp-linux.Dockerfile`) — a Docker image.** The stock `ghcr.io/ggml-org/whisper.cpp:main-vulkan` image ships an AVX2/FMA CPU baseline and SIGILLs on pre-Haswell CPUs (e.g. Ivy Bridge), so this Dockerfile rebuilds `whisper-server` from source with `GGML_NATIVE=OFF` and an explicit AVX+F16C-only instruction set, statically linking `libggml`/`libwhisper` into a single binary. Built and pushed with plain `docker build`/`docker push` — no dedicated script:
+
+```bash
+cd server/docker
+docker build -f whisper-cpp-linux.Dockerfile \
+  -t ghcr.io/homelab-00/whisper-cpp-linux:v1.0.0 \
+  -t ghcr.io/homelab-00/whisper-cpp-linux:latest .
+docker push --all-tags ghcr.io/homelab-00/whisper-cpp-linux
+```
+
+Pin whisper.cpp to a tagged release instead of `master` with `--build-arg WHISPER_CPP_REF=v1.7.4`. As with any first push to a new GHCR package, visibility defaults to Private — flip it to Public afterwards and verify with an anonymous pull (`docker logout ghcr.io && docker pull ghcr.io/homelab-00/whisper-cpp-linux`). Both `docker-compose.vulkan.yml`'s `image:` and `dockerManager.ts`'s `VULKAN_SIDECAR_IMAGE` constant reference this repo by name and must be kept in sync with any rename.
+
+**Windows (native `whisper-server.exe`) — not a Docker image at all.** The `vulkan-wsl2` runtime profile runs whisper.cpp as a native process on the Windows host instead of a sidecar container, so there is no AVX2-baseline concern to rebuild around — the exe is compiled once (standard whisper.cpp CMake Vulkan build for Windows) and published as a plain OCI artifact blob via [`oras`](https://oras.land/), not a container image:
+
+```bash
+oras push ghcr.io/homelab-00/whisper-cpp-windows:v1.0.0,latest \
+  --artifact-type application/vnd.transcriptionsuite.whisper-server \
+  --annotation "org.opencontainers.image.source=https://github.com/homelab-00/TranscriptionSuite" \
+  --annotation "org.opencontainers.image.description=Whisper server (ggml) Windows binary" \
+  --annotation "org.opencontainers.image.version=1.0.0" \
+  directory-where-whisper-server-lives/whisper-server.exe:application/vnd.microsoft.portable-executable
+```
+
+`oras`'s comma-separated tag list pushes the version tag and `latest` in one call so they always point at the same manifest — no separate re-tag step. Flip the package to Public afterwards (same GHCR-defaults-to-Private trap as the Docker repos). At runtime, `downloadWhisperServerExe()` in `dockerManager.ts` pulls this artifact with the same anonymous two-step GHCR auth flow used for image pulls (pull token → OCI manifest → blob by digest), picks the PE-typed layer (falling back to the last layer, since `oras` appends the file after the empty config blob), verifies the downloaded blob's `sha256` digest against the manifest before writing anything to disk, and stores the result at `%APPDATA%\TranscriptionSuite\whisper-server\whisper-server.exe` (via a `.tmp` sidecar + rename so a failed download never leaves a corrupt executable behind).
+
+> **Superseded experimental path:** `whisper-cpp-vulkan-wsl2.Dockerfile` (adds Mesa's `dzn` Vulkan-on-D3D12 ICD to the upstream `main-vulkan` image so it can enumerate `/dev/dxg` under Docker Desktop's WSL2 backend) was an earlier, Docker-sidecar-based approach to Windows GPU support. It is **not published to GHCR** — build it locally with `server/docker/build-vulkan-wsl2.sh` (or `.ps1` on Windows) if you want to experiment with it. The shipped `vulkan-wsl2` profile uses the native `whisper-server.exe` path above instead.
 
 #### Networking by Platform
 
@@ -1463,6 +1514,7 @@ The dashboard's `dockerManager.ts` automatically sets `WHISPERCPP_SERVER_URL` ba
 |---------------------|--------|---------|
 | `WHISPERCPP_SERVER_URL` | dockerManager (auto) | URL for backend → whisper-server communication |
 | `WHISPERCPP_MODEL` | User (optional) | GGML model path inside the container (default: `/models/ggml-large-v3-turbo.bin`) |
+| `WHISPERCPP_EXTERNAL_MODEL_MGMT` | dockerManager (auto, `vulkan-wsl2` only) | Set to `1` so `WhisperCppBackend.load()` skips its own GGML download and `/load` POST — the native host exe owns model loading on Windows, relaunched onto the requested model by the dashboard instead |
 
 To use a different GGML model, set `WHISPERCPP_MODEL` in your `.env` file or pass it via `StartContainerOptions.whispercppModel` from the dashboard.
 
@@ -1486,9 +1538,11 @@ whisper.cpp models have different capabilities compared to the default faster-wh
 | `server/backend/core/stt/capabilities.py` | Translation validation (GGML falls through to Whisper logic) |
 | `server/backend/config.py` | `whisper_cpp` config section + `WHISPERCPP_SERVER_URL` env override |
 | `server/backend/core/model_manager.py` | Feature status reporting (`get_whispercpp_feature_status()`) |
-| `server/docker/docker-compose.vulkan.yml` | Sidecar overlay (whisper-server image, healthcheck, volumes) |
+| `server/docker/docker-compose.vulkan.yml` | Sidecar overlay (whisper-server image, model-wait command, healthcheck, volumes) |
+| `server/docker/whisper-cpp-linux.Dockerfile` | Linux sidecar image build (no-AVX2 whisper.cpp Vulkan rebuild) |
+| `server/docker/whisper-cpp-vulkan-wsl2.Dockerfile`, `build-vulkan-wsl2.sh`/`.ps1` | Superseded experimental Windows Docker-sidecar path (unpublished, local-build only) |
 | `dashboard/src/services/modelCapabilities.ts` | Frontend GGML detection + capability flags |
-| `dashboard/electron/dockerManager.ts` | Vulkan runtime profile, platform-aware env injection |
+| `dashboard/electron/dockerManager.ts` | Vulkan runtime profile, platform-aware env injection, `whisper-server.exe` oras download/relaunch logic |
 
 #### Limitations
 
@@ -1531,6 +1585,8 @@ GH-83). The toggle is opt-in per user so nothing happens automatically.
 **Repo layout:**
 - Default: `ghcr.io/homelab-00/transcriptionsuite-server:<tag>` — cu129, `sm_70..sm_120`
 - Legacy: `ghcr.io/homelab-00/transcriptionsuite-server-legacy:<tag>` — cu126, `sm_50..sm_90`
+- Vulkan-WSL2 (Windows): `ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2:<tag>` — cu129, byte-identical to default; GGML transcription runs in the native `whisper-server.exe` sidecar instead of a container
+- Vulkan-Linux: `ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux:<tag>` — cu129, byte-identical to default; GGML transcription runs in the `whisper-cpp-linux` Docker sidecar (see §6.9)
 
 The legacy image is published to a **separate GHCR repo**, not a tag suffix, so
 `VERSION_RE` (`dashboard/src/services/versionUtils.ts`) and the tag-selector
@@ -1556,11 +1612,16 @@ the toggle in Server settings (Runtime = GPU (CUDA)).
 
 **Building and publishing:**
 
-Two workflows — the two-step flow mirrors the default-image release process;
-the one-shot flow is a convenience that does `docker build` + push in a single
-invocation. Pick whichever matches your habits.
+Default and Legacy share one `Dockerfile` and go through `docker-build-push.sh`
+(it knows how to build and push both). The two Vulkan variants are simpler in
+one sense — they're byte-identical to the default image (same `Dockerfile`,
+same cu129 wheels, no `PYTORCH_VARIANT` override; only the sidecar differs, see
+§6.9) — but `docker-build-push.sh` has no `vulkan-linux` case, and `vulkan-wsl2`
+isn't actually published through it either despite the script accepting
+`--variant vulkan-wsl2`. Both are built with a plain `docker compose build` and
+published with a manual `docker tag` + `docker push --all-tags` instead.
 
-*Two-step (mirrors the default-image release flow):*
+*Default and Legacy, two-step (mirrors the default-image release process):*
 ```bash
 # Default cu129 image (unchanged from before GH-83):
 TAG=v1.3.3 docker compose -f server/docker/docker-compose.yml build --no-cache
@@ -1571,12 +1632,6 @@ TAG=v1.3.3 PYTORCH_VARIANT=cu126 \
   IMAGE_REPO=ghcr.io/homelab-00/transcriptionsuite-server-legacy \
   docker compose -f server/docker/docker-compose.yml build --no-cache
 ./build/docker-build-push.sh --variant legacy v1.3.3
-
-# Vulkan-WSL2 image (same cu129 wheels as default, separate GHCR repo):
-TAG=v1.3.3 \
-  IMAGE_REPO=ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2 \
-  docker compose -f server/docker/docker-compose.yml build --no-cache
-./build/docker-build-push.sh --variant vulkan-wsl2 v1.3.3
 ```
 The three env vars for the legacy build:
 - `PYTORCH_VARIANT=cu126` — compose `build.args` picks it up and bakes it into
@@ -1585,42 +1640,56 @@ The three env vars for the legacy build:
   legacy repo locally (what `docker-build-push.sh --variant legacy` then pushes).
 - `TAG` — the version tag, same semantics as before.
 
-The vulkan-wsl2 build takes only **two** env vars — it omits `PYTORCH_VARIANT`
-because this variant uses the same cu129 wheels as default. The Vulkan GGML
-transcription runs in a native `whisper-server.exe` sidecar, so the main server
-image is unchanged from default; only the target GHCR repo differs:
-- `IMAGE_REPO=…-vulkan-wsl2` — tags the build under the vulkan-wsl2 repo locally
-  (what `docker-build-push.sh --variant vulkan-wsl2` then pushes).
-- `TAG` — the version tag, same semantics as before.
-
-*One-shot (runs `docker build` with the right build-arg, then pushes):*
+*Default and Legacy, one-shot (runs `docker build` with the right build-arg, then pushes):*
 ```bash
-# Default:
 ./build/docker-build-push.sh --build v1.3.3
-
-# Legacy:
 ./build/docker-build-push.sh --variant legacy --build v1.3.3
-
-# Vulkan-WSL2:
-./build/docker-build-push.sh --variant vulkan-wsl2 --build v1.3.3
 ```
 
-*Releasing all variants of the same version:* run the legacy and vulkan-wsl2
-commands (or their one-shot equivalents) after the two default ones. Each
-targets its own GHCR repo and its own `:latest` alias, so they never collide.
+*Vulkan-WSL2 (Windows) — build the plain default image, then tag it into the
+dedicated repo and push everything:*
+```bash
+cd server/docker
+docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml build transcriptionsuite
+docker tag ghcr.io/homelab-00/transcriptionsuite-server:latest \
+  ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2:v1.3.7
+docker tag ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2:v1.3.7 \
+  ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2:latest
+docker push --all-tags ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2
+```
 
-`--variant legacy` flips both the build-arg (`PYTORCH_VARIANT=cu126`) and the
-push target. `--variant vulkan-wsl2` flips only the push target (build-arg stays
-at the cu129 default). `latest` is auto-tagged only within each variant's own
-repo; the default repo is never touched by a legacy or vulkan-wsl2 run. See
-`build/docker-build-push.sh --help` for full usage.
+*Vulkan-Linux — same shape, built with the Linux Vulkan overlay so the local
+image matches the full stack that will actually run:*
+```bash
+cd server/docker
+docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.vulkan.yml build transcriptionsuite
+docker tag ghcr.io/homelab-00/transcriptionsuite-server:latest \
+  ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux:v1.3.7
+docker tag ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux:v1.3.7 \
+  ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux:latest
+docker push --all-tags ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux
+```
+
+Both Vulkan builds compile the same `transcriptionsuite` service from the
+unmodified `Dockerfile` with no `IMAGE_REPO`/`PYTORCH_VARIANT` override, so the
+result is tagged under the plain default repo (`...transcriptionsuite-server:latest`)
+first; the compose overlays (`desktop-vm` / `linux-host` + `vulkan`) only affect
+*runtime* networking and the sidecar, not the image contents. The subsequent
+`docker tag` moves that image into the variant's own dedicated repo without a
+rebuild, and `docker push --all-tags` publishes every locally-tagged version for
+that repo (the version tag and `latest`) in one call.
+
+*Releasing all variants of the same version:* run the legacy, vulkan-wsl2, and
+vulkan-linux commands after the two default ones. Each targets its own GHCR
+repo and its own `:latest` alias, so they never collide.
 
 > **First push of a new GHCR package?** GHCR defaults new package visibility to
 > **Private** — the same gap that broke anonymous pulls for `-legacy` in v1.3.3
-> (issues #83/#99). After the first `transcriptionsuite-server-vulkan-wsl2` push,
-> flip the package to Public and verify with an anonymous pull
-> (`docker logout ghcr.io && docker pull …-vulkan-wsl2:<tag>`). The push script
-> prints the exact settings URL and verification command on completion.
+> (issues #83/#99). After the first push to `transcriptionsuite-server-vulkan-wsl2`
+> or `transcriptionsuite-server-vulkan-linux`, flip the package to Public and
+> verify with an anonymous pull (`docker logout ghcr.io && docker pull
+> ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2:<tag>`, likewise for
+> `-vulkan-linux`).
 
 **Trade-offs:**
 - Legacy first-run bootstrap is longer than the default variant — without

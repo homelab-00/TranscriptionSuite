@@ -402,13 +402,16 @@ Either way, you use **GGML models** (not the CUDA models) — see the [model tab
 
 **How to set it up:**
 
-1. In the dashboard, select **Vulkan** as the runtime profile (instead of GPU or CPU) when starting the server.
-2. The dashboard automatically starts the whisper-server helper container alongside the main one.
-3. Pick a **GGML model** — the dashboard suggests **`ggml-large-v3-turbo-q8_0.bin`** as a starting point.
-4. Download the model from the **Model Manager** tab (it streams straight from HuggingFace into the models volume — no Python or CLI tools needed).
-5. Click **Start Server** — the sidecar loads the model and the main container routes requests to it.
+1. In the **1. Runtime Settings** card, select **Vulkan Linux** as the runtime profile.
+2. In the **2. Docker Image** card, select the **Vulkan Linux** image variant and click **Fetch Fresh Image**. This profile uses its own dedicated image, so wait for the download to finish.
+3. In the **3. Instance Settings** card, under **Main Transcriber** select **whisper.cpp**, then pick the GGML model you want from the dropdown below it — e.g. `ggml-large-v3-turbo-q8_0.bin` (see the [model table below](#available-ggml-models)).
+4. Under **Live Mode Model**, select **whisper.cpp** again, then pick the GGML model you want for Live Mode from the dropdown below it.
+5. Click **Start Local**.
+6. In the setup prompts, when it gets to diarization, click **Skip** for now — diarization isn't available for whisper.cpp (GGML) models yet.
 
-> **Switching models:** the sidecar loads its model once at startup. To switch, stop the server, pick the new model, then start again.
+> **Use the same model for Main and Live Mode.** Picking different GGML models for the main transcriber and Live Mode currently has some issues we're still working on — stick to the same model for both until that's resolved.
+
+> **Switching models:** model selection is locked while the server is running. To switch, stop the server, pick the new model in Instance Settings, then start again.
 
 #### Available GGML models
 
