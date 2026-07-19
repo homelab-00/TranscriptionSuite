@@ -2343,7 +2343,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                 <div className="border-b border-white/5 pb-4">
                   <div className="flex flex-wrap items-center gap-5">
                     {!isMetal && (
-                      <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
+                      <div className="flex shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
                         <StatusLight
                           status={
                             isRunningAndHealthy
@@ -2354,25 +2354,31 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           }
                           animate={isRunningAndHealthy}
                         />
-                        <span
-                          className={`font-mono text-sm transition-colors ${
-                            isRunning
-                              ? 'text-slate-300'
-                              : containerStatus.exists
-                                ? 'text-accent-orange'
-                                : 'text-slate-500'
-                          }`}
-                        >
-                          {statusLabel}
-                        </span>
-                        {isRunning && serverMode && (
+                        {/* Status label and the LOCAL/REMOTE mode badge stack
+                            vertically so the badge sits directly under the
+                            Running/Stopped text instead of widening this block
+                            and pushing the action buttons into an overflow. */}
+                        <div className="flex flex-col items-start gap-1">
                           <span
-                            className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                            className={`font-mono text-sm transition-colors ${
+                              isRunning
+                                ? 'text-slate-300'
+                                : containerStatus.exists
+                                  ? 'text-accent-orange'
+                                  : 'text-slate-500'
+                            }`}
                           >
-                            {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
-                            {serverMode}
+                            {statusLabel}
                           </span>
-                        )}
+                          {isRunning && serverMode && (
+                            <span
+                              className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase ${serverMode === 'local' ? 'bg-accent-cyan/15 text-accent-cyan' : 'bg-accent-magenta/15 text-accent-magenta'}`}
+                            >
+                              {serverMode === 'local' ? <Laptop size={10} /> : <Radio size={10} />}
+                              {serverMode}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     )}
                     <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-4">
