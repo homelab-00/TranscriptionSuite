@@ -35,9 +35,11 @@
 
 <div align="center">
 
-**Demo**
+**Preview**
 
-https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
+
+https://github.com/user-attachments/assets/f1ad13d3-fe5b-433b-b912-f13a83e2c240
+
 
 </div>
 
@@ -47,7 +49,6 @@ https://github.com/user-attachments/assets/f63ee730-de9a-4a55-b0ab-e342b30905a4
   - [1.1 Features](#11-features)
   - [1.2 Compatibility Matrix](#12-compatibility-matrix)
   - [1.3 Screenshots](#13-screenshots)
-  - [1.4 Short Tour](#14-short-tour)
 - [2. Installation](#2-installation)
   - [2.1 macOS Apple Silicon](#21-macos-apple-silicon)
   - [2.2 macOS Intel](#22-macos-intel)
@@ -158,14 +159,6 @@ A **runtime** is the engine mode the app uses to run the models, and it maps to 
 | Audio Note View | Server Tab |
 |:---------------:|:----------:|
 | ![Audio Note View](assets/shot-3.png) | ![Server Tab](assets/shot-4.png) |
-
-</div>
-
-### 1.4 Short Tour
-
-<div align="center">
-
-https://github.com/user-attachments/assets/688fd4b2-230b-4e2f-bfed-7f92aa769010
 
 </div>
 
