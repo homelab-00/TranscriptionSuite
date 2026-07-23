@@ -2,6 +2,7 @@
 Health and status endpoints for TranscriptionSuite server.
 """
 
+import shutil
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -93,6 +94,12 @@ async def get_status(request: Request) -> dict[str, Any]:
         "features": status.get("features", {}),
         "ready": is_ready or is_live_mode_active(),
     }
+
+    # The native mac-metal backend runs on a host that may lack ffmpeg entirely
+    # (Docker images bundle it), which silently breaks every non-WAV import
+    # (GH #255). Surface it so the dashboard can warn before an import fails.
+    # Additive + backward compatible.
+    response["ffmpeg_available"] = shutil.which("ffmpeg") is not None
 
     # Surface the container's *actual* GPU availability (CUDA usable inside this
     # container), not the host's. The dashboard's host-side preflight can report

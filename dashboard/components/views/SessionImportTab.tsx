@@ -58,7 +58,16 @@ function formatTimeEst(ms: number): string {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export const SessionImportTab: React.FC = () => {
+interface SessionImportTabProps {
+  /**
+   * Server-reported ffmpeg availability from /api/status (GH-255). False
+   * means every non-WAV import will fail to decode; undefined means the
+   * server predates the field and no warning should be shown.
+   */
+  ffmpegAvailable?: boolean;
+}
+
+export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvailable }) => {
   // Zustand store
   const jobs = useImportQueueStore(useShallow(selectSessionJobs));
   const isPaused = useImportQueueStore((s) => s.isPaused);
@@ -572,6 +581,19 @@ export const SessionImportTab: React.FC = () => {
           e.target.value = '';
         }}
       />
+
+      {/* GH-255: the server host has no ffmpeg — every non-WAV import will
+          fail to decode, so warn before the user drops a file. */}
+      {ffmpegAvailable === false && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2.5">
+          <AlertCircle size={14} className="mt-0.5 shrink-0 text-amber-400" />
+          <p className="flex-1 text-xs text-amber-300">
+            <strong>FFmpeg is not installed on the server host</strong> - only WAV files can be
+            imported. On macOS, install it with <strong>brew install ffmpeg</strong>, then restart
+            the server.
+          </p>
+        </div>
+      )}
 
       {/* Drop Zone */}
       <div

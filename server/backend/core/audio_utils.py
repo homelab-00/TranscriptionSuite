@@ -526,6 +526,15 @@ AUDIO_DECODE_ERROR_MESSAGE = (
     "Could not decode audio: the file is empty, corrupt, or in an unsupported format."
 )
 
+# GH #255: shown when ffmpeg is absent on the server host (native mac-metal
+# builds — Docker images bundle ffmpeg). Static and path-free, safe to surface
+# to clients verbatim.
+FFMPEG_MISSING_ERROR_MESSAGE = (
+    "FFmpeg is not installed on the server host, so this audio format cannot be "
+    "decoded. Install FFmpeg (macOS: brew install ffmpeg) and restart the "
+    "server, or import a WAV file instead."
+)
+
 
 class AudioDecodeError(ValueError):
     """Raised when an uploaded audio file cannot be decoded.
@@ -614,6 +623,15 @@ def load_audio(
     """
     # Import config here to avoid circular dependency
     from server.config import get_config
+
+    # A missing ffmpeg executable is an environment problem knowable before any
+    # decode attempt — fail fast with an actionable message instead of letting
+    # both loaders fail and surface the generic corrupt-file error, which
+    # blames the user's (perfectly fine) file (GH #255). WAV never needs
+    # ffmpeg: the legacy soundfile path decodes it directly.
+    if Path(file_path).suffix.lower() not in (".wav", ".wave") and not shutil.which("ffmpeg"):
+        logger.error("FFmpeg executable not found — cannot decode non-WAV audio")
+        raise AudioDecodeError(FFMPEG_MISSING_ERROR_MESSAGE)
 
     try:
         cfg = get_config()

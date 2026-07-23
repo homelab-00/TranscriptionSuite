@@ -35,6 +35,12 @@ export interface ServerStatus {
    * Consumed by the GpuHealthCard on the Server tab.
    */
   gpu_error_recovery_hint?: string;
+  /**
+   * Whether ffmpeg is present on the server host (GH-255). False on native
+   * mac-metal installs without Homebrew ffmpeg, where every non-WAV import
+   * fails to decode. Absent on older servers that predate the field.
+   */
+  ffmpeg_available?: boolean;
   diarization_available?: boolean;
   active_connections?: number;
   tls_enabled?: boolean;

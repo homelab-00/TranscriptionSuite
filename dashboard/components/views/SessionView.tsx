@@ -1328,7 +1328,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
           <div className="mb-6 flex flex-col space-y-2">
             <h1 className="text-3xl font-bold tracking-tight text-white">Session</h1>
           </div>
-          <SessionImportTab />
+          <SessionImportTab ffmpegAvailable={serverConnection.details?.ffmpeg_available} />
         </div>
       </div>
     );

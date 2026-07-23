@@ -976,6 +976,71 @@ class TestLoadAudioDecodeErrors:
         assert "tmpGARBAGE" not in str(exc.value)
 
 
+# ── Missing-ffmpeg preflight (GH #255) ────────────────────────────────────
+
+
+class TestLoadAudioFfmpegMissing:
+    """load_audio() must detect a missing ffmpeg executable BEFORE attempting to
+    decode a non-WAV file and raise an actionable, path-free error instead of
+    the generic corrupt-file message that misled the GH #255 reporter into
+    thinking their m4a was broken."""
+
+    def test_m4a_with_ffmpeg_missing_raises_actionable_error(self, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda _cmd: None)
+        with pytest.raises(au.AudioDecodeError) as exc:
+            au.load_audio("/tmp/recording.m4a")
+        msg = str(exc.value)
+        assert msg == au.FFMPEG_MISSING_ERROR_MESSAGE
+        assert msg != au.AUDIO_DECODE_ERROR_MESSAGE
+        assert "ffmpeg" in msg.lower()
+        assert "/tmp" not in msg
+        assert "recording" not in msg
+        # Still a ValueError subclass so route handlers keep mapping it to 400.
+        assert isinstance(exc.value, ValueError)
+
+    def test_mp3_with_ffmpeg_missing_raises_actionable_error(self, monkeypatch):
+        # The GH #255 reporter also tried an mp3 — same preflight must fire.
+        monkeypatch.setattr("shutil.which", lambda _cmd: None)
+        with pytest.raises(au.AudioDecodeError) as exc:
+            au.load_audio("/tmp/voice-memo.mp3")
+        assert str(exc.value) == au.FFMPEG_MISSING_ERROR_MESSAGE
+
+    def test_wav_with_ffmpeg_missing_still_decodes(self, tmp_path, monkeypatch):
+        # WAV never needs ffmpeg (legacy soundfile path) — the preflight must
+        # not block it. Real file, real decode, no loader mocks.
+        import soundfile as sf
+
+        monkeypatch.setattr("shutil.which", lambda _cmd: None)
+        p = tmp_path / "ok.wav"
+        sf.write(str(p), np.zeros(1600, dtype=np.float32), 16000)
+        out, sr = au.load_audio(str(p))
+        assert sr == 16000
+        assert len(out) > 0
+
+    def test_wav_suffix_check_is_case_insensitive(self, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda _cmd: None)
+        monkeypatch.setattr("server.config.get_config", _raiser(RuntimeError("no config")))
+        arr = np.zeros(16, dtype=np.float32)
+        monkeypatch.setattr(au, "load_audio_legacy", lambda *_a, **_kw: (arr, 16000))
+        out, sr = au.load_audio("/tmp/UPPER.WAV")
+        assert sr == 16000
+
+    def test_ffmpeg_present_keeps_generic_decode_error(self, monkeypatch):
+        # With ffmpeg available, a genuine decode failure must still surface
+        # the generic (path-free) message — the preflight must not misfire.
+        monkeypatch.setattr("shutil.which", lambda _cmd: "/usr/bin/ffmpeg")
+        monkeypatch.setattr("server.config.get_config", _raiser(RuntimeError("no config")))
+        monkeypatch.setattr(au, "load_audio_legacy", _raiser(RuntimeError("bad mpeg frame")))
+        with pytest.raises(au.AudioDecodeError) as exc:
+            au.load_audio("/tmp/broken.mp3")
+        assert str(exc.value) == au.AUDIO_DECODE_ERROR_MESSAGE
+
+    def test_ffmpeg_missing_message_is_path_free(self):
+        # The message is a static constant surfaced verbatim to clients; it
+        # must never contain filesystem paths (FINDING #1 discipline).
+        assert "/" not in au.FFMPEG_MISSING_ERROR_MESSAGE.replace("brew install ffmpeg", "")
+
+
 # ── Metal / unified-memory GPU detection (FINDING #3) ─────────────────────
 
 
