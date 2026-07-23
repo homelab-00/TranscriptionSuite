@@ -213,3 +213,28 @@ def test_status_omits_gpu_available_when_model_manager_missing(test_client_local
 
     assert response.status_code == 200
     assert "gpu_available" not in response.json()
+
+
+def test_status_reports_ffmpeg_available_true(test_client_local, monkeypatch):
+    """GET /api/status reports ffmpeg_available=true when ffmpeg is on PATH."""
+    monkeypatch.setattr("shutil.which", lambda _cmd: "/usr/bin/ffmpeg")
+
+    response = test_client_local.get("/api/status")
+
+    assert response.status_code == 200
+    assert response.json()["ffmpeg_available"] is True
+
+
+def test_status_reports_ffmpeg_available_false_when_missing(test_client_local, monkeypatch):
+    """
+    The bug this guards (GH #255): the native mac-metal host may have no
+    ffmpeg at all, which silently breaks every non-WAV import. /api/status
+    must report ffmpeg_available=False so the dashboard can warn up front
+    instead of letting imports fail with a misleading decode error.
+    """
+    monkeypatch.setattr("shutil.which", lambda _cmd: None)
+
+    response = test_client_local.get("/api/status")
+
+    assert response.status_code == 200
+    assert response.json()["ffmpeg_available"] is False
