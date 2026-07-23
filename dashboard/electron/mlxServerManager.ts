@@ -103,6 +103,18 @@ export class MLXServerManager {
       ? inheritedPath
       : `${homebrewBins}:${inheritedPath}`;
 
+    // GH #255: the Metal DMG ships a static ffmpeg/ffprobe pair at
+    // Resources/ffmpeg (injected and code-signed by release.yml). Append that
+    // dir AFTER the Homebrew bins so a user-installed FFmpeg (typically a
+    // fuller build) still wins, while hosts without one fall back to the
+    // bundled binaries instead of failing every non-WAV decode.
+    const bundledFfmpegDir =
+      app.isPackaged && process.resourcesPath ? path.join(process.resourcesPath, 'ffmpeg') : null;
+    const spawnPath =
+      bundledFfmpegDir && fs.existsSync(path.join(bundledFfmpegDir, 'ffmpeg'))
+        ? `${augmentedPath}:${bundledFfmpegDir}`
+        : augmentedPath;
+
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
       DATA_DIR: dataDir,
@@ -115,7 +127,7 @@ export class MLXServerManager {
       // Force line-buffered stdout so the Electron parent sees output
       // immediately instead of waiting for the 8KB pipe buffer to fill.
       PYTHONUNBUFFERED: '1',
-      PATH: augmentedPath,
+      PATH: spawnPath,
     };
     if (opts.hfToken) env.HF_TOKEN = opts.hfToken;
     if (opts.mainTranscriberModel) env.MAIN_TRANSCRIBER_MODEL = opts.mainTranscriberModel;

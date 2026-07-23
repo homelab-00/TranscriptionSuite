@@ -296,6 +296,84 @@ jobs:
           fi
           echo "✓ Bundled MLX venv verified (uvicorn + fastapi present and importable)"
 
+      - name: Bundle static ffmpeg + ffprobe into app bundle
+        # GH #255: macOS ships no ffmpeg, and the Metal backend shells out to
+        # ffmpeg/ffprobe for every non-WAV decode (imports, multitrack probing,
+        # duration, notebook MP3). Bundle a self-contained static pair so the
+        # native build works without Homebrew. mlxServerManager appends this
+        # directory to the spawned server's PATH after the Homebrew bins, so a
+        # user-installed FFmpeg still takes precedence.
+        #
+        # Binaries: FFmpeg GPL static arm64 builds from
+        # https://ffmpeg.martin-riedl.de (build script published at
+        # https://git.martin-riedl.de/ffmpeg/build-script). Pinned to an
+        # immutable versioned path with hardcoded SHA256s of the zips — a
+        # changed or compromised upstream fails the build instead of shipping
+        # silently. To bump: pick a new versioned path from the site, update
+        # FFMPEG_BUILD and both hashes from the published .zip.sha256 files.
+        #
+        # ORDERING (GH #154): this step mutates Contents/Resources, so it MUST
+        # run before the re-sign step below. The re-sign's `-perm /111` pass
+        # signs these binaries automatically, and the seal gate then covers
+        # them.
+        env:
+          FFMPEG_BUILD: "1783011502_8.1.2"
+          FFMPEG_ZIP_SHA256: "ef1aa60006c7b77ce170c1608c08d8e4ba1c30c5746f2ac986ded932d0ac2c3c"
+          FFPROBE_ZIP_SHA256: "c39787f4af7a3932502d2d48db6f6feaaa836b48a73ef78c32cc3285df61dfaf"
+        run: |
+          APP_BUNDLE="$(pwd)/dashboard/release/mac-arm64/TranscriptionSuite.app"
+          FFMPEG_DIR="$APP_BUNDLE/Contents/Resources/ffmpeg"
+          BASE_URL="https://ffmpeg.martin-riedl.de/download/macos/arm64/${FFMPEG_BUILD}"
+          mkdir -p "$FFMPEG_DIR"
+
+          fetch_tool() {
+            local tool="$1" sha="$2"
+            curl -fsSL --retry 3 -o "$tool.zip" "$BASE_URL/$tool.zip"
+            echo "$sha  $tool.zip" | shasum -a 256 -c -
+            unzip -o -q "$tool.zip" -d "$FFMPEG_DIR"
+            chmod 755 "$FFMPEG_DIR/$tool"
+            rm "$tool.zip"
+          }
+          fetch_tool ffmpeg "$FFMPEG_ZIP_SHA256"
+          fetch_tool ffprobe "$FFPROBE_ZIP_SHA256"
+
+          # Smoke-run on the arm64 runner: the binaries must execute and carry
+          # the codecs the backend depends on (aac/mp3/flac/vorbis/opus decode
+          # for imports, libmp3lame encode for notebook MP3 conversion).
+          "$FFMPEG_DIR/ffmpeg" -version | head -1
+          "$FFMPEG_DIR/ffprobe" -version | head -1
+          DECODERS="$("$FFMPEG_DIR/ffmpeg" -hide_banner -decoders)"
+          for codec in aac mp3 flac vorbis opus; do
+            if ! echo "$DECODERS" | grep -qw "$codec"; then
+              echo "::error::Bundled ffmpeg is missing the $codec decoder"
+              exit 1
+            fi
+          done
+          if ! "$FFMPEG_DIR/ffmpeg" -hide_banner -encoders | grep -qw libmp3lame; then
+            echo "::error::Bundled ffmpeg is missing the libmp3lame encoder"
+            exit 1
+          fi
+
+          # GPL compliance: record what ships and where its source and build
+          # script live, next to the binaries.
+          cat > "$FFMPEG_DIR/NOTICE.txt" <<EOF
+          FFmpeg static binaries (ffmpeg, ffprobe) for macOS arm64
+          Build: ${FFMPEG_BUILD} from https://ffmpeg.martin-riedl.de
+          Build script (Apache-2.0): https://git.martin-riedl.de/ffmpeg/build-script
+          FFmpeg source code: https://ffmpeg.org/download.html
+
+          These binaries are compiled with --enable-gpl (includes libx264 and
+          libx265) and are distributed under the GNU General Public License.
+          Run "./ffmpeg -L" for the full license text and "./ffmpeg -buildconf"
+          for the exact configure flags. TranscriptionSuite itself is licensed
+          under GPL-3.0 (see the LICENSE file in the repository).
+
+          The bundled binaries are a fallback used only when no ffmpeg is found
+          on PATH; a Homebrew-installed FFmpeg takes precedence.
+          EOF
+
+          echo "✓ Bundled static ffmpeg/ffprobe (${FFMPEG_BUILD}) into Resources/ffmpeg"
+
       - name: Re-sign app bundle after backend injection
         # electron-builder builds with hardenedRuntime=true, signing the Electron
         # binaries.  Adding the Python venv (with many unsigned .so files) breaks

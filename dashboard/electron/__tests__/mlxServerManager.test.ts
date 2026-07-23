@@ -524,3 +524,82 @@ describe('[GH #136] MLXServerManager native model cache', () => {
     });
   });
 });
+
+// ── GH #255 — bundled ffmpeg PATH fallback ────────────────────────────────
+
+describe('[GH #255] MLXServerManager bundled ffmpeg on spawn PATH', () => {
+  const proc = process as unknown as { resourcesPath?: string };
+  const originalResourcesPath = proc.resourcesPath;
+  let mockWindow: ReturnType<typeof makeMockWindow>;
+
+  /** Make the uvicorn/python/symlink probes succeed, plus any extra paths. */
+  function stubExists(extra: (p: string) => boolean = () => false) {
+    mockExistsSync.mockImplementation((p: string) => {
+      if (typeof p !== 'string') return false;
+      if (p.includes('uvicorn') || p.includes('python3') || p.endsWith('/server')) return true;
+      return extra(p);
+    });
+  }
+
+  /** Drive start() to running and return the env passed to spawn(). */
+  async function startAndCaptureSpawnEnv(): Promise<Record<string, string>> {
+    const child = makeChildProcess();
+    mockSpawn.mockReturnValue(child);
+    const manager = new MLXServerManager(() => mockWindow as never);
+    const startPromise = manager.start({ port: 8000 });
+    child.stderr.emit('data', Buffer.from('Application startup complete\n'));
+    await startPromise;
+    const [, , spawnOptions] = mockSpawn.mock.calls[0] as [
+      string,
+      string[],
+      { env: Record<string, string> },
+    ];
+    return spawnOptions.env;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWindow = makeMockWindow();
+    mockApp.isPackaged = false;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    proc.resourcesPath = originalResourcesPath;
+  });
+
+  it('packaged with Resources/ffmpeg/ffmpeg present: appends the bundled dir after the Homebrew bins', async () => {
+    mockApp.isPackaged = true;
+    proc.resourcesPath = '/mock/Resources';
+    stubExists((p) => p === '/mock/Resources/ffmpeg/ffmpeg');
+
+    const env = await startAndCaptureSpawnEnv();
+
+    const dirs = env.PATH.split(':');
+    expect(dirs).toContain('/mock/Resources/ffmpeg');
+    // A user-installed Homebrew FFmpeg must still win over the bundled one.
+    expect(dirs.indexOf('/mock/Resources/ffmpeg')).toBeGreaterThan(
+      dirs.indexOf('/opt/homebrew/bin'),
+    );
+  });
+
+  it('packaged without the bundled binary (e.g. thin DMG): PATH does not gain the dir', async () => {
+    mockApp.isPackaged = true;
+    proc.resourcesPath = '/mock/Resources';
+    stubExists();
+
+    const env = await startAndCaptureSpawnEnv();
+
+    expect(env.PATH.split(':')).not.toContain('/mock/Resources/ffmpeg');
+  });
+
+  it('development (not packaged): PATH is untouched even if a Resources/ffmpeg exists', async () => {
+    mockApp.isPackaged = false;
+    proc.resourcesPath = '/mock/Resources';
+    stubExists((p) => p === '/mock/Resources/ffmpeg/ffmpeg');
+
+    const env = await startAndCaptureSpawnEnv();
+
+    expect(env.PATH.split(':')).not.toContain('/mock/Resources/ffmpeg');
+  });
+});
