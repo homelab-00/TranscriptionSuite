@@ -2357,7 +2357,16 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   // and select the cpu PyTorch wheels so the bootstrap skips the multi-GB CUDA
   // wheels a CPU-only host can't use (GH-125). Set on composeEnv only (not
   // persisted to .env) so a later GPU launch is unaffected.
-  if (runtimeProfile === 'cpu') {
+  //
+  // Vulkan (Linux) and vulkan-wsl2 (Windows) get the same treatment:
+  // composeFileArgs() only attaches the NVIDIA device-passthrough overlay
+  // (docker-compose.gpu.yml) for the 'gpu' profile, so the main container never
+  // has CUDA device access on either Vulkan profile regardless of wheel variant
+  // — GPU-accelerated ASR runs through the whisper.cpp/Vulkan sidecar instead
+  // (containerised on Linux via /dev/dri, a native whisper-server.exe on
+  // Windows). The cu129 wheels (~3.9GB of nvidia-* packages, see uv.lock) buy
+  // nothing on either profile.
+  if (runtimeProfile === 'cpu' || runtimeProfile === 'vulkan' || runtimeProfile === 'vulkan-wsl2') {
     composeEnv['CUDA_VISIBLE_DEVICES'] = '';
     composeEnv['PYTORCH_VARIANT'] = 'cpu';
   }
