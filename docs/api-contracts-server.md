@@ -20,7 +20,7 @@
 |--------|------|------|---------|
 | GET | `/health` | none | Liveness probe (`{status, service}`) |
 | GET | `/ready` | user | Readiness — 200 when model loaded/disabled or Live Mode active, else 503 |
-| GET | `/api/status` | none | Detailed status: version, models, features, `ready`, `gpu_available`, `gpu_error` |
+| GET | `/api/status` | none | Detailed status: version, models, features, `ready`, `gpu_available`, `ffmpeg_available`, `gpu_error` |
 
 ### Authentication (`/api/auth`)
 | Method | Path | Auth | Purpose |
