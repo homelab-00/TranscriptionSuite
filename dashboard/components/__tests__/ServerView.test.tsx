@@ -212,6 +212,8 @@ vi.mock('../../src/types/runtime', () => ({
 // ── Import after mocks ────────────────────────────────────────────────────
 
 import { ServerView } from '../views/ServerView';
+import { getConfig, setConfig } from '../../src/config/store';
+import { toast } from 'sonner';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -941,6 +943,156 @@ describe('Docker image variant selector', () => {
       expect(legacyTile.disabled).toBe(false);
     });
     expect(screen.queryByText('Not published')).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Extra CA certificates picker (GH-200) — the Volumes card exposes a folder
+// picker whose value dockerManager reads at container start and passes to
+// compose as EXTRA_CA_CERTS_DIR (TLS-intercepting antivirus/proxy networks).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Extra CA certificates picker (GH-200)', () => {
+  function setupCaApi(configMap: Record<string, unknown>) {
+    const selectFolder = vi.fn().mockResolvedValue(null);
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockImplementation(async (key: string) => configMap[key]),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+        checkModelCache: vi.fn().mockResolvedValue({}),
+      },
+      app: {
+        getArch: vi.fn().mockReturnValue('x64'),
+        getConfigDir: vi.fn().mockResolvedValue('/mock/config'),
+      },
+      mlx: {
+        getStatus: vi.fn().mockResolvedValue('stopped'),
+        onStatusChanged: vi.fn().mockReturnValue(vi.fn()),
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+      },
+      tailscale: {
+        getHostname: vi.fn().mockResolvedValue('my-server.tail1234.ts.net'),
+      },
+      server: {
+        checkFirewallPort: vi.fn().mockResolvedValue(null),
+        checkGpu: vi.fn().mockResolvedValue({ gpu: false, toolkit: false, vulkan: false }),
+      },
+      fileIO: { selectFolder },
+    };
+    return { selectFolder };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDocker.available = true;
+    mockDocker.images = [];
+    mockDocker.volumes = [];
+    mockDocker.container = { exists: false, running: false, status: 'unknown', health: undefined };
+    mockDocker.operationError = null;
+    mockDocker.operating = false;
+    mockDocker.composeAvailable = true;
+    mockAdminStatus.status = { models: {} };
+    // Restore the module-factory default after tests that override it.
+    vi.mocked(getConfig).mockReset();
+    vi.mocked(getConfig).mockResolvedValue(undefined);
+  });
+
+  it('persists a chosen folder and shows it in the Volumes card', async () => {
+    const { selectFolder } = setupCaApi({ 'server.runtimeProfile': 'cpu' });
+    selectFolder.mockResolvedValue('/home/me/.config/TranscriptionSuite/ca');
+
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    expect(await screen.findByText('Extra CA certificates')).toBeDefined();
+
+    fireEvent.click(screen.getByText('Choose folder').closest('button') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(vi.mocked(setConfig)).toHaveBeenCalledWith(
+        'server.extraCaCertsDir',
+        '/home/me/.config/TranscriptionSuite/ca',
+      );
+    });
+    expect(screen.getByText('/home/me/.config/TranscriptionSuite/ca')).toBeDefined();
+    expect(screen.getByText('Change')).toBeDefined();
+    expect(screen.queryByText('Choose folder')).toBeNull();
+  });
+
+  it('loads a saved folder on mount and clears it back to unset', async () => {
+    setupCaApi({ 'server.runtimeProfile': 'cpu' });
+    vi.mocked(getConfig).mockImplementation(async (key: string) =>
+      key === 'server.extraCaCertsDir'
+        ? 'C:\\Users\\me\\AppData\\Roaming\\TranscriptionSuite\\ca'
+        : undefined,
+    );
+
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    expect(
+      await screen.findByText('C:\\Users\\me\\AppData\\Roaming\\TranscriptionSuite\\ca'),
+    ).toBeDefined();
+
+    fireEvent.click(screen.getByText('Clear').closest('button') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(vi.mocked(setConfig)).toHaveBeenCalledWith('server.extraCaCertsDir', '');
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByText('C:\\Users\\me\\AppData\\Roaming\\TranscriptionSuite\\ca'),
+      ).toBeNull();
+    });
+    expect(screen.getByText('Choose folder')).toBeDefined();
+  });
+
+  it('does not render on the Metal (bare-metal) runtime', async () => {
+    setupCaApi({ 'server.runtimeProfile': 'metal' });
+
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    expect(await screen.findByText('5. Persistent Volumes')).toBeDefined();
+    expect(screen.queryByText('Extra CA certificates')).toBeNull();
+  });
+
+  it('does not show the folder as configured when persisting fails', async () => {
+    const { selectFolder } = setupCaApi({ 'server.runtimeProfile': 'cpu' });
+    selectFolder.mockResolvedValue('/home/me/ca');
+    vi.mocked(setConfig).mockRejectedValueOnce(new Error('disk full'));
+
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    expect(await screen.findByText('Extra CA certificates')).toBeDefined();
+
+    fireEvent.click(screen.getByText('Choose folder').closest('button') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(vi.mocked(toast.error)).toHaveBeenCalled();
+    });
+    // Container start reads the store, not the UI, so the UI must not claim
+    // a folder the store never received.
+    expect(screen.queryByText('/home/me/ca')).toBeNull();
+    expect(screen.getByText('Choose folder')).toBeDefined();
+  });
+
+  it('rejects a folder whose path contains a colon without persisting it', async () => {
+    const { selectFolder } = setupCaApi({ 'server.runtimeProfile': 'cpu' });
+    // Finder maps "/" typed in a folder name to ":" on disk; Docker cannot
+    // mount such a path.
+    selectFolder.mockResolvedValue('/home/me/Certs 06:2026');
+
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    expect(await screen.findByText('Extra CA certificates')).toBeDefined();
+
+    fireEvent.click(screen.getByText('Choose folder').closest('button') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(vi.mocked(toast.error)).toHaveBeenCalled();
+    });
+    expect(vi.mocked(setConfig)).not.toHaveBeenCalledWith(
+      'server.extraCaCertsDir',
+      expect.anything(),
+    );
+    expect(screen.queryByText('/home/me/Certs 06:2026')).toBeNull();
   });
 });
 

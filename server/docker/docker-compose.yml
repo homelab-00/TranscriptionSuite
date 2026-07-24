@@ -149,7 +149,9 @@ services:
       # scanner re-signs traffic; the entrypoint installs every *.crt/*.pem/*.cer found
       # here into the container trust store. Docker does not propagate the host's trust
       # store into containers, so without this the re-signed cert is always rejected.
-      #   Windows: EXTRA_CA_CERTS_DIR=%APPDATA%\TranscriptionSuite\ca
+      #   Windows: EXTRA_CA_CERTS_DIR=C:\Users\<you>\AppData\Roaming\TranscriptionSuite\ca
+      #     (write the full path: %VARS% like %APPDATA% are NOT expanded in a .env file;
+      #     a literal %APPDATA% aborts startup with "refers to undefined volume %APPDATA%\...")
       #   Linux/macOS: EXTRA_CA_CERTS_DIR=~/.config/TranscriptionSuite/ca
       # Unset mounts an empty placeholder, which is a no-op.
       - ${EXTRA_CA_CERTS_DIR:-./.empty}:/ca-trust:ro

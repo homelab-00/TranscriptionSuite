@@ -544,9 +544,13 @@ _TLS_INTERCEPTION_HINT = (
     "connection scanning' setting and start the server again. That is the whole fix "
     "for most home users. "
     "(2) Otherwise (corporate proxy, or you want to keep the scanner on), export the "
-    "intercepting root CA and put it in a folder of its own, then set "
-    "EXTRA_CA_CERTS_DIR to that folder — the container installs it at startup and "
-    "trusts it. Certificate verification stays ON either way. "
+    "intercepting root CA as 'Base-64 encoded X.509' (PEM) - NOT the DER format the "
+    "Windows export wizard pre-selects - and put it in a folder of its own. Then "
+    "point the server at that folder: in the dashboard use Server tab -> Persistent "
+    "Volumes -> Extra CA certificates -> Choose folder; with docker compose set "
+    "EXTRA_CA_CERTS_DIR to the folder's full expanded path (%VARS% are not expanded "
+    "in a .env file). The container installs it at startup and trusts it. "
+    "Certificate verification stays ON either way. "
     "Full instructions: https://github.com/homelab-00/TranscriptionSuite/blob/main/docs/deployment-guide.md#tls-interception--corporate-network-unknownissuer"
 )
 
