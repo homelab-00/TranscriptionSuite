@@ -185,6 +185,14 @@ Apple Silicon transcription runs on Apple's **Metal + MLX** GPU stack, bundled r
 
 > *Naming note: wherever the app says "Metal server", what actually runs is **MLX** - Apple's machine-learning framework, which uses Metal as its GPU layer. MLX only exists on Apple Silicon, which is why Intel Macs ([§2.2](#22-macos-intel)) can't use this path.*
 
+**Prerequisite - FFmpeg:** the server uses [FFmpeg](https://ffmpeg.org/) to decode compressed audio (M4A, MP3, FLAC, OGG - everything except WAV), and macOS doesn't ship it. Install it once with [Homebrew](https://brew.sh/):
+
+```bash
+brew install ffmpeg
+```
+
+Without it the server still starts, but importing anything other than a WAV file fails with a decode error. If you install FFmpeg while the app is running, restart the Metal server afterwards.
+
 **Install steps:**
 
 1. From the [Releases](https://github.com/homelab-00/TranscriptionSuite/releases) page, download **`TranscriptionSuite-<version>-arm64-mac-metal.dmg`** (~3-5 GB) - the **bundled** build with the dashboard **and** the Python/MLX server pre-installed. (Careful: there is also a thin `arm64-mac.dmg` without the server - see the tip below.)
