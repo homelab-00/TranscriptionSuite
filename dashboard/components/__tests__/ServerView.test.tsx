@@ -179,27 +179,56 @@ vi.mock('@headlessui/react', () => {
     typeof children === 'function' ? (children as (a: any) => React.ReactNode)(args) : children;
   const passthrough = ({ children }: { children?: React.ReactNode }) =>
     React.createElement('div', null, renderChildren(children));
+  // Same render-prop mock convention as SessionImportTab.output-format.test.tsx:
+  // ListboxButton forwards aria-label so getByRole('button', { name }) works,
+  // and ListboxOption wires its click to the Listbox onChange via context so
+  // selecting an option drives the component (used by the GPU picker tests).
+  const OnChangeCtx = React.createContext<(value: unknown) => void>(() => {});
   return {
     Dialog: ({ children, open }: { children: React.ReactNode; open: boolean }) =>
       open ? React.createElement('div', { role: 'dialog' }, renderChildren(children)) : null,
     DialogPanel: passthrough,
     DialogTitle: ({ children }: { children: React.ReactNode }) =>
       React.createElement('h2', null, renderChildren(children)),
-    Listbox: ({ children, value }: { children: React.ReactNode; value: unknown }) =>
-      React.createElement('div', { 'data-value': value }, renderChildren(children, { open: true })),
-    ListboxButton: ({ children }: { children: React.ReactNode }) =>
+    Listbox: ({
+      children,
+      value,
+      onChange,
+    }: {
+      children: React.ReactNode;
+      value: unknown;
+      onChange?: (value: unknown) => void;
+    }) =>
+      React.createElement(
+        OnChangeCtx.Provider,
+        { value: onChange ?? (() => {}) },
+        React.createElement(
+          'div',
+          { 'data-value': value },
+          renderChildren(children, { open: true }),
+        ),
+      ),
+    ListboxButton: ({
+      children,
+      ['aria-label']: ariaLabel,
+    }: {
+      children: React.ReactNode;
+      'aria-label'?: string;
+    }) =>
       React.createElement(
         'button',
-        { type: 'button' },
+        { type: 'button', 'aria-label': ariaLabel },
         renderChildren(children, { open: true, focus: false, hover: false }),
       ),
     ListboxOptions: passthrough,
-    ListboxOption: ({ children, value }: { children: React.ReactNode; value: unknown }) =>
-      React.createElement(
+    ListboxOption: ({ children, value }: { children: React.ReactNode; value: unknown }) => {
+      const onChange = React.useContext(OnChangeCtx);
+      return React.createElement(
         'div',
-        { 'data-value': value },
+        { role: 'option', 'data-value': value, onClick: () => onChange(value) },
         renderChildren(children, { selected: false, focus: false, active: false }),
-      ),
+      );
+    },
   };
 });
 
@@ -1145,36 +1174,44 @@ describe('Multi-GPU selection', () => {
     mockAdminStatus.status = { models: {} };
   });
 
+  // The picker is a CustomSelect (headlessui Listbox). The mock above renders
+  // its options inline and always open: the trigger is the button named by
+  // aria-label, and each option is a role="option" wired to onChange.
+  const pickerButton = () => screen.queryByRole('button', { name: 'GPU for inference' });
+
   it('shows the GPU picker with one option per NVIDIA card when two are detected', async () => {
     setupApi([RTX_3060, RTX_3090]);
     await mountAndRedetect();
-    const select = (await screen.findByLabelText('GPU for inference')) as HTMLSelectElement;
-    const labels = Array.from(select.options).map((o) => o.textContent);
+    await waitFor(() => {
+      expect(pickerButton()).not.toBeNull();
+    });
+    const labels = screen.getAllByRole('option').map((o) => o.textContent);
     expect(labels).toEqual([
       'Automatic (Docker default)',
       'GPU 0: NVIDIA GeForce RTX 3060 (12 GB)',
       'GPU 1: NVIDIA GeForce RTX 3090 (24 GB)',
     ]);
-    expect(select.value).toBe('auto');
+    expect(pickerButton()?.textContent).toContain('Automatic (Docker default)');
   });
 
   it('persists a picked card to server.gpuDevice as its UUID', async () => {
     const { setSpy } = setupApi([RTX_3060, RTX_3090]);
     await mountAndRedetect();
-    const select = (await screen.findByLabelText('GPU for inference')) as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'GPU-bbb' } });
+    await waitFor(() => {
+      expect(pickerButton()).not.toBeNull();
+    });
+    fireEvent.click(screen.getByRole('option', { name: 'GPU 1: NVIDIA GeForce RTX 3090 (24 GB)' }));
     await waitFor(() => {
       expect(setSpy).toHaveBeenCalledWith('server.gpuDevice', 'GPU-bbb');
     });
-    expect(select.value).toBe('GPU-bbb');
+    expect(pickerButton()?.textContent).toContain('GPU 1: NVIDIA GeForce RTX 3090 (24 GB)');
   });
 
   it('hydrates a persisted selection from server.gpuDevice', async () => {
     setupApi([RTX_3060, RTX_3090], { storedGpuDevice: 'GPU-bbb' });
     await mountAndRedetect();
-    const select = (await screen.findByLabelText('GPU for inference')) as HTMLSelectElement;
     await waitFor(() => {
-      expect(select.value).toBe('GPU-bbb');
+      expect(pickerButton()?.textContent).toContain('GPU 1: NVIDIA GeForce RTX 3090 (24 GB)');
     });
   });
 
@@ -1184,7 +1221,7 @@ describe('Multi-GPU selection', () => {
     await waitFor(() => {
       expect((window as any).electronAPI.docker.checkGpu).toHaveBeenCalled();
     });
-    expect(screen.queryByLabelText('GPU for inference')).toBeNull();
+    expect(pickerButton()).toBeNull();
   });
 
   it('keeps the Vulkan tiles selectable on a mixed NVIDIA + AMD host', async () => {
@@ -1213,7 +1250,7 @@ describe('Multi-GPU selection', () => {
     await waitFor(() => {
       expect(screen.getByText(/CUDA uses only NVIDIA cards/)).toBeTruthy();
     });
-    expect(screen.queryByLabelText('GPU for inference')).toBeNull();
+    expect(pickerButton()).toBeNull();
   });
 
   it('keeps the Vulkan lockout when the only extra GPU is an integrated one', async () => {
@@ -1235,12 +1272,15 @@ describe('Multi-GPU selection', () => {
   it('surfaces a stale pin as an explicit option instead of silently claiming Automatic', async () => {
     setupApi([RTX_3060, RTX_3090], { storedGpuDevice: 'GPU-gone' });
     await mountAndRedetect();
-    const select = (await screen.findByLabelText('GPU for inference')) as HTMLSelectElement;
     await waitFor(() => {
-      expect(select.value).toBe('GPU-gone');
+      expect(pickerButton()?.textContent).toContain(
+        'Previously selected GPU not detected - starts as Automatic',
+      );
     });
     expect(
-      screen.getByText('Previously selected GPU not detected - starts as Automatic'),
+      screen.getByRole('option', {
+        name: 'Previously selected GPU not detected - starts as Automatic',
+      }),
     ).toBeTruthy();
   });
 });

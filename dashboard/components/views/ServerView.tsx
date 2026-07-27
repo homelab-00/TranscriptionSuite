@@ -25,6 +25,7 @@ import {
   MinusCircle,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
+import { CustomSelect } from '../ui/CustomSelect';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
 import { ImageTagChips } from '../ui/ImageTagChips';
@@ -1549,12 +1550,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // disabled so a slower backend cannot be picked by accident. Fails open
   // while detection is pending (gpuInfo === null) and in jsdom test mounts.
   const nvidiaDetected = gpuInfo?.gpu ?? false;
-  // Multi-GPU support: NVIDIA cards eligible for the CUDA GPU picker (need an
-  // nvidia-smi index for docker device_ids and a UUID for stable persistence).
+  // Multi-GPU support: discrete NVIDIA cards eligible for the CUDA GPU picker
+  // (need an nvidia-smi index for docker device_ids and a UUID for stable
+  // persistence; the discrete gate keeps any future non-discrete inventory
+  // entries from ever counting toward the picker threshold).
   const nvidiaGpus = useMemo(
     () =>
       (gpuInfo?.gpus ?? []).filter(
-        (g) => g.vendor === 'nvidia' && g.index !== null && g.uuid !== null,
+        (g) =>
+          g.vendor === 'nvidia' && g.kind === 'discrete' && g.index !== null && g.uuid !== null,
       ),
     [gpuInfo?.gpus],
   );
@@ -1577,6 +1581,25 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // instead of silently claiming Automatic. startContainer falls back to the
   // compose defaults while the card is absent.
   const gpuDeviceStale = gpuDevice !== 'auto' && !nvidiaGpus.some((g) => g.uuid === gpuDevice);
+  // Option list + labels for the GPU picker CustomSelect. The stale entry (if
+  // any) sits right after Automatic so the current store value always has a
+  // visible, honestly-labelled row.
+  const gpuDeviceOptions = useMemo(() => {
+    const options = ['auto'];
+    if (gpuDeviceStale) options.push(gpuDevice);
+    for (const g of nvidiaGpus) if (g.uuid) options.push(g.uuid);
+    return options;
+  }, [nvidiaGpus, gpuDeviceStale, gpuDevice]);
+  const gpuDeviceOptionLabels = useMemo(() => {
+    const labels: Record<string, string> = { auto: 'Automatic (Docker default)' };
+    if (gpuDeviceStale) {
+      labels[gpuDevice] = 'Previously selected GPU not detected - starts as Automatic';
+    }
+    for (const g of nvidiaGpus) {
+      if (g.uuid) labels[g.uuid] = `GPU ${g.index}: ${g.name}${formatVramGb(g.memoryMiB)}`;
+    }
+    return labels;
+  }, [nvidiaGpus, gpuDeviceStale, gpuDevice]);
   // Hardware check (arm64 mac) passes immediately via Electron; server report only
   // refines whether mlx_whisper is actually installed.
   const metalSatisfied = isAppleSilicon && (mlxFeature === undefined || metalSupported);
@@ -2015,36 +2038,23 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   />
                 </SelectorGroup>
                 {/* Multi-GPU picker: only rendered when the host has more than
-                    one CUDA-capable card. Selection is persisted as a GPU UUID
-                    and pinned at server start via the GPU_DEVICE compose
-                    variable; Automatic keeps the previous single-GPU behavior. */}
+                    one discrete CUDA-capable card. Selection is persisted as a
+                    GPU UUID and pinned at server start via the GPU_DEVICE
+                    compose variable; Automatic keeps the previous single-GPU
+                    behavior. Uses the shared CustomSelect so the popup matches
+                    the app styling instead of the OS-native menu. */}
                 {runtimeProfile === 'gpu' && nvidiaGpus.length > 1 && (
                   <div className="mt-3">
-                    <label
-                      htmlFor="gpu-device-select"
-                      className="mb-1 block text-xs font-medium text-slate-300"
-                    >
-                      GPU for inference
-                    </label>
-                    <select
-                      id="gpu-device-select"
+                    <p className="mb-1 text-xs font-medium text-slate-300">GPU for inference</p>
+                    <CustomSelect
                       value={gpuDevice}
+                      onChange={handleGpuDeviceChange}
+                      options={gpuDeviceOptions}
+                      optionLabel={gpuDeviceOptionLabels}
                       disabled={isRunning}
-                      onChange={(e) => handleGpuDeviceChange(e.target.value)}
-                      className="w-full max-w-sm rounded border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
-                    >
-                      <option value="auto">Automatic (Docker default)</option>
-                      {gpuDeviceStale && (
-                        <option value={gpuDevice}>
-                          Previously selected GPU not detected - starts as Automatic
-                        </option>
-                      )}
-                      {nvidiaGpus.map((g) => (
-                        <option key={g.uuid ?? g.name} value={g.uuid ?? 'auto'}>
-                          {`GPU ${g.index}: ${g.name}${formatVramGb(g.memoryMiB)}`}
-                        </option>
-                      ))}
-                    </select>
+                      aria-label="GPU for inference"
+                      className="focus:ring-accent-cyan w-full max-w-sm rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition-shadow outline-none hover:border-white/20 focus:ring-1"
+                    />
                     <p className="mt-1 text-xs text-slate-500 italic">
                       Multiple NVIDIA GPUs detected - the selected card runs the inference server
                     </p>
