@@ -529,6 +529,12 @@ const store = new Store({
     // selecting the Metal runtime alone must not launch the server.
     'server.mlxDesiredRunning': false,
     'server.gpuAutoDetectDone': false,
+    // Multi-GPU: which NVIDIA card runs the inference server. 'auto' keeps the
+    // compose defaults (legacy overlay: device 0, CDI: all GPUs); otherwise an
+    // NVIDIA GPU UUID ("GPU-...") resolved to an nvidia-smi index at start
+    // time by dockerManager.startContainer(). Set from the Runtime Settings
+    // GPU picker, which only appears when >1 NVIDIA GPU is detected.
+    'server.gpuDevice': 'auto',
     // Issue #83 — opt-in legacy-GPU image variant (Pascal/Maxwell support).
     // Default false keeps behaviour unchanged for existing users. When true,
     // the dashboard uses the `-legacy` GHCR repo for list/pull/tag operations.

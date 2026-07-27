@@ -160,18 +160,37 @@ function getString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/** " (12 GB)" suffix for the GPU picker options; empty when VRAM is unknown. */
+function formatVramGb(memoryMiB: number | null): string {
+  if (memoryMiB === null || !Number.isFinite(memoryMiB) || memoryMiB <= 0) return '';
+  return ` (${Math.round(memoryMiB / 1024)} GB)`;
+}
+
+// Shape of the docker:checkGpu IPC payload. Keep in sync with
+// electron/preload.ts and electron/gpuInventory.ts (canonical GpuDevice).
+// `gpus` is the full host inventory (multi-GPU support): NVIDIA entries carry
+// an nvidia-smi index + UUID, AMD/Intel entries are vendor/name-only markers
+// used to recognize mixed NVIDIA+AMD systems. Optional so stale mocks and
+// older payload shapes stay assignable.
+interface GpuInfoPayload {
+  gpu: boolean;
+  toolkit: boolean;
+  vulkan: boolean;
+  wslSupport?: { available: boolean; gpuPassthroughDetected: boolean; reason?: string };
+  gpus?: Array<{
+    vendor: 'nvidia' | 'amd' | 'intel' | 'unknown';
+    kind: 'discrete' | 'integrated' | 'virtual' | 'unknown';
+    index: number | null;
+    name: string;
+    memoryMiB: number | null;
+    uuid: string | null;
+  }>;
+}
+
 // Session-level GPU detection cache — survives view unmount/remount.
 // `wslSupport` is populated by `checkGpu()` only on Win32 (GH-101 follow-up);
 // it gates the experimental Vulkan-WSL2 runtime profile button below.
-let cachedGpuInfo:
-  | {
-      gpu: boolean;
-      toolkit: boolean;
-      vulkan: boolean;
-      wslSupport?: { available: boolean; gpuPassthroughDetected: boolean; reason?: string };
-    }
-  | null
-  | undefined = undefined; // undefined = not yet checked
+let cachedGpuInfo: GpuInfoPayload | null | undefined = undefined; // undefined = not yet checked
 
 function normalizeModelName(value: string): string {
   return value.trim().toLowerCase();
@@ -1289,12 +1308,19 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   const [setupDismissed, setSetupDismissed] = useState(true); // hide until loaded
   const [setupExpanded, setSetupExpanded] = useState(true);
-  const [gpuInfo, setGpuInfo] = useState<{
-    gpu: boolean;
-    toolkit: boolean;
-    vulkan: boolean;
-    wslSupport?: { available: boolean; gpuPassthroughDetected: boolean; reason?: string };
-  } | null>(cachedGpuInfo ?? null);
+  const [gpuInfo, setGpuInfo] = useState<GpuInfoPayload | null>(cachedGpuInfo ?? null);
+
+  // Multi-GPU: which NVIDIA card runs the inference server. Persisted as
+  // electron-store key server.gpuDevice (auto | GPU UUID) and consumed by
+  // dockerManager.startContainer(), which resolves the UUID to an nvidia-smi
+  // index for the GPU_DEVICE compose variable. Hydrated in the mount effect
+  // below; only rendered as a picker when more than one NVIDIA GPU exists.
+  const [gpuDevice, setGpuDevice] = useState<string>('auto');
+  const handleGpuDeviceChange = useCallback((value: string): void => {
+    setGpuDevice(value);
+    const api = (window as any).electronAPI;
+    api?.config?.set?.('server.gpuDevice', value)?.catch?.(() => {});
+  }, []);
 
   // ─── GPU Health Card state (NVIDIA Linux only) ─────────────────────────────
   // Phase 2 of the CUDA error 999 recovery plan. Three pieces of state feed the
@@ -1410,6 +1436,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           setSetupDismissed(val === true);
         })
         .catch(() => setSetupDismissed(false));
+      // Multi-GPU: hydrate the persisted GPU picker selection (auto or a GPU UUID)
+      api.config
+        .get('server.gpuDevice')
+        .then((val: unknown) => {
+          if (typeof val === 'string' && val) setGpuDevice(val);
+        })
+        .catch(() => {});
     } else {
       setSetupDismissed(false);
     }
@@ -1417,51 +1450,44 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (cachedGpuInfo === undefined && api?.docker?.checkGpu) {
       api.docker
         .checkGpu()
-        .then(
-          (info: {
-            gpu: boolean;
-            toolkit: boolean;
-            vulkan: boolean;
-            wslSupport?: { available: boolean; gpuPassthroughDetected: boolean; reason?: string };
-          }) => {
-            cachedGpuInfo = info;
-            setGpuInfo(info);
-            // Auto-set runtime profile based on hardware detection.
-            // Runs exactly once: on fresh install or upgrade from a version without the flag.
-            // Priority: Metal (Apple Silicon) > NVIDIA GPU > Vulkan (AMD/Intel) > CPU
-            api.config
-              ?.get('server.gpuAutoDetectDone')
-              .then((done: unknown) => {
-                if (done === true) return; // already ran — respect user's stored choice
-                // Determine best profile for this hardware
-                let detected: RuntimeProfile = 'cpu';
-                if (metalSupported) {
-                  detected = 'metal';
-                } else if (info.gpu && info.toolkit) {
-                  detected = 'gpu';
-                } else if (info.vulkan) {
-                  detected = 'vulkan';
-                }
-                handleRuntimeProfileChange(detected);
-                // If Metal was selected, also set the default MLX model
-                if (detected === 'metal') {
-                  api.config
-                    ?.get('server.mainModelSelection')
-                    .then((modelVal: unknown) => {
-                      const cur = typeof modelVal === 'string' ? modelVal.trim() : '';
-                      if (!cur || cur === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
-                        setMainModelSelection(MLX_DEFAULT_MODEL);
-                        api.config?.set('server.mainModelSelection', MLX_DEFAULT_MODEL);
-                      }
-                    })
-                    .catch(() => {});
-                }
-                // Mark auto-detection as done so it never re-runs
-                api.config?.set('server.gpuAutoDetectDone', true);
-              })
-              .catch(() => {});
-          },
-        )
+        .then((info: GpuInfoPayload) => {
+          cachedGpuInfo = info;
+          setGpuInfo(info);
+          // Auto-set runtime profile based on hardware detection.
+          // Runs exactly once: on fresh install or upgrade from a version without the flag.
+          // Priority: Metal (Apple Silicon) > NVIDIA GPU > Vulkan (AMD/Intel) > CPU
+          api.config
+            ?.get('server.gpuAutoDetectDone')
+            .then((done: unknown) => {
+              if (done === true) return; // already ran — respect user's stored choice
+              // Determine best profile for this hardware
+              let detected: RuntimeProfile = 'cpu';
+              if (metalSupported) {
+                detected = 'metal';
+              } else if (info.gpu && info.toolkit) {
+                detected = 'gpu';
+              } else if (info.vulkan) {
+                detected = 'vulkan';
+              }
+              handleRuntimeProfileChange(detected);
+              // If Metal was selected, also set the default MLX model
+              if (detected === 'metal') {
+                api.config
+                  ?.get('server.mainModelSelection')
+                  .then((modelVal: unknown) => {
+                    const cur = typeof modelVal === 'string' ? modelVal.trim() : '';
+                    if (!cur || cur === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
+                      setMainModelSelection(MLX_DEFAULT_MODEL);
+                      api.config?.set('server.mainModelSelection', MLX_DEFAULT_MODEL);
+                    }
+                  })
+                  .catch(() => {});
+              }
+              // Mark auto-detection as done so it never re-runs
+              api.config?.set('server.gpuAutoDetectDone', true);
+            })
+            .catch(() => {});
+        })
         .catch(() => {
           cachedGpuInfo = null;
           setGpuInfo(null);
@@ -1490,17 +1516,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         cachedGpuInfo = undefined;
         return api.docker.checkGpu();
       })
-      .then(
-        (info: {
-          gpu: boolean;
-          toolkit: boolean;
-          vulkan: boolean;
-          wslSupport?: { available: boolean; gpuPassthroughDetected: boolean; reason?: string };
-        }) => {
-          cachedGpuInfo = info;
-          setGpuInfo(info);
-        },
-      )
+      .then((info: GpuInfoPayload) => {
+        cachedGpuInfo = info;
+        setGpuInfo(info);
+      })
       .catch(() => {
         cachedGpuInfo = null;
         setGpuInfo(null);
@@ -1530,6 +1549,34 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // disabled so a slower backend cannot be picked by accident. Fails open
   // while detection is pending (gpuInfo === null) and in jsdom test mounts.
   const nvidiaDetected = gpuInfo?.gpu ?? false;
+  // Multi-GPU support: NVIDIA cards eligible for the CUDA GPU picker (need an
+  // nvidia-smi index for docker device_ids and a UUID for stable persistence).
+  const nvidiaGpus = useMemo(
+    () =>
+      (gpuInfo?.gpus ?? []).filter(
+        (g) => g.vendor === 'nvidia' && g.index !== null && g.uuid !== null,
+      ),
+    [gpuInfo?.gpus],
+  );
+  // Mixed-vendor host (e.g. NVIDIA + AMD): a DISCRETE non-NVIDIA GPU exists
+  // alongside the NVIDIA one. In that case the Vulkan runtimes stay
+  // selectable so the user can route inference to the AMD / Intel card
+  // instead of CUDA. The whisper.cpp sidecar image ships Mesa drivers only,
+  // so on such a host it cannot even see the NVIDIA card and lands on the
+  // AMD / Intel one. The kind gate matters: integrated GPUs (iGPU next to an
+  // NVIDIA card, Optimus laptops) and virtual display adapters (RDP, Hyper-V)
+  // are in the inventory too and must NOT defeat the NVIDIA lockout.
+  const nonNvidiaGpuPresent = (gpuInfo?.gpus ?? []).some(
+    (g) => (g.vendor === 'amd' || g.vendor === 'intel') && g.kind === 'discrete',
+  );
+  const vulkanBlockedByNvidia = nvidiaDetected && !nonNvidiaGpuPresent;
+  // Stale selection guard: the stored UUID no longer matches a present card
+  // (removed, or the driver stopped reporting it). The pin is deliberately
+  // kept in the store so a transient failure does not erase a deliberate
+  // choice; the picker surfaces the state honestly via an explicit option
+  // instead of silently claiming Automatic. startContainer falls back to the
+  // compose defaults while the card is absent.
+  const gpuDeviceStale = gpuDevice !== 'auto' && !nvidiaGpus.some((g) => g.uuid === gpuDevice);
   // Hardware check (arm64 mac) passes immediately via Electron; server report only
   // refines whether mlx_whisper is actually installed.
   const metalSatisfied = isAppleSilicon && (mlxFeature === undefined || metalSupported);
@@ -1895,14 +1942,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     selected={runtimeProfile === 'vulkan-wsl2'}
                     disabled={
                       isRunning ||
-                      nvidiaDetected ||
+                      vulkanBlockedByNvidia ||
                       (hostPlatform !== 'unknown' && hostPlatform !== 'win32') ||
                       (hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected)
                     }
                     badge={
                       hostPlatform !== 'unknown' && hostPlatform !== 'win32'
                         ? 'Windows only'
-                        : nvidiaDetected
+                        : vulkanBlockedByNvidia
                           ? 'NVIDIA detected'
                           : hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected
                             ? 'Requires WSL2 GPU'
@@ -1924,14 +1971,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     selected={runtimeProfile === 'vulkan'}
                     disabled={
                       isRunning ||
-                      nvidiaDetected ||
+                      vulkanBlockedByNvidia ||
                       hostPlatform === 'win32' ||
                       hostPlatform === 'darwin'
                     }
                     badge={
                       hostPlatform === 'win32' || hostPlatform === 'darwin'
                         ? 'Linux only'
-                        : nvidiaDetected
+                        : vulkanBlockedByNvidia
                           ? 'NVIDIA detected'
                           : undefined
                     }
@@ -1967,9 +2014,60 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     onSelect={() => handleRuntimeProfileChange('cpu')}
                   />
                 </SelectorGroup>
+                {/* Multi-GPU picker: only rendered when the host has more than
+                    one CUDA-capable card. Selection is persisted as a GPU UUID
+                    and pinned at server start via the GPU_DEVICE compose
+                    variable; Automatic keeps the previous single-GPU behavior. */}
+                {runtimeProfile === 'gpu' && nvidiaGpus.length > 1 && (
+                  <div className="mt-3">
+                    <label
+                      htmlFor="gpu-device-select"
+                      className="mb-1 block text-xs font-medium text-slate-300"
+                    >
+                      GPU for inference
+                    </label>
+                    <select
+                      id="gpu-device-select"
+                      value={gpuDevice}
+                      disabled={isRunning}
+                      onChange={(e) => handleGpuDeviceChange(e.target.value)}
+                      className="w-full max-w-sm rounded border border-white/10 bg-black/40 px-2 py-1.5 text-xs text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
+                    >
+                      <option value="auto">Automatic (Docker default)</option>
+                      {gpuDeviceStale && (
+                        <option value={gpuDevice}>
+                          Previously selected GPU not detected - starts as Automatic
+                        </option>
+                      )}
+                      {nvidiaGpus.map((g) => (
+                        <option key={g.uuid ?? g.name} value={g.uuid ?? 'auto'}>
+                          {`GPU ${g.index}: ${g.name}${formatVramGb(g.memoryMiB)}`}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500 italic">
+                      Multiple NVIDIA GPUs detected - the selected card runs the inference server
+                    </p>
+                  </div>
+                )}
+                {runtimeProfile === 'gpu' &&
+                  nvidiaDetected &&
+                  nonNvidiaGpuPresent &&
+                  !isRunning && (
+                    <p className="mt-2 text-xs text-slate-500 italic">
+                      CUDA uses only NVIDIA cards - switch Runtime to Vulkan to use the AMD / Intel
+                      GPU instead
+                    </p>
+                  )}
                 {runtimeProfile === 'vulkan' && !isRunning && (
                   <p className="mt-2 text-xs text-slate-500 italic">
                     AMD/Intel GPU via whisper.cpp — no diarization; live mode via GGML models
+                  </p>
+                )}
+                {runtimeProfile === 'vulkan' && nvidiaDetected && !isRunning && (
+                  <p className="mt-1 text-xs text-slate-500 italic">
+                    The NVIDIA card stays idle here - the whisper.cpp sidecar (Mesa drivers) uses
+                    the AMD / Intel GPU
                   </p>
                 )}
                 {runtimeProfile === 'vulkan-wsl2' && !isRunning && (

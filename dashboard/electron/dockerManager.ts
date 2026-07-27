@@ -40,6 +40,13 @@ import {
 } from './containerRuntime.js';
 import { type WslSupport, resetWslSupportCache } from './wslDetect.js';
 import { hfCacheDirName } from './hfRepoAliases.js';
+import {
+  type GpuDevice,
+  enumerateGpus,
+  enumerateNvidiaGpus,
+  parseCdiDeviceNames,
+  resolveGpuDeviceSelection,
+} from './gpuInventory.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -103,6 +110,23 @@ export function readUseLegacyGpuFromStore(): boolean {
     return data['server.useLegacyGpu'] === true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Read the persisted `server.gpuDevice` selection ('auto' or an NVIDIA GPU
+ * UUID) from the electron-store JSON file on disk. Defaults to 'auto' when the
+ * file is missing or the key is absent — matches the config store default.
+ */
+export function readGpuDeviceFromStore(): string {
+  try {
+    const storePath = path.join(app.getPath('userData'), 'dashboard-config.json');
+    const raw = fs.readFileSync(storePath, 'utf8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const value = data['server.gpuDevice'];
+    return typeof value === 'string' && value ? value : 'auto';
+  } catch {
+    return 'auto';
   }
 }
 
@@ -2371,6 +2395,81 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     composeEnv['PYTORCH_VARIANT'] = 'cpu';
   }
 
+  // Multi-GPU: pin the container to the user-selected NVIDIA card. The
+  // selection is persisted as a GPU UUID (stable across reboots and PCI
+  // reordering) and resolved here, at start time, against a fresh nvidia-smi
+  // listing. The result feeds the GPU_DEVICE variable interpolated by
+  // docker-compose.gpu.yml (legacy: device_ids, takes an index or a UUID),
+  // docker-compose.gpu-cdi.yml and podman-compose.gpu.yml (nvidia.com/gpu=X).
+  // 'auto' or a stale UUID (card removed) leaves GPU_DEVICE empty so each
+  // overlay keeps its historical default (legacy: device 0, CDI: all GPUs).
+  // Set on composeEnv only (not persisted to .env) like PYTORCH_VARIANT above.
+  //
+  // The empty-string default is load-bearing: buildProcessEnv() spreads
+  // process.env underneath composeEnv, so without it an ambient GPU_DEVICE
+  // exported in the user's shell would silently override the compose
+  // defaults ('' triggers the ${GPU_DEVICE:-...} fallback just like unset).
+  composeEnv['GPU_DEVICE'] = '';
+  if (runtimeProfile === 'gpu') {
+    const storedGpuDevice = readGpuDeviceFromStore();
+    if (storedGpuDevice !== 'auto') {
+      // Lean NVIDIA-only listing (no lspci/CIM sweep) — resolution only ever
+      // matches NVIDIA cards, and this path blocks Start Server.
+      let inventory: GpuDevice[] = [];
+      try {
+        inventory = await enumerateNvidiaGpus((cmd, args, opts) => exec(cmd, args, opts));
+      } catch (err: any) {
+        console.warn('[DockerManager] nvidia-smi listing for GPU pin failed:', err.message);
+      }
+      const resolution = resolveGpuDeviceSelection(storedGpuDevice, inventory);
+      const device = resolution.device;
+      if (resolution.composeValue !== null && device) {
+        // CDI (Docker cdi mode and Podman) resolves nvidia.com/gpu=X against
+        // the static CDI registry (/etc/cdi/nvidia.yaml), whose device set can
+        // lag behind live hardware. Validate against `nvidia-ctk cdi list`,
+        // preferring the UUID-named device (immune to index reordering) over
+        // the index-named one. Legacy mode needs no validation: the nvidia
+        // runtime resolves UUIDs in device_ids directly.
+        const useCdi = detectedRuntimeKind === 'podman' || detectedGpuMode === 'cdi';
+        if (useCdi) {
+          let cdiNames: string[] | null = null;
+          try {
+            cdiNames = parseCdiDeviceNames(await exec('nvidia-ctk', ['cdi', 'list']));
+          } catch (err: any) {
+            console.warn('[DockerManager] nvidia-ctk cdi list failed:', err.message);
+          }
+          if (cdiNames === null) {
+            // Listing unavailable — best effort, index name is the common case
+            composeEnv['GPU_DEVICE'] = resolution.composeValue;
+          } else if (device.uuid && cdiNames.includes(device.uuid)) {
+            composeEnv['GPU_DEVICE'] = device.uuid;
+          } else if (cdiNames.includes(resolution.composeValue)) {
+            composeEnv['GPU_DEVICE'] = resolution.composeValue;
+          } else {
+            console.warn(
+              `[DockerManager] CDI registry has no device for GPU ${resolution.composeValue} ` +
+                `(${device.name}). Falling back to the default GPU assignment — regenerate the ` +
+                'spec with: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml',
+            );
+          }
+        } else {
+          composeEnv['GPU_DEVICE'] = device.uuid ?? resolution.composeValue;
+        }
+        if (composeEnv['GPU_DEVICE'] !== '') {
+          console.log(
+            `[DockerManager] Pinning container to GPU ${resolution.composeValue} ` +
+              `(${device.name}, ${composeEnv['GPU_DEVICE']})`,
+          );
+        }
+      } else {
+        console.warn(
+          `[DockerManager] Stored GPU selection ${storedGpuDevice} not found in current ` +
+            'inventory — falling back to the default GPU assignment',
+        );
+      }
+    }
+  }
+
   // GH-125: guarantee CPU launches never request a NeMo model. The UI-side
   // reset can be bypassed on first-run auto-detect (profile is set before the
   // model selection hydrates), so enforce the faster-whisper substitution here
@@ -3371,28 +3470,66 @@ function unsubscribeFromDownloadEvents(callback: (event: BootstrapDownloadEvent)
 // ─── GPU Detection ──────────────────────────────────────────────────────────
 
 /**
+ * Session cache of the host GPU inventory. The full enumeration spawns
+ * nvidia-smi plus lspci (Linux) or a PowerShell CIM query (Windows), so it
+ * must not re-run on every checkGpu() consumer (SettingsModal calls checkGpu
+ * on every open). Cleared by resetGpuCache() so the Re-detect link picks up
+ * hardware changes without an app restart.
+ */
+let cachedGpuInventory: GpuDevice[] | null = null;
+
+/**
+ * Enumerate the host GPU inventory (NVIDIA via nvidia-smi, AMD/Intel via
+ * Linux DRI sysfs or the Windows CIM query). Best-effort: returns [] rather
+ * than throwing. Used by checkGpu() for the UI payload and by startContainer()
+ * to resolve the persisted device selection against live hardware.
+ */
+async function hostGpuInventory(): Promise<GpuDevice[]> {
+  if (cachedGpuInventory !== null) return cachedGpuInventory;
+  const gpus = await enumerateGpus({
+    exec: (cmd, args, opts) => exec(cmd, args, opts),
+    platform: process.platform,
+    dri: {
+      readdirSync: (dir) => fs.readdirSync(dir),
+      readFileSync: (file) => fs.readFileSync(file, 'utf8'),
+      realpathSync: (p) => fs.realpathSync(p),
+    },
+  });
+  cachedGpuInventory = gpus;
+  return gpus;
+}
+
+/**
  * Check for NVIDIA GPU + container toolkit availability.
  * Also probes Docker Desktop on Windows for WSL2 GPU paravirtualization
  * (GH-101 follow-up) — surfaced via the optional `wslSupport` field, which is
  * `undefined` on non-Win32 platforms.
  *
- * Returns { gpu, toolkit, vulkan, wslSupport? }.
+ * Returns { gpu, toolkit, vulkan, wslSupport?, gpus }. `gpus` is the full
+ * host inventory (multi-GPU support): NVIDIA devices carry an nvidia-smi
+ * index + UUID; AMD/Intel devices are name/vendor-only so the renderer can
+ * recognize mixed NVIDIA+AMD systems and label the Vulkan runtime.
  */
 async function checkGpu(): Promise<{
   gpu: boolean;
   toolkit: boolean;
   vulkan: boolean;
   wslSupport?: WslSupport;
+  gpus: GpuDevice[];
 }> {
   let gpu = false;
   let toolkit = false;
   let vulkan = false;
-  try {
-    const gpuName = await exec('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader']);
+  const gpus = await hostGpuInventory();
+  const nvidiaGpus = gpus.filter((g) => g.vendor === 'nvidia' && g.index !== null);
+  if (nvidiaGpus.length > 0) {
     gpu = true;
-    console.log('[DockerManager] NVIDIA GPU detected:', gpuName);
-  } catch (err: any) {
-    console.warn('[DockerManager] nvidia-smi not found or failed:', err.message);
+    console.log(
+      '[DockerManager] NVIDIA GPU(s) detected:',
+      nvidiaGpus.map((g) => `${g.index}: ${g.name}`).join(', '),
+    );
+  } else {
+    console.warn('[DockerManager] nvidia-smi not found, failed, or reported no GPUs');
   }
   if (gpu) {
     const isPodman = detectedRuntimeKind === 'podman';
@@ -3440,7 +3577,15 @@ async function checkGpu(): Promise<{
   // AND /dev/dri/renderD128 (the actual render node) to be present.
   // On WSL2 or systems with partial DRI, renderD128 may exist while /dev/dri
   // is not mountable by Docker — checking both prevents false Vulkan detection.
-  if (!gpu && process.platform === 'linux') {
+  //
+  // Multi-GPU follow-up: a mixed host (NVIDIA + discrete AMD/Intel) is also a
+  // Vulkan candidate — the NVIDIA presence alone must not zero the flag,
+  // otherwise first-run auto-detect on a mixed host without the NVIDIA
+  // container toolkit would land on 'cpu' even though the whisper.cpp/Vulkan
+  // path works on the AMD card. Auto-detect priority is unchanged: a working
+  // CUDA stack (gpu && toolkit) still wins over vulkan.
+  const discreteNonNvidiaGpu = gpus.some((g) => g.vendor !== 'nvidia' && g.kind === 'discrete');
+  if ((!gpu || discreteNonNvidiaGpu) && process.platform === 'linux') {
     try {
       const fs = await import('fs');
       vulkan = fs.existsSync('/dev/dri') && fs.existsSync('/dev/dri/renderD128');
@@ -3484,7 +3629,7 @@ async function checkGpu(): Promise<{
     );
   }
 
-  return { gpu, toolkit, vulkan, wslSupport };
+  return { gpu, toolkit, vulkan, wslSupport, gpus };
 }
 
 /**
@@ -3498,6 +3643,8 @@ function resetGpuCache(): void {
   // Force `checkGpu()` to re-detect the toolkit mode (CDI vs legacy) too —
   // a user who installs nvidia-container-toolkit mid-session benefits.
   detectedGpuMode = null;
+  // Drop the GPU inventory so Re-detect sees added/removed cards.
+  cachedGpuInventory = null;
 }
 
 /**

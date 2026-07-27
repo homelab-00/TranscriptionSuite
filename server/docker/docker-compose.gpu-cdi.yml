@@ -5,6 +5,11 @@
 # Used automatically when the dashboard detects CDI mode.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu-cdi.yml up -d
 
+# GPU_DEVICE selects which card on multi-GPU hosts (nvidia-smi index, set by
+# the dashboard at server start from the Runtime Settings GPU picker; CDI
+# device names are generated in the same order). Unset keeps the historical
+# default of exposing all GPUs.
+
 services:
   transcriptionsuite:
     deploy:
@@ -13,5 +18,5 @@ services:
           devices:
             - driver: cdi
               device_ids:
-                - nvidia.com/gpu=all
+                - nvidia.com/gpu=${GPU_DEVICE:-all}
               capabilities: [gpu]

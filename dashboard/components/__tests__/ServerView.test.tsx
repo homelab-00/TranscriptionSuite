@@ -949,10 +949,12 @@ describe('Docker image variant selector', () => {
 // CUDA and CPU Only runtimes stay selectable; the Vulkan and Metal tiles are
 // disabled with an 'NVIDIA detected' badge.
 //
-// MUST STAY THE LAST DESCRIBE IN THIS FILE: ServerView module-caches the
-// checkGpu result (cachedGpuInfo), so the gpu:true probe below leaks into the
-// initial state of every mount that follows it. Earlier describes never
-// provide docker.checkGpu, which keeps the cache unset until this point.
+// MUST STAY AFTER EVERY DESCRIBE THAT OMITS docker.checkGpu: ServerView
+// module-caches the checkGpu result (cachedGpuInfo), so the gpu:true probe
+// below leaks into the initial state of every mount that follows it. Earlier
+// describes never provide docker.checkGpu, which keeps the cache unset until
+// this point. The multi-GPU describe below tolerates the leak by clicking
+// Re-detect, which resets the cache and re-fetches from its own mock.
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('NVIDIA runtime gating', () => {
@@ -1024,5 +1026,221 @@ describe('NVIDIA runtime gating', () => {
     expect(
       (runtimeGroup.getByText('CPU Only').closest('button') as HTMLButtonElement).disabled,
     ).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-GPU picker + mixed-vendor gating.
+//
+// cachedGpuInfo leaks from the describes above, so every test here clicks the
+// Re-detect link first: handleRedetectGpu clears the module cache and
+// re-invokes docker.checkGpu, whose mock carries the per-test gpus inventory.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Multi-GPU selection', () => {
+  type MockGpu = {
+    vendor: 'nvidia' | 'amd' | 'intel' | 'unknown';
+    kind: 'discrete' | 'integrated' | 'virtual' | 'unknown';
+    index: number | null;
+    name: string;
+    memoryMiB: number | null;
+    uuid: string | null;
+  };
+
+  const RTX_3060: MockGpu = {
+    vendor: 'nvidia',
+    kind: 'discrete',
+    index: 0,
+    name: 'NVIDIA GeForce RTX 3060',
+    memoryMiB: 12288,
+    uuid: 'GPU-aaa',
+  };
+  const RTX_3090: MockGpu = {
+    vendor: 'nvidia',
+    kind: 'discrete',
+    index: 1,
+    name: 'NVIDIA GeForce RTX 3090',
+    memoryMiB: 24576,
+    uuid: 'GPU-bbb',
+  };
+  const RX_6700: MockGpu = {
+    vendor: 'amd',
+    kind: 'discrete',
+    index: null,
+    name: 'AMD Radeon RX 6700 XT',
+    memoryMiB: null,
+    uuid: null,
+  };
+  const INTEL_IGPU: MockGpu = {
+    vendor: 'intel',
+    kind: 'integrated',
+    index: null,
+    name: 'Intel UHD Graphics 770',
+    memoryMiB: null,
+    uuid: null,
+  };
+
+  function setupApi(gpus: MockGpu[], opts?: { storedGpuDevice?: string }) {
+    const setSpy = vi.fn().mockResolvedValue(undefined);
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockImplementation(async (key: string) => {
+          if (key === 'server.runtimeProfile') return 'gpu';
+          if (key === 'server.gpuAutoDetectDone') return true;
+          if (key === 'server.gpuDevice') return opts?.storedGpuDevice ?? 'auto';
+          return undefined;
+        }),
+        set: setSpy,
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+        checkModelCache: vi.fn().mockResolvedValue({}),
+        resetGpuCache: vi.fn().mockResolvedValue(undefined),
+        checkGpu: vi.fn().mockResolvedValue({
+          gpu: gpus.some((g) => g.vendor === 'nvidia'),
+          toolkit: true,
+          vulkan: false,
+          gpus,
+        }),
+      },
+      app: {
+        getArch: vi.fn().mockReturnValue('x64'),
+        getConfigDir: vi.fn().mockResolvedValue('/mock/config'),
+      },
+      mlx: {
+        getStatus: vi.fn().mockResolvedValue('stopped'),
+        onStatusChanged: vi.fn().mockReturnValue(vi.fn()),
+      },
+      tailscale: {
+        getHostname: vi.fn().mockResolvedValue('my-server.tail1234.ts.net'),
+      },
+      server: {
+        checkFirewallPort: vi.fn().mockResolvedValue(null),
+      },
+    };
+    return { setSpy };
+  }
+
+  /** Mount, then force a re-detect so the per-test checkGpu payload replaces
+   *  the module-level cache leaked by earlier describes. */
+  async function mountAndRedetect() {
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    const redetect = await screen.findByRole('button', { name: 'Re-detect' });
+    fireEvent.click(redetect);
+    await waitFor(() => {
+      expect((window as any).electronAPI.docker.checkGpu).toHaveBeenCalled();
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDocker.available = true;
+    mockDocker.images = [];
+    mockDocker.remoteTags = [];
+    mockDocker.variantTags = null;
+    mockDocker.container = { exists: false, running: false, status: 'unknown', health: undefined };
+    mockDocker.operationError = null;
+    mockDocker.operating = false;
+    mockDocker.composeAvailable = true;
+    mockAdminStatus.status = { models: {} };
+  });
+
+  it('shows the GPU picker with one option per NVIDIA card when two are detected', async () => {
+    setupApi([RTX_3060, RTX_3090]);
+    await mountAndRedetect();
+    const select = (await screen.findByLabelText('GPU for inference')) as HTMLSelectElement;
+    const labels = Array.from(select.options).map((o) => o.textContent);
+    expect(labels).toEqual([
+      'Automatic (Docker default)',
+      'GPU 0: NVIDIA GeForce RTX 3060 (12 GB)',
+      'GPU 1: NVIDIA GeForce RTX 3090 (24 GB)',
+    ]);
+    expect(select.value).toBe('auto');
+  });
+
+  it('persists a picked card to server.gpuDevice as its UUID', async () => {
+    const { setSpy } = setupApi([RTX_3060, RTX_3090]);
+    await mountAndRedetect();
+    const select = (await screen.findByLabelText('GPU for inference')) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'GPU-bbb' } });
+    await waitFor(() => {
+      expect(setSpy).toHaveBeenCalledWith('server.gpuDevice', 'GPU-bbb');
+    });
+    expect(select.value).toBe('GPU-bbb');
+  });
+
+  it('hydrates a persisted selection from server.gpuDevice', async () => {
+    setupApi([RTX_3060, RTX_3090], { storedGpuDevice: 'GPU-bbb' });
+    await mountAndRedetect();
+    const select = (await screen.findByLabelText('GPU for inference')) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(select.value).toBe('GPU-bbb');
+    });
+  });
+
+  it('hides the picker when only one NVIDIA GPU is present', async () => {
+    setupApi([RTX_3090]);
+    await mountAndRedetect();
+    await waitFor(() => {
+      expect((window as any).electronAPI.docker.checkGpu).toHaveBeenCalled();
+    });
+    expect(screen.queryByLabelText('GPU for inference')).toBeNull();
+  });
+
+  it('keeps the Vulkan tiles selectable on a mixed NVIDIA + AMD host', async () => {
+    setupApi([RTX_3090, RX_6700]);
+    await mountAndRedetect();
+    const runtimeGroup = within(screen.getByText('Runtime').closest('.space-y-2') as HTMLElement);
+    // Only the Metal tile still carries the NVIDIA badge; the Vulkan tiles are
+    // free so inference can be routed to the AMD card.
+    await waitFor(() => {
+      expect(runtimeGroup.getAllByText('NVIDIA detected').length).toBe(1);
+    });
+    const vulkanLinux = runtimeGroup
+      .getByText('Vulkan Linux')
+      .closest('button') as HTMLButtonElement;
+    expect(vulkanLinux.disabled).toBe(false);
+    const metal = runtimeGroup.getByText('Metal').closest('button') as HTMLButtonElement;
+    expect(metal.disabled).toBe(true);
+    // Mixed-vendor hint under the CUDA runtime.
+    expect(screen.getByText(/CUDA uses only NVIDIA cards/)).toBeTruthy();
+  });
+
+  it('does not show the picker on an NVIDIA-only single-GPU host with an AMD card present', async () => {
+    setupApi([RTX_3090, RX_6700]);
+    await mountAndRedetect();
+    // The AMD card must not count toward the NVIDIA picker threshold.
+    await waitFor(() => {
+      expect(screen.getByText(/CUDA uses only NVIDIA cards/)).toBeTruthy();
+    });
+    expect(screen.queryByLabelText('GPU for inference')).toBeNull();
+  });
+
+  it('keeps the Vulkan lockout when the only extra GPU is an integrated one', async () => {
+    setupApi([RTX_3090, INTEL_IGPU]);
+    await mountAndRedetect();
+    const runtimeGroup = within(screen.getByText('Runtime').closest('.space-y-2') as HTMLElement);
+    // iGPUs and virtual adapters must not read as a routable second card:
+    // both Vulkan tiles and Metal keep the NVIDIA badge.
+    await waitFor(() => {
+      expect(runtimeGroup.getAllByText('NVIDIA detected').length).toBe(3);
+    });
+    const vulkanLinux = runtimeGroup
+      .getByText('Vulkan Linux')
+      .closest('button') as HTMLButtonElement;
+    expect(vulkanLinux.disabled).toBe(true);
+    expect(screen.queryByText(/CUDA uses only NVIDIA cards/)).toBeNull();
+  });
+
+  it('surfaces a stale pin as an explicit option instead of silently claiming Automatic', async () => {
+    setupApi([RTX_3060, RTX_3090], { storedGpuDevice: 'GPU-gone' });
+    await mountAndRedetect();
+    const select = (await screen.findByLabelText('GPU for inference')) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(select.value).toBe('GPU-gone');
+    });
+    expect(
+      screen.getByText('Previously selected GPU not detected - starts as Automatic'),
+    ).toBeTruthy();
   });
 });
