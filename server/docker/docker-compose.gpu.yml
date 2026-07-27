@@ -1,6 +1,11 @@
 # NVIDIA GPU overlay
 # Adds GPU device reservation for CUDA-accelerated transcription.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
+#
+# GPU_DEVICE selects which card on multi-GPU hosts (nvidia-smi index, set by
+# the dashboard at server start from the Runtime Settings GPU picker). Unset
+# defaults to device 0 — the same card the previous `count: 1` reservation
+# resolved to, so manual `docker compose up` behaves as before.
 
 services:
   transcriptionsuite:
@@ -9,5 +14,6 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids:
+                - ${GPU_DEVICE:-0}
               capabilities: [gpu]

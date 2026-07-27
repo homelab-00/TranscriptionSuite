@@ -153,6 +153,14 @@ export interface ElectronAPI {
       toolkit: boolean;
       vulkan: boolean;
       wslSupport?: WslSupport;
+      gpus: Array<{
+        vendor: 'nvidia' | 'amd' | 'intel' | 'unknown';
+        kind: 'discrete' | 'integrated' | 'virtual' | 'unknown';
+        index: number | null;
+        name: string;
+        memoryMiB: number | null;
+        uuid: string | null;
+      }>;
     }>;
     resetGpuCache: () => Promise<void>;
     hasVulkanWsl2SidecarImage: () => Promise<boolean>;

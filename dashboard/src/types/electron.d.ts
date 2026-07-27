@@ -23,6 +23,16 @@ interface WslSupport {
   gpuPassthroughDetected: boolean;
   reason?: string;
 }
+
+// Keep in sync with electron/gpuInventory.ts (canonical) and electron/preload.ts
+interface HostGpuDevice {
+  vendor: 'nvidia' | 'amd' | 'intel' | 'unknown';
+  kind: 'discrete' | 'integrated' | 'virtual' | 'unknown';
+  index: number | null;
+  name: string;
+  memoryMiB: number | null;
+  uuid: string | null;
+}
 type HfTokenDecision = 'unset' | 'provided' | 'skipped';
 type ClientLogType = 'info' | 'success' | 'error' | 'warning';
 
@@ -133,6 +143,7 @@ interface ElectronAPI {
       toolkit: boolean;
       vulkan: boolean;
       wslSupport?: WslSupport;
+      gpus: HostGpuDevice[];
     }>;
     hasVulkanWsl2SidecarImage: () => Promise<boolean>;
     listImages: () => Promise<
