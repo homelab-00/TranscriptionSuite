@@ -147,9 +147,10 @@ vi.mock('../../src/services/modelRegistry', () => ({
 // modelSelection
 vi.mock('../../src/services/modelSelection', () => ({
   MODEL_DEFAULT_LOADING_PLACEHOLDER: 'Loading…',
-  LEGACY_CUSTOM_OPTION: 'Custom (HuggingFace repo)',
+  MAIN_MODEL_CUSTOM_OPTION: 'Custom (HuggingFace repo)',
   MAIN_RECOMMENDED_MODEL: 'openai/whisper-large-v3-turbo',
   LIVE_MODEL_SAME_AS_MAIN_OPTION: 'Same as main model',
+  LIVE_MODEL_CUSTOM_OPTION: 'Custom live model',
   MODEL_DISABLED_OPTION: 'Disabled',
   DISABLED_MODEL_SENTINEL: '__disabled__',
   WHISPER_MEDIUM: 'openai/whisper-medium',
@@ -421,8 +422,7 @@ describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
       ).toBeDefined();
     });
     expect(screen.queryAllByText(PYANNOTE_TILE).length).toBeGreaterThanOrEqual(1);
-    // The custom-repo tile was removed entirely.
-    expect(screen.queryAllByText(CUSTOM_TILE).length).toBe(0);
+    expect(screen.queryAllByText(CUSTOM_TILE).length).toBeGreaterThanOrEqual(1);
     // The "not supported on Apple Silicon" inline reason is gone.
     expect(screen.queryByText(/pyannote\.audio MPS path/i)).toBeNull();
   });
@@ -449,32 +449,25 @@ describe('Pyannote diarization on Mac Metal (gate removed, Issue #112)', () => {
     // Sortformer stays visible on non-Metal, greyed with its reason badge.
     expect(screen.queryAllByText(SORTFORMER_TILE).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText('Requires Metal')).not.toBeNull();
-    expect(screen.queryAllByText(CUSTOM_TILE).length).toBe(0);
+    expect(screen.queryAllByText(CUSTOM_TILE).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('migrates a legacy Custom diarization selection to the PyAnnote default', async () => {
-    // The custom-repo option was removed: a store persisted before the removal
-    // (Custom sentinel + retired custom text) must fall back to the pyannote
-    // default, render no custom input, and clear the retired key.
-    const setSpy = setupElectronAPI({
-      'server.runtimeProfile': 'cpu',
+  it('on Mac Metal with Custom + pyannote-prefixed value, shows NO unsupported warning', async () => {
+    setupElectronAPI({
+      'server.runtimeProfile': 'metal',
       'server.diarizationModelSelection': CUSTOM,
       'server.diarizationCustomModel': 'pyannote/some-fork',
     });
 
     render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
 
+    // The custom-repo input renders; the old amber "not supported" warning is gone.
     await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: new RegExp(PYANNOTE_TILE, 'i'), pressed: true }),
-      ).toBeDefined();
+      expect(screen.getByDisplayValue('pyannote/some-fork')).toBeDefined();
     });
-    expect(screen.queryByDisplayValue('pyannote/some-fork')).toBeNull();
-    await waitFor(() => {
-      expect(
-        setSpy.mock.calls.some(([k, v]) => k === 'server.diarizationCustomModel' && v === ''),
-      ).toBe(true);
-    });
+    expect(
+      screen.queryByText(/Custom pyannote repos are not supported on Apple Silicon/i),
+    ).toBeNull();
   });
 });
 

@@ -62,13 +62,13 @@ import {
 import { getModelsByFamily } from '../../src/services/modelRegistry';
 import {
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
-  LEGACY_CUSTOM_OPTION,
+  MAIN_MODEL_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
+  LIVE_MODEL_CUSTOM_OPTION,
   MODEL_DISABLED_OPTION,
   DISABLED_MODEL_SENTINEL,
   WHISPER_MEDIUM,
   MAIN_MODEL_PRESETS,
-  MAIN_RECOMMENDED_MODEL,
   LIVE_MODEL_PRESETS,
   VULKAN_RECOMMENDED_MODEL,
   resolveMainModelSelectionValue,
@@ -78,6 +78,7 @@ import {
 import {
   DIARIZATION_CAMPP_OPTION,
   DIARIZATION_DEFAULT_MODEL,
+  DIARIZATION_MODEL_CUSTOM_OPTION,
   DIARIZATION_SORTFORMER_OPTION,
   MLX_DEFAULT_MODEL,
   defaultMainModelFor,
@@ -128,24 +129,29 @@ const MAIN_MODEL_SELECTION_OPTIONS = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
   ...MAIN_MODEL_PRESETS,
   MODEL_DISABLED_OPTION,
+  MAIN_MODEL_CUSTOM_OPTION,
 ]);
 const LIVE_MODEL_SELECTION_OPTIONS = new Set([
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
   ...LIVE_MODEL_PRESETS,
   MODEL_DISABLED_OPTION,
+  LIVE_MODEL_CUSTOM_OPTION,
 ]);
 const DIARIZATION_MODEL_SELECTION_OPTIONS = new Set([
   DIARIZATION_CAMPP_OPTION,
   DIARIZATION_SORTFORMER_OPTION,
   DIARIZATION_DEFAULT_MODEL,
+  DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
 
 const UI_SENTINEL_VALUES = new Set([
   MODEL_DEFAULT_LOADING_PLACEHOLDER,
-  LEGACY_CUSTOM_OPTION,
+  MAIN_MODEL_CUSTOM_OPTION,
   LIVE_MODEL_SAME_AS_MAIN_OPTION,
+  LIVE_MODEL_CUSTOM_OPTION,
   DIARIZATION_CAMPP_OPTION,
   DIARIZATION_SORTFORMER_OPTION,
+  DIARIZATION_MODEL_CUSTOM_OPTION,
 ]);
 
 function sanitizeModelName(value: string): string {
@@ -215,21 +221,25 @@ function normalizeLiveModelToWhisper(modelName: string): string {
   return isLiveCompatibleModel(modelName) ? modelName : FALLBACK_LIVE_WHISPER_MODEL;
 }
 
-// Map server-reported model names to UI selections. The custom-repo option is
-// gone, so a model the pickers cannot represent falls back to a preset default
-// instead of a "Custom" selection.
-function mapMainModelToSelection(modelName: string): string {
+function mapMainModelToSelection(modelName: string): { selection: string; custom: string } {
   const normalizedModel = normalizeModelName(modelName);
   if (!normalizedModel || normalizedModel === normalizeModelName(DISABLED_MODEL_SENTINEL)) {
-    return MODEL_DISABLED_OPTION;
+    return { selection: MODEL_DISABLED_OPTION, custom: '' };
   }
-  return findCaseInsensitivePreset(modelName, MAIN_MODEL_PRESETS) ?? MAIN_RECOMMENDED_MODEL;
+  const preset = findCaseInsensitivePreset(modelName, MAIN_MODEL_PRESETS);
+  if (preset) {
+    return { selection: preset, custom: '' };
+  }
+  return { selection: MAIN_MODEL_CUSTOM_OPTION, custom: modelName };
 }
 
-function mapLiveModelToSelection(modelName: string, mainModelName: string): string {
+function mapLiveModelToSelection(
+  modelName: string,
+  mainModelName: string,
+): { selection: string; custom: string } {
   const normalizedModel = normalizeModelName(modelName);
   if (!normalizedModel || normalizedModel === normalizeModelName(DISABLED_MODEL_SENTINEL)) {
-    return MODEL_DISABLED_OPTION;
+    return { selection: MODEL_DISABLED_OPTION, custom: '' };
   }
 
   const normalizedLiveModel = normalizeLiveModelToWhisper(modelName);
@@ -239,21 +249,25 @@ function mapLiveModelToSelection(modelName: string, mainModelName: string): stri
     isWhisperModel(mainModelName) &&
     normalizeModelName(normalizedLiveModel) === normalizeModelName(mainModelName)
   ) {
-    return LIVE_MODEL_SAME_AS_MAIN_OPTION;
+    return { selection: LIVE_MODEL_SAME_AS_MAIN_OPTION, custom: '' };
   }
 
-  return (
-    findCaseInsensitivePreset(normalizedLiveModel, LIVE_MODEL_PRESETS) ??
-    FALLBACK_LIVE_WHISPER_MODEL
-  );
+  const preset = findCaseInsensitivePreset(normalizedLiveModel, LIVE_MODEL_PRESETS);
+  if (preset) {
+    return { selection: preset, custom: '' };
+  }
+  return { selection: LIVE_MODEL_CUSTOM_OPTION, custom: normalizedLiveModel };
 }
 
-function mapDiarizationModelToSelection(modelName: string): string {
+function mapDiarizationModelToSelection(modelName: string): { selection: string; custom: string } {
   const normalizedModel = normalizeModelName(modelName);
   if (!normalizedModel) {
-    return DIARIZATION_SORTFORMER_OPTION;
+    return { selection: DIARIZATION_SORTFORMER_OPTION, custom: '' };
   }
-  return DIARIZATION_DEFAULT_MODEL;
+  if (normalizedModel === normalizeModelName(DIARIZATION_DEFAULT_MODEL)) {
+    return { selection: DIARIZATION_DEFAULT_MODEL, custom: '' };
+  }
+  return { selection: DIARIZATION_MODEL_CUSTOM_OPTION, custom: modelName };
 }
 
 export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFlowPending }) => {
@@ -262,12 +276,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   // Model selection state
   const [mainModelSelection, setMainModelSelection] = useState(MODEL_DEFAULT_LOADING_PLACEHOLDER);
+  const [mainCustomModel, setMainCustomModel] = useState('');
   const [liveModelSelection, setLiveModelSelection] = useState(LIVE_MODEL_SAME_AS_MAIN_OPTION);
+  const [liveCustomModel, setLiveCustomModel] = useState('');
   const [localSelectionsHydrated, setLocalSelectionsHydrated] = useState(false);
   const [modelsHydrated, setModelsHydrated] = useState(false);
   const [diarizationModelSelection, setDiarizationModelSelection] = useState(
     DIARIZATION_SORTFORMER_OPTION,
   );
+  const [diarizationCustomModel, setDiarizationCustomModel] = useState('');
   const [diarizationHydrated, setDiarizationHydrated] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
 
@@ -471,18 +488,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         ]: unknown[]) => {
           if (!active) return;
 
-          // ── Legacy custom-repo migration ──────────────────────────────────
-          // The "Custom (HuggingFace repo)" option was removed. If a stored
-          // selection is the old Custom sentinel, adopt the stored custom text
-          // as the candidate model name — it may match a preset (e.g. a repo
-          // that later became a registry model); anything else falls through
-          // the unknown-value fallbacks below. The retired custom keys are
-          // cleared afterwards so this can never re-fire.
           let nextMainSelection =
             getString(storedMainSelection) ?? MODEL_DEFAULT_LOADING_PLACEHOLDER;
-          if (nextMainSelection === LEGACY_CUSTOM_OPTION) {
-            nextMainSelection = getString(storedMainCustom) ?? '';
-          }
+          let nextMainCustom = getString(storedMainCustom) ?? '';
 
           if (!MAIN_MODEL_SELECTION_OPTIONS.has(nextMainSelection)) {
             if (
@@ -490,16 +498,23 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             ) {
               nextMainSelection = MODEL_DISABLED_OPTION;
             } else {
-              nextMainSelection =
-                findCaseInsensitivePreset(nextMainSelection, MAIN_MODEL_PRESETS) ??
-                MODEL_DEFAULT_LOADING_PLACEHOLDER;
+              const preset = findCaseInsensitivePreset(nextMainSelection, MAIN_MODEL_PRESETS);
+              if (preset) {
+                nextMainSelection = preset;
+              } else if (nextMainSelection) {
+                nextMainCustom = nextMainSelection;
+                nextMainSelection = MAIN_MODEL_CUSTOM_OPTION;
+              } else {
+                nextMainSelection = MODEL_DEFAULT_LOADING_PLACEHOLDER;
+              }
             }
+          }
+          if (nextMainSelection !== MAIN_MODEL_CUSTOM_OPTION) {
+            nextMainCustom = '';
           }
 
           let nextLiveSelection = getString(storedLiveSelection) ?? LIVE_MODEL_SAME_AS_MAIN_OPTION;
-          if (nextLiveSelection === LEGACY_CUSTOM_OPTION) {
-            nextLiveSelection = getString(storedLiveCustom) ?? '';
-          }
+          let nextLiveCustom = getString(storedLiveCustom) ?? '';
 
           if (!LIVE_MODEL_SELECTION_OPTIONS.has(nextLiveSelection)) {
             if (
@@ -507,22 +522,38 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             ) {
               nextLiveSelection = MODEL_DISABLED_OPTION;
             } else {
-              nextLiveSelection =
-                findCaseInsensitivePreset(nextLiveSelection, LIVE_MODEL_PRESETS) ??
-                LIVE_MODEL_SAME_AS_MAIN_OPTION;
+              const preset = findCaseInsensitivePreset(nextLiveSelection, LIVE_MODEL_PRESETS);
+              if (preset) {
+                nextLiveSelection = preset;
+              } else if (nextLiveSelection) {
+                nextLiveCustom = nextLiveSelection;
+                nextLiveSelection = LIVE_MODEL_CUSTOM_OPTION;
+              } else {
+                nextLiveSelection = LIVE_MODEL_SAME_AS_MAIN_OPTION;
+              }
             }
           }
+          if (nextLiveSelection !== LIVE_MODEL_CUSTOM_OPTION) {
+            nextLiveCustom = '';
+          }
 
-          const resolvedMainModel = resolveMainModelSelectionValue(nextMainSelection, '');
+          const resolvedMainModel = resolveMainModelSelectionValue(
+            nextMainSelection,
+            nextMainCustom,
+            '',
+          );
           const resolvedLiveModel = resolveLiveModelSelectionValue(
             nextLiveSelection,
+            nextLiveCustom,
             resolvedMainModel,
+            '',
           );
           if (
             resolvedLiveModel !== DISABLED_MODEL_SENTINEL &&
             !isLiveCompatibleModel(resolvedLiveModel)
           ) {
             nextLiveSelection = FALLBACK_LIVE_WHISPER_MODEL;
+            nextLiveCustom = '';
           }
 
           // ── Merged diarization control (one-shot migration) ──────────────
@@ -541,9 +572,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
           const legacyEngineRaw = getString(storedSensevoiceEngine);
           let nextDiarizationSelection =
             getString(storedDiarizationSelection) ?? DIARIZATION_SORTFORMER_OPTION;
-          if (nextDiarizationSelection === LEGACY_CUSTOM_OPTION) {
-            nextDiarizationSelection = getString(storedDiarizationCustom) ?? '';
-          }
+          let nextDiarizationCustom = getString(storedDiarizationCustom) ?? '';
 
           if (legacyEngineRaw) {
             // Preserve EFFECTIVE behavior: pre-merge, a SenseVoice main plus
@@ -552,6 +581,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             // because engine=funasr was a no-op for non-SenseVoice mains.
             const migratedMainModel = resolveMainModelSelectionValue(
               nextMainSelection,
+              nextMainCustom,
               configuredMainModel,
             );
             if (
@@ -575,11 +605,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             ) {
               nextDiarizationSelection = DIARIZATION_DEFAULT_MODEL;
             } else if (nextDiarizationSelection) {
-              // Formerly a custom repo — fall back to the pyannote default.
-              nextDiarizationSelection = DIARIZATION_DEFAULT_MODEL;
+              nextDiarizationCustom = nextDiarizationSelection;
+              nextDiarizationSelection = DIARIZATION_MODEL_CUSTOM_OPTION;
             } else {
               nextDiarizationSelection = DIARIZATION_SORTFORMER_OPTION;
             }
+          }
+          if (nextDiarizationSelection !== DIARIZATION_MODEL_CUSTOM_OPTION) {
+            nextDiarizationCustom = '';
           }
 
           // Branch B migration: the dedicated "GGML Sidecar Model" selector is
@@ -598,24 +631,15 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   (isWhisperCppModel(storedGgml) ? storedGgml : undefined))) ??
               VULKAN_RECOMMENDED_MODEL;
             nextMainSelection = migratedId;
-          }
-
-          // Consume the retired custom-repo keys (one-shot; see migration
-          // note above). Failures are benign — the same normalization simply
-          // re-runs on the next mount.
-          if (
-            getString(storedMainCustom) ||
-            getString(storedLiveCustom) ||
-            getString(storedDiarizationCustom)
-          ) {
-            void api.config.set('server.mainCustomModel', '').catch(() => {});
-            void api.config.set('server.liveCustomModel', '').catch(() => {});
-            void api.config.set('server.diarizationCustomModel', '').catch(() => {});
+            nextMainCustom = '';
           }
 
           setMainModelSelection(nextMainSelection);
+          setMainCustomModel(nextMainCustom);
           setLiveModelSelection(nextLiveSelection);
+          setLiveCustomModel(nextLiveCustom);
           setDiarizationModelSelection(nextDiarizationSelection);
+          setDiarizationCustomModel(nextDiarizationCustom);
         },
       )
       .catch(() => {})
@@ -647,14 +671,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       // recommended default. Subsumes the old special cases (MLX ids off
       // Metal, NeMo on CPU — GH-125) and also covers GGML mains left over
       // from a Vulkan profile, which used to survive the switch.
-      const resolvedMain = resolveMainModelSelectionValue(mainModelSelection, '');
+      const resolvedMain = resolveMainModelSelectionValue(mainModelSelection, mainCustomModel, '');
       const mainFamily = familyChoiceForModel(resolvedMain);
       let mainAfterReset = resolvedMain;
       if (mainFamily && !isFamilyChoiceEnabledFor(mainFamily, profile)) {
         const nextDefault = defaultMainModelFor(profile);
         mainAfterReset = nextDefault;
         setMainModelSelection(nextDefault);
+        setMainCustomModel('');
         api?.config?.set('server.mainModelSelection', nextDefault);
+        api?.config?.set('server.mainCustomModel', '');
       }
       // Live picks are whisper/whispercpp-only; GGML live models are invalid
       // off Vulkan and MLX ids are never valid. Fall back to Same-as-main —
@@ -664,7 +690,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
         liveModelSelection !== LIVE_MODEL_SAME_AS_MAIN_OPTION &&
         liveModelSelection !== MODEL_DISABLED_OPTION
       ) {
-        const resolvedLive = resolveLiveModelSelectionValue(liveModelSelection, mainAfterReset);
+        const resolvedLive = resolveLiveModelSelectionValue(
+          liveModelSelection,
+          liveCustomModel,
+          mainAfterReset,
+          '',
+        );
         const liveFamily = familyChoiceForModel(resolvedLive);
         const liveInvalid =
           liveFamily !== null &&
@@ -707,7 +738,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     },
     [
       mainModelSelection,
+      mainCustomModel,
       liveModelSelection,
+      liveCustomModel,
       isAppleSilicon,
       metalSupported,
       mlxFeature,
@@ -880,8 +913,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     // away and returning would overwrite the user's selection with whatever model
     // the server happens to be running (which may be an older choice).
     if (mainModelSelection === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
-      setMainModelSelection(mapMainModelToSelection(configuredMainModel));
-      setLiveModelSelection(mapLiveModelToSelection(configuredLiveModel, configuredMainModel));
+      const mappedMain = mapMainModelToSelection(configuredMainModel);
+      const mappedLive = mapLiveModelToSelection(configuredLiveModel, configuredMainModel);
+
+      setMainModelSelection(mappedMain.selection);
+      setMainCustomModel(mappedMain.custom);
+      setLiveModelSelection(mappedLive.selection);
+      setLiveCustomModel(mappedLive.custom);
     }
 
     setModelsHydrated(true);
@@ -903,7 +941,9 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     // otherwise navigating away and returning would overwrite the user's
     // selection with whatever the server reports.
     if (diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION) {
-      setDiarizationModelSelection(mapDiarizationModelToSelection(configuredDiarizationModel));
+      const mappedDiarization = mapDiarizationModelToSelection(configuredDiarizationModel);
+      setDiarizationModelSelection(mappedDiarization.selection);
+      setDiarizationCustomModel(mappedDiarization.custom);
     }
 
     setDiarizationHydrated(true);
@@ -915,11 +955,20 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     localSelectionsHydrated,
   ]);
 
-  const activeTranscriber = resolveMainModelSelectionValue(mainModelSelection, configuredMainModel);
+  const activeTranscriber = resolveMainModelSelectionValue(
+    mainModelSelection,
+    mainCustomModel,
+    configuredMainModel,
+  );
   // SenseVoice-only: the diarization-engine selector is greyed unless the main
   // transcriber is a SenseVoice model.
   const isSenseVoiceMain = isSenseVoiceModel(activeTranscriber);
-  const activeLiveModel = resolveLiveModelSelectionValue(liveModelSelection, activeTranscriber);
+  const activeLiveModel = resolveLiveModelSelectionValue(
+    liveModelSelection,
+    liveCustomModel,
+    activeTranscriber,
+    configuredLiveModel,
+  );
   const normalizedLiveModel = normalizeLiveModelToWhisper(activeLiveModel);
   // Vulkan sidecar boot/launch model, derived from the Main Transcriber pick
   // (Branch B). The backend swaps to the live model at runtime via /load; this
@@ -939,10 +988,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // single-pass diarizer while leaving the config.yaml pyannote default in place
   // as the fallback if cam++ fails to load.
   const activeDiarizationModel =
-    diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION ||
-    diarizationModelSelection === DIARIZATION_CAMPP_OPTION
-      ? ''
-      : DIARIZATION_DEFAULT_MODEL;
+    diarizationModelSelection === DIARIZATION_MODEL_CUSTOM_OPTION
+      ? diarizationCustomModel.trim() || configuredDiarizationModel || DIARIZATION_DEFAULT_MODEL
+      : diarizationModelSelection === DIARIZATION_SORTFORMER_OPTION ||
+          diarizationModelSelection === DIARIZATION_CAMPP_OPTION
+        ? ''
+        : DIARIZATION_DEFAULT_MODEL;
 
   // SenseVoice diarization engine env value: 'funasr' only when the merged
   // dropdown is set to CAM++, else 'pyannote'. This is a harmless no-op unless
@@ -1101,7 +1152,10 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Live Mode accepts faster-whisper and whisper.cpp (GGML) backends, but the
   // Same-as-main tile additionally requires a faster-whisper main: with a
   // whisper.cpp main, Same-as-main is demoted to an explicit GGML pick of the
-  // same model (or the whisper default if that GGML has no live role).
+  // same model (or the whisper default if that GGML has no live role). A custom
+  // GGML main can never be a preset, so it demotes to the recommended GGML —
+  // falling to faster-whisper there would silently move Live Mode off the
+  // Vulkan sidecar.
   useEffect(() => {
     if (!localSelectionsHydrated || activeLiveModel === DISABLED_MODEL_SENTINEL) return;
     if (
@@ -1111,22 +1165,26 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       setLiveModelSelection(
         LIVE_MODEL_PRESETS.includes(activeLiveModel)
           ? activeLiveModel
-          : FALLBACK_LIVE_WHISPER_MODEL,
+          : mainModelSelection === MAIN_MODEL_CUSTOM_OPTION
+            ? VULKAN_RECOMMENDED_MODEL
+            : FALLBACK_LIVE_WHISPER_MODEL,
       );
       return;
     }
     if (isLiveCompatibleModel(activeLiveModel)) return;
     setLiveModelSelection(FALLBACK_LIVE_WHISPER_MODEL);
-  }, [activeLiveModel, liveModelSelection, localSelectionsHydrated]);
+    setLiveCustomModel('');
+  }, [activeLiveModel, liveModelSelection, mainModelSelection, localSelectionsHydrated]);
 
   // Metal mode: auto-switch a non-MLX main model to the MLX default.
   useEffect(() => {
     if (!localSelectionsHydrated || runtimeProfile !== 'metal') return;
-    const resolved = resolveMainModelSelectionValue(mainModelSelection, '');
+    const resolved = resolveMainModelSelectionValue(mainModelSelection, mainCustomModel, '');
     if (resolved && !isMLXModel(resolved) && resolved !== MODEL_DEFAULT_LOADING_PLACEHOLDER) {
       setMainModelSelection(MLX_DEFAULT_MODEL);
+      setMainCustomModel('');
     }
-  }, [runtimeProfile, localSelectionsHydrated, mainModelSelection]);
+  }, [runtimeProfile, localSelectionsHydrated, mainModelSelection, mainCustomModel]);
 
   useEffect(() => {
     // Sortformer is Metal/MLX-only; on any non-Metal runtime fall back to the
@@ -1183,8 +1241,22 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     if (!localSelectionsHydrated) return;
     const api = (window as any).electronAPI;
     if (!api?.config) return;
+    void api.config.set('server.mainCustomModel', mainCustomModel).catch(() => {});
+  }, [localSelectionsHydrated, mainCustomModel]);
+
+  useEffect(() => {
+    if (!localSelectionsHydrated) return;
+    const api = (window as any).electronAPI;
+    if (!api?.config) return;
     void api.config.set('server.liveModelSelection', liveModelSelection).catch(() => {});
   }, [localSelectionsHydrated, liveModelSelection]);
+
+  useEffect(() => {
+    if (!localSelectionsHydrated) return;
+    const api = (window as any).electronAPI;
+    if (!api?.config) return;
+    void api.config.set('server.liveCustomModel', liveCustomModel).catch(() => {});
+  }, [localSelectionsHydrated, liveCustomModel]);
 
   useEffect(() => {
     if (!localSelectionsHydrated) return;
@@ -1196,6 +1268,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       .set('server.diarizationModelSelection', diarizationModelSelection)
       .catch(() => {});
   }, [localSelectionsHydrated, diarizationModelSelection]);
+
+  useEffect(() => {
+    if (!localSelectionsHydrated) return;
+    const api = (window as any).electronAPI;
+    if (!api?.config) return;
+    void api.config.set('server.diarizationCustomModel', diarizationCustomModel).catch(() => {});
+  }, [localSelectionsHydrated, diarizationCustomModel]);
 
   // Check model download cache whenever the active model names or container state
   // change. GH-213: covers every option the selectors can show (not just the 3
@@ -1525,6 +1604,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     if (!cur || cur === MODEL_DEFAULT_LOADING_PLACEHOLDER) {
                       setMainModelSelection(MLX_DEFAULT_MODEL);
                       api.config?.set('server.mainModelSelection', MLX_DEFAULT_MODEL);
+                      api.config?.set('server.mainCustomModel', '');
                     }
                   })
                   .catch(() => {});
@@ -2695,10 +2775,16 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                   isRunning={isRunning}
                   mainModelSelection={mainModelSelection}
                   onMainModelSelectionChange={setMainModelSelection}
+                  mainCustomModel={mainCustomModel}
+                  onMainCustomModelChange={setMainCustomModel}
                   liveModelSelection={liveModelSelection}
                   onLiveModelSelectionChange={setLiveModelSelection}
+                  liveCustomModel={liveCustomModel}
+                  onLiveCustomModelChange={setLiveCustomModel}
                   diarizationModelSelection={diarizationModelSelection}
                   onDiarizationModelSelectionChange={setDiarizationModelSelection}
+                  diarizationCustomModel={diarizationCustomModel}
+                  onDiarizationCustomModelChange={setDiarizationCustomModel}
                   activeTranscriber={activeTranscriber}
                   activeLiveModel={activeLiveModel}
                   diarizationStatusModelId={diarizationStatusModelId}
