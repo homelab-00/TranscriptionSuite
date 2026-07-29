@@ -3,11 +3,13 @@
 /**
  * GH-200 — a hand-added compose env key must survive every server start.
  *
- * On a TLS-intercepting network (corporate proxy / antivirus HTTPS scanning) the
- * only way a packaged-app user can get their root CA into the container is to add
- * `EXTRA_CA_CERTS_DIR=...` to `<userData>/docker/.env` by hand: there is no UI for
- * it yet, and the compose files themselves are overwritten from the bundle on every
- * launch.
+ * On a TLS-intercepting network (corporate proxy / antivirus HTTPS scanning) a
+ * packaged-app user can get their root CA into the container by adding
+ * `EXTRA_CA_CERTS_DIR=...` to `<userData>/docker/.env` by hand. The Server-tab
+ * folder picker (see dockerManagerExtraCaCerts.test.ts) now offers the same via
+ * process env, but the hand-edited route stays supported: the compose files
+ * themselves are overwritten from the bundle on every launch, and users who set
+ * this up pre-UI must not be broken.
  *
  * `upsertComposeEnvValues` rewrites that same file on every start. It only strips
  * the keys it is about to write, so unknown keys survive — and this test pins that,

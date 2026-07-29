@@ -133,19 +133,42 @@ Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root | ForEach-Object {
 } | Set-Content -Encoding ascii "$dir\host-roots.crt"
 ```
 
-Then set `EXTRA_CA_CERTS_DIR=%APPDATA%\TranscriptionSuite\ca` and restart the
-server. (This exports every root your OS already trusts, which necessarily
-includes the interceptor's. If you prefer to trust only that one CA, export it
-alone from `certmgr.msc` → Trusted Root Certification Authorities → right-click
-→ All Tasks → Export → **Base-64 encoded X.509** and drop the file in that
-folder instead.)
+(This exports every root your OS already trusts, which necessarily includes the
+interceptor's. If you prefer to trust only that one CA, export it alone from
+`certmgr.msc` → Trusted Root Certification Authorities → right-click → All Tasks
+→ Export, and drop the file in that folder instead. **Careful:** the export
+wizard pre-selects "DER encoded binary X.509", which the container cannot read.
+Pick **Base-64 encoded X.509** instead.)
 
 On Linux/macOS the equivalent is any directory containing your CA:
 `EXTRA_CA_CERTS_DIR=~/.config/TranscriptionSuite/ca`.
 
+Then point the server at that folder. Pick the route that matches how you run it:
+
+- **Dashboard:** Server tab → *5. Persistent Volumes* → **Extra CA certificates**
+  → *Choose folder*, then start the server. Nothing else to set.
+- **`docker compose` in a terminal:** set `EXTRA_CA_CERTS_DIR` as a shell
+  environment variable, or add it to the `.env` file next to the compose file.
+  In a `.env` file always write the full expanded path
+  (`EXTRA_CA_CERTS_DIR=C:\Users\<you>\AppData\Roaming\TranscriptionSuite\ca`).
+  Compose does **not** expand `%APPDATA%`-style variables there; with a literal
+  `%APPDATA%` compose refuses to start with an error like
+  `service ... refers to undefined volume %APPDATA%\...: invalid compose project`.
+  If you see that error, replace the `%VAR%` with the real path.
+- **Dashboard without the picker (older app versions):** hand-add the same
+  `EXTRA_CA_CERTS_DIR=<full expanded path>` line to the dashboard's compose env
+  file, which survives every server start. It lives at
+  `%APPDATA%\TranscriptionSuite\docker\.env` on Windows,
+  `~/.config/TranscriptionSuite/docker/.env` on Linux, and
+  `~/Library/Application Support/TranscriptionSuite/docker/.env` on macOS.
+  (A system-wide environment variable also works, but the dashboard only
+  inherits it at app launch: fully quit and reopen the app afterwards.
+  Clicking Start/Restart alone will not pick it up.)
+
 Accepted file extensions are `.crt`, `.pem` and `.cer`; PEM bundles holding many
 certificates are split automatically. Files that are not PEM (a DER export) are
-skipped with a warning rather than corrupting the trust store.
+skipped with a `WARNING: ... holds no PEM certificate` line in the container log
+rather than corrupting the trust store.
 
 Behind a corporate proxy you likely also need `HTTP_PROXY`, `HTTPS_PROXY` and
 `NO_PROXY`, which are passed through to the container.

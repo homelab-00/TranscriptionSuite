@@ -25,9 +25,11 @@ keep working.
 
 Two Debian behaviours drive the design
 --------------------------------------
-* ``update-ca-certificates`` only reads files ending in ``.crt``. A ``.pem`` -- the
-  extension Windows' certmgr and OpenSSL both produce by default -- is *silently
-  ignored*. So extensions are normalized rather than copied verbatim.
+* ``update-ca-certificates`` only reads files ending in ``.crt``. A ``.pem`` (what
+  OpenSSL emits) or a ``.cer`` (certmgr's export extension; note certmgr's wizard
+  pre-selects DER encoding, which holds no PEM and is skipped with a warning, so
+  only a "Base-64 encoded X.509" export is usable) is *silently ignored* by it.
+  So extensions are normalized rather than copied verbatim.
 * Its per-file handling is not reliably multi-certificate, while a host root-store
   export is a single file holding hundreds of concatenated certificates. So bundles
   are split into one certificate per file.

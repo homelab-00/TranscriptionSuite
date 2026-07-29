@@ -875,10 +875,11 @@ function sanitizeEnvValue(value: string): string {
   return value.replace(/[\r\n]+/g, '').trim();
 }
 
-// Exported for tests: preserving keys we do not own is load-bearing. It is the only
-// way a packaged-app user can set EXTRA_CA_CERTS_DIR to escape a TLS-intercepting
-// network (GH #200), and a refactor that stripped unknown keys would silently
-// re-break them on the next server start.
+// Exported for tests: preserving keys we do not own is load-bearing. A hand-added
+// EXTRA_CA_CERTS_DIR here is how packaged-app users escaped a TLS-intercepting
+// network before the Server-tab folder picker existed (GH #200), and a refactor
+// that stripped unknown keys would silently re-break them on the next server start.
+// The picker deliberately bypasses this file (process env only) so both routes coexist.
 export function upsertComposeEnvValues(values: Record<string, string>): void {
   const composeEnvPath = path.join(getComposeDir(), '.env');
   const entries = Object.entries(values);
@@ -951,6 +952,66 @@ function readPortFromStore(): number {
     // fall through
   }
   return DEFAULT_SERVER_PORT;
+}
+
+/**
+ * Read the extra-CA-certificates folder picked in the dashboard (Server tab →
+ * Persistent Volumes) from the electron-store JSON on disk. Exported for tests.
+ *
+ * When set, startContainer passes it as EXTRA_CA_CERTS_DIR so compose
+ * interpolates it into the `${EXTRA_CA_CERTS_DIR:-./.empty}:/ca-trust:ro` bind
+ * mount and the container trusts the TLS-intercepting antivirus/proxy root CA
+ * (GH-200). Returns null when unset/blank so the caller leaves the variable
+ * alone entirely — a hand-edited EXTRA_CA_CERTS_DIR in the compose .env (the
+ * pre-UI escape hatch preserved by upsertComposeEnvValues) then still applies.
+ */
+export function readExtraCaCertsDirFromStore(): string | null {
+  try {
+    const storePath = path.join(app.getPath('userData'), 'dashboard-config.json');
+    const raw = fs.readFileSync(storePath, 'utf8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const value = data['server.extraCaCertsDir'];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+/**
+ * GH-200: inject the picked extra-CA folder into compose interpolation.
+ *
+ * The value must reach composeEnv (the compose child process env) and must
+ * NEVER be persisted to the compose .env: a stale or empty EXTRA_CA_CERTS_DIR
+ * line there would keep applying after the picker is cleared and would clobber
+ * the hand-edited escape hatch that upsertComposeEnvValues preserves. The
+ * envUpdates record is taken so that contract is enforced and testable: an
+ * entry that slips in (say, a future refactor pattern-matching the paired
+ * composeEnv/envUpdates assignments in startContainer) is dropped here before
+ * upsertComposeEnvValues writes the file. A configured folder that no longer
+ * exists is skipped with a warning: compose would silently auto-create an empty
+ * dir and mount it, reproducing the very no-cert failure this feature fixes.
+ * Exported for tests.
+ */
+export function applyExtraCaCertsEnv(
+  composeEnv: Record<string, string>,
+  envUpdates: Record<string, string>,
+): void {
+  if ('EXTRA_CA_CERTS_DIR' in envUpdates) {
+    console.warn(
+      '[DockerManager] EXTRA_CA_CERTS_DIR must never be written to the compose .env; dropping it (GH-200)',
+    );
+    delete envUpdates['EXTRA_CA_CERTS_DIR'];
+  }
+  const extraCaCertsDir = readExtraCaCertsDirFromStore();
+  if (!extraCaCertsDir) return;
+  if (!fs.existsSync(extraCaCertsDir)) {
+    console.warn(
+      `[DockerManager] Extra CA certificates folder not found, skipping /ca-trust mount: ${extraCaCertsDir}`,
+    );
+    return;
+  }
+  composeEnv['EXTRA_CA_CERTS_DIR'] = extraCaCertsDir;
 }
 
 /**
@@ -2608,6 +2669,7 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     detectedGpuMode,
   );
 
+  applyExtraCaCertsEnv(composeEnv, envUpdates);
   upsertComposeEnvValues(envUpdates);
 
   // Create host directory for startup events file (bind-mounted into container).

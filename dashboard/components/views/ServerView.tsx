@@ -44,6 +44,8 @@ import { StartupActivityInline } from './server/StartupActivityInline';
 import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { SERVER_START_ID } from '../../src/utils/startupEventMapping';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
+import { useFolderPicker } from '../../src/hooks/useFolderPicker';
+import { getConfig, setConfig } from '../../src/config/store';
 import { useServerStatus } from '../../src/hooks/useServerStatus';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { useModelCache } from '../../src/hooks/useModelCache';
@@ -338,6 +340,49 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
     writeToClipboard(dir).catch(() => {});
     setCopiedPath(label);
     setTimeout(() => setCopiedPath((c) => (c === label ? null : c)), 2000);
+  }, []);
+
+  // Extra CA certificates folder for TLS-intercepting antivirus/proxy setups
+  // (GH-200). Persisted as server.extraCaCertsDir; dockerManager reads it at
+  // container start and feeds the EXTRA_CA_CERTS_DIR bind mount. Blank = unset.
+  const [extraCaCertsDir, setExtraCaCertsDir] = useState<string | null>(null);
+  const pickFolder = useFolderPicker();
+  useEffect(() => {
+    getConfig<string>('server.extraCaCertsDir')
+      .then((v) => {
+        if (typeof v === 'string' && v.trim()) setExtraCaCertsDir(v);
+      })
+      .catch(() => {});
+  }, []);
+  const handlePickCaCertsDir = useCallback(async () => {
+    const selected = await pickFolder();
+    if (!selected) return;
+    // Docker rejects a bind-mount whose host path contains ":" (the volume-spec
+    // separator; Windows drive letters like C:\ are the one exception), so
+    // refuse it here with a clear message instead of failing at server start.
+    if (selected.replace(/^[A-Za-z]:(?=[\\/])/, '').includes(':')) {
+      toast.error(
+        'Docker cannot mount a folder whose path contains ":". Rename the folder and pick it again.',
+      );
+      return;
+    }
+    // Persist first, then commit UI state: container start reads the store, not
+    // the UI, so an optimistic update on a failed write would show a folder that
+    // never mounts.
+    try {
+      await setConfig('server.extraCaCertsDir', selected);
+      setExtraCaCertsDir(selected);
+    } catch {
+      toast.error('Could not save the CA certificates folder setting.');
+    }
+  }, [pickFolder]);
+  const handleClearCaCertsDir = useCallback(async () => {
+    try {
+      await setConfig('server.extraCaCertsDir', '');
+      setExtraCaCertsDir(null);
+    } catch {
+      toast.error('Could not clear the CA certificates folder setting.');
+    }
   }, []);
 
   // Runtime profile shorthands. Valid model families, live options and
@@ -2800,6 +2845,49 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                         Clear {vol.label.replace(' Volume', '')}
                       </Button>
                     ))}
+                  </div>
+                )}
+
+                {/* Extra CA certificates mount for TLS-intercepting networks (GH-200) */}
+                {!isMetal && (
+                  <div className="border-t border-white/5 pt-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="h-2 w-2 rounded-full bg-slate-500" />
+                        <span className="text-sm text-slate-300">Extra CA certificates</span>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon={<FolderOpen size={14} />}
+                          onClick={handlePickCaCertsDir}
+                        >
+                          {extraCaCertsDir ? 'Change' : 'Choose folder'}
+                        </Button>
+                        {extraCaCertsDir && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            icon={<XCircle size={14} />}
+                            onClick={handleClearCaCertsDir}
+                          >
+                            Clear
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    {extraCaCertsDir && (
+                      <div className="mt-1 pl-5 font-mono text-xs break-all text-slate-400">
+                        {extraCaCertsDir}
+                      </div>
+                    )}
+                    <p className="mt-1 pl-5 text-xs text-slate-500">
+                      Only needed when an antivirus or corporate proxy inspects HTTPS and server
+                      startup fails with certificate errors. Export the intercepting root
+                      certificate (Base-64 / PEM format) into a folder and choose it here. The
+                      container trusts it from the next server start.
+                    </p>
                   </div>
                 )}
               </div>
