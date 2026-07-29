@@ -87,12 +87,20 @@ describe('ModelCardPicker', () => {
     expect(screen.queryByText('Main')).not.toBeInTheDocument();
   });
 
-  it('never offers a custom repo card', () => {
+  it('omits the custom card when no custom option is configured', () => {
     setup();
     expand();
 
     expect(screen.queryByText('Custom (HuggingFace repo)')).not.toBeInTheDocument();
-    expect(screen.queryByPlaceholderText('owner/model-name')).not.toBeInTheDocument();
+  });
+
+  it('renders the custom card when a custom option is configured', () => {
+    setup({
+      custom: { value: 'Custom (HuggingFace repo)', text: '', onTextChange: vi.fn() },
+    });
+    expand();
+
+    expect(screen.getByRole('button', { name: /select custom/i })).toBeInTheDocument();
   });
 
   it('falls back to a placeholder summary for an unknown selection', () => {

@@ -5,14 +5,17 @@ import { ModelCardPicker } from '../../models/ModelCardPicker';
 import type { ModelCacheStatus } from '../../../src/hooks/useModelCache';
 import type { FamilyChoiceId } from '../../../src/services/instanceMatrix';
 import { modelsForFamilyChoice } from '../../../src/services/instanceMatrix';
+import { MAIN_MODEL_CUSTOM_OPTION } from '../../../src/services/modelSelection';
 
 interface MainModelPickerProps {
   selectedFamily: FamilyChoiceId | null;
   mainModelSelection: string;
+  mainCustomModel: string;
   isRunning: boolean;
   canManage: boolean;
   modelCacheStatus: ModelCacheStatus;
   onMainModelSelectionChange: (value: string) => void;
+  onMainCustomModelChange: (value: string) => void;
   onRemove: (id: string) => void;
 }
 
@@ -30,10 +33,12 @@ interface MainModelPickerProps {
 export function MainModelPicker({
   selectedFamily,
   mainModelSelection,
+  mainCustomModel,
   isRunning,
   canManage,
   modelCacheStatus,
   onMainModelSelectionChange,
+  onMainCustomModelChange,
   onRemove,
 }: MainModelPickerProps) {
   const models = selectedFamily ? modelsForFamilyChoice(selectedFamily) : [];
@@ -45,6 +50,11 @@ export function MainModelPicker({
       <ModelCardPicker
         models={models}
         selection={mainModelSelection}
+        custom={{
+          value: MAIN_MODEL_CUSTOM_OPTION,
+          text: mainCustomModel,
+          onTextChange: onMainCustomModelChange,
+        }}
         badgeLabel="Main"
         isRunning={isRunning}
         canManage={canManage}

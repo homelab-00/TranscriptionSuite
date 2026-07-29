@@ -43,7 +43,6 @@ import {
   MAIN_RECOMMENDED_MODEL,
   LIVE_RECOMMENDED_MODEL,
   DISABLED_MODEL_SENTINEL,
-  LEGACY_CUSTOM_OPTION,
   ONBOARDING_MAIN_MODEL_OPTIONS,
   ONBOARDING_LIVE_MODEL_OPTIONS,
   OptionalDependencyBootstrapStatus,
@@ -520,7 +519,9 @@ const AppInner: React.FC = () => {
 
           await Promise.all([
             setConfig('server.mainModelSelection', mapBackendModelToUiSelection(selectedMainModel)),
+            setConfig('server.mainCustomModel', ''),
             setConfig('server.liveModelSelection', mapBackendModelToUiSelection(selectedLiveModel)),
+            setConfig('server.liveCustomModel', ''),
             setConfig('app.modelSelectionOnboardingCompleted', true),
           ]);
         } else if (!selectedMainModel || !selectedLiveModel) {
@@ -539,37 +540,30 @@ const AppInner: React.FC = () => {
           const envMainModel = await readComposeEnvValue('MAIN_TRANSCRIBER_MODEL');
           const envLiveModel = await readComposeEnvValue('LIVE_TRANSCRIBER_MODEL');
 
-          let storedMainSelection =
+          const storedMainSelection =
             typeof storedMainSelectionRaw === 'string' && storedMainSelectionRaw.trim()
               ? storedMainSelectionRaw.trim()
               : mapBackendModelToUiSelection(envMainModel || MAIN_RECOMMENDED_MODEL);
-          let storedLiveSelection =
+          const storedLiveSelection =
             typeof storedLiveSelectionRaw === 'string' && storedLiveSelectionRaw.trim()
               ? storedLiveSelectionRaw.trim()
               : mapBackendModelToUiSelection(envLiveModel || LIVE_RECOMMENDED_MODEL);
 
-          // Legacy: pre-removal stores may still hold the retired Custom
-          // sentinel (until ServerView hydrates once and normalizes them).
-          // Adopt the old custom text so this start path keeps resolving to a
-          // real model.
           const storedMainCustom =
-            typeof storedMainCustomRaw === 'string' ? storedMainCustomRaw.trim() : '';
+            typeof storedMainCustomRaw === 'string' ? storedMainCustomRaw : '';
           const storedLiveCustom =
-            typeof storedLiveCustomRaw === 'string' ? storedLiveCustomRaw.trim() : '';
-          if (storedMainSelection === LEGACY_CUSTOM_OPTION) {
-            storedMainSelection = storedMainCustom || envMainModel || MAIN_RECOMMENDED_MODEL;
-          }
-          if (storedLiveSelection === LEGACY_CUSTOM_OPTION) {
-            storedLiveSelection = storedLiveCustom || envLiveModel || LIVE_RECOMMENDED_MODEL;
-          }
+            typeof storedLiveCustomRaw === 'string' ? storedLiveCustomRaw : '';
 
           const resolvedMainModel = resolveMainModelSelectionValue(
             storedMainSelection,
+            storedMainCustom,
             envMainModel || MAIN_RECOMMENDED_MODEL,
           );
           const resolvedLiveModel = resolveLiveModelSelectionValue(
             storedLiveSelection,
+            storedLiveCustom,
             resolvedMainModel,
+            envLiveModel || LIVE_RECOMMENDED_MODEL,
           );
 
           selectedMainModel = toBackendModelEnvValue(resolvedMainModel);

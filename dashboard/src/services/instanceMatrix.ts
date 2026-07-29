@@ -36,6 +36,7 @@ import {
 // (server.diarizationModelSelection); values must never change.
 export const DIARIZATION_SORTFORMER_OPTION = 'Sortformer (Metal; ≤ 4 speakers)';
 export const DIARIZATION_DEFAULT_MODEL = 'pyannote/speaker-diarization-community-1';
+export const DIARIZATION_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 export const DIARIZATION_CAMPP_OPTION = 'CAM++ (fast, built-in)';
 export const DIARIZATION_BUILTIN_LABEL = 'Built-in';
 
@@ -370,7 +371,7 @@ export function liveModelsFor(runtime: RuntimeProfile): ModelInfo[] {
   );
 }
 
-export type DiarizationTileId = 'pyannote' | 'campp' | 'sortformer' | 'builtin';
+export type DiarizationTileId = 'pyannote' | 'campp' | 'sortformer' | 'builtin' | 'custom';
 
 export interface DiarizationTile {
   id: DiarizationTileId;
@@ -442,6 +443,14 @@ export function diarizationTilesFor(
       enabled: true,
       isDefault: defaultId === 'pyannote',
       hint: 'HuggingFace token required',
+    },
+    {
+      id: 'custom',
+      label: 'Custom',
+      storedValue: DIARIZATION_MODEL_CUSTOM_OPTION,
+      enabled: true,
+      isDefault: false,
+      hint: 'HuggingFace repo',
     },
   ];
 }

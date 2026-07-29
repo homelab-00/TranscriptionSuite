@@ -1,15 +1,18 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { MainModelPicker } from '../MainModelPicker';
+import { MAIN_MODEL_CUSTOM_OPTION } from '../../../../src/services/modelSelection';
 
 function setup(overrides: Partial<React.ComponentProps<typeof MainModelPicker>> = {}) {
   const props = {
     selectedFamily: 'nemo' as const,
     mainModelSelection: 'nvidia/parakeet-tdt-0.6b-v3',
+    mainCustomModel: '',
     isRunning: false,
     canManage: true,
     modelCacheStatus: {},
     onMainModelSelectionChange: vi.fn(),
+    onMainCustomModelChange: vi.fn(),
     onRemove: vi.fn(),
     ...overrides,
   };
@@ -63,14 +66,6 @@ describe('MainModelPicker', () => {
     expect(screen.queryByText(/Parakeet/)).not.toBeInTheDocument();
   });
 
-  it('does not offer a custom HuggingFace repo option', () => {
-    setup();
-    expand();
-
-    expect(screen.queryByText(/Custom \(HuggingFace repo\)/)).not.toBeInTheDocument();
-    expect(screen.queryByPlaceholderText('owner/model-name')).not.toBeInTheDocument();
-  });
-
   it('reports the model id when a card is selected', () => {
     const props = setup();
     expand();
@@ -94,6 +89,46 @@ describe('MainModelPicker', () => {
       'aria-pressed',
       'false',
     );
+  });
+
+  it('switches to the custom option when the custom card is chosen', () => {
+    const props = setup();
+    expand();
+
+    fireEvent.click(screen.getByRole('button', { name: /select custom/i }));
+
+    expect(props.onMainModelSelectionChange).toHaveBeenCalledWith(MAIN_MODEL_CUSTOM_OPTION);
+  });
+
+  it('hides the free-text repo input while a registry model is selected', () => {
+    setup();
+    expand();
+
+    expect(screen.queryByPlaceholderText('owner/model-name')).not.toBeInTheDocument();
+  });
+
+  it('shows the free-text repo input while the custom option is active', () => {
+    setup({ mainModelSelection: MAIN_MODEL_CUSTOM_OPTION });
+    expand();
+
+    expect(screen.getByPlaceholderText('owner/model-name')).toBeInTheDocument();
+  });
+
+  it('summarizes a custom selection in the collapsed header', () => {
+    setup({ mainModelSelection: MAIN_MODEL_CUSTOM_OPTION, mainCustomModel: 'me/my-model' });
+
+    expect(screen.getByText('Custom: me/my-model')).toBeInTheDocument();
+  });
+
+  it('reports edits to the custom repo', () => {
+    const props = setup({ mainModelSelection: MAIN_MODEL_CUSTOM_OPTION });
+    expand();
+
+    fireEvent.change(screen.getByPlaceholderText('owner/model-name'), {
+      target: { value: 'me/my-model' },
+    });
+
+    expect(props.onMainCustomModelChange).toHaveBeenCalledWith('me/my-model');
   });
 
   it('locks every card against selection while the server is running', () => {
@@ -121,14 +156,29 @@ describe('MainModelPicker', () => {
     expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument();
   });
 
-  it('renders an empty list when no family is selected', () => {
+  it('renders nothing but the custom card when no family is selected', () => {
     setup({ selectedFamily: null });
     expand();
 
+    expect(screen.getByRole('button', { name: /select custom/i })).toBeInTheDocument();
     expect(screen.queryByText(/Parakeet/)).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /select (parakeet|canary)/i }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText('Select a model')).toBeInTheDocument();
+  });
+
+  it('shows the current custom repo in the input', () => {
+    setup({ mainModelSelection: MAIN_MODEL_CUSTOM_OPTION, mainCustomModel: 'me/my-model' });
+    expand();
+
+    expect(screen.getByDisplayValue('me/my-model')).toBeInTheDocument();
+  });
+
+  it('locks the custom repo input too while the server is running', () => {
+    setup({
+      mainModelSelection: MAIN_MODEL_CUSTOM_OPTION,
+      mainCustomModel: 'me/my-model',
+      isRunning: true,
+    });
+    expand();
+
+    expect(screen.getByPlaceholderText('owner/model-name')).toBeDisabled();
   });
 });
