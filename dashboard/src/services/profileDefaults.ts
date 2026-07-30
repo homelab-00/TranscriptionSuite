@@ -11,8 +11,6 @@ export interface ProfilePublicFieldDefaults {
   destination_folder: string;
   auto_summary_enabled: boolean;
   auto_export_enabled: boolean;
-  summary_model_id: string | null;
-  summary_prompt_template: string | null;
   export_format: 'plaintext';
 }
 
@@ -23,8 +21,6 @@ export function defaultPublicFields(documentsPath: string): ProfilePublicFieldDe
     // Lurker-safe: both auto-actions OFF by default (FR30/FR31 intent)
     auto_summary_enabled: false,
     auto_export_enabled: false,
-    summary_model_id: null,
-    summary_prompt_template: null,
     export_format: 'plaintext',
   };
 }

@@ -45,8 +45,6 @@ def _minimal_public_fields() -> dict:
         "destination_folder": "/tmp/dest",
         "auto_summary_enabled": False,
         "auto_export_enabled": False,
-        "summary_model_id": None,
-        "summary_prompt_template": None,
         "export_format": "plaintext",
     }
 

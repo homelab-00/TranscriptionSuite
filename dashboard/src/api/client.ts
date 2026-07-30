@@ -56,8 +56,6 @@ export interface ProfilePublicFields {
   destination_folder: string;
   auto_summary_enabled: boolean;
   auto_export_enabled: boolean;
-  summary_model_id: string | null;
-  summary_prompt_template: string | null;
   export_format: string;
 }
 

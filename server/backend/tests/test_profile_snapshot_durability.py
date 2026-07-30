@@ -44,8 +44,6 @@ def _public() -> dict:
         "destination_folder": "/tmp",
         "auto_summary_enabled": False,
         "auto_export_enabled": False,
-        "summary_model_id": None,
-        "summary_prompt_template": None,
         "export_format": "plaintext",
     }
 
