@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.13.0
+  spec_version: 1.13.1
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -118,13 +118,15 @@ meta:
       - components/views/ServerView.tsx
       - components/views/SessionImportTab.tsx
       - components/views/SessionView.tsx
+      - components/views/settings/__tests__/AiPromptsSection.test.tsx
+      - components/views/settings/AiPromptsSection.tsx
       - components/views/SettingsModal.tsx
       - components/views/StarPopupModal.tsx
       - index.html
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-07-29T19:02:52.154Z
+    generated_at: 2026-07-30T21:45:30.506Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -1420,6 +1422,23 @@ component_contracts:
     state_rules:
       - id: option-switches
         rule: Import option toggles remain AppleSwitch-based with current labels and descriptions.
+  AiPromptsSection:
+    file: components/views/settings/AiPromptsSection.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   AmdIcon:
     file: components/ui/icons/AmdIcon.tsx
     required_tokens:
