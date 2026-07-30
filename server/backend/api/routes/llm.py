@@ -847,10 +847,13 @@ async def summarize_recording(
             preamble = f"{preface}\n\n{_VERBATIM_DIRECTIVE}\n\n"
             full_text = preamble + full_text
 
-        # Process with LLM
+        # Process with LLM. GH-254 — summaries use their own system prompt,
+        # not the shared default_system_prompt that also feeds the chat.
+        config = get_llm_config()
         llm_response = await process_with_llm(
             LLMRequest(
                 transcription_text=full_text,
+                system_prompt=config["summary_system_prompt"],
                 user_prompt=custom_prompt,
             )
         )
@@ -927,9 +930,12 @@ async def summarize_recording_stream(
         async def _release_slot() -> None:
             await _release_summary_slot(recording_id)
 
+        # GH-254 — mirror of the non-streaming path: explicit summary prompt.
+        config = get_llm_config()
         return _build_llm_stream_response(
             LLMRequest(
                 transcription_text=full_text,
+                system_prompt=config["summary_system_prompt"],
                 user_prompt=custom_prompt,
             ),
             on_complete=_persist,

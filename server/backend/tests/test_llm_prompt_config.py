@@ -13,7 +13,9 @@ key deletion.
 """
 
 import asyncio
+import json
 
+import pytest
 from server.api.routes import llm
 
 
@@ -107,3 +109,131 @@ class TestStatusExposesPrompts:
         assert status.chat_system_prompt == "Chat prompt"
         assert status.summary_system_prompt_default == llm.DEFAULT_SUMMARY_SYSTEM_PROMPT
         assert status.chat_system_prompt_default == llm.DEFAULT_CHAT_SYSTEM_PROMPT
+
+
+class _FakeJsonResponse:
+    status_code = 200
+
+    def json(self) -> dict:
+        return {
+            "choices": [{"message": {"content": "A summary."}}],
+            "model": "test-model",
+            "usage": {"total_tokens": 12},
+        }
+
+
+class _FakeStreamResponse:
+    """Async context manager mimicking a streaming ``httpx.Response``."""
+
+    status_code = 200
+
+    def __init__(self, lines: list[str]):
+        self._lines = lines
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    async def aread(self) -> bytes:
+        return b""
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+class _CapturingClient:
+    """``httpx.AsyncClient`` stub that records every JSON payload it is given."""
+
+    def __init__(self, captured: list[dict], lines: list[str]):
+        self._captured = captured
+        self._lines = lines
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    async def post(self, _url, json=None, headers=None):
+        self._captured.append(json)
+        return _FakeJsonResponse()
+
+    def stream(self, _method, _url, json=None, headers=None):
+        self._captured.append(json)
+        return _FakeStreamResponse(self._lines)
+
+
+class _CapturingHttpx:
+    """Stub httpx module — only what the LLM routes touch."""
+
+    def __init__(self, captured: list[dict], lines: list[str] | None = None):
+        self._client = _CapturingClient(captured, lines or [])
+
+    def AsyncClient(self, **_kwargs):
+        return self._client
+
+    ConnectError = ConnectionError
+    ConnectTimeout = TimeoutError
+    TimeoutException = TimeoutError
+
+
+def _sse(content: str) -> str:
+    payload = {"model": "test-model", "choices": [{"delta": {"content": content}}]}
+    return f"data: {json.dumps(payload)}"
+
+
+def _drain(response) -> list[str]:
+    """Synchronously consume an async StreamingResponse body."""
+
+    async def _collect() -> list[str]:
+        return [
+            chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+            async for chunk in response.body_iterator
+        ]
+
+    return asyncio.run(_collect())
+
+
+@pytest.fixture
+def _stub_recording(monkeypatch):
+    """Recording 42 exists with one transcription segment; summary saves are no-ops."""
+    import server.database.database as database_mod
+
+    monkeypatch.setattr(
+        database_mod, "get_recording", lambda rid: {"id": rid} if rid == 42 else None
+    )
+    monkeypatch.setattr(
+        database_mod,
+        "get_transcription",
+        lambda rid: {"segments": [{"text": "Hello world"}]} if rid == 42 else None,
+    )
+    monkeypatch.setattr(database_mod, "update_recording_summary", lambda *_a, **_kw: True)
+    return database_mod
+
+
+class TestSummarizeUsesSummaryPrompt:
+    def test_streaming_summarize_sends_summary_prompt(self, monkeypatch, _stub_recording):
+        captured: list[dict] = []
+        monkeypatch.setattr(llm, "get_llm_config", lambda: _full_config())
+        monkeypatch.setattr(
+            llm,
+            "_get_httpx",
+            lambda: _CapturingHttpx(captured, [_sse("A summary."), "data: [DONE]"]),
+        )
+
+        _drain(asyncio.run(llm.summarize_recording_stream(42)))
+
+        assert captured, "no request was sent to the provider"
+        assert captured[0]["messages"][0] == {"role": "system", "content": "Summary prompt"}
+
+    def test_blocking_summarize_sends_summary_prompt(self, monkeypatch, _stub_recording):
+        captured: list[dict] = []
+        monkeypatch.setattr(llm, "get_llm_config", lambda: _full_config())
+        monkeypatch.setattr(llm, "_get_httpx", lambda: _CapturingHttpx(captured))
+
+        asyncio.run(llm.summarize_recording(42))
+
+        assert captured[0]["messages"][0] == {"role": "system", "content": "Summary prompt"}

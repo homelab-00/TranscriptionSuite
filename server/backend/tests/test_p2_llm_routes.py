@@ -30,6 +30,8 @@ def _config(*, enabled: bool = True, base_url: str = "http://localhost:1234", **
         "max_tokens": 2048,
         "temperature": 0.7,
         "default_system_prompt": "Summarize this transcription concisely.",
+        "summary_system_prompt": "Summarize this transcription concisely.",
+        "chat_system_prompt": "You are a helpful assistant.",
     }
     defaults.update(kw)
     return defaults
