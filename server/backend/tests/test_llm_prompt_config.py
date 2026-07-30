@@ -237,3 +237,35 @@ class TestSummarizeUsesSummaryPrompt:
         asyncio.run(llm.summarize_recording(42))
 
         assert captured[0]["messages"][0] == {"role": "system", "content": "Summary prompt"}
+
+
+class TestChatUsesChatPrompt:
+    def test_chat_sends_chat_prompt_not_summary_prompt(self, monkeypatch):
+        """Regression: every conversation used to open with the summarise instruction."""
+        import server.database.database as database_mod
+
+        monkeypatch.setattr(
+            database_mod,
+            "get_conversation_with_messages",
+            lambda cid: {"id": cid, "recording_id": 1, "messages": [], "model": None},
+        )
+        monkeypatch.setattr(database_mod, "add_message", lambda **_kwargs: 1)
+
+        captured: list[dict] = []
+        monkeypatch.setattr(llm, "get_llm_config", lambda: _full_config())
+        monkeypatch.setattr(
+            llm, "_get_httpx", lambda: _CapturingHttpx(captured, [_sse("Hi."), "data: [DONE]"])
+        )
+
+        response = asyncio.run(
+            llm.chat_with_llm(
+                llm.ChatRequest(
+                    conversation_id=7,
+                    user_message="What was decided?",
+                    include_transcription=False,
+                )
+            )
+        )
+        _drain(response)
+
+        assert captured[0]["messages"][0] == {"role": "system", "content": "Chat prompt"}

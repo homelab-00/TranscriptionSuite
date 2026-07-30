@@ -1682,7 +1682,10 @@ async def chat_with_llm(request: ChatRequest):
         )
 
     # Build the messages array from conversation history
-    system_prompt = request.system_prompt or config.get("default_system_prompt", "")
+    # GH-254 — the chat gets its own prompt. It used to share
+    # default_system_prompt with the summariser, so every conversation opened
+    # with "Summarize this transcription concisely."
+    system_prompt = request.system_prompt or config.get("chat_system_prompt", "")
     messages: list[dict[str, str]] = []
 
     if system_prompt:
