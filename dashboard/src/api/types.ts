@@ -450,6 +450,12 @@ export interface LLMStatus {
   has_api_key: boolean;
   title_generation_prompt?: string | null;
   auto_title_enabled?: boolean;
+  // GH-254 — effective prompts plus the server's built-in defaults, which back
+  // the "Reset to default" buttons in Settings → AI.
+  summary_system_prompt?: string | null;
+  summary_system_prompt_default?: string | null;
+  chat_system_prompt?: string | null;
+  chat_system_prompt_default?: string | null;
 }
 
 export interface LLMResponse {
