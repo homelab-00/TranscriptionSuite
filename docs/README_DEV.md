@@ -1329,6 +1329,8 @@ The server's `/api/status` endpoint reads this file to report backend capability
 | `BOOTSTRAP_PRUNE_UV_CACHE` | `false` | Delete `/runtime/cache` after a successful sync to reclaim disk space. |
 | `BOOTSTRAP_LOG_CHANGES` | `true` | Emit before/after package delta to logs. |
 | `BOOTSTRAP_TIMEOUT_SECONDS` | `1800` | Maximum seconds allowed for a single `uv sync` run. |
+| `BOOTSTRAP_SYNC_ATTEMPTS` | `3` | Total `uv sync` attempts when the failure is a transient network fault (dropped/stalled download). Backoff 30s, 60s, … capped at 300s. TLS-certificate failures, a full disk and unsatisfiable requirements are never retried. |
+| `UV_HTTP_TIMEOUT` | `900` | Per-HTTP-request budget handed to uv. uv's own default (30s) is too tight for the 674MB `nvidia-cudnn-cu12` wheel; an explicit value here always wins. |
 | `BOOTSTRAP_REQUIRE_HF_TOKEN` | `false` | Abort bootstrap if `HF_TOKEN` is not set. |
 | `INSTALL_WHISPER` | `false` | Force-enable the `whisper` extra regardless of configured model. |
 | `INSTALL_NEMO` | `false` | Force-enable the `nemo` extra regardless of configured model. |
