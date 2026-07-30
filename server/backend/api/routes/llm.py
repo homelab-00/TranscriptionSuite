@@ -70,6 +70,37 @@ async def _release_summary_slot(recording_id: int) -> None:
         _summary_in_flight.discard(recording_id)
 
 
+# --- Prompt defaults (GH-254) ---
+#
+# Before GH-254 a single ``local_llm.default_system_prompt`` was the system
+# message for AI summaries AND for AI chat, which meant every conversation in
+# the notebook opened with "Summarize this transcription concisely." Each
+# feature now owns a key; ``default_system_prompt`` survives as the legacy
+# fallback so pre-existing config.yaml files behave exactly as they did.
+
+DEFAULT_SUMMARY_SYSTEM_PROMPT = (
+    "Summarize this transcription concisely. Respond in the same language as the transcript."
+)
+
+DEFAULT_CHAT_SYSTEM_PROMPT = (
+    "You are a helpful assistant answering questions about a transcript. "
+    "Base your answers on the transcript provided; if it does not contain the "
+    "answer, say so plainly. Respond in the same language as the user's question."
+)
+
+DEFAULT_TITLE_GENERATION_PROMPT = (
+    "Your task is to produce a SHORT TITLE for this conversation.\n"
+    "Rules:\n"
+    "- Maximum 8 words\n"
+    "- Use the primary language of the conversation\n"
+    "- Output ONLY the title — no preamble, no explanation, no quotes, no punctuation at the end\n"
+    "Examples of good titles:\n"
+    "  Copper grain boundary discussion\n"
+    "  Project deadline planning\n"
+    'Bad (do not do this): "Sure, here is a title: Grain boundaries in copper alloys."'
+)
+
+
 def _get_httpx():
     """Import httpx lazily to avoid startup cost for non-LLM flows."""
     import httpx
@@ -181,6 +212,8 @@ def get_llm_config() -> dict:
         raw_url = llm_config.get("base_url", default_base_url)
         base_url = raw_url.rstrip("/").removesuffix("/v1")
 
+        legacy_prompt = llm_config.get("default_system_prompt")
+
         return {
             "enabled": llm_config.get("enabled", True),
             "base_url": base_url,
@@ -190,20 +223,20 @@ def get_llm_config() -> dict:
             "context_length": llm_config.get("context_length"),
             "max_tokens": llm_config.get("max_tokens", 2048),
             "temperature": llm_config.get("temperature", 0.7),
-            "default_system_prompt": llm_config.get(
-                "default_system_prompt", "Summarize this transcription concisely."
+            # Legacy key — still honoured by /process, and the middle link of
+            # both chains below. ``or`` (not a .get default) so an empty string
+            # falls through to the built-in.
+            "default_system_prompt": legacy_prompt or DEFAULT_SUMMARY_SYSTEM_PROMPT,
+            "summary_system_prompt": (
+                llm_config.get("summary_system_prompt")
+                or legacy_prompt
+                or DEFAULT_SUMMARY_SYSTEM_PROMPT
             ),
-            "title_generation_prompt": llm_config.get(
-                "title_generation_prompt",
-                "Your task is to produce a SHORT TITLE for this conversation.\n"
-                "Rules:\n"
-                "- Maximum 8 words\n"
-                "- Use the primary language of the conversation\n"
-                "- Output ONLY the title — no preamble, no explanation, no quotes, no punctuation at the end\n"
-                "Examples of good titles:\n"
-                "  Copper grain boundary discussion\n"
-                "  Project deadline planning\n"
-                'Bad (do not do this): "Sure, here is a title: Grain boundaries in copper alloys."',
+            "chat_system_prompt": (
+                llm_config.get("chat_system_prompt") or legacy_prompt or DEFAULT_CHAT_SYSTEM_PROMPT
+            ),
+            "title_generation_prompt": (
+                llm_config.get("title_generation_prompt") or DEFAULT_TITLE_GENERATION_PROMPT
             ),
             "auto_title_enabled": llm_config.get("auto_title_enabled", True),
         }
@@ -219,18 +252,10 @@ def get_llm_config() -> dict:
         "context_length": None,
         "max_tokens": 2048,
         "temperature": 0.7,
-        "default_system_prompt": "Summarize this transcription concisely.",
-        "title_generation_prompt": (
-            "Your task is to produce a SHORT TITLE for this conversation.\n"
-            "Rules:\n"
-            "- Maximum 8 words\n"
-            "- Use the primary language of the conversation\n"
-            "- Output ONLY the title — no preamble, no explanation, no quotes, no punctuation at the end\n"
-            "Examples of good titles:\n"
-            "  Copper grain boundary discussion\n"
-            "  Project deadline planning\n"
-            'Bad (do not do this): "Sure, here is a title: Grain boundaries in copper alloys."'
-        ),
+        "default_system_prompt": DEFAULT_SUMMARY_SYSTEM_PROMPT,
+        "summary_system_prompt": DEFAULT_SUMMARY_SYSTEM_PROMPT,
+        "chat_system_prompt": DEFAULT_CHAT_SYSTEM_PROMPT,
+        "title_generation_prompt": DEFAULT_TITLE_GENERATION_PROMPT,
         "auto_title_enabled": True,
     }
 
