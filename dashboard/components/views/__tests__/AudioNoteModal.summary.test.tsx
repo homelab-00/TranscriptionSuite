@@ -203,4 +203,76 @@ describe('AudioNoteModal — stored summary (GH-254)', () => {
     expect(document.body.textContent).toContain('Generate AI Summary');
     expect(mockSummarizeStream).not.toHaveBeenCalled();
   });
+
+  it('regenerate confirms and then streams a fresh summary', async () => {
+    mockRecording = { ...BASE_RECORDING, summary: 'Old summary.' };
+    mockSummarizeStream.mockImplementation(async function* () {
+      yield 'New ';
+      yield 'summary.';
+    });
+
+    render(React.createElement(AudioNoteModal, { isOpen: true, onClose: vi.fn(), note: NOTE }), {
+      wrapper: createWrapper(),
+    });
+    await openModal();
+
+    const button = document.body.querySelector(
+      '[aria-label="Regenerate summary"]',
+    ) as HTMLButtonElement;
+    expect(button).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(button);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockConfirm).toHaveBeenCalled();
+    expect(mockSummarizeStream).toHaveBeenCalledWith(1);
+    expect(document.body.textContent).toContain('New summary.');
+  });
+
+  it('a failed regeneration restores the previous summary', async () => {
+    mockRecording = { ...BASE_RECORDING, summary: 'Old summary.' };
+    mockSummarizeStream.mockImplementation(() => {
+      throw new Error('provider offline');
+    });
+
+    render(React.createElement(AudioNoteModal, { isOpen: true, onClose: vi.fn(), note: NOTE }), {
+      wrapper: createWrapper(),
+    });
+    await openModal();
+
+    await act(async () => {
+      fireEvent.click(
+        document.body.querySelector('[aria-label="Regenerate summary"]') as HTMLButtonElement,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(document.body.textContent).toContain('Old summary.');
+    expect(document.body.textContent).toContain('Failed to generate summary');
+  });
+
+  it('declining the confirmation does not stream', async () => {
+    mockRecording = { ...BASE_RECORDING, summary: 'Old summary.' };
+    mockConfirm.mockResolvedValue(false);
+
+    render(React.createElement(AudioNoteModal, { isOpen: true, onClose: vi.fn(), note: NOTE }), {
+      wrapper: createWrapper(),
+    });
+    await openModal();
+
+    await act(async () => {
+      fireEvent.click(
+        document.body.querySelector('[aria-label="Regenerate summary"]') as HTMLButtonElement,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockSummarizeStream).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('Old summary.');
+  });
 });

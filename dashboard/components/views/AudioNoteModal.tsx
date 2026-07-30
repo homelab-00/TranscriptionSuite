@@ -937,6 +937,27 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     setGenerating(false);
   }, [setGenerating]);
 
+  // GH-254 — the server always regenerates when the stream endpoint is called.
+  // Skipping regeneration is purely a client-side short-circuit on a stored
+  // summary. Confirm first because regenerating overwrites hand edits.
+  //
+  // NOTE: no apostrophes in these comments — the ui-contract scanner treats one
+  // as an opening string quote and silently swallows later className tokens.
+  const handleRegenerateSummary = useCallback(async () => {
+    if (!note?.recordingId || isGenerating) return;
+    if (
+      !(await confirm('Regenerate the summary? The current one will be replaced.', {
+        danger: true,
+        confirmLabel: 'Regenerate',
+      }))
+    )
+      return;
+    setSummaryError(null);
+    setSummaryText('');
+    setSummaryExpanded(true);
+    setGenerating(true);
+  }, [note?.recordingId, isGenerating, confirm, setGenerating]);
+
   const handleEnterSummaryEdit = useCallback(() => {
     if (isGenerating) return;
     setIsSummaryEditing(true);
@@ -2257,6 +2278,16 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                               title="Stop generation"
                             >
                               <StopCircle size={14} />
+                            </button>
+                          )}
+                          {!isGenerating && summaryText && !isSummaryEditing && (
+                            <button
+                              onClick={() => void handleRegenerateSummary()}
+                              className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                              title="Regenerate summary"
+                              aria-label="Regenerate summary"
+                            >
+                              <RotateCw size={14} />
                             </button>
                           )}
                           {!isGenerating && summaryText && !isSummaryEditing && (
