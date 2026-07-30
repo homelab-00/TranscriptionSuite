@@ -140,6 +140,13 @@ class LLMStatus(BaseModel):
     has_api_key: bool = False
     title_generation_prompt: str | None = None
     auto_title_enabled: bool = True
+    # GH-254 — Settings → AI edits these; the *_default fields let the
+    # dashboard implement "Reset to default" without hardcoding a second
+    # copy of the prompt text that can drift from the server's.
+    summary_system_prompt: str | None = None
+    summary_system_prompt_default: str | None = None
+    chat_system_prompt: str | None = None
+    chat_system_prompt_default: str | None = None
 
 
 async def _get_loaded_model_id(base_url: str, headers: dict[str, str] | None = None) -> str | None:
@@ -287,6 +294,10 @@ async def get_llm_status():
             has_api_key=api_key_set,
             title_generation_prompt=config.get("title_generation_prompt"),
             auto_title_enabled=bool(config.get("auto_title_enabled", True)),
+            summary_system_prompt=config.get("summary_system_prompt"),
+            summary_system_prompt_default=DEFAULT_SUMMARY_SYSTEM_PROMPT,
+            chat_system_prompt=config.get("chat_system_prompt"),
+            chat_system_prompt_default=DEFAULT_CHAT_SYSTEM_PROMPT,
             **kwargs,
         )  # type: ignore[arg-type]
 

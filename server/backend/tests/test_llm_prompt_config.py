@@ -12,6 +12,8 @@ what makes the Settings "Reset to default" button a plain write rather than a
 key deletion.
 """
 
+import asyncio
+
 from server.api.routes import llm
 
 
@@ -71,3 +73,37 @@ class TestPromptResolution:
         assert llm.DEFAULT_SUMMARY_SYSTEM_PROMPT != llm.DEFAULT_CHAT_SYSTEM_PROMPT
         assert "Summarize" in llm.DEFAULT_SUMMARY_SYSTEM_PROMPT
         assert "Summarize" not in llm.DEFAULT_CHAT_SYSTEM_PROMPT
+
+
+def _full_config(**overrides) -> dict:
+    """A complete get_llm_config() result — every key the routes index."""
+    cfg = {
+        "enabled": True,
+        "base_url": "http://localhost:1234",
+        "api_key": "",
+        "model": "test-model",
+        "gpu_offload": 1.0,
+        "context_length": None,
+        "max_tokens": 2048,
+        "temperature": 0.7,
+        "default_system_prompt": "Legacy prompt",
+        "summary_system_prompt": "Summary prompt",
+        "chat_system_prompt": "Chat prompt",
+        "title_generation_prompt": "Title prompt",
+        "auto_title_enabled": True,
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+class TestStatusExposesPrompts:
+    def test_status_returns_effective_and_default_prompts(self, monkeypatch):
+        """Settings → AI reads the effective values and the built-ins for Reset."""
+        monkeypatch.setattr(llm, "get_llm_config", lambda: _full_config(enabled=False))
+
+        status = asyncio.run(llm.get_llm_status())
+
+        assert status.summary_system_prompt == "Summary prompt"
+        assert status.chat_system_prompt == "Chat prompt"
+        assert status.summary_system_prompt_default == llm.DEFAULT_SUMMARY_SYSTEM_PROMPT
+        assert status.chat_system_prompt_default == llm.DEFAULT_CHAT_SYSTEM_PROMPT
