@@ -269,3 +269,32 @@ class TestChatUsesChatPrompt:
         _drain(response)
 
         assert captured[0]["messages"][0] == {"role": "system", "content": "Chat prompt"}
+
+
+class TestAutoSummaryUsesSummaryPrompt:
+    def test_auto_summary_sends_summary_prompt_and_no_user_prompt(self, monkeypatch):
+        """Automatic and manual summaries must not be able to diverge."""
+        import server.database.database as database_mod
+        from server.core import auto_summary_engine
+
+        monkeypatch.setattr(database_mod, "get_recording", lambda rid: {"id": rid})
+        monkeypatch.setattr(
+            database_mod,
+            "get_transcription",
+            lambda _rid: {"segments": [{"text": "Hello world"}]},
+        )
+        monkeypatch.setattr(llm, "get_llm_config", lambda: _full_config())
+
+        seen: list[llm.LLMRequest] = []
+
+        async def _fake_process(request):
+            seen.append(request)
+            return llm.LLMResponse(response="A summary.", model="test-model", tokens_used=10)
+
+        monkeypatch.setattr(llm, "process_with_llm", _fake_process)
+
+        result = asyncio.run(auto_summary_engine.summarize_for_auto_action(42, {}))
+
+        assert result["text"] == "A summary."
+        assert seen[0].system_prompt == "Summary prompt"
+        assert seen[0].user_prompt is None
