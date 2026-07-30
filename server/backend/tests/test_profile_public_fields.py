@@ -10,14 +10,20 @@ No migration is needed: ``public_fields`` is a JSON blob and the model sets
 tripping as extras — they are simply never read again.
 """
 
-# ``server.database.database`` must be imported before any route module: the
-# lazy ``__getattr__`` in server/backend/database/__init__.py resolves
-# ``from server.database import X`` by importing the submodule, and if the
-# submodule is not in sys.modules yet the fromlist handler calls that same
+import importlib
+
+# ``server.database.database`` must be in sys.modules before any route module is
+# imported: the lazy ``__getattr__`` in server/backend/database/__init__.py
+# resolves ``from server.database import X`` by importing the submodule, and if
+# the submodule is not loaded yet the fromlist handler calls that same
 # __getattr__ again — infinite recursion at collection time. Every other route
 # test dodges this the same way (see test_profile_routes.py).
-import server.database.database  # noqa: F401
-from server.api.routes.profiles import ProfilePublicFields
+#
+# Imported for its side effect via import_module rather than a plain ``import``
+# statement, so the intent reads as a preload instead of an unused binding.
+importlib.import_module("server.database.database")
+
+from server.api.routes.profiles import ProfilePublicFields  # noqa: E402 — see preload above
 
 
 class TestDeadSummaryConfigRemoved:

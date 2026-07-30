@@ -217,7 +217,7 @@ def _stub_recording(monkeypatch):
 class TestSummarizeUsesSummaryPrompt:
     def test_streaming_summarize_sends_summary_prompt(self, monkeypatch, _stub_recording):
         captured: list[dict] = []
-        monkeypatch.setattr(llm, "get_llm_config", lambda: _full_config())
+        monkeypatch.setattr(llm, "get_llm_config", _full_config)
         monkeypatch.setattr(
             llm,
             "_get_httpx",
@@ -231,7 +231,7 @@ class TestSummarizeUsesSummaryPrompt:
 
     def test_blocking_summarize_sends_summary_prompt(self, monkeypatch, _stub_recording):
         captured: list[dict] = []
-        monkeypatch.setattr(llm, "get_llm_config", lambda: _full_config())
+        monkeypatch.setattr(llm, "get_llm_config", _full_config)
         monkeypatch.setattr(llm, "_get_httpx", lambda: _CapturingHttpx(captured))
 
         asyncio.run(llm.summarize_recording(42))
@@ -252,7 +252,7 @@ class TestChatUsesChatPrompt:
         monkeypatch.setattr(database_mod, "add_message", lambda **_kwargs: 1)
 
         captured: list[dict] = []
-        monkeypatch.setattr(llm, "get_llm_config", lambda: _full_config())
+        monkeypatch.setattr(llm, "get_llm_config", _full_config)
         monkeypatch.setattr(
             llm, "_get_httpx", lambda: _CapturingHttpx(captured, [_sse("Hi."), "data: [DONE]"])
         )
@@ -283,7 +283,7 @@ class TestAutoSummaryUsesSummaryPrompt:
             "get_transcription",
             lambda _rid: {"segments": [{"text": "Hello world"}]},
         )
-        monkeypatch.setattr(llm, "get_llm_config", lambda: _full_config())
+        monkeypatch.setattr(llm, "get_llm_config", _full_config)
 
         seen: list[llm.LLMRequest] = []
 
