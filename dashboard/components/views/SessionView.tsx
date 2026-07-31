@@ -46,7 +46,7 @@ import { useTraySync } from '../../src/hooks/useTraySync';
 import type { ServerConnectionInfo } from '../../src/hooks/useServerStatus';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useScrollFade } from '../../src/hooks/useScrollFade';
-import { apiClient } from '../../src/api/client';
+import { apiClient, APIError } from '../../src/api/client';
 import { getAuthToken, getConfig, setConfig } from '../../src/config/store';
 import { logClientEvent } from '../../src/services/clientDebugLog';
 import { loopbackOwner } from '../../src/services/loopbackOwner';
@@ -68,6 +68,48 @@ import { useImportQueueStore } from '../../src/stores/importQueueStore';
 import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { toast } from 'sonner';
 import { isRuntimeProfile, type RuntimeProfile } from '../../src/types/runtime';
+
+/** How long to wait between polls for the result of a retried job. */
+const RETRY_POLL_INTERVAL_MS = 3000;
+/**
+ * Give up polling after this many misses (~5 min). Long recordings legitimately
+ * take minutes to re-transcribe, and giving up early strands a result that has
+ * already been persisted — the recovery banner still finds it, but only after
+ * the user navigates away and back.
+ */
+const RETRY_POLL_MAX_ATTEMPTS = 100;
+
+/** Pull the human-readable reason out of a FastAPI detail body. */
+function extractDetail(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body);
+    if (typeof parsed?.detail === 'string') return parsed.detail;
+  } catch {
+    // Not JSON — fall through and use the raw body if it is short enough.
+  }
+  const trimmed = body.trim();
+  return trimmed && trimmed.length <= 200 ? trimmed : undefined;
+}
+
+async function readDetail(resp: Response): Promise<string | undefined> {
+  try {
+    return extractDetail(await resp.text());
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Turn a failed /retry call into something actionable. Every refusal this
+ * endpoint returns is recoverable by the user: 409 = another job holds the
+ * model, 410 = the audio is genuinely gone, 404 = the job predates this database.
+ */
+function describeRetryError(err: unknown): string | undefined {
+  if (err instanceof APIError) {
+    return extractDetail(err.body) ?? `The server refused the retry (HTTP ${err.status}).`;
+  }
+  return err instanceof Error ? err.message : undefined;
+}
 
 interface SessionViewProps {
   serverConnection: ServerConnectionInfo;
@@ -182,10 +224,21 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Session main-result editing (client-only): hand-corrections flow into
   // Copy/Download. Reset whenever a new transcription replaces the text.
   const [editedResultText, setEditedResultText] = useState('');
-  // A partial transcript is persisted as a 'completed' job, so without this the
-  // user cannot tell a truncated transcript from a whole one. Retry is their only
-  // recourse.
-  const [retryingPartial, setRetryingPartial] = useState(false);
+  // Retry re-transcribes from the saved job audio, which the durability layer
+  // keeps on disk. Two banners share it: a partial transcript (persisted as a
+  // 'completed' job, so the user cannot otherwise tell a truncated transcript
+  // from a whole one) and an outright failure.
+  const [retrying, setRetrying] = useState(false);
+  const retryPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCancelledRef = useRef(false);
+  // Stop the poll on unmount so it cannot setState into a dead component. The
+  // transcript is already durable server-side, so dropping the poll loses nothing.
+  useEffect(() => {
+    return () => {
+      retryCancelledRef.current = true;
+      if (retryPollTimerRef.current) clearTimeout(retryPollTimerRef.current);
+    };
+  }, []);
   useEffect(() => {
     setEditedResultText(transcription.result?.text ?? '');
   }, [transcription.result?.text]);
@@ -887,25 +940,76 @@ export const SessionView: React.FC<SessionViewProps> = ({
     transcription.startPreview(seconds);
   }, [transcription]);
 
-  // Re-transcribe a truncated result from the job's saved audio. The server
-  // accepts /retry for a partial job even though its status is 'completed'.
-  const handleRetryPartial = useCallback(async () => {
+  // Re-transcribe from the job's saved audio. Serves both the partial-transcript
+  // banner (the server accepts /retry for a partial job even though its status is
+  // 'completed') and the error banner — the retention sweep only collects
+  // completed+delivered jobs, so the audio of a FAILED job is never
+  // garbage-collected and a CUDA OOM or a crashed backend stays recoverable.
+  //
+  // The WebSocket that carried the original job is gone by the time either banner
+  // is on screen, so the result can only come back by polling the durability
+  // endpoint — the same contract used by the reconnect path in useTranscription.
+  const handleRetry = useCallback(async () => {
     const jobId = transcription.jobId;
-    if (!jobId || retryingPartial) return;
-    setRetryingPartial(true);
+    if (!jobId || retrying) return;
+    setRetrying(true);
+    retryCancelledRef.current = false;
+
     try {
       await apiClient.retryTranscription(jobId);
-      toast.success('Retrying transcription', {
-        description: 'Re-transcribing from the saved audio.',
-      });
     } catch (err) {
-      toast.error('Could not retry the transcription', {
-        description: err instanceof Error ? err.message : undefined,
-      });
-    } finally {
-      setRetryingPartial(false);
+      setRetrying(false);
+      toast.error('Could not retry the transcription', { description: describeRetryError(err) });
+      return;
     }
-  }, [transcription.jobId, retryingPartial]);
+
+    toast.success('Retrying transcription', {
+      description: 'Re-transcribing from the saved audio.',
+    });
+
+    let attempts = 0;
+    const poll = async () => {
+      if (retryCancelledRef.current) return;
+      try {
+        const resp = await apiClient.fetchTranscriptionResult(jobId);
+        if (retryCancelledRef.current) return;
+        if (resp.status === 200) {
+          const data = await resp.json();
+          const r = data.result ?? {};
+          transcription.loadResult({
+            text: r.text ?? '',
+            words: r.words ?? [],
+            language: r.language,
+            duration: r.duration,
+            partial: r.partial ?? false,
+            partialReason: r.partial_reason ?? null,
+          });
+          setRetrying(false);
+          return;
+        }
+        // 410 — the retry itself failed on the server (it reports the reason).
+        if (resp.status === 410) {
+          setRetrying(false);
+          toast.error('Retry failed', { description: await readDetail(resp) });
+          return;
+        }
+      } catch {
+        // Network blip — treat like a not-ready poll and try again.
+      }
+      if (retryCancelledRef.current) return;
+      attempts += 1;
+      if (attempts >= RETRY_POLL_MAX_ATTEMPTS) {
+        setRetrying(false);
+        toast.error('Retry is still running', {
+          description:
+            'The transcript did not arrive in time. It is saved on the server — reopen this tab to pick it up.',
+        });
+        return;
+      }
+      retryPollTimerRef.current = setTimeout(poll, RETRY_POLL_INTERVAL_MS);
+    };
+    void poll();
+  }, [transcription, retrying]);
 
   // Copy transcription result to clipboard (prefers the edited text)
   const handleCopyTranscription = useCallback(() => {
@@ -1971,10 +2075,10 @@ export const SessionView: React.FC<SessionViewProps> = ({
                             </span>
                             <Button
                               variant="secondary"
-                              disabled={retryingPartial || !transcription.jobId}
-                              onClick={handleRetryPartial}
+                              disabled={retrying || !transcription.jobId}
+                              onClick={handleRetry}
                             >
-                              {retryingPartial ? 'Retrying…' : 'Retry'}
+                              {retrying ? 'Retrying…' : 'Retry'}
                             </Button>
                           </div>
                         )}
@@ -2013,10 +2117,22 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       </div>
                     )}
 
-                    {/* Errors */}
+                    {/* Errors. A job id means the recording reached the server and its
+                      audio was persisted before transcription was attempted, so the
+                      failure is recoverable — offer Retry. Without one (e.g. the socket
+                      died before session_started) there is nothing to retry from. */}
                     {transcription.error && (
-                      <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400">
-                        {transcription.error}
+                      <div
+                        data-testid="transcription-error"
+                        role="alert"
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-400"
+                      >
+                        <span>{transcription.error}</span>
+                        {transcription.jobId && (
+                          <Button variant="secondary" disabled={retrying} onClick={handleRetry}>
+                            {retrying ? 'Retrying…' : 'Retry'}
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>
