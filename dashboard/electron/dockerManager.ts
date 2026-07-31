@@ -1683,6 +1683,24 @@ let pullCancelled = false;
 let pullBackoffResolve: (() => void) | null = null;
 
 /**
+ * The renderer polls `listImages()` every 10s, so its routine log lines
+ * ("found N image(s) via <strategy>", fallback notices) are only printed when
+ * the call's outcome differs from the previous call — otherwise a long-running
+ * session fills the log with hundreds of identical lines. Warnings and errors
+ * are not deduplicated.
+ */
+let lastListImagesLog: string | null = null;
+
+function flushListImagesLog(lines: string[]): void {
+  const summary = lines.join(' | ');
+  if (summary === lastListImagesLog) return;
+  lastListImagesLog = summary;
+  for (const line of lines) {
+    console.log(`[DockerManager] listImages: ${line}`);
+  }
+}
+
+/**
  * List local Docker images matching our repo.
  *
  * The repo URL is chosen by the persisted `server.useLegacyGpu` setting
@@ -1691,6 +1709,7 @@ let pullBackoffResolve: (() => void) | null = null;
  */
 async function listImages(): Promise<DockerImage[]> {
   const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
+  const callLog: string[] = [];
   const parseLegacyFormat = (output: string): DockerImage[] => {
     return output
       .split('\n')
@@ -1715,9 +1734,7 @@ async function listImages(): Promise<DockerImage[]> {
       `reference=${imageRepo}`,
     ]);
     if (!output) {
-      console.log(
-        '[DockerManager] listImages: json+filter returned empty output, trying next strategy',
-      );
+      callLog.push('json+filter returned empty output, trying next strategy');
     } else {
       type ImageRecord = {
         // Docker NDJSON fields (PascalCase)
@@ -1809,13 +1826,12 @@ async function listImages(): Promise<DockerImage[]> {
       }
 
       if (parsedAnyJson && parsed.length > 0) {
-        console.log(`[DockerManager] listImages: found ${parsed.length} image(s) via json+filter`);
+        callLog.push(`found ${parsed.length} image(s) via json+filter`);
+        flushListImagesLog(callLog);
         return parsed;
       }
       if (parsedAnyJson) {
-        console.log(
-          '[DockerManager] listImages: json+filter parsed OK but found 0 images, trying next strategy',
-        );
+        callLog.push('json+filter parsed OK but found 0 images, trying next strategy');
       }
       // Fall through to next strategy if no JSON was parsed or 0 images found.
     }
@@ -1834,12 +1850,11 @@ async function listImages(): Promise<DockerImage[]> {
     ]);
     const results = parseLegacyFormat(legacyOutput);
     if (results.length > 0) {
-      console.log(
-        `[DockerManager] listImages: found ${results.length} image(s) via template+filter`,
-      );
+      callLog.push(`found ${results.length} image(s) via template+filter`);
+      flushListImagesLog(callLog);
       return results;
     }
-    console.log('[DockerManager] listImages: template+filter found 0 images, trying next strategy');
+    callLog.push('template+filter found 0 images, trying next strategy');
   } catch (err: any) {
     console.warn('[DockerManager] listImages template+filter failed:', err.message);
   }
@@ -1852,10 +1867,12 @@ async function listImages(): Promise<DockerImage[]> {
       '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}\t{{.ID}}',
     ]);
     const results = parseLegacyFormat(rawOutput);
-    console.log(`[DockerManager] listImages: found ${results.length} image(s) via unfiltered scan`);
+    callLog.push(`found ${results.length} image(s) via unfiltered scan`);
+    flushListImagesLog(callLog);
     return results;
   } catch (err: any) {
     console.error('[DockerManager] listImages: all strategies failed:', err.message);
+    flushListImagesLog(callLog);
     return [];
   }
 }
