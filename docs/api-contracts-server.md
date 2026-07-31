@@ -113,6 +113,25 @@
 | POST | `/api/llm/conversation/{conversation_id}/generate-title` | user | **NEW** — LLM-generate a short title |
 | POST | `/api/llm/chat` | user | **NEW** — multi-turn streaming chat over transcription (alias-aware) |
 
+#### Prompt configuration (GH-254)
+
+`GET /api/llm/status` also returns the effective prompts and the server's
+built-in defaults: `summary_system_prompt`, `summary_system_prompt_default`,
+`chat_system_prompt`, `chat_system_prompt_default`. Settings → AI reads these;
+the `*_default` pair backs "Reset to default", so the prompt text lives only on
+the server and cannot drift in the dashboard.
+
+| Config key | Consumed by | Resolution order |
+|---|---|---|
+| `local_llm.summary_system_prompt` | `/summarize/{id}`, `/summarize/{id}/stream`, auto-summary | key → `default_system_prompt` → built-in |
+| `local_llm.chat_system_prompt` | `/chat` | key → `default_system_prompt` → built-in |
+| `local_llm.default_system_prompt` | `/process`, `/process/stream` | key → built-in summary prompt |
+
+The legacy `default_system_prompt` link keeps a pre-GH-254 `config.yaml`
+behaving identically. An empty string falls through to the built-in, which is
+what makes "Reset to default" a plain write. Changes apply on the next request
+after `POST /api/llm/config/reload` — no server restart.
+
 ### Admin (`/api/admin`)
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|

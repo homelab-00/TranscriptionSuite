@@ -102,8 +102,6 @@ def _seed_profile(template: str, destination: str) -> int:
             "destination_folder": destination,
             "auto_summary_enabled": False,
             "auto_export_enabled": False,
-            "summary_model_id": None,
-            "summary_prompt_template": None,
             "export_format": "plaintext",
         },
     )

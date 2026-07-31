@@ -70,6 +70,37 @@ async def _release_summary_slot(recording_id: int) -> None:
         _summary_in_flight.discard(recording_id)
 
 
+# --- Prompt defaults (GH-254) ---
+#
+# Before GH-254 a single ``local_llm.default_system_prompt`` was the system
+# message for AI summaries AND for AI chat, which meant every conversation in
+# the notebook opened with "Summarize this transcription concisely." Each
+# feature now owns a key; ``default_system_prompt`` survives as the legacy
+# fallback so pre-existing config.yaml files behave exactly as they did.
+
+DEFAULT_SUMMARY_SYSTEM_PROMPT = (
+    "Summarize this transcription concisely. Respond in the same language as the transcript."
+)
+
+DEFAULT_CHAT_SYSTEM_PROMPT = (
+    "You are a helpful assistant answering questions about a transcript. "
+    "Base your answers on the transcript provided; if it does not contain the "
+    "answer, say so plainly. Respond in the same language as the user's question."
+)
+
+DEFAULT_TITLE_GENERATION_PROMPT = (
+    "Your task is to produce a SHORT TITLE for this conversation.\n"
+    "Rules:\n"
+    "- Maximum 8 words\n"
+    "- Use the primary language of the conversation\n"
+    "- Output ONLY the title — no preamble, no explanation, no quotes, no punctuation at the end\n"
+    "Examples of good titles:\n"
+    "  Copper grain boundary discussion\n"
+    "  Project deadline planning\n"
+    'Bad (do not do this): "Sure, here is a title: Grain boundaries in copper alloys."'
+)
+
+
 def _get_httpx():
     """Import httpx lazily to avoid startup cost for non-LLM flows."""
     import httpx
@@ -108,7 +139,15 @@ class LLMStatus(BaseModel):
     error: str | None = None
     has_api_key: bool = False
     title_generation_prompt: str | None = None
+    title_generation_prompt_default: str | None = None
     auto_title_enabled: bool = True
+    # GH-254 — Settings → AI edits these; the *_default fields let the
+    # dashboard implement "Reset to default" without hardcoding a second
+    # copy of the prompt text that can drift from the server's.
+    summary_system_prompt: str | None = None
+    summary_system_prompt_default: str | None = None
+    chat_system_prompt: str | None = None
+    chat_system_prompt_default: str | None = None
 
 
 async def _get_loaded_model_id(base_url: str, headers: dict[str, str] | None = None) -> str | None:
@@ -181,6 +220,8 @@ def get_llm_config() -> dict:
         raw_url = llm_config.get("base_url", default_base_url)
         base_url = raw_url.rstrip("/").removesuffix("/v1")
 
+        legacy_prompt = llm_config.get("default_system_prompt")
+
         return {
             "enabled": llm_config.get("enabled", True),
             "base_url": base_url,
@@ -190,20 +231,20 @@ def get_llm_config() -> dict:
             "context_length": llm_config.get("context_length"),
             "max_tokens": llm_config.get("max_tokens", 2048),
             "temperature": llm_config.get("temperature", 0.7),
-            "default_system_prompt": llm_config.get(
-                "default_system_prompt", "Summarize this transcription concisely."
+            # Legacy key — still honoured by /process, and the middle link of
+            # both chains below. ``or`` (not a .get default) so an empty string
+            # falls through to the built-in.
+            "default_system_prompt": legacy_prompt or DEFAULT_SUMMARY_SYSTEM_PROMPT,
+            "summary_system_prompt": (
+                llm_config.get("summary_system_prompt")
+                or legacy_prompt
+                or DEFAULT_SUMMARY_SYSTEM_PROMPT
             ),
-            "title_generation_prompt": llm_config.get(
-                "title_generation_prompt",
-                "Your task is to produce a SHORT TITLE for this conversation.\n"
-                "Rules:\n"
-                "- Maximum 8 words\n"
-                "- Use the primary language of the conversation\n"
-                "- Output ONLY the title — no preamble, no explanation, no quotes, no punctuation at the end\n"
-                "Examples of good titles:\n"
-                "  Copper grain boundary discussion\n"
-                "  Project deadline planning\n"
-                'Bad (do not do this): "Sure, here is a title: Grain boundaries in copper alloys."',
+            "chat_system_prompt": (
+                llm_config.get("chat_system_prompt") or legacy_prompt or DEFAULT_CHAT_SYSTEM_PROMPT
+            ),
+            "title_generation_prompt": (
+                llm_config.get("title_generation_prompt") or DEFAULT_TITLE_GENERATION_PROMPT
             ),
             "auto_title_enabled": llm_config.get("auto_title_enabled", True),
         }
@@ -219,18 +260,10 @@ def get_llm_config() -> dict:
         "context_length": None,
         "max_tokens": 2048,
         "temperature": 0.7,
-        "default_system_prompt": "Summarize this transcription concisely.",
-        "title_generation_prompt": (
-            "Your task is to produce a SHORT TITLE for this conversation.\n"
-            "Rules:\n"
-            "- Maximum 8 words\n"
-            "- Use the primary language of the conversation\n"
-            "- Output ONLY the title — no preamble, no explanation, no quotes, no punctuation at the end\n"
-            "Examples of good titles:\n"
-            "  Copper grain boundary discussion\n"
-            "  Project deadline planning\n"
-            'Bad (do not do this): "Sure, here is a title: Grain boundaries in copper alloys."'
-        ),
+        "default_system_prompt": DEFAULT_SUMMARY_SYSTEM_PROMPT,
+        "summary_system_prompt": DEFAULT_SUMMARY_SYSTEM_PROMPT,
+        "chat_system_prompt": DEFAULT_CHAT_SYSTEM_PROMPT,
+        "title_generation_prompt": DEFAULT_TITLE_GENERATION_PROMPT,
         "auto_title_enabled": True,
     }
 
@@ -261,7 +294,12 @@ async def get_llm_status():
             base_url=base_url,
             has_api_key=api_key_set,
             title_generation_prompt=config.get("title_generation_prompt"),
+            title_generation_prompt_default=DEFAULT_TITLE_GENERATION_PROMPT,
             auto_title_enabled=bool(config.get("auto_title_enabled", True)),
+            summary_system_prompt=config.get("summary_system_prompt"),
+            summary_system_prompt_default=DEFAULT_SUMMARY_SYSTEM_PROMPT,
+            chat_system_prompt=config.get("chat_system_prompt"),
+            chat_system_prompt_default=DEFAULT_CHAT_SYSTEM_PROMPT,
             **kwargs,
         )  # type: ignore[arg-type]
 
@@ -811,10 +849,13 @@ async def summarize_recording(
             preamble = f"{preface}\n\n{_VERBATIM_DIRECTIVE}\n\n"
             full_text = preamble + full_text
 
-        # Process with LLM
+        # Process with LLM. GH-254 — summaries use their own system prompt,
+        # not the shared default_system_prompt that also feeds the chat.
+        config = get_llm_config()
         llm_response = await process_with_llm(
             LLMRequest(
                 transcription_text=full_text,
+                system_prompt=config["summary_system_prompt"],
                 user_prompt=custom_prompt,
             )
         )
@@ -891,9 +932,12 @@ async def summarize_recording_stream(
         async def _release_slot() -> None:
             await _release_summary_slot(recording_id)
 
+        # GH-254 — mirror of the non-streaming path: explicit summary prompt.
+        config = get_llm_config()
         return _build_llm_stream_response(
             LLMRequest(
                 transcription_text=full_text,
+                system_prompt=config["summary_system_prompt"],
                 user_prompt=custom_prompt,
             ),
             on_complete=_persist,
@@ -1640,7 +1684,10 @@ async def chat_with_llm(request: ChatRequest):
         )
 
     # Build the messages array from conversation history
-    system_prompt = request.system_prompt or config.get("default_system_prompt", "")
+    # GH-254 — the chat gets its own prompt. It used to share
+    # default_system_prompt with the summariser, so every conversation opened
+    # with "Summarize this transcription concisely."
+    system_prompt = request.system_prompt or config.get("chat_system_prompt", "")
     messages: list[dict[str, str]] = []
 
     if system_prompt:

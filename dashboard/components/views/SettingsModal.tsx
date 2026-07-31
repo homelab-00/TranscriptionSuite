@@ -49,6 +49,8 @@ import { IntelIcon } from '../ui/icons/IntelIcon';
 import { AppleIcon } from '../ui/icons/AppleIcon';
 import type { RuntimeProfile } from '../../src/types/runtime';
 import type { Profile } from '../../src/api/client';
+import { AiPromptsSection } from './settings/AiPromptsSection';
+import { PromptField } from './settings/PromptField';
 import { EmptyProfileForm } from '../profiles/EmptyProfileForm';
 import { ModelProfilesPanel } from '../profiles/ModelProfilesPanel';
 import { useLanguages } from '../../src/hooks/useLanguages';
@@ -190,6 +192,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [aiKeyConfigured, setAiKeyConfigured] = useState(false);
   const [aiTitlePrompt, setAiTitlePrompt] = useState('');
   const [aiAutoTitle, setAiAutoTitle] = useState(true);
+  // GH-254 — editable summary/chat prompts. The *Default values come from the
+  // server so "Reset to default" cannot drift from the backend fallback.
+  const [aiSummaryPrompt, setAiSummaryPrompt] = useState('');
+  const [aiChatPrompt, setAiChatPrompt] = useState('');
+  const [aiSummaryPromptDefault, setAiSummaryPromptDefault] = useState('');
+  const [aiChatPromptDefault, setAiChatPromptDefault] = useState('');
+  const [aiTitlePromptDefault, setAiTitlePromptDefault] = useState('');
 
   // Settings state
   const [appSettings, setAppSettings] = useState({
@@ -302,6 +311,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         }
         if (status.auto_title_enabled != null) {
           setAiAutoTitle(status.auto_title_enabled);
+        }
+        if (status.summary_system_prompt != null) {
+          setAiSummaryPrompt(status.summary_system_prompt);
+        }
+        if (status.chat_system_prompt != null) {
+          setAiChatPrompt(status.chat_system_prompt);
+        }
+        if (status.summary_system_prompt_default != null) {
+          setAiSummaryPromptDefault(status.summary_system_prompt_default);
+        }
+        if (status.chat_system_prompt_default != null) {
+          setAiChatPromptDefault(status.chat_system_prompt_default);
+        }
+        if (status.title_generation_prompt_default != null) {
+          setAiTitlePromptDefault(status.title_generation_prompt_default);
         }
       })
       .catch(() => {
@@ -2117,6 +2141,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           )}
         </Section>
 
+        <Section title="Prompts">
+          <AiPromptsSection
+            summaryPrompt={aiSummaryPrompt}
+            chatPrompt={aiChatPrompt}
+            summaryDefault={aiSummaryPromptDefault}
+            chatDefault={aiChatPromptDefault}
+            onSummaryPromptChange={(value) => {
+              setAiSummaryPrompt(value);
+              handleAiFieldChange('summary_system_prompt', value);
+            }}
+            onChatPromptChange={(value) => {
+              setAiChatPrompt(value);
+              handleAiFieldChange('chat_system_prompt', value);
+            }}
+          />
+        </Section>
+
         <Section title="Automatic Title Generation">
           <AppleSwitch
             checked={aiAutoTitle}
@@ -2127,28 +2168,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             label="Auto-generate title after first exchange"
           />
           {aiAutoTitle && (
-            <>
-              <p className="mt-4 mb-3 text-xs text-slate-400">
-                Prompt sent to the LLM to generate the title. The response should be 8 words or
-                fewer.
-              </p>
-              <textarea
-                rows={3}
+            <div className="mt-4">
+              <PromptField
+                id="ai-title-prompt"
+                label="Title generation prompt"
+                helpText="Prompt sent to the LLM to generate the title. The response should be 8 words or fewer."
                 value={aiTitlePrompt}
-                onChange={(e) => {
-                  setAiTitlePrompt(e.target.value);
-                  handleAiFieldChange('title_generation_prompt', e.target.value);
+                defaultValue={aiTitlePromptDefault}
+                rows={6}
+                onChange={(value) => {
+                  setAiTitlePrompt(value);
+                  handleAiFieldChange('title_generation_prompt', value);
                 }}
-                placeholder="Your task is to produce a SHORT TITLE for this conversation. Rules: Maximum 8 words, use the primary language, output ONLY the title — no preamble, no quotes, no punctuation at the end."
-                className="focus:border-accent-cyan/50 w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none"
               />
-            </>
+            </div>
           )}
         </Section>
 
         <Section title="Notes">
           <ul className="list-inside list-disc space-y-1 text-xs text-slate-400">
             <li>Changes take effect after server restart.</li>
+            <li>Prompt changes apply to the next summary or chat — no restart needed.</li>
             <li>
               For Docker: use <code className="text-slate-300">LLM_API_KEY</code> and{' '}
               <code className="text-slate-300">LM_STUDIO_URL</code> environment variables instead.

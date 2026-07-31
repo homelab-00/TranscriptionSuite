@@ -461,6 +461,17 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [summaryText, setSummaryText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  // GH-254 — the seeding effect must read the CURRENT generating state without
+  // taking it as a dependency: as a dependency it would re-run when a stream
+  // finishes and overwrite the fresh text with the stale recording.summary.
+  const isGeneratingRef = useRef(false);
+  const setGenerating = useCallback((value: boolean) => {
+    isGeneratingRef.current = value;
+    setIsGenerating(value);
+  }, []);
+  // GH-254 — generation failures render as their own line instead of being
+  // written into summaryText, where an edit-save would persist the error.
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const [isSummaryEditing, setIsSummaryEditing] = useState(false);
   const [summaryEditText, setSummaryEditText] = useState('');
   const [isSummarySaving, setIsSummarySaving] = useState(false);
@@ -624,6 +635,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     transcription,
     loading: recordingLoading,
     audioUrl,
+    refresh,
   } = useRecording(note?.recordingId ?? null);
   const segments = transcription?.segments ?? [];
   const hasDiarizationTranscript =
@@ -739,9 +751,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     if (isOpen) {
       setIsRendered(true);
       setIsVisible(false);
-      setSummaryExpanded(false);
-      setSummaryText('');
-      setIsGenerating(false);
+      setGenerating(false);
       setIsTranscriptEditing(false);
       apiClient
         .getLLMStatus()
@@ -777,6 +787,20 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
       clearTimeout(timer);
     };
   }, [isOpen]);
+
+  // GH-254 — seed the summary panel from the persisted recording.
+  //
+  // Reset and populate MUST live in the same effect. The modal stays mounted
+  // between open and close (isRendered holds it for the exit animation), so
+  // useRecording does not refetch when the same note is reopened; a separate
+  // reset would clear the text and this effect would not re-run to restore it.
+  useEffect(() => {
+    if (!isOpen || isGeneratingRef.current) return;
+    const stored = recording?.summary ?? '';
+    setSummaryText(stored);
+    setSummaryExpanded(Boolean(stored));
+    setSummaryError(null);
+  }, [isOpen, note?.recordingId, recording?.summary]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -853,61 +877,48 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
     };
   }, [isOpen, note?.recordingId]);
 
-  // Stream summary from API (or show existing summary)
+  // Stream a new summary from the API. Stored summaries never reach this
+  // effect — they are seeded above (GH-254).
   useEffect(() => {
     if (!isGenerating) return;
 
-    // If recording already has a summary, show it immediately
-    if (recording?.summary) {
-      let i = 0;
-      const text = recording.summary;
-      const interval = setInterval(() => {
-        setSummaryText(text.slice(0, i));
-        i++;
-        if (i > text.length) {
-          setIsGenerating(false);
-          clearInterval(interval);
-        }
-      }, 15);
-      return () => clearInterval(interval);
+    if (!note?.recordingId) {
+      setSummaryError('Open a synced recording to generate an AI summary.');
+      setGenerating(false);
+      return;
     }
 
-    // Otherwise, stream from the LLM API
-    if (note?.recordingId) {
-      let cancelled = false;
-      (async () => {
-        try {
-          const stream = apiClient.summarizeRecordingStream(note.recordingId!);
-          let text = '';
-          for await (const chunk of stream) {
-            if (cancelled) break;
-            text += chunk;
-            setSummaryText(text);
-          }
-        } catch {
-          if (!cancelled) setSummaryText('Failed to generate summary. Is the LLM server running?');
-        } finally {
-          if (!cancelled) setIsGenerating(false);
+    let cancelled = false;
+    const previous = recording?.summary ?? '';
+    (async () => {
+      try {
+        const stream = apiClient.summarizeRecordingStream(note.recordingId!);
+        let text = '';
+        for await (const chunk of stream) {
+          if (cancelled) break;
+          text += chunk;
+          setSummaryText(text);
         }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    } else {
-      // No recording ID — show fallback message
-      const msg = 'Open a synced recording to generate an AI summary.';
-      let i = 0;
-      const interval = setInterval(() => {
-        setSummaryText(msg.slice(0, i));
-        i++;
-        if (i > msg.length) {
-          setIsGenerating(false);
-          clearInterval(interval);
+      } catch {
+        if (!cancelled) {
+          // Never leave the error where the summary was: the row is untouched
+          // on failure, so restore what the user had (CLAUDE.md — no data loss).
+          setSummaryError('Failed to generate summary. Is the AI provider running?');
+          setSummaryText(previous);
         }
-      }, 20);
-      return () => clearInterval(interval);
-    }
-  }, [isGenerating, note?.recordingId, recording?.summary]);
+      } finally {
+        if (!cancelled) {
+          setGenerating(false);
+          // Re-sync summary + summary_model from the row the server just wrote.
+          refresh();
+          onRecordingMutated?.();
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isGenerating, note?.recordingId]);
 
   // Close context menu on click anywhere
   useEffect(() => {
@@ -917,13 +928,35 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   }, []);
 
   const handleGenerateSummary = () => {
+    setSummaryError(null);
     setSummaryExpanded(true);
-    setIsGenerating(true);
+    setGenerating(true);
   };
 
   const handleStopGeneration = useCallback(() => {
-    setIsGenerating(false);
-  }, []);
+    setGenerating(false);
+  }, [setGenerating]);
+
+  // GH-254 — the server always regenerates when the stream endpoint is called.
+  // Skipping regeneration is purely a client-side short-circuit on a stored
+  // summary. Confirm first because regenerating overwrites hand edits.
+  //
+  // NOTE: no apostrophes in these comments — the ui-contract scanner treats one
+  // as an opening string quote and silently swallows later className tokens.
+  const handleRegenerateSummary = useCallback(async () => {
+    if (!note?.recordingId || isGenerating) return;
+    if (
+      !(await confirm('Regenerate the summary? The current one will be replaced.', {
+        danger: true,
+        confirmLabel: 'Regenerate',
+      }))
+    )
+      return;
+    setSummaryError(null);
+    setSummaryText('');
+    setSummaryExpanded(true);
+    setGenerating(true);
+  }, [note?.recordingId, isGenerating, confirm, setGenerating]);
 
   const handleEnterSummaryEdit = useCallback(() => {
     if (isGenerating) return;
@@ -2249,6 +2282,16 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                           )}
                           {!isGenerating && summaryText && !isSummaryEditing && (
                             <button
+                              onClick={() => void handleRegenerateSummary()}
+                              className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+                              title="Regenerate summary"
+                              aria-label="Regenerate summary"
+                            >
+                              <RotateCw size={14} />
+                            </button>
+                          )}
+                          {!isGenerating && summaryText && !isSummaryEditing && (
+                            <button
                               onClick={handleEnterSummaryEdit}
                               className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
                               title="Edit summary"
@@ -2306,6 +2349,11 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                           showStreamingCursor: isGenerating,
                           onAnswerClick: handleEnterSummaryEdit,
                         })
+                      )}
+                      {summaryError && (
+                        <p role="alert" className="mt-2 text-xs text-red-400">
+                          {summaryError}
+                        </p>
                       )}
                     </div>
                   )}

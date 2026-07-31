@@ -96,8 +96,6 @@ class ProfilePublicFields(BaseModel):
     destination_folder: str = ""
     auto_summary_enabled: bool = False
     auto_export_enabled: bool = False
-    summary_model_id: str | None = None
-    summary_prompt_template: str | None = None
     export_format: str = "plaintext"
     # Sprint 5 — Story 7.2 / FR43-46 — per-profile webhook configuration.
     # The URL itself is public-fields (Lurkers can see if a profile fires

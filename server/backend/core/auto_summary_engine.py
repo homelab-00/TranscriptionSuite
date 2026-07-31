@@ -38,6 +38,10 @@ async def summarize_for_auto_action(
 ) -> dict[str, Any]:
     """Summarize the recording's transcript via the configured LLM.
 
+    ``public_fields`` is accepted for coordinator compatibility but is no
+    longer read: GH-254 removed the dead ``summary_prompt_template`` key, and
+    the prompt now comes from ``local_llm.summary_system_prompt``.
+
     Returns ``{"text": str, "model": str | None, "tokens_used": int | None,
     "truncated": bool}``. Truncation detection (Story 6.7 — commit F) is a
     follow-up; commit B always returns ``truncated=False``.
@@ -51,6 +55,7 @@ async def summarize_for_auto_action(
         _VERBATIM_DIRECTIVE,
         LLMRequest,
         _build_alias_aware_transcript_text,
+        get_llm_config,
         process_with_llm,
     )
     from server.database.database import get_recording, get_transcription
@@ -67,10 +72,13 @@ async def summarize_for_auto_action(
     if preface:
         full_text = f"{preface}\n\n{_VERBATIM_DIRECTIVE}\n\n{full_text}"
 
-    custom_prompt = public_fields.get("summary_prompt_template")
+    # GH-254 — the per-profile ``summary_prompt_template`` was dead config
+    # (never editable in any UI, always None). Automatic summaries use the
+    # same global summary prompt as manual ones so the two cannot diverge.
+    config = get_llm_config()
     request = LLMRequest(
         transcription_text=full_text,
-        user_prompt=custom_prompt or None,
+        system_prompt=config["summary_system_prompt"],
     )
 
     try:
