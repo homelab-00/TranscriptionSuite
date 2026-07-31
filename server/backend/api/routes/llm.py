@@ -139,6 +139,7 @@ class LLMStatus(BaseModel):
     error: str | None = None
     has_api_key: bool = False
     title_generation_prompt: str | None = None
+    title_generation_prompt_default: str | None = None
     auto_title_enabled: bool = True
     # GH-254 — Settings → AI edits these; the *_default fields let the
     # dashboard implement "Reset to default" without hardcoding a second
@@ -293,6 +294,7 @@ async def get_llm_status():
             base_url=base_url,
             has_api_key=api_key_set,
             title_generation_prompt=config.get("title_generation_prompt"),
+            title_generation_prompt_default=DEFAULT_TITLE_GENERATION_PROMPT,
             auto_title_enabled=bool(config.get("auto_title_enabled", True)),
             summary_system_prompt=config.get("summary_system_prompt"),
             summary_system_prompt_default=DEFAULT_SUMMARY_SYSTEM_PROMPT,

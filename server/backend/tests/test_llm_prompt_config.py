@@ -110,6 +110,15 @@ class TestStatusExposesPrompts:
         assert status.summary_system_prompt_default == llm.DEFAULT_SUMMARY_SYSTEM_PROMPT
         assert status.chat_system_prompt_default == llm.DEFAULT_CHAT_SYSTEM_PROMPT
 
+    def test_status_returns_the_title_prompt_default(self, monkeypatch):
+        """The title prompt gets a Reset button too, so its default must ship."""
+        monkeypatch.setattr(llm, "get_llm_config", lambda: _full_config(enabled=False))
+
+        status = asyncio.run(llm.get_llm_status())
+
+        assert status.title_generation_prompt == "Title prompt"
+        assert status.title_generation_prompt_default == llm.DEFAULT_TITLE_GENERATION_PROMPT
+
 
 class _FakeJsonResponse:
     status_code = 200

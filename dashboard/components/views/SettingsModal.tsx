@@ -50,6 +50,7 @@ import { AppleIcon } from '../ui/icons/AppleIcon';
 import type { RuntimeProfile } from '../../src/types/runtime';
 import type { Profile } from '../../src/api/client';
 import { AiPromptsSection } from './settings/AiPromptsSection';
+import { PromptField } from './settings/PromptField';
 import { EmptyProfileForm } from '../profiles/EmptyProfileForm';
 import { ModelProfilesPanel } from '../profiles/ModelProfilesPanel';
 import { useLanguages } from '../../src/hooks/useLanguages';
@@ -197,6 +198,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [aiChatPrompt, setAiChatPrompt] = useState('');
   const [aiSummaryPromptDefault, setAiSummaryPromptDefault] = useState('');
   const [aiChatPromptDefault, setAiChatPromptDefault] = useState('');
+  const [aiTitlePromptDefault, setAiTitlePromptDefault] = useState('');
 
   // Settings state
   const [appSettings, setAppSettings] = useState({
@@ -321,6 +323,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         }
         if (status.chat_system_prompt_default != null) {
           setAiChatPromptDefault(status.chat_system_prompt_default);
+        }
+        if (status.title_generation_prompt_default != null) {
+          setAiTitlePromptDefault(status.title_generation_prompt_default);
         }
       })
       .catch(() => {
@@ -2163,22 +2168,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             label="Auto-generate title after first exchange"
           />
           {aiAutoTitle && (
-            <>
-              <p className="mt-4 mb-3 text-xs text-slate-400">
-                Prompt sent to the LLM to generate the title. The response should be 8 words or
-                fewer.
-              </p>
-              <textarea
-                rows={3}
+            <div className="mt-4">
+              <PromptField
+                id="ai-title-prompt"
+                label="Title generation prompt"
+                helpText="Prompt sent to the LLM to generate the title. The response should be 8 words or fewer."
                 value={aiTitlePrompt}
-                onChange={(e) => {
-                  setAiTitlePrompt(e.target.value);
-                  handleAiFieldChange('title_generation_prompt', e.target.value);
+                defaultValue={aiTitlePromptDefault}
+                rows={6}
+                onChange={(value) => {
+                  setAiTitlePrompt(value);
+                  handleAiFieldChange('title_generation_prompt', value);
                 }}
-                placeholder="Your task is to produce a SHORT TITLE for this conversation. Rules: Maximum 8 words, use the primary language, output ONLY the title — no preamble, no quotes, no punctuation at the end."
-                className="focus:border-accent-cyan/50 w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none"
               />
-            </>
+            </div>
           )}
         </Section>
 

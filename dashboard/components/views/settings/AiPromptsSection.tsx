@@ -6,14 +6,13 @@
  * that file is already ~2450 lines and a render test of it would need
  * roughly twenty mocks — this one needs none.
  *
- * The default texts are supplied by the server (GET /api/llm/status) rather
- * than hardcoded here, so "Reset to default" can never drift from what the
- * backend actually falls back to.
+ * Both fields are PromptField instances, which is also what the title prompt
+ * in the Automatic Title Generation section uses, so every prompt in the tab
+ * shares one layout and one textarea style.
  */
 
 import React from 'react';
-import { RotateCw } from 'lucide-react';
-import { Button } from '../../ui/Button';
+import { PromptField } from './PromptField';
 
 interface AiPromptsSectionProps {
   summaryPrompt: string;
@@ -24,9 +23,6 @@ interface AiPromptsSectionProps {
   onChatPromptChange: (value: string) => void;
 }
 
-const TEXTAREA_CLASS =
-  'focus:border-accent-cyan/50 w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none';
-
 export const AiPromptsSection: React.FC<AiPromptsSectionProps> = ({
   summaryPrompt,
   chatPrompt,
@@ -36,63 +32,21 @@ export const AiPromptsSection: React.FC<AiPromptsSectionProps> = ({
   onChatPromptChange,
 }) => (
   <>
-    <div>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <label htmlFor="ai-summary-prompt" className="text-sm text-slate-200">
-          AI summary prompt
-        </label>
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<RotateCw size={14} />}
-          aria-label="Reset AI summary prompt to default"
-          onClick={() => onSummaryPromptChange(summaryDefault)}
-        >
-          Reset to default
-        </Button>
-      </div>
-      <p className="mb-3 text-xs text-slate-400">
-        System prompt used when a recording is summarised — both the Generate button in a note and
-        the automatic summary after transcription.
-      </p>
-      <textarea
-        id="ai-summary-prompt"
-        aria-label="AI summary prompt"
-        rows={4}
-        value={summaryPrompt}
-        onChange={(e) => onSummaryPromptChange(e.target.value)}
-        placeholder={summaryDefault}
-        className={TEXTAREA_CLASS}
-      />
-    </div>
-
-    <div>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <label htmlFor="ai-chat-prompt" className="text-sm text-slate-200">
-          AI chat prompt
-        </label>
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<RotateCw size={14} />}
-          aria-label="Reset AI chat prompt to default"
-          onClick={() => onChatPromptChange(chatDefault)}
-        >
-          Reset to default
-        </Button>
-      </div>
-      <p className="mb-3 text-xs text-slate-400">
-        System message that opens every conversation in a note's AI chat panel.
-      </p>
-      <textarea
-        id="ai-chat-prompt"
-        aria-label="AI chat prompt"
-        rows={4}
-        value={chatPrompt}
-        onChange={(e) => onChatPromptChange(e.target.value)}
-        placeholder={chatDefault}
-        className={TEXTAREA_CLASS}
-      />
-    </div>
+    <PromptField
+      id="ai-summary-prompt"
+      label="AI summary prompt"
+      helpText="System prompt used when a recording is summarised — both the Generate button in a note and the automatic summary after transcription."
+      value={summaryPrompt}
+      defaultValue={summaryDefault}
+      onChange={onSummaryPromptChange}
+    />
+    <PromptField
+      id="ai-chat-prompt"
+      label="AI chat prompt"
+      helpText="System message that opens every conversation in the AI chat panel of a note."
+      value={chatPrompt}
+      defaultValue={chatDefault}
+      onChange={onChatPromptChange}
+    />
   </>
 );

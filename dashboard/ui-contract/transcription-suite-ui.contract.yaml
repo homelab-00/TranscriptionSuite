@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.13.1
+  spec_version: 1.13.2
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -96,6 +96,7 @@ meta:
       - components/ui/UpdateBanner.tsx
       - components/ui/UpdateModal.tsx
       - components/views/__tests__/AudioNoteModal.auto-actions.test.tsx
+      - components/views/__tests__/AudioNoteModal.summary.test.tsx
       - components/views/__tests__/GpuDiagnosticModal.test.tsx
       - components/views/__tests__/GpuHealthCard.test.tsx
       - components/views/AboutModal.tsx
@@ -119,14 +120,16 @@ meta:
       - components/views/SessionImportTab.tsx
       - components/views/SessionView.tsx
       - components/views/settings/__tests__/AiPromptsSection.test.tsx
+      - components/views/settings/__tests__/PromptField.test.tsx
       - components/views/settings/AiPromptsSection.tsx
+      - components/views/settings/PromptField.tsx
       - components/views/SettingsModal.tsx
       - components/views/StarPopupModal.tsx
       - index.html
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-07-30T21:45:30.506Z
+    generated_at: 2026-07-31T00:09:16.584Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -2578,6 +2581,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   ProfileSelector:
     file: components/profiles/ProfileSelector.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  PromptField:
+    file: components/views/settings/PromptField.tsx
     required_tokens:
       - colors
       - motion

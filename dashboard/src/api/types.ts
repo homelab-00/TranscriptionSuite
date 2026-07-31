@@ -449,6 +449,7 @@ export interface LLMStatus {
   error: string | null;
   has_api_key: boolean;
   title_generation_prompt?: string | null;
+  title_generation_prompt_default?: string | null;
   auto_title_enabled?: boolean;
   // GH-254 — effective prompts plus the server's built-in defaults, which back
   // the "Reset to default" buttons in Settings → AI.
