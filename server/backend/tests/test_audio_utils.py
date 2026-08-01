@@ -464,6 +464,63 @@ class TestGetGpuMemoryInfo:
 
         assert info == {"available": False}
 
+    def test_reports_torch_and_device_wide_numbers(self):
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 2 * 1024**3
+        mock_torch.cuda.memory_reserved.return_value = 3 * 1024**3
+        mock_torch.cuda.get_device_properties.return_value = MagicMock(total_memory=12 * 1024**3)
+        mock_torch.cuda.mem_get_info.return_value = (4 * 1024**3, 12 * 1024**3)
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            info = au.get_gpu_memory_info()
+
+        assert info["allocated_gb"] == 2.0
+        assert info["reserved_gb"] == 3.0
+        assert info["total_gb"] == 12.0
+        assert info["free_gb"] == 9.0
+        assert info["device_free_gb"] == 4.0
+        assert info["device_used_gb"] == 8.0
+
+    def test_device_wide_failure_keeps_torch_view(self):
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 2 * 1024**3
+        mock_torch.cuda.memory_reserved.return_value = 3 * 1024**3
+        mock_torch.cuda.get_device_properties.return_value = MagicMock(total_memory=12 * 1024**3)
+        mock_torch.cuda.mem_get_info.side_effect = RuntimeError("not supported")
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            info = au.get_gpu_memory_info()
+
+        assert info["allocated_gb"] == 2.0
+        assert "device_free_gb" not in info
+        assert "device_used_gb" not in info
+
+
+class TestPostJobGpuCleanup:
+    def test_clears_cache_and_logs(self):
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 1 * 1024**3
+        mock_torch.cuda.memory_reserved.return_value = 1 * 1024**3
+        mock_torch.cuda.get_device_properties.return_value = MagicMock(total_memory=12 * 1024**3)
+        mock_torch.cuda.mem_get_info.return_value = (6 * 1024**3, 12 * 1024**3)
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            au.post_job_gpu_cleanup("test job")
+
+        mock_torch.cuda.empty_cache.assert_called_once()
+        mock_torch.cuda.synchronize.assert_called_once()
+
+    def test_never_raises(self):
+        with patch.object(au, "clear_gpu_cache", side_effect=RuntimeError("boom")):
+            au.post_job_gpu_cleanup("test job")  # must not raise
+
+    def test_noop_without_cuda(self):
+        with patch.object(au, "HAS_TORCH", False):
+            au.post_job_gpu_cleanup("test job")  # must not raise
+
 
 # ── convert_to_wav ────────────────────────────────────────────────────────
 
