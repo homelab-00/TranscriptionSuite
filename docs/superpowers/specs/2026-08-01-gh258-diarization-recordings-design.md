@@ -4,6 +4,7 @@
 - **Status:** Approved design (pending spec review) → next step: implementation plan
 - **Area:** WebSocket longform path (`server/backend/api/routes/websocket.py`), new shared dispatch helper (`server/backend/core/`), Session tab UI (`dashboard/components/views/SessionView.tsx`), client config
 - **Issue:** [#258](https://github.com/homelab-00/TranscriptionSuite/issues/258) — "Enable diarization for regular recordings on the main Session Tab (not Import)", opened from [#256](https://github.com/homelab-00/TranscriptionSuite/issues/256)
+- **Code baseline:** `main` @ `02921d69` (PR #272). All line references below were re-verified against this commit on 2026-08-01, after PRs #269 / #270 / #272 merged.
 
 ---
 
@@ -18,7 +19,7 @@ Speaker diarization has never run on the microphone/system-audio recording path.
 | Notebook upload | `api/routes/notebook.py` | lines 877-1041 |
 | OpenAI-compatible audio | `api/routes/openai_audio.py` | ~line 181 |
 
-The recording path is the WebSocket: `websocket.py:833` (`start` message) → `TranscriptionSession.process_transcription()` (line 348) → `engine.transcribe_file()` (line 452). The `start` message accepts only `language`, `use_vad`, `translation_enabled`, `translation_target_language`, `profile_id` and `auto_add_to_notebook` (lines 851-905). **There is no diarization field in the protocol at all**, and `AudioToTextRecorder.transcribe_file()` has no diarization parameter — the gap is architectural, not merely unwired.
+The recording path is the WebSocket: `websocket.py:855` (`start` message) → `TranscriptionSession.process_transcription()` (line 348) → `engine.transcribe_file()` (line 452). The `start` message accepts only `language`, `use_vad`, `translation_enabled`, `translation_target_language`, `profile_id` and `auto_add_to_notebook` (lines 873-927). **There is no diarization field in the protocol at all**, and `AudioToTextRecorder.transcribe_file()` has no diarization parameter — the gap is architectural, not merely unwired.
 
 The reporter in #256 recorded a meeting through the Session tab with the Server-tab "Diarization" card configured, and got no speaker labels. That card only writes `DIARIZATION_MODEL` / `SENSEVOICE_DIARIZATION_ENGINE` env vars at container start (`dockerManager.ts`): it picks **which** engine, never **whether** diarization runs.
 
@@ -26,7 +27,8 @@ The reporter in #256 recorded a meeting through the Session tab with the Server-
 
 Nothing new needs to be invented on the ML side:
 
-- `core/parallel_diarize.py` — `transcribe_and_diarize()` (parallel STT + PyAnnote) and `transcribe_then_diarize()` (sequential, for GPUs under ~16 GB VRAM). Both are backend-agnostic and already degrade to `(result, None)` when diarization fails.
+- `core/parallel_diarize.py` — `transcribe_and_diarize()` (parallel STT + PyAnnote) and `transcribe_then_diarize()` (sequential, for GPUs under ~16 GB VRAM). Both are backend-agnostic and already degrade to `(result, None)` when diarization fails. Since PR #269 both also release the diarization model in a guarded `finally` (lines 103-118 and 269-283), so callers must **not** add their own unload.
+- `core/stt/backends/base.py::as_gpu_oom()` (line 62) and `GpuOutOfMemoryError` (line 27), added in PR #269 — translate a CUDA/CTranslate2/torch out-of-memory failure into a typed error carrying an actionable `remedy` string.
 - `core/speaker_merge.py` — `build_speaker_segments()` (line 204) merges diarization turns onto word timestamps; `build_speaker_segments_nowords()` (line 282) is the segment-level fallback for backends without word timings (MLX Canary).
 - `core/stt/backends/base.py::use_integrated_diarization_for()` (line 282) — decides whether a backend's own single-pass `transcribe_with_diarization()` should be used (WhisperX, VibeVoice always; SenseVoice only when the resolved engine is `funasr`).
 - `config.py::resolve_parallel_diarization_default()` (line 540) and `resolve_sensevoice_diarization_engine()` (line 586).
@@ -72,7 +74,8 @@ class DiarizationOutcome:
     """Why diarization did or did not happen, for client-facing reporting."""
     requested: bool
     performed: bool
-    reason: str | None          # "ready" | "token_missing" | "unavailable" | None
+    reason: str | None          # "ready" | "token_missing" | "out_of_memory" | "unavailable" | None
+    remedy: str | None = None   # actionable hint, populated for out_of_memory
 
 
 @dataclass(frozen=True)
@@ -115,6 +118,8 @@ Internal flow, mirroring the proven sequence in `transcription.py:349-529`:
 - `ValueError` — input validation; the caller decides the status code.
 - `AudioDecodeError` — a corrupt file is not a diarization problem (this is the FINDING #1 carve-out already documented at `notebook.py:961-964`).
 
+**OOM classification.** Before falling back to the generic `"unavailable"` reason, a swallowed diarization exception is passed through `as_gpu_oom()`. When it classifies, the outcome becomes `reason="out_of_memory"` with the error's `remedy` attached. This is precisely the #256 reporter's failure mode — a 4 GB RTX 500 Ada running concurrent STT + PyAnnote — and "Diarization ran out of VRAM; free some and retry, or switch to sequential mode" is a far better message than "unavailable". Note that OOM is deliberately excluded from the CUDA retry backoff (`diarization_engine.py::_is_transient_cuda_error`, line 53: `if "out of memory" in msg: return False`), so classification at this layer is the only place the condition can be made legible to the user.
+
 **Word timestamps.** Diarization forces `word_timestamps=True` internally regardless of the caller's flag, because speaker alignment needs them. This mirrors `need_word_timestamps = word_timestamps or diarization` at `transcription.py:455`.
 
 ### 3.2 New formatter: `format_speaker_text()` in `core/formatters.py`
@@ -129,14 +134,14 @@ This is deliberately **not** `plaintext_export.stream_plaintext()`: that functio
 
 ### 3.3 `api/routes/websocket.py`
 
-**Protocol.** The `start` message gains two optional fields, validated with the same untrusted-input discipline as `profile_id` (lines 857-860):
+**Protocol.** The `start` message gains two optional fields, validated with the same untrusted-input discipline as `profile_id` (lines 879-882):
 
 | Field | Type | Validation |
 |-------|------|------------|
 | `diarization` | bool | `isinstance(x, bool)` else `False` |
 | `expected_speakers` | int \| null | `isinstance(x, int) and 1 <= x <= 10` else `None` |
 
-`TranscriptionSession.__init__` gains `self.diarization_enabled = False` and `self.expected_speakers: int | None = None`; `start_recording()` gains the matching keyword arguments.
+`TranscriptionSession.__init__` gains `self.diarization_enabled = False` and `self.expected_speakers: int | None = None`; `start_recording()` (line 678) gains the matching keyword arguments, and `handle_client_message` (line 849) resolves them alongside the existing `auto_add_to_notebook` block before calling it at line 922.
 
 **`process_transcription()` changes, in order:**
 
@@ -151,6 +156,8 @@ This is deliberately **not** `plaintext_export.stream_plaintext()`: that functio
 `★ Ordering constraint:` the `format_speaker_text()` call (step 3) must happen before the existing persistence block at lines 489-527, which builds the payload, writes it to the database, and only then delivers it. Formatting after persistence would store bare text while sending labelled text, so a post-crash recovery through `GET /result/{job_id}` would silently lose the speakers.
 
 `★ Model-swap note:` `transcribe_then_diarize()` unloads the STT model (`parallel_diarize.py:73`) and reloads it in its `finally` block. The WebSocket path holds a live `engine` reference obtained before the call and uses it afterwards only for `getattr(engine, "model_name", None)`, which stays valid. The import routes already do exactly this. A code comment must record it so nobody "fixes" the reference later.
+
+`★ Post-#269 constraint:` `process_transcription`'s `finally` block now ends with `post_job_gpu_cleanup()` (lines 657-676), and its own comment states it **must stay last** — a cancellation landing inside that `await` would skip anything appended after it, and today that would be the temp-file cleanup and state reset. No new statement may be added below it. Relatedly, both `parallel_diarize` entry points already release the diarization model in their own guarded `finally`, so `diarization_dispatch` must not unload anything itself; doing so would be a redundant second unload with a real cost, since an unguarded raise there could replace an in-flight `TranscriptionCancelledError` (the exact bug #269 fixed).
 
 ### 3.4 Dashboard
 
@@ -224,7 +231,8 @@ SessionView  ──start({diarization, expectedSpeakers})──▶  useTranscrip
 | Failure | Behaviour |
 |---------|-----------|
 | Diarization model missing / no HF token | Transcript delivered in full; `outcome.reason = "token_missing"`; amber note in the UI |
-| Diarization crashes mid-run (OOM on a small GPU) | `parallel_diarize` returns `(result, None)`; transcript delivered; `reason = "unavailable"` |
+| Diarization OOMs on a small GPU | `parallel_diarize` returns `(result, None)`; transcript delivered; `as_gpu_oom()` classifies it, so `reason = "out_of_memory"` with the remedy shown in the amber note. Mitigations to suggest: turn off parallel diarization (sequential never co-resides the two models) and `main_transcriber.low_vram_mode` (`config.py:560`) |
+| Diarization crashes for any other reason | `parallel_diarize` returns `(result, None)`; transcript delivered; `reason = "unavailable"` |
 | Speaker merge raises | Caught inside the helper; transcript delivered without speakers |
 | User cancels | `TranscriptionCancelledError` propagates; existing `mark_failed` path unchanged |
 | Corrupt audio | `AudioDecodeError` propagates as a clean decode error, not mislabelled as a diarization problem |
@@ -262,5 +270,6 @@ Mocking rules that bite: patch `audio_utils.*` rather than `model_manager.*`, an
 ## 8. Related work
 
 - **Follow-up PR (agreed 2026-08-01):** migrate `transcription.py`, `notebook.py` and `openai_audio.py` onto `diarization_dispatch`, deleting roughly 400 lines of duplication. Must preserve each route's distinct edges: HTTP status codes, the `X-Diarization-Status` response header, and the differing DB write paths.
-- **`docs/superpowers/plans/2026-08-01-vram-discipline.md`** (planned, unimplemented) includes a parallel-diarization VRAM leak fix. Because this design reuses `parallel_diarize` unchanged, that fix will apply to the recording path automatically once implemented. No coordination needed; no conflicting edits.
+- **VRAM discipline (PR #269, merged 2026-08-01)** shipped four things this design must build on rather than duplicate: the parallel-diarization VRAM leak fix (both `parallel_diarize` paths now unload the diarization model in a guarded `finally`), `post_job_gpu_cleanup()` at every job-completion site including `process_transcription`, the `GpuOutOfMemoryError` / `as_gpu_oom()` classification pair, and the opt-in `main_transcriber.low_vram_mode` config key. The recording path inherits the leak fix for free. See the two `★` constraint notes in §3.3.
+- **Live-start synchronisation (PR #272, merged)** touched `useTranscription.ts` only in `loadResult()` (it now clears the stale error on a delivered transcript) and did not change the `start` frame, so §3.4's plan applies unchanged. PR #272 also reshaped `ServerStatus.gpu_memory` in `types.ts` from a string to a nested `GpuMemoryInfo` object — unrelated to this work, but worth knowing before touching that file.
 - **GH-256** remains unanswered on GitHub. Once this ships, the issue should be answered and closed with the README correction noted.
