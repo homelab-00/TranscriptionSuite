@@ -74,6 +74,11 @@ class LiveModeSession:
         self._engine: LiveModeEngine | None = None
         self._message_queue: asyncio.Queue[dict] = asyncio.Queue()
         self._running = False
+        # GH-271: True once an engine has actually come up in this session.
+        # ``process_messages`` needs it to tell "not started yet" (keep
+        # waiting - the model may still be loading) apart from "started and
+        # now stopped" (drain and exit).
+        self._engine_started = False
         # Backend borrowed from the main engine (non-None when sharing).
         self._shared_backend: object | None = None
         # Capture the event loop so engine callbacks (from background threads)
@@ -362,14 +367,35 @@ class LiveModeSession:
                 shared_backend=shared_backend,
             )
 
-            # Start the engine
-            if self._engine.start():
+            # Start the engine.  GH-271: ``start()`` blocks until the recorder
+            # has actually been built (or has failed), which includes the model
+            # load - so run it off the event loop, otherwise queued status
+            # messages, pings and the WebSocket receive loop would all stall
+            # for the duration of the load.  Only a real "listening" outcome
+            # clears _model_displaced; a background failure now falls through
+            # to the finally block, which restores the main model immediately
+            # instead of leaving it detached for the whole session.
+            if await asyncio.to_thread(self._engine.start):
                 self._running = True
+                self._engine_started = True
                 _model_displaced = False  # Engine owns the model now
                 logger.info(f"Live Mode started for {self.client_name}")
                 return True
             else:
-                await self.send_message("error", {"message": "Failed to start engine"})
+                start_error = self._engine.start_error
+                logger.error(
+                    "Live Mode failed to initialize for %s: %s", self.client_name, start_error
+                )
+                await self.send_message(
+                    "error",
+                    {
+                        "message": (
+                            f"Failed to start Live Mode: {start_error}"
+                            if start_error
+                            else "Failed to start engine"
+                        )
+                    },
+                )
                 return False  # finally will restore
 
         except Exception as e:
@@ -532,9 +558,14 @@ class LiveModeSession:
                 await self.send_message(msg["type"], msg["data"])
             except TimeoutError:
                 # Check if we should exit - only exit when:
-                # 1. _running is False (engine stopped)
-                # 2. Queue is empty (no pending messages)
-                if not self._running and self._message_queue.empty():
+                # 1. An engine actually came up in this session.  GH-271: the
+                #    start-up window (model load) can last minutes with
+                #    _running still False, and exiting there would strand every
+                #    message the engine queues, including the LISTENING state
+                #    the client waits for before it starts capturing audio.
+                # 2. _running is False (engine stopped)
+                # 3. Queue is empty (no pending messages)
+                if self._engine_started and not self._running and self._message_queue.empty():
                     break
                 continue
             except Exception as e:

@@ -185,6 +185,18 @@ export function useLiveMode(): LiveModeState {
             }
           } else if (state === 'PROCESSING') {
             setStatusTracked('processing');
+          } else if (state === 'ERROR') {
+            // GH-271: the engine reports a terminal failure out of band. This
+            // branch used to be missing, so an engine that died mid-session
+            // left the UI sitting in listening forever with audio still
+            // streaming into a dead session. Keep any more specific message
+            // that an `error` frame already delivered (or is about to): the
+            // two frames race, and the specific one always wins.
+            captureRef.current?.stop();
+            setAnalyser(null);
+            setStatusMessage(null);
+            setError((prev) => prev ?? 'Live mode stopped because the engine reported an error.');
+            setStatusTracked('error');
           } else if (state === 'STOPPED') {
             // GH-230: a server-initiated stop must tear down capture too —
             // leaving it running kept streaming audio into a dead session and

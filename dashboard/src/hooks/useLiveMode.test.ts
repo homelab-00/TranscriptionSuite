@@ -179,6 +179,42 @@ describe('[P1] useLiveMode', () => {
       expect(result.current.error).toBe('Engine crashed');
     });
 
+    // GH-271: a terminal engine failure arrives as an out-of-band `state`
+    // frame. The hook used to drop it, leaving the UI stuck in listening.
+    it('transitions to error on state ERROR and tears down capture', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'state', data: { state: 'ERROR' } });
+      });
+
+      expect(result.current.status).toBe('error');
+      expect(result.current.error).toContain('engine reported an error');
+      expect(result.current.statusMessage).toBeNull();
+      expect(lastCapture.stop).toHaveBeenCalled();
+    });
+
+    it('keeps the specific error message when an error frame precedes state ERROR', () => {
+      const { result } = renderHook(() => useLiveMode());
+
+      act(() => {
+        result.current.start();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'error',
+          data: { message: 'Failed to start Live Mode: CUDA out of memory' },
+        });
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'state', data: { state: 'ERROR' } });
+      });
+
+      expect(result.current.status).toBe('error');
+      expect(result.current.error).toBe('Failed to start Live Mode: CUDA out of memory');
+    });
+
     it('transitions to error on socket error callback', () => {
       const { result } = renderHook(() => useLiveMode());
 
