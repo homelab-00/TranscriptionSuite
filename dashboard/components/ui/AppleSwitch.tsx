@@ -7,6 +7,12 @@ interface AppleSwitchProps {
   description?: string;
   size?: 'sm' | 'md';
   disabled?: boolean;
+  /**
+   * Accessible name when the caller renders its own visible label, so the
+   * switch can be laid out apart from the text describing it. Falls back to
+   * `label`, which stays the right choice whenever this component owns both.
+   */
+  ariaLabel?: string;
 }
 
 export const AppleSwitch: React.FC<AppleSwitchProps> = ({
@@ -16,6 +22,7 @@ export const AppleSwitch: React.FC<AppleSwitchProps> = ({
   description,
   size = 'sm',
   disabled = false,
+  ariaLabel,
 }) => {
   // sm: 36px width, 20px height
   // md: 44px width, 24px height
@@ -43,7 +50,7 @@ export const AppleSwitch: React.FC<AppleSwitchProps> = ({
         type="button"
         role="switch"
         aria-checked={checked}
-        aria-label={label}
+        aria-label={ariaLabel ?? label}
         disabled={disabled}
         onClick={() => {
           if (!disabled) onChange(!checked);

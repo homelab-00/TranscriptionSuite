@@ -1889,8 +1889,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         </div>
                       </div>
                       <div className="mb-1 h-12 w-px self-end bg-white/10"></div>
+                      {/* GH-258: fixed width rather than min-w-25, so the
+                        Speaker Diarization row below can share the exact same
+                        control column. Content-driven width would drift the
+                        moment this label changes (it does, for Canary bidi). */}
                       <div
-                        className="flex min-w-25 flex-col items-center"
+                        className="flex w-34 flex-col items-center"
                         title={canTranslate ? '' : 'Current model does not support translation'}
                       >
                         <label
@@ -1921,28 +1925,37 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
                     {/* GH-258: speaker diarization for this recording. Off by
                       default so plain dictation is untouched; the count row
-                      only appears once it is on. */}
-                    <div className="border-t border-white/5 pt-2">
-                      <div
-                        title={
-                          diarizationUnavailable
-                            ? diarizationFeature?.reason === 'token_missing'
-                              ? 'Diarization needs a HuggingFace token. Add one in Settings and restart the server.'
-                              : 'Diarization is unavailable on this server.'
-                            : 'Label who said what in the finished transcript.'
-                        }
-                      >
-                        <AppleSwitch
-                          checked={effectiveDiarization}
-                          onChange={handleDiarizationToggle}
-                          disabled={diarizationUnavailable}
-                          label="Speaker Diarization"
-                        />
+                      only appears once it is on. The control column is the same
+                      fixed width as the Translate column above and the padding
+                      matches that row's p-1, so both switches sit on one
+                      vertical axis. */}
+                    <div
+                      className="border-t border-white/5 px-1 pt-2"
+                      title={
+                        diarizationUnavailable
+                          ? diarizationFeature?.reason === 'token_missing'
+                            ? 'Diarization needs a HuggingFace token. Add one in Settings and restart the server.'
+                            : 'Diarization is unavailable on this server.'
+                          : 'Label who said what in the finished transcript.'
+                      }
+                    >
+                      <div className="flex items-center gap-6">
+                        <span className="min-w-0 flex-1 text-sm font-medium text-white/90">
+                          Speaker Diarization
+                        </span>
+                        <div className="flex w-34 flex-col items-center">
+                          <AppleSwitch
+                            checked={effectiveDiarization}
+                            onChange={handleDiarizationToggle}
+                            disabled={diarizationUnavailable}
+                            ariaLabel="Speaker Diarization"
+                          />
+                        </div>
                       </div>
                       {effectiveDiarization && (
-                        <div className="mt-1 flex items-center justify-between pl-1">
-                          <span className="text-xs text-slate-400">Speakers</span>
-                          <div className="flex items-center gap-2">
+                        <div className="mt-1 flex items-center gap-6">
+                          <span className="min-w-0 flex-1 text-xs text-slate-400">Speakers</span>
+                          <div className="flex w-34 items-center justify-center gap-2">
                             <button
                               type="button"
                               aria-label="Fewer speakers"
