@@ -1248,15 +1248,16 @@ def _run_transcription(
         )
 
     finally:
-        from server.core.audio_utils import post_job_gpu_cleanup
-
-        post_job_gpu_cleanup("notebook import", model_manager.gpu_device_index)
-
         # Cleanup temp file
         try:
             tmp_path.unlink()
         except Exception as e:
             logger.warning(f"Failed to cleanup temp file {tmp_path}: {e}")
+
+        # Must stay LAST in this finally — nothing may sit behind it.
+        from server.core.audio_utils import post_job_gpu_cleanup
+
+        post_job_gpu_cleanup("notebook import", model_manager.gpu_device_index)
 
 
 @router.post("/transcribe/upload", response_model=AcceptedResponse, status_code=202)

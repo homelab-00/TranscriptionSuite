@@ -463,14 +463,19 @@ async def create_transcription(
         logger.exception("OpenAI transcription endpoint error")
         return _openai_error(500, "Internal server error", error_type="server_error")
     finally:
+        model_manager.job_tracker.end_job(job_id)
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        # Must stay LAST in this finally — a cancellation landing inside the
+        # await would otherwise skip end_job and the temp-file unlink above:
+        # the single job slot has no timeout or admin force-release, so a
+        # stranded slot 429s every later job until the server restarts.
         from server.core.audio_utils import post_job_gpu_cleanup
 
         await asyncio.to_thread(
             post_job_gpu_cleanup, "openai transcription", model_manager.gpu_device_index
         )
-        model_manager.job_tracker.end_job(job_id)
-        if tmp_path:
-            Path(tmp_path).unlink(missing_ok=True)
 
 
 # ------------------------------------------------------------------
@@ -586,11 +591,16 @@ async def create_translation(
         logger.exception("OpenAI translation endpoint error")
         return _openai_error(500, "Internal server error", error_type="server_error")
     finally:
+        model_manager.job_tracker.end_job(job_id)
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        # Must stay LAST in this finally — a cancellation landing inside the
+        # await would otherwise skip end_job and the temp-file unlink above:
+        # the single job slot has no timeout or admin force-release, so a
+        # stranded slot 429s every later job until the server restarts.
         from server.core.audio_utils import post_job_gpu_cleanup
 
         await asyncio.to_thread(
             post_job_gpu_cleanup, "openai translation", model_manager.gpu_device_index
         )
-        model_manager.job_tracker.end_job(job_id)
-        if tmp_path:
-            Path(tmp_path).unlink(missing_ok=True)

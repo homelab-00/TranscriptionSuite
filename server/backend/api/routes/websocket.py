@@ -643,21 +643,6 @@ class TranscriptionSession:
                 await self.send_message("error", {"message": error_message})
 
         finally:
-            # Hand cached GPU blocks back to the driver so co-resident
-            # workloads (e.g. a local LLM) get the VRAM between jobs. The
-            # model stays warm; run in a thread because empty_cache blocks.
-            # The local model_manager is bound inside the try, so resolve the
-            # device index from the singleton instead — a failure before that
-            # binding must not turn into a NameError in this finally.
-            from server.core.audio_utils import post_job_gpu_cleanup
-            from server.core.model_manager import get_model_manager
-
-            try:
-                _device_index = get_model_manager().gpu_device_index
-            except Exception:
-                _device_index = 0
-            await asyncio.to_thread(post_job_gpu_cleanup, "longform recording", _device_index)
-
             # Only delete files in /tmp — persistent audio in recordings_dir must survive
             # so failed jobs can be retried (Wave 2) and orphan recovery can find them (Wave 3).
             if (
@@ -671,6 +656,24 @@ class TranscriptionSession:
                     logger.warning(f"Failed to delete temp file: {e}")
             self.temp_file = None
             self.audio_chunks = []
+
+            # Hand cached GPU blocks back to the driver so co-resident
+            # workloads (e.g. a local LLM) get the VRAM between jobs. The
+            # model stays warm; run in a thread because empty_cache blocks.
+            # The local model_manager is bound inside the try, so resolve the
+            # device index from the singleton instead — a failure before that
+            # binding must not turn into a NameError in this finally. This
+            # must stay LAST: a cancellation landing inside the await would
+            # otherwise skip whatever comes after it, and here that would be
+            # the temp-file cleanup and state reset above.
+            from server.core.audio_utils import post_job_gpu_cleanup
+            from server.core.model_manager import get_model_manager
+
+            try:
+                _device_index = get_model_manager().gpu_device_index
+            except Exception:
+                _device_index = 0
+            await asyncio.to_thread(post_job_gpu_cleanup, "longform recording", _device_index)
 
     async def start_recording(
         self,
