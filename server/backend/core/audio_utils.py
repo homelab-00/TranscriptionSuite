@@ -210,7 +210,7 @@ def clear_gpu_cache() -> None:
         logger.debug(f"Could not clear GPU cache: {e}")
 
 
-def post_job_gpu_cleanup(context: str = "job") -> None:
+def post_job_gpu_cleanup(context: str = "job", device_index: int = 0) -> None:
     """Release cached GPU memory after a transcription job completes.
 
     Hands the caching allocators' unused blocks back to the driver so
@@ -220,11 +220,12 @@ def post_job_gpu_cleanup(context: str = "job") -> None:
 
     Args:
         context: Short label for the completed job type, used in the log line.
+        device_index: GPU device index to query (default 0).
     """
     try:
         clear_gpu_cache()
-        info = get_gpu_memory_info()
-        if info.get("available"):
+        info = get_gpu_memory_info(device_index)
+        if info.get("available") and "error" not in info:
             logger.info(
                 "GPU memory after %s: torch allocated=%s GB reserved=%s GB, device used=%s GB",
                 context,
