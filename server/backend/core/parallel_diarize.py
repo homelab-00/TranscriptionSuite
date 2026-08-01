@@ -107,7 +107,16 @@ def transcribe_then_diarize(
         # Both are no-ops when models are already in the target state.
         # Running here (before any return) guarantees the STT model is available
         # for subsequent jobs regardless of how this function exits.
-        model_manager.unload_diarization_model()
+        # Guarded: an unguarded raise here would replace whatever exception is
+        # already propagating (e.g. TranscriptionCancelledError) on its way out
+        # of this finally, turning a clean cancel into an unrelated 500.
+        try:
+            model_manager.unload_diarization_model()
+        except Exception:
+            logger.warning(
+                "Failed to unload the diarization model after sequential run",
+                exc_info=True,
+            )
         try:
             model_manager.load_transcription_model()
         except Exception:
@@ -262,4 +271,14 @@ def transcribe_and_diarize(
         # needed during this job — release its VRAM instead of leaving it
         # resident forever (this path never unloaded it before). Idempotent,
         # so the Sortformer branch unloading on its own is fine.
-        model_manager.unload_diarization_model()
+        # Guarded: this finally also covers the parallel-execution cancellation
+        # exit above — an unguarded raise here would replace an in-flight
+        # TranscriptionCancelledError, turning a clean user cancel (HTTP 499)
+        # into a generic 500.
+        try:
+            model_manager.unload_diarization_model()
+        except Exception:
+            logger.warning(
+                "Failed to unload the diarization model after parallel run",
+                exc_info=True,
+            )
