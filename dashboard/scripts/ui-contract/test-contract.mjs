@@ -263,10 +263,12 @@ async function main() {
   );
 
   // The mirror hazard: comment markers *inside* a string are data, not comments.
+  // Asserted as exact equality rather than a substring check — the input holds
+  // no comments, so a correct strip returns it byte-for-byte. Equality is the
+  // stronger claim, and it keeps this out of the shape of a URL-allowlist test.
   const urlInString = `const href = 'https://example.com/a'; const c = "gap-2";`;
   expect(
-    stripComments(urlInString).includes('https://example.com/a') &&
-      stripComments(urlInString).includes('gap-2'),
+    stripComments(urlInString) === urlInString,
     'Comment markers inside a string literal are preserved',
     stripComments(urlInString),
   );
