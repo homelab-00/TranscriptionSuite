@@ -52,13 +52,13 @@ def _ensure_engine_importable() -> None:
         sys.modules["scipy"] = scipy
         sys.modules["scipy.signal"] = scipy_signal
 
-    # server.core.stt.backends.factory
-    factory_mod_name = "server.core.stt.backends.factory"
-    if factory_mod_name not in sys.modules:
-        factory_stub = types.ModuleType(factory_mod_name)
-        factory_stub.create_backend = MagicMock()  # type: ignore[attr-defined]
-        factory_stub.detect_backend_type = MagicMock(return_value="whisper")  # type: ignore[attr-defined]
-        sys.modules[factory_mod_name] = factory_stub
+    # server.core.stt.backends.factory — like capabilities below, the real
+    # module only imports ``re`` at module scope (every backend import is lazy
+    # inside its factory branch), so we let it import naturally.
+    # It must NOT be stubbed: ``server.core.stt.backends.__init__`` does a
+    # from-import of several names off it, so a partial stub makes this file
+    # fail at collection with ImportError whenever it runs before whichever
+    # other test file happens to import the real module first.
 
     # server.core.stt.capabilities — the real module has no heavy deps
     # (only imports ``re``), so we let it import naturally instead of stubbing.

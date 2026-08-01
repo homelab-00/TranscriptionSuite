@@ -103,24 +103,36 @@ def test_filter_linearity_r_squared_above_0_95() -> None:
     """
     sizes = [10, 100, 500, 1000]
     samples_per_size = 30
-    means: list[float] = []
+    # This measures CPU time, not wall clock, and takes the best of N.
+    #
+    # Linearity is a claim about WORK, so process_time_ns is the honest metric:
+    # it excludes every interval where the scheduler descheduled us, which is
+    # what made this test flaky. Wall-clock timing on a loaded machine inflated
+    # whichever size happened to get preempted, bending the fit; on a saturated
+    # box every sample of a size can be hit, so best-of-N alone is not enough.
+    # Best-of-N is kept on top because remaining noise is strictly additive.
+    timings: list[float] = []
     for n in sizes:
         turns = _sample_turns(n)
+        # Warm up so first-call effects (branch prediction, allocator growth)
+        # are not charged to the first measured sample.
+        for _ in range(3):
+            _ = filter_low_confidence(turns, mode="below_80")
         per_size: list[int] = []
         for _ in range(samples_per_size):
-            t0 = time.perf_counter_ns()
+            t0 = time.process_time_ns()
             _ = filter_low_confidence(turns, mode="below_80")
-            per_size.append(time.perf_counter_ns() - t0)
-        means.append(float(np.mean(per_size)))
+            per_size.append(time.process_time_ns() - t0)
+        timings.append(float(min(per_size)))
 
     # Linear regression Y = aX + b; report r²
     x = np.array(sizes, dtype=float)
-    y = np.array(means, dtype=float)
+    y = np.array(timings, dtype=float)
     slope, intercept = np.polyfit(x, y, 1)
     pred = slope * x + intercept
     ss_res = float(np.sum((y - pred) ** 2))
     ss_tot = float(np.sum((y - np.mean(y)) ** 2))
     r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 1.0
     assert r2 > 0.95 or math.isclose(r2, 0.95, rel_tol=0.01), (
-        f"linearity r²={r2:.3f} < 0.95; sizes={sizes} means_ns={means}"
+        f"linearity r²={r2:.3f} < 0.95; sizes={sizes} min_ns={timings}"
     )
