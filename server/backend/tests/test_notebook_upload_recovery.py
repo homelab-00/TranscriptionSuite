@@ -306,6 +306,153 @@ class TestNotebookRunTranscription:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Notebook upload diarization via diarization_dispatch (GH-274)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestNotebookDiarizationDispatch:
+    """The notebook worker delegates the diarization decision tree to
+    core/diarization_dispatch; these pin the route-side wiring the dispatch
+    cannot see: the DB save gets the RAW speaker turns, and the job payload
+    carries the outcome dict."""
+
+    def _stub_route_io(self, tmp_path: Path, monkeypatch) -> dict:
+        import server.core.audio_utils as au
+        from server.api.routes import notebook as nb_route
+
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
+        saved: dict = {}
+
+        def _save(**kw):
+            saved.update(kw)
+            return 7
+
+        monkeypatch.setattr(nb_route, "save_longform_to_database", _save)
+        monkeypatch.setattr(nb_route, "check_time_slot_overlap", lambda *_a, **_kw: None)
+        monkeypatch.setattr(au, "convert_to_mp3", lambda *_a, **_kw: None)
+        return saved
+
+    def _run(self, mgr, tmp_file: Path, *, use_parallel_default=True) -> None:
+        from server.api.routes import notebook as nb_route
+
+        nb_route._run_transcription(
+            model_manager=mgr,
+            tmp_path=tmp_file,
+            filename="input.wav",
+            language=None,
+            translation_enabled=False,
+            translation_target_language=None,
+            enable_diarization=True,
+            enable_word_timestamps=True,
+            file_created_at=None,
+            expected_speakers=None,
+            parallel_diarization=None,
+            use_parallel_default=use_parallel_default,
+            title=None,
+            job_id="job-diar",
+            event_loop=None,
+        )
+
+    def test_two_pass_speaker_turns_reach_the_db_save(self, tmp_path: Path, monkeypatch):
+        saved = self._stub_route_io(tmp_path, monkeypatch)
+
+        stt_result = SimpleNamespace(
+            text="hello",
+            segments=[{"text": "hello", "start": 0.0, "end": 1.0}],
+            words=[{"word": "hello", "start": 0.0, "end": 0.5}],
+            language="en",
+            language_probability=0.99,
+            duration=1.5,
+            num_speakers=0,
+        )
+        raw_turn = {"speaker": "SPEAKER_00", "start": 0.0, "end": 1.0}
+        diar_seg = MagicMock()
+        diar_seg.to_dict.return_value = raw_turn
+        merged_word = {"word": "hello", "start": 0.0, "end": 0.5, "speaker": "SPEAKER_00"}
+        merged_segments = [
+            {
+                "text": "hello",
+                "start": 0.0,
+                "end": 1.0,
+                "speaker": "SPEAKER_00",
+                "words": [merged_word],
+            }
+        ]
+
+        monkeypatch.setattr(
+            "server.core.parallel_diarize.transcribe_and_diarize",
+            lambda **_kw: (stt_result, MagicMock(segments=[diar_seg], num_speakers=1)),
+        )
+        monkeypatch.setattr(
+            "server.core.speaker_merge.build_speaker_segments",
+            lambda *_a, **_kw: (merged_segments, [merged_word], 1),
+        )
+
+        engine = _make_engine()
+        engine._backend = None  # keep the dispatch on the two-pass path
+        mgr = _ModelManager(engine)
+
+        tmp_file = tmp_path / "input.wav"
+        tmp_file.write_bytes(b"\x00" * 1024)
+        self._run(mgr, tmp_file)
+
+        result = mgr.job_tracker.results["job-diar"]
+        assert "error" not in result, f"expected success, got: {result}"
+        assert result["recording_id"] == 7
+        assert result["diarization"]["performed"] is True
+        assert result["diarization"]["reason"] == "ready"
+        # The DB save receives the RAW turns (it aligns them itself) plus the
+        # word timings lifted out of the merged segments.
+        assert saved["diarization_segments"] == [raw_turn]
+        assert saved["word_timestamps"] == [merged_word]
+
+    def test_integrated_token_failure_still_saves_a_plain_transcript(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """A missing HF token degrades to plain transcription — the recording
+        is still saved, with the reason recorded (GH-274: this used to retry
+        the two-pass pipeline by accident)."""
+        import sys
+        import types as _types
+
+        saved = self._stub_route_io(tmp_path, monkeypatch)
+
+        # Stub the lazy `from server.core.stt.engine import TranscriptionResult`
+        # inside the dispatch's integrated path (the real module imports torch).
+        fake_engine_mod = _types.ModuleType("server.core.stt.engine")
+        fake_engine_mod.TranscriptionResult = SimpleNamespace  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "server.core.stt.engine", fake_engine_mod)
+
+        import server.core.audio_utils as au
+
+        monkeypatch.setattr(au, "load_audio", lambda *_a, **_kw: ([0.0] * 16000, 16000))
+
+        class _TokenErrorBackend:
+            preferred_input_sample_rate_hz = 16000
+            backend_name = "fake-whisperx"
+
+            def transcribe_with_diarization(self, audio_data, *, audio_sample_rate, **kwargs):
+                raise ValueError("needs a HuggingFace token")
+
+        engine = _make_engine()
+        engine._backend = _TokenErrorBackend()
+        mgr = _ModelManager(engine)
+        mgr.get_diarization_feature_status = lambda: {"reason": "token_missing"}
+
+        tmp_file = tmp_path / "input.wav"
+        tmp_file.write_bytes(b"\x00" * 1024)
+        self._run(mgr, tmp_file)
+
+        result = mgr.job_tracker.results["job-diar"]
+        assert "error" not in result, f"transcript lost on token failure: {result}"
+        assert result["recording_id"] == 7
+        assert result["diarization"]["performed"] is False
+        assert result["diarization"]["reason"] == "token_missing"
+        assert saved["diarization_segments"] is None
+        engine.transcribe_file.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # File import (_run_file_import)
 # ─────────────────────────────────────────────────────────────────────────────
 
