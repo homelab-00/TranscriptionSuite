@@ -684,6 +684,14 @@ class ModelManager:
         if not self.gpu_available:
             return configured_batch_size
 
+        from server.config import resolve_low_vram_mode
+
+        if resolve_low_vram_mode(self.config):
+            if configured_batch_size > 4:
+                logger.info("Low VRAM mode: capping batch_size %d -> 4", configured_batch_size)
+                return 4
+            return configured_batch_size
+
         from server.core.audio_utils import get_gpu_memory_info
 
         gpu_info = get_gpu_memory_info(self._gpu_device_index)

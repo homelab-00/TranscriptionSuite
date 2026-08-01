@@ -75,6 +75,12 @@ main_transcriber:
     # Beam size for decoding. Higher can improve accuracy but is slower.
     beam_size: 5
 
+    # Low VRAM mode: trade some speed for a smaller GPU footprint. Caps the
+    # transcription batch size at 4, which roughly halves the extra VRAM used
+    # while a job runs. Useful when sharing the GPU with other apps (e.g. a
+    # local LLM). Loaded models are not affected - they stay in VRAM either way.
+    low_vram_mode: false
+
     # Optional initial prompt to guide transcription style/context.
     # Example: "This is a technical transcript. ZFS, Kubernetes, TCP/IP."
     initial_prompt: null
