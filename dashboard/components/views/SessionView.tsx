@@ -158,6 +158,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [monitorVolumePct, setMonitorVolumePct] = useState<number | null>(null);
   useEffect(() => loopbackOwner.subscribeVolumePct(setMonitorVolumePct), []);
 
+  // GH-258: speaker diarization for the main recording. Persisted client-side;
+  // the count is shared with Settings > Diarization so both surfaces agree.
+  const [diarizationEnabled, setDiarizationEnabled] = useState(false);
+  const [constrainSpeakers, setConstrainSpeakers] = useState(false);
+  const [numSpeakers, setNumSpeakers] = useState(2);
+
   // Runtime profile (read from persisted config)
   const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('cpu');
   useEffect(() => {
@@ -506,6 +512,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
         savedHideTimestamps,
         savedMainTranslate,
         savedMainBidiTarget,
+        savedDiarizationEnabled,
+        savedConstrainSpeakers,
+        savedNumSpeakers,
       ] = await Promise.all([
         getConfig<'mic' | 'system'>('session.audioSource'),
         getConfig<string>('session.micDevice'),
@@ -515,6 +524,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
         getConfig<boolean>('output.hideTimestamps'),
         getConfig<boolean>('session.mainTranslate'),
         getConfig<string>('session.mainBidiTarget'),
+        getConfig<boolean>('diarization.enabledForRecordings'),
+        getConfig<boolean>('diarization.constrainSpeakers'),
+        getConfig<number>('diarization.numSpeakers'),
       ]);
       if (!active) return;
 
@@ -546,6 +558,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
       if (typeof savedMainBidiTarget === 'string' && savedMainBidiTarget) {
         setMainBidiTargetRaw(savedMainBidiTarget);
       }
+      // GH-258: diarization preferences for the main recording.
+      if (typeof savedDiarizationEnabled === 'boolean') {
+        setDiarizationEnabled(savedDiarizationEnabled);
+      }
+      if (typeof savedConstrainSpeakers === 'boolean') setConstrainSpeakers(savedConstrainSpeakers);
+      if (typeof savedNumSpeakers === 'number' && savedNumSpeakers >= 1 && savedNumSpeakers <= 10) {
+        setNumSpeakers(savedNumSpeakers);
+      }
     })().catch(() => {});
 
     return () => {
@@ -557,6 +577,26 @@ export const SessionView: React.FC<SessionViewProps> = ({
     setAudioSource(source);
     persistedSelectionsRef.current.audioSource = source;
     void setConfig('session.audioSource', source).catch(() => {});
+  }, []);
+
+  const handleDiarizationToggle = useCallback((enabled: boolean) => {
+    setDiarizationEnabled(enabled);
+    void setConfig('diarization.enabledForRecordings', enabled).catch(() => {});
+  }, []);
+
+  const handleSpeakerCountChange = useCallback((next: number) => {
+    // 0 means auto-detect: the stepper's floor releases the constraint rather
+    // than pinning the run to a single speaker, which is never what is wanted.
+    const clamped = Math.max(0, Math.min(10, next));
+    if (clamped === 0) {
+      setConstrainSpeakers(false);
+      void setConfig('diarization.constrainSpeakers', false).catch(() => {});
+      return;
+    }
+    setConstrainSpeakers(true);
+    setNumSpeakers(clamped);
+    void setConfig('diarization.constrainSpeakers', true).catch(() => {});
+    void setConfig('diarization.numSpeakers', clamped).catch(() => {});
   }, []);
 
   const handleMicDeviceChange = useCallback((device: string) => {
@@ -825,6 +865,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
     transcription.status === 'complete' ||
     transcription.status === 'error';
 
+  // GH-209 gate, same contract the Import tab uses: the server computes this
+  // ONCE at container startup, so adding a token in Settings needs a restart.
+  const diarizationFeature = (admin.status?.models as any)?.features?.diarization as
+    | { available: boolean; reason: string }
+    | undefined;
+  const diarizationUnavailable = diarizationFeature?.available === false;
+  const effectiveDiarization = diarizationUnavailable ? false : diarizationEnabled;
+
   const handleStartRecording = useCallback(() => {
     if (!canStartRecording || mainModelDisabled) return;
     // gh-102: refuse to start when the active model requires an explicit
@@ -868,6 +916,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
         // every teardown path releases it (GH-230).
         monitorSinkName: isSystemAudio && isLinux ? sinkNameMap[sysDevice] : undefined,
         autoAddToNotebook,
+        // GH-258: forced off when the server reports the feature unavailable.
+        diarization: effectiveDiarization,
+        expectedSpeakers: effectiveDiarization && constrainSpeakers ? numSpeakers : undefined,
       });
       // Apply persisted capture gain after capture starts
       if (isSystemAudio) {
@@ -886,6 +937,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
     micDeviceIds,
     resolveLanguage,
     mainModelDisabled,
+    effectiveDiarization,
+    constrainSpeakers,
+    numSpeakers,
     isLinux,
     sysDevice,
     sinkNameMap,
@@ -1863,6 +1917,58 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           )}
                         </div>
                       </div>
+                    </div>
+
+                    {/* GH-258: speaker diarization for this recording. Off by
+                      default so plain dictation is untouched; the count row
+                      only appears once it is on. */}
+                    <div className="border-t border-white/5 pt-2">
+                      <div
+                        title={
+                          diarizationUnavailable
+                            ? diarizationFeature?.reason === 'token_missing'
+                              ? 'Diarization needs a HuggingFace token. Add one in Settings and restart the server.'
+                              : 'Diarization is unavailable on this server.'
+                            : 'Label who said what in the finished transcript.'
+                        }
+                      >
+                        <AppleSwitch
+                          checked={effectiveDiarization}
+                          onChange={handleDiarizationToggle}
+                          disabled={diarizationUnavailable}
+                          label="Speaker Diarization"
+                        />
+                      </div>
+                      {effectiveDiarization && (
+                        <div className="mt-1 flex items-center justify-between pl-1">
+                          <span className="text-xs text-slate-400">Speakers</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              aria-label="Fewer speakers"
+                              onClick={() =>
+                                handleSpeakerCountChange(constrainSpeakers ? numSpeakers - 1 : 0)
+                              }
+                              className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition-colors hover:bg-white/10"
+                            >
+                              &minus;
+                            </button>
+                            <span className="w-14 text-center text-xs text-slate-300">
+                              {constrainSpeakers ? numSpeakers : 'Auto'}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label="More speakers"
+                              onClick={() =>
+                                handleSpeakerCountChange(constrainSpeakers ? numSpeakers + 1 : 2)
+                              }
+                              className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition-colors hover:bg-white/10"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Record / Stop Button */}
