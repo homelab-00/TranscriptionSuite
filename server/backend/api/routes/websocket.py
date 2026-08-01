@@ -604,7 +604,10 @@ class TranscriptionSession:
         except Exception as e:
             # Import lazily to avoid circular imports at module load time.
             from server.core.model_manager import TranscriptionCancelledError
-            from server.core.stt.backends.base import BackendDependencyError
+            from server.core.stt.backends.base import (
+                BackendDependencyError,
+                GpuOutOfMemoryError,
+            )
 
             if isinstance(e, TranscriptionCancelledError):
                 logger.info(f"Transcription cancelled (client disconnected) for {self.client_name}")
@@ -616,17 +619,18 @@ class TranscriptionSession:
                             "Failed to mark job %s as failed: %s", self._current_job_id, _mf_err
                         )
             else:
-                # Surface BackendDependencyError remedy so the dashboard
-                # can render an actionable hint (Issue #76).
-                dep_error: BackendDependencyError | None = None
-                if isinstance(e, BackendDependencyError):
-                    dep_error = e
-                elif isinstance(e.__cause__, BackendDependencyError):
-                    dep_error = e.__cause__  # type: ignore[assignment]
+                # Surface the remedy of any error that carries one so the
+                # dashboard can render an actionable hint (Issue #76 for a
+                # missing backend dependency, a full GPU for GpuOutOfMemoryError).
+                remedy: str | None = None
+                for candidate in (e, e.__cause__):
+                    if isinstance(candidate, BackendDependencyError | GpuOutOfMemoryError):
+                        remedy = candidate.remedy
+                        break
                 logger.error(f"Transcription error: {e}", exc_info=True)
                 error_message = (
-                    f"Transcription failed: {e}. {dep_error.remedy}"
-                    if dep_error is not None
+                    f"Transcription failed: {e}. {remedy}"
+                    if remedy is not None
                     else f"Transcription failed: {e}"
                 )
                 if self._current_job_id:

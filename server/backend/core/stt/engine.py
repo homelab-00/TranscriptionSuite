@@ -34,7 +34,7 @@ import numpy as np
 import torch
 from scipy.signal import resample
 from server.config import get_config, resolve_main_transcriber_model
-from server.core.stt.backends.base import PartialTranscriptionError
+from server.core.stt.backends.base import PartialTranscriptionError, as_gpu_oom
 from server.core.stt.backends.factory import create_backend, detect_backend_type
 from server.core.stt.capabilities import validate_translation_request
 from server.core.stt.vad import VoiceActivityDetector
@@ -757,6 +757,12 @@ class AudioToTextRecorder:
             except Exception as e:
                 logger.exception(f"Transcription error: {e}")
                 self._set_state("inactive")
+                # CTranslate2 words one OOM two ways and picks between them by
+                # timing, so "invalid device ordinal" reaches the user for what
+                # is really a full GPU. Say what actually happened.
+                oom = as_gpu_oom(e)
+                if oom is not None:
+                    raise oom from e
                 raise
 
     def transcribe_file(
@@ -1021,6 +1027,9 @@ class AudioToTextRecorder:
 
             except Exception as e:
                 logger.exception(f"Transcription error: {e}")
+                oom = as_gpu_oom(e)
+                if oom is not None:
+                    raise oom from e
                 raise
 
     def _recording_worker(self) -> None:

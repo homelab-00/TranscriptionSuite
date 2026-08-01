@@ -642,6 +642,10 @@ export function useTranscription(): TranscriptionState {
   const loadResult = useCallback(
     (r: TranscriptionResult) => {
       setResult(r);
+      // A delivered transcript supersedes whatever went wrong before it — a
+      // recovered or retried result must not leave the old error banner on
+      // screen next to the transcript it just replaced.
+      setError(null);
       setStatusTracked('complete');
     },
     [setStatusTracked],

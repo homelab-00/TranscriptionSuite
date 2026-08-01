@@ -1554,6 +1554,19 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
         # detached (Issue #76).
         engine = await asyncio.to_thread(model_manager.ensure_transcription_loaded)
 
+        # Retry almost always follows a CUDA OOM, so it starts on a card that is
+        # still saturated: the transcription model keeps its allocations and the
+        # failed attempt may have left cached blocks behind. Hand those back to
+        # the driver first — without this the first retry after an OOM tends to
+        # die inside CTranslate2 while a second one moments later succeeds.
+        # Best-effort: never let the cleanup itself sink the retry.
+        try:
+            from ...core.audio_utils import clear_gpu_cache
+
+            await asyncio.to_thread(clear_gpu_cache)
+        except Exception as _gpu_err:
+            logger.debug("Could not free GPU cache before retry: %s", _gpu_err)
+
         result = await asyncio.to_thread(
             engine.transcribe_file,
             audio_path,

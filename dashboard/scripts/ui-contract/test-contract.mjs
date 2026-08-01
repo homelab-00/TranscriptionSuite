@@ -3,7 +3,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import YAML from 'yaml';
 import { createValidationReport } from './validate-contract.mjs';
-import { BASELINE_PATH, CONTRACT_PATH, PROJECT_ROOT, extractFacts } from './shared.mjs';
+import {
+  BASELINE_PATH,
+  CONTRACT_PATH,
+  PROJECT_ROOT,
+  extractFacts,
+  stripComments,
+} from './shared.mjs';
 
 const TMP_DIR = path.join(PROJECT_ROOT, 'scripts', 'ui-contract', 'fixtures', '.tmp');
 const SCHEMA_FAIL_FIXTURE = path.join(
@@ -227,6 +233,53 @@ async function main() {
     'Versioning pass when semver is bumped',
   );
   expect(semverPass.ok === true, 'Bumped semver contract remains valid with baseline warning only');
+
+  // 8. Comment stripping: prose must never reach the string scanner, and code
+  // must survive it intact. A lone apostrophe in a comment used to shift the
+  // scanner's quote pairing for the rest of the file, silently dropping real
+  // classNames from the contract and inventing tokens out of comment text.
+  const loneApostrophe = [
+    "// re-transcribe from the job's saved audio",
+    'const a = "px-4 py-2";',
+  ].join('\n');
+  expect(
+    stripComments(loneApostrophe).includes('px-4 py-2'),
+    'Lone apostrophe in a line comment does not swallow the next string',
+    stripComments(loneApostrophe),
+  );
+  expect(
+    !stripComments(loneApostrophe).includes('re-transcribe'),
+    'Line comment prose is removed before scanning',
+  );
+
+  const jsxBlockComment = '{/* keep the max-height here */}\n<div className="mt-2 flex" />';
+  expect(
+    !stripComments(jsxBlockComment).includes('max-height'),
+    'Block/JSX comment prose is removed before scanning',
+  );
+  expect(
+    stripComments(jsxBlockComment).includes('mt-2 flex'),
+    'Block comment does not consume the className that follows it',
+  );
+
+  // The mirror hazard: comment markers *inside* a string are data, not comments.
+  // Asserted as exact equality rather than a substring check — the input holds
+  // no comments, so a correct strip returns it byte-for-byte. Equality is the
+  // stronger claim, and it keeps this out of the shape of a URL-allowlist test.
+  const urlInString = `const href = 'https://example.com/a'; const c = "gap-2";`;
+  expect(
+    stripComments(urlInString) === urlInString,
+    'Comment markers inside a string literal are preserved',
+    stripComments(urlInString),
+  );
+
+  // An escaped quote must not be mistaken for the end of the string.
+  const escapedQuote = `const s = 'it\\'s fine'; const c = "p-1";`;
+  expect(
+    stripComments(escapedQuote).includes('p-1'),
+    'Escaped quote inside a string does not desynchronise the scanner',
+    stripComments(escapedQuote),
+  );
 
   if (failures.length > 0) {
     process.stderr.write(`ui-contract tests failed (${failures.length}/${checks.length})\n`);
