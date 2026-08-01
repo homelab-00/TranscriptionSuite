@@ -36,6 +36,11 @@ DISABLED_MODEL_SENTINEL = "__none__"
 # default never drifts across the routes that read it (see GH #173).
 DEFAULT_PARALLEL_DIARIZATION = False
 
+# Low VRAM mode caps the transcription batch size regardless of card size, an
+# opt-in trade of throughput for headroom on GPUs shared with other workloads
+# (e.g. a local LLM). Default OFF preserves today's tiered auto-scaling.
+DEFAULT_LOW_VRAM_MODE = False
+
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge *overlay* onto *base*, returning a NEW dict.
@@ -549,6 +554,28 @@ def resolve_parallel_diarization_default(config: ServerConfig | dict[str, Any]) 
         value = _dict_get(config, "diarization", "parallel")
         if value is None:
             value = DEFAULT_PARALLEL_DIARIZATION
+    return bool(value)
+
+
+def resolve_low_vram_mode(config: ServerConfig | dict[str, Any]) -> bool:
+    """
+    Resolve ``main_transcriber.low_vram_mode`` (default OFF).
+
+    When ON, the transcription batch size is capped at 4, trading throughput
+    for smaller transient VRAM peaks during jobs. Intended for GPUs shared
+    with other workloads (e.g. a local LLM). Loaded models are unaffected:
+    the transcription and alignment models stay warm either way.
+
+    Scope: WhisperX is the only backend that reads ``batch_size``, so this
+    setting has no effect on NeMo (Parakeet/Canary), whisper.cpp, SenseVoice
+    (which batches by duration, not count), VibeVoice or the MLX backends.
+    """
+    if isinstance(config, ServerConfig):
+        value = config.get("main_transcriber", "low_vram_mode", default=DEFAULT_LOW_VRAM_MODE)
+    else:
+        value = _dict_get(config, "main_transcriber", "low_vram_mode")
+        if value is None:
+            value = DEFAULT_LOW_VRAM_MODE
     return bool(value)
 
 

@@ -141,3 +141,10 @@ def test_resolve_parallel_diarization_default_accepts_serverconfig(tmp_path):
     # base, so the resolver must return False for a stock config too.
     cfg = config.ServerConfig()
     assert config.resolve_parallel_diarization_default(cfg) is False
+
+
+def test_resolve_low_vram_mode_accepts_serverconfig(tmp_path):
+    # ServerConfig() loads the baked-in defaults (low_vram_mode: false) as the
+    # merge base, so the resolver must return False for a stock config too.
+    cfg = config.ServerConfig()
+    assert config.resolve_low_vram_mode(cfg) is False

@@ -67,11 +67,18 @@ def _drive_retry(monkeypatch, *, transcribe_raises: Exception | None = None) -> 
             end_job=lambda _id: None,
         ),
         ensure_transcription_loaded=lambda: fake_engine,
+        gpu_device_index=0,
     )
 
     audio_utils = importlib.import_module("server.core.audio_utils")
     monkeypatch.setattr(
         audio_utils, "clear_gpu_cache", lambda: trace.append("clear_gpu_cache"), raising=False
+    )
+    monkeypatch.setattr(
+        audio_utils,
+        "post_job_gpu_cleanup",
+        lambda ctx="job", device_index=0: trace.append("post_job_gpu_cleanup"),
+        raising=False,
     )
 
     repo = importlib.import_module("server.database.job_repository")
@@ -116,6 +123,7 @@ def test_retry_still_succeeds_if_cache_clear_fails(monkeypatch):
             end_job=lambda _id: None,
         ),
         ensure_transcription_loaded=lambda: fake_engine,
+        gpu_device_index=0,
     )
 
     def _boom() -> None:
@@ -137,3 +145,10 @@ def test_retry_still_succeeds_if_cache_clear_fails(monkeypatch):
 
     assert "save_result" in trace, f"a failing cache clear aborted the retry: {trace}"
     assert "mark_failed" not in trace
+
+
+def test_gpu_cleanup_runs_after_retry_completes(monkeypatch):
+    # save_result also lands in the trace (patched in _drive_retry) - it runs
+    # inside the try, after transcribe_file and before the finally's cleanup.
+    trace = _drive_retry(monkeypatch)
+    assert trace == ["clear_gpu_cache", "transcribe_file", "save_result", "post_job_gpu_cleanup"]

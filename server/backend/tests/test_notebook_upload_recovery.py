@@ -76,6 +76,7 @@ class _ModelManager:
         self._dep_error = dep_error
         self.ensure_calls = 0
         self.job_tracker = _JobTracker()
+        self.gpu_device_index = 0
 
     def ensure_transcription_loaded(self):
         self.ensure_calls += 1

@@ -107,7 +107,16 @@ def transcribe_then_diarize(
         # Both are no-ops when models are already in the target state.
         # Running here (before any return) guarantees the STT model is available
         # for subsequent jobs regardless of how this function exits.
-        model_manager.unload_diarization_model()
+        # Guarded: an unguarded raise here would replace whatever exception is
+        # already propagating (e.g. TranscriptionCancelledError) on its way out
+        # of this finally, turning a clean cancel into an unrelated 500.
+        try:
+            model_manager.unload_diarization_model()
+        except Exception:
+            logger.warning(
+                "Failed to unload the diarization model after sequential run",
+                exc_info=True,
+            )
         try:
             model_manager.load_transcription_model()
         except Exception:
@@ -161,98 +170,115 @@ def transcribe_and_diarize(
         )
 
     # If pre-load failed, just transcribe normally
-    if diar_engine is None or audio_data is None:
-        result = engine.transcribe_file(
-            file_path,
-            language=language,
-            task=task,
-            translation_target_language=translation_target_language,
-            word_timestamps=word_timestamps,
-            cancellation_check=cancellation_check,
-            progress_callback=progress_callback,
-        )
-        return result, None
-
-    # Sortformer uses MLX/Metal — running it in parallel with MLX Whisper
-    # (also Metal) deadlocks the GPU.  Fall back to sequential mode.
-    from server.core.sortformer_engine import SortformerEngine
-
-    if isinstance(diar_engine, SortformerEngine):
-        logger.info(
-            "Sortformer + MLX detected — switching to sequential mode to avoid Metal deadlock"
-        )
-        return transcribe_then_diarize(
-            engine=engine,
-            model_manager=model_manager,
-            file_path=file_path,
-            language=language,
-            task=task,
-            translation_target_language=translation_target_language,
-            word_timestamps=word_timestamps,
-            expected_speakers=expected_speakers,
-            cancellation_check=cancellation_check,
-            progress_callback=progress_callback,
-        )
-
-    # ------------------------------------------------------------------
-    # Phase 2 — Parallel execution
-    # ------------------------------------------------------------------
-    logger.info("Starting parallel transcription + diarization")
-
-    # Capture audio_data/sample_rate in closures for the diarization worker
-    _audio_data = audio_data
-    _audio_sr = audio_sample_rate
-    _expected = expected_speakers
-
-    def _do_transcribe() -> TranscriptionResult:
-        threading.current_thread().name = "parallel_diarize:transcribe"
-        return engine.transcribe_file(
-            file_path,
-            language=language,
-            task=task,
-            translation_target_language=translation_target_language,
-            word_timestamps=word_timestamps,
-            cancellation_check=cancellation_check,
-            progress_callback=progress_callback,
-        )
-
-    def _do_diarize() -> DiarizationResult:
-        threading.current_thread().name = "parallel_diarize:diarize"
-        return diar_engine.diarize_audio(_audio_data, _audio_sr, num_speakers=_expected)
-
-    transcribe_future: Future[TranscriptionResult]
-    diarize_future: Future[DiarizationResult]
-
-    model_manager.job_tracker.set_phase("transcribing_diarizing")
-    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="parallel_diarize") as pool:
-        transcribe_future = pool.submit(_do_transcribe)
-        diarize_future = pool.submit(_do_diarize)
-
-        # ------------------------------------------------------------------
-        # Phase 3 — Collect results
-        # ------------------------------------------------------------------
-
-        # Wait for transcription first — it's the critical path.
-        try:
-            result = transcribe_future.result()
-        except TranscriptionCancelledError:
-            diarize_future.cancel()
-            raise
-        except Exception:
-            diarize_future.cancel()
-            raise
-
-        # Collect diarization (non-critical — failures degrade gracefully).
-        try:
-            diar_result = diarize_future.result()
-            logger.info(
-                "Parallel diarization complete: %s speakers found",
-                diar_result.num_speakers,
-            )
-            return result, diar_result
-        except Exception:
-            logger.warning(
-                "Diarization failed during parallel run — returning transcript without speakers",
-                exc_info=True,
+    try:
+        if diar_engine is None or audio_data is None:
+            result = engine.transcribe_file(
+                file_path,
+                language=language,
+                task=task,
+                translation_target_language=translation_target_language,
+                word_timestamps=word_timestamps,
+                cancellation_check=cancellation_check,
+                progress_callback=progress_callback,
             )
             return result, None
+
+        # Sortformer uses MLX/Metal — running it in parallel with MLX Whisper
+        # (also Metal) deadlocks the GPU.  Fall back to sequential mode.
+        from server.core.sortformer_engine import SortformerEngine
+
+        if isinstance(diar_engine, SortformerEngine):
+            logger.info(
+                "Sortformer + MLX detected — switching to sequential mode to avoid Metal deadlock"
+            )
+            return transcribe_then_diarize(
+                engine=engine,
+                model_manager=model_manager,
+                file_path=file_path,
+                language=language,
+                task=task,
+                translation_target_language=translation_target_language,
+                word_timestamps=word_timestamps,
+                expected_speakers=expected_speakers,
+                cancellation_check=cancellation_check,
+                progress_callback=progress_callback,
+            )
+
+        # ------------------------------------------------------------------
+        # Phase 2 — Parallel execution
+        # ------------------------------------------------------------------
+        logger.info("Starting parallel transcription + diarization")
+
+        # Capture audio_data/sample_rate in closures for the diarization worker
+        _audio_data = audio_data
+        _audio_sr = audio_sample_rate
+        _expected = expected_speakers
+
+        def _do_transcribe() -> TranscriptionResult:
+            threading.current_thread().name = "parallel_diarize:transcribe"
+            return engine.transcribe_file(
+                file_path,
+                language=language,
+                task=task,
+                translation_target_language=translation_target_language,
+                word_timestamps=word_timestamps,
+                cancellation_check=cancellation_check,
+                progress_callback=progress_callback,
+            )
+
+        def _do_diarize() -> DiarizationResult:
+            threading.current_thread().name = "parallel_diarize:diarize"
+            return diar_engine.diarize_audio(_audio_data, _audio_sr, num_speakers=_expected)
+
+        transcribe_future: Future[TranscriptionResult]
+        diarize_future: Future[DiarizationResult]
+
+        model_manager.job_tracker.set_phase("transcribing_diarizing")
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="parallel_diarize") as pool:
+            transcribe_future = pool.submit(_do_transcribe)
+            diarize_future = pool.submit(_do_diarize)
+
+            # ------------------------------------------------------------------
+            # Phase 3 — Collect results
+            # ------------------------------------------------------------------
+
+            # Wait for transcription first — it's the critical path.
+            try:
+                result = transcribe_future.result()
+            except TranscriptionCancelledError:
+                diarize_future.cancel()
+                raise
+            except Exception:
+                diarize_future.cancel()
+                raise
+
+            # Collect diarization (non-critical — failures degrade gracefully).
+            try:
+                diar_result = diarize_future.result()
+                logger.info(
+                    "Parallel diarization complete: %s speakers found",
+                    diar_result.num_speakers,
+                )
+                return result, diar_result
+            except Exception:
+                logger.warning(
+                    "Diarization failed during parallel run — returning transcript without speakers",
+                    exc_info=True,
+                )
+                return result, None
+    finally:
+        # Mirror transcribe_then_diarize: the diarization model is only
+        # needed during this job - release its VRAM instead of leaving it
+        # resident forever (this path never unloaded it before). Idempotent,
+        # so the Sortformer branch unloading on its own is fine.
+        # Guarded: this finally also covers the parallel-execution cancellation
+        # exit above - an unguarded raise here would replace an in-flight
+        # TranscriptionCancelledError, turning a clean user cancel (HTTP 499)
+        # into a generic 500.
+        try:
+            model_manager.unload_diarization_model()
+        except Exception:
+            logger.warning(
+                "Failed to unload the diarization model after parallel run",
+                exc_info=True,
+            )

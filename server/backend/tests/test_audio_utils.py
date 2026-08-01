@@ -6,7 +6,8 @@ Covers:
 - ``check_cuda_available()`` with _cuda_probe_failed flag
 - ``clear_gpu_cache()`` no-op when CUDA unavailable
 - ``check_cuda_available()`` with/without torch
-- ``get_gpu_memory_info()`` when CUDA unavailable
+- ``get_gpu_memory_info()`` torch-allocator and device-wide (mem_get_info) views
+- ``post_job_gpu_cleanup()`` cache clear, device-index forwarding, error-state guard
 - ``convert_to_wav()`` subprocess invocation and error handling
 - ``convert_to_mp3()`` subprocess invocation and error handling
 - ``normalize_audio_legacy()`` peak normalization (empty, silent, normal)
@@ -18,6 +19,7 @@ Covers:
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -463,6 +465,102 @@ class TestGetGpuMemoryInfo:
             info = au.get_gpu_memory_info()
 
         assert info == {"available": False}
+
+    def test_reports_torch_and_device_wide_numbers(self):
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 2 * 1024**3
+        mock_torch.cuda.memory_reserved.return_value = 3 * 1024**3
+        mock_torch.cuda.get_device_properties.return_value = MagicMock(total_memory=12 * 1024**3)
+        mock_torch.cuda.mem_get_info.return_value = (4 * 1024**3, 12 * 1024**3)
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            info = au.get_gpu_memory_info()
+
+        assert info["allocated_gb"] == 2.0
+        assert info["reserved_gb"] == 3.0
+        assert info["total_gb"] == 12.0
+        assert info["free_gb"] == 9.0
+        assert info["device_free_gb"] == 4.0
+        assert info["device_used_gb"] == 8.0
+
+    def test_device_wide_failure_keeps_torch_view(self):
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 2 * 1024**3
+        mock_torch.cuda.memory_reserved.return_value = 3 * 1024**3
+        mock_torch.cuda.get_device_properties.return_value = MagicMock(total_memory=12 * 1024**3)
+        mock_torch.cuda.mem_get_info.side_effect = RuntimeError("not supported")
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            info = au.get_gpu_memory_info()
+
+        assert info["allocated_gb"] == 2.0
+        assert "device_free_gb" not in info
+        assert "device_used_gb" not in info
+
+
+class TestPostJobGpuCleanup:
+    def test_clears_cache_and_logs(self, caplog):
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 1 * 1024**3
+        mock_torch.cuda.memory_reserved.return_value = 2 * 1024**3
+        mock_torch.cuda.get_device_properties.return_value = MagicMock(total_memory=12 * 1024**3)
+        mock_torch.cuda.mem_get_info.return_value = (4 * 1024**3, 12 * 1024**3)
+
+        caplog.set_level(logging.INFO)
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            au.post_job_gpu_cleanup("test job")
+
+        mock_torch.cuda.empty_cache.assert_called_once()
+        mock_torch.cuda.synchronize.assert_called_once()
+
+        # Distinct allocated/reserved/device-used values (1.0/2.0/8.0) so a
+        # mixed-up log argument (e.g. device_used_gb logged in allocated_gb's
+        # spot) is caught rather than masked by a repeated value.
+        assert "test job" in caplog.text
+        assert "allocated=1.0" in caplog.text
+        assert "reserved=2.0" in caplog.text
+        assert "device used=8.0" in caplog.text
+
+    def test_forwards_device_index(self):
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.return_value = 1 * 1024**3
+        mock_torch.cuda.memory_reserved.return_value = 1 * 1024**3
+        mock_torch.cuda.get_device_properties.return_value = MagicMock(total_memory=12 * 1024**3)
+        mock_torch.cuda.mem_get_info.return_value = (6 * 1024**3, 12 * 1024**3)
+
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            au.post_job_gpu_cleanup("test job", device_index=1)
+
+        mock_torch.cuda.memory_allocated.assert_called_once_with(1)
+        mock_torch.cuda.memory_reserved.assert_called_once_with(1)
+        mock_torch.cuda.get_device_properties.assert_called_once_with(1)
+        mock_torch.cuda.mem_get_info.assert_called_once_with(1)
+
+    def test_no_log_when_error_state(self, caplog):
+        # get_gpu_memory_info() hitting its outer except already logs the
+        # failure itself; post_job_gpu_cleanup must not additionally claim
+        # success with "n/a" placeholders in that case.
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.cuda.memory_allocated.side_effect = RuntimeError("boom")
+
+        caplog.set_level(logging.INFO)
+        with patch.object(au, "torch", mock_torch), patch.object(au, "HAS_TORCH", True):
+            au.post_job_gpu_cleanup("test job")
+
+        assert "GPU memory after" not in caplog.text
+
+    def test_never_raises(self):
+        with patch.object(au, "clear_gpu_cache", side_effect=RuntimeError("boom")):
+            au.post_job_gpu_cleanup("test job")  # must not raise
+
+    def test_noop_without_cuda(self):
+        with patch.object(au, "HAS_TORCH", False):
+            au.post_job_gpu_cleanup("test job")  # must not raise
 
 
 # ── convert_to_wav ────────────────────────────────────────────────────────

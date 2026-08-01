@@ -75,6 +75,16 @@ main_transcriber:
     # Beam size for decoding. Higher can improve accuracy but is slower.
     beam_size: 5
 
+    # Low VRAM mode: trade some speed for a smaller GPU footprint. Caps the
+    # transcription batch size at 4 regardless of card size, which shrinks the
+    # extra VRAM a job needs at its peak. Useful when sharing the GPU with
+    # other apps (e.g. a local LLM). Only the WhisperX backend reads batch
+    # size, so this affects faster-whisper and Whisper models only - NeMo
+    # (Parakeet/Canary), whisper.cpp, SenseVoice, VibeVoice and MLX ignore it.
+    # Cards with 8 GB or less already cap at 4, so it is a no-op there too.
+    # Loaded models are not affected - they stay in VRAM either way.
+    low_vram_mode: false
+
     # Optional initial prompt to guide transcription style/context.
     # Example: "This is a technical transcript. ZFS, Kubernetes, TCP/IP."
     initial_prompt: null

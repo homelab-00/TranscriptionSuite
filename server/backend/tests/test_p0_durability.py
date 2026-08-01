@@ -9,6 +9,7 @@ Run:  ../../build/.venv/bin/pytest tests/test_p0_durability.py -v --tb=short
 from __future__ import annotations
 
 import asyncio
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -587,3 +588,42 @@ class TestDura007PeriodicSweepBusy:
 
         assert len(mark_calls) == 1
         assert mark_calls[0][0] == "startup-orphan"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Post-job GPU cleanup: the longform WS path must release cached VRAM
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.p0
+@pytest.mark.durability
+class TestPostJobGpuCleanupOnWs(_BaseProcessTranscription):
+    """The longform WS path must release cached VRAM in its finally."""
+
+    def _trace(self, monkeypatch) -> list[str]:
+        calls: list[str] = []
+        audio_utils = importlib.import_module("server.core.audio_utils")
+        monkeypatch.setattr(
+            audio_utils,
+            "post_job_gpu_cleanup",
+            lambda ctx="job", device_index=0: calls.append(ctx),
+            raising=False,
+        )
+        return calls
+
+    def test_cleanup_runs_after_success(self, monkeypatch):
+        calls = self._trace(monkeypatch)
+        session = _make_session()
+
+        asyncio.run(session.process_transcription())
+
+        assert calls == ["longform recording"]
+
+    def test_cleanup_runs_when_transcription_fails(self, monkeypatch):
+        calls = self._trace(monkeypatch)
+        self._engine.transcribe_file.side_effect = RuntimeError("CUDA OOM")
+        session = _make_session()
+
+        asyncio.run(session.process_transcription())
+
+        assert calls == ["longform recording"]

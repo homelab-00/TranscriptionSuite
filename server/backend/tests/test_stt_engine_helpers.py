@@ -796,3 +796,76 @@ class TestComputeTypeAutoCorrection:
             self._apply_correction(rec)
 
         assert rec.compute_type == "auto"
+
+
+# ── shutdown() backend unload ────────────────────────────────────────────
+
+
+def _make_recorder_for_shutdown(owns_backend: bool):
+    import threading
+
+    rec = object.__new__(AudioToTextRecorder)
+    rec.instance_name = "test"
+    rec.is_shut_down = False
+    rec.is_running = True
+    rec.start_recording_event = threading.Event()
+    rec.stop_recording_event = threading.Event()
+    rec.shutdown_event = threading.Event()
+    rec.recording_thread = None
+    rec._backend = MagicMock()
+    rec._owns_backend = owns_backend
+    rec._model_loaded = True
+    return rec
+
+
+class TestShutdownUnloadsBackend:
+    def test_shutdown_unloads_owned_backend(self):
+        rec = _make_recorder_for_shutdown(owns_backend=True)
+        backend = rec._backend
+
+        rec.shutdown()
+
+        backend.unload.assert_called_once()
+        assert rec._backend is None
+        assert rec._model_loaded is False
+
+    def test_shutdown_leaves_shared_backend_alone(self):
+        """A borrowed backend (Live Mode sharing) belongs to the caller."""
+        rec = _make_recorder_for_shutdown(owns_backend=False)
+        backend = rec._backend
+
+        rec.shutdown()
+
+        backend.unload.assert_not_called()
+        assert rec._backend is None
+        assert rec._model_loaded is False
+
+    def test_shutdown_is_idempotent(self):
+        rec = _make_recorder_for_shutdown(owns_backend=True)
+        backend = rec._backend
+
+        rec.shutdown()
+
+        # Reassign to a fresh mock so the second call's effect on *this*
+        # object is what gets checked, isolating the ``is_shut_down`` guard:
+        # ``self._backend`` is already ``None`` after the first call, so an
+        # assertion against the original mock would pass even if the guard
+        # were deleted (the ``if self._backend is not None`` check alone
+        # would already stop a second unload). Swapping in a fresh backend
+        # means only the guard - not that side effect - can prevent the
+        # second call from touching it.
+        rec._backend = MagicMock()
+        fresh_backend = rec._backend
+
+        rec.shutdown()
+
+        backend.unload.assert_called_once()
+        fresh_backend.unload.assert_not_called()
+
+    def test_shutdown_survives_unload_failure(self):
+        rec = _make_recorder_for_shutdown(owns_backend=True)
+        rec._backend.unload.side_effect = RuntimeError("CUDA context gone")
+
+        rec.shutdown()  # must not raise
+
+        assert rec._backend is None

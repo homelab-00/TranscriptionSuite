@@ -467,6 +467,16 @@ async def create_transcription(
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
 
+        # Must stay LAST in this finally - a cancellation landing inside the
+        # await would otherwise skip end_job and the temp-file unlink above:
+        # the single job slot has no timeout or admin force-release, so a
+        # stranded slot 429s every later job until the server restarts.
+        from server.core.audio_utils import post_job_gpu_cleanup
+
+        await asyncio.to_thread(
+            post_job_gpu_cleanup, "openai transcription", model_manager.gpu_device_index
+        )
+
 
 # ------------------------------------------------------------------
 # POST /v1/audio/translations
@@ -584,3 +594,13 @@ async def create_translation(
         model_manager.job_tracker.end_job(job_id)
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
+
+        # Must stay LAST in this finally - a cancellation landing inside the
+        # await would otherwise skip end_job and the temp-file unlink above:
+        # the single job slot has no timeout or admin force-release, so a
+        # stranded slot 429s every later job until the server restarts.
+        from server.core.audio_utils import post_job_gpu_cleanup
+
+        await asyncio.to_thread(
+            post_job_gpu_cleanup, "openai translation", model_manager.gpu_device_index
+        )

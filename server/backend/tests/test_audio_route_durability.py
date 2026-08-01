@@ -769,6 +769,7 @@ class TestIntegratedDiarizationFallback:
             ensure_transcription_loaded=lambda: engine,
             job_tracker=_FakeTracker(),
             get_diarization_feature_status=lambda: {"reason": "ready"},
+            gpu_device_index=0,
         )
 
         # Patch diarization config fallback (not used on this path, but safe).

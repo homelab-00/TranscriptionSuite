@@ -210,6 +210,33 @@ def clear_gpu_cache() -> None:
         logger.debug(f"Could not clear GPU cache: {e}")
 
 
+def post_job_gpu_cleanup(context: str = "job", device_index: int = 0) -> None:
+    """Release cached GPU memory after a transcription job completes.
+
+    Hands the caching allocators' unused blocks back to the driver so
+    co-resident GPU workloads (e.g. a local LLM sharing the card) get the
+    VRAM between jobs. The transcription model itself stays warm - only
+    freed-but-cached blocks are returned. Best-effort: never raises.
+
+    Args:
+        context: Short label for the completed job type, used in the log line.
+        device_index: GPU device index to query (default 0).
+    """
+    try:
+        clear_gpu_cache()
+        info = get_gpu_memory_info(device_index)
+        if info.get("available") and "error" not in info:
+            logger.info(
+                "GPU memory after %s: torch allocated=%s GB reserved=%s GB, device used=%s GB",
+                context,
+                info.get("allocated_gb", "n/a"),
+                info.get("reserved_gb", "n/a"),
+                info.get("device_used_gb", "n/a"),
+            )
+    except Exception as e:
+        logger.debug("Post-job GPU cleanup failed (non-critical): %s", e)
+
+
 def check_cuda_available() -> bool:
     """Check if CUDA is available for GPU acceleration."""
     if _cuda_probe_failed:
@@ -397,6 +424,14 @@ def cuda_health_check(device_index: int = 0) -> dict[str, Any]:
 def get_gpu_memory_info(device_index: int = 0) -> dict:
     """Get GPU memory usage information.
 
+    Reports two views that measure different things:
+    - allocated_gb/reserved_gb/free_gb: THIS process's PyTorch caching
+      allocator only. The CTranslate2 transcription model allocates outside
+      this allocator and is invisible here.
+    - device_free_gb/device_used_gb: the whole device as the driver sees it
+      (includes CTranslate2 and other processes). Best-effort - absent when
+      the runtime does not support mem_get_info.
+
     Args:
         device_index: GPU device index to query (default 0).
     """
@@ -408,13 +443,22 @@ def get_gpu_memory_info(device_index: int = 0) -> dict:
         reserved = torch.cuda.memory_reserved(device_index) / (1024**3)  # GB
         total = torch.cuda.get_device_properties(device_index).total_memory / (1024**3)  # GB
 
-        return {
+        info = {
             "available": True,
             "allocated_gb": round(allocated, 2),
             "reserved_gb": round(reserved, 2),
             "total_gb": round(total, 2),
             "free_gb": round(total - reserved, 2),
         }
+
+        try:
+            device_free, device_total = torch.cuda.mem_get_info(device_index)
+            info["device_free_gb"] = round(device_free / (1024**3), 2)
+            info["device_used_gb"] = round((device_total - device_free) / (1024**3), 2)
+        except Exception:
+            logger.debug("torch.cuda.mem_get_info unavailable", exc_info=True)
+
+        return info
     except Exception as e:
         logger.error(f"Error getting GPU memory info: {e}")
         return {"available": True, "error": str(e)}
