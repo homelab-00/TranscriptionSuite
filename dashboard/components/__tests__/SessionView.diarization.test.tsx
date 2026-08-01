@@ -324,3 +324,63 @@ describe('SessionView - speaker diarization for recordings (GH-258)', () => {
     expect(mockTranscription.start.mock.calls[0][0]).toMatchObject({ diarization: false });
   });
 });
+
+describe('SessionView - skipped diarization notice (GH-258)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDiarizationFeature.value = { available: true, reason: 'ready' };
+    mockTranscription.status = 'idle';
+    mockTranscription.result = null;
+    mockGetConfig.mockImplementation(() => Promise.resolve(undefined));
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockResolvedValue(undefined),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+      docker: { readComposeEnvValue: vi.fn().mockResolvedValue('false') },
+    };
+  });
+
+  it('warns when diarization was requested but did not happen', async () => {
+    mockTranscription.status = 'complete';
+    mockTranscription.result = {
+      text: 'plain transcript',
+      words: [],
+      language: 'en',
+      duration: 12,
+      partial: false,
+      partialReason: null,
+      numSpeakers: 0,
+      diarization: {
+        requested: true,
+        performed: false,
+        reason: 'out_of_memory',
+        remedy: 'Free VRAM and try again.',
+      },
+    } as any;
+
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    expect(await screen.findByText(/Speaker labels are missing/i)).toBeTruthy();
+    expect(await screen.findByText(/Free VRAM and try again/i)).toBeTruthy();
+  });
+
+  it('shows no diarization warning when it succeeded', async () => {
+    mockTranscription.status = 'complete';
+    mockTranscription.result = {
+      text: 'SPEAKER_00: hello',
+      words: [],
+      language: 'en',
+      duration: 12,
+      partial: false,
+      partialReason: null,
+      numSpeakers: 2,
+      diarization: { requested: true, performed: true, reason: 'ready', remedy: null },
+    } as any;
+
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    await screen.findByRole('switch', { name: 'Speaker Diarization' });
+    expect(screen.queryByText(/Speaker labels are missing/i)).toBeNull();
+  });
+});

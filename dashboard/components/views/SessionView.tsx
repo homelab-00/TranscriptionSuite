@@ -2188,6 +2188,27 @@ export const SessionView: React.FC<SessionViewProps> = ({
                             </Button>
                           </div>
                         )}
+                        {/* GH-258: diarization degrades rather than failing, so a
+                          transcript can arrive with no speakers even though the
+                          user asked for them. Without this the silence reads as
+                          a broken toggle. */}
+                        {transcription.result.diarization?.requested &&
+                          !transcription.result.diarization.performed && (
+                            <div
+                              role="status"
+                              data-testid="diarization-skipped-notice"
+                              className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-300"
+                            >
+                              Speaker labels are missing from this transcript
+                              {transcription.result.diarization.reason
+                                ? ` (${transcription.result.diarization.reason.replace(/_/g, ' ')})`
+                                : ''}
+                              .
+                              {transcription.result.diarization.remedy
+                                ? ` ${transcription.result.diarization.remedy}`
+                                : ''}
+                            </div>
+                          )}
                         <FindReplaceTextEditor
                           value={editedResultText}
                           onChange={setEditedResultText}
