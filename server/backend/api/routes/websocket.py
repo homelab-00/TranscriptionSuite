@@ -661,7 +661,7 @@ class TranscriptionSession:
             # workloads (e.g. a local LLM) get the VRAM between jobs. The
             # model stays warm; run in a thread because empty_cache blocks.
             # The local model_manager is bound inside the try, so resolve the
-            # device index from the singleton instead — a failure before that
+            # device index from the singleton instead - a failure before that
             # binding must not turn into a NameError in this finally. This
             # must stay LAST: a cancellation landing inside the await would
             # otherwise skip whatever comes after it, and here that would be

@@ -1186,7 +1186,7 @@ def _run_file_import(
         except Exception as e:
             logger.warning("File import: failed to cleanup temp file %s: %s", tmp_path, e)
 
-        # Must stay LAST in this finally — nothing may sit behind it.
+        # Must stay LAST in this finally - nothing may sit behind it.
         from server.core.audio_utils import post_job_gpu_cleanup
 
         post_job_gpu_cleanup("file import", model_manager.gpu_device_index)
@@ -1648,7 +1648,7 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
         if tracker_job_id:
             model_manager.job_tracker.end_job(tracker_job_id)
 
-        # Must stay LAST in this finally — a cancellation landing inside the
+        # Must stay LAST in this finally - a cancellation landing inside the
         # await would otherwise skip end_job above and strand the single job
         # slot: TranscriptionJobTracker has no timeout, no self-healing sweep,
         # and no admin force-release, so every later job would 429 forever.

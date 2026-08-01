@@ -122,7 +122,7 @@ class TestPostJobGpuCleanup:
             au.post_job_gpu_cleanup("test job")  # must not raise
 ```
 
-Note: `test_unavailable_when_no_cuda` already exists — keep it, add the new methods to the same class.
+Note: `test_unavailable_when_no_cuda` already exists - keep it, add the new methods to the same class.
 
 - [ ] **Step 2: Run tests to verify the new ones fail**
 
@@ -145,7 +145,7 @@ def get_gpu_memory_info(device_index: int = 0) -> dict:
       allocator only. The CTranslate2 transcription model allocates outside
       this allocator and is invisible here.
     - device_free_gb/device_used_gb: the whole device as the driver sees it
-      (includes CTranslate2 and other processes). Best-effort — absent when
+      (includes CTranslate2 and other processes). Best-effort - absent when
       the runtime does not support mem_get_info.
 
     Args:
@@ -188,7 +188,7 @@ def post_job_gpu_cleanup(context: str = "job") -> None:
 
     Hands the caching allocators' unused blocks back to the driver so
     co-resident GPU workloads (e.g. a local LLM sharing the card) get the
-    VRAM between jobs. The transcription model itself stays warm — only
+    VRAM between jobs. The transcription model itself stays warm - only
     freed-but-cached blocks are returned. Best-effort: never raises.
 
     Args:
@@ -224,7 +224,7 @@ git commit -m "feat(server): device-wide GPU memory reporting and a post-job cle
 
 ### Task 2: Run the cleanup at every job-completion site
 
-Today no job-completion path touches the GPU (verified). Add `post_job_gpu_cleanup()` to the `finally` of all five completion sites. Explicitly EXCLUDED: `preview_transcription()` (`websocket.py:339-346`) — the rolling preview fires every few seconds during recording and clearing the cache per preview chunk would thrash the allocator.
+Today no job-completion path touches the GPU (verified). Add `post_job_gpu_cleanup()` to the `finally` of all five completion sites. Explicitly EXCLUDED: `preview_transcription()` (`websocket.py:339-346`) - the rolling preview fires every few seconds during recording and clearing the cache per preview chunk would thrash the allocator.
 
 The helper's signature is `post_job_gpu_cleanup(context: str = "job", device_index: int = 0)`. Every completion site has a `model_manager` in scope, so pass the server's configured device index instead of assuming GPU 0. `ModelManager` keeps that as the private `_gpu_device_index`; expose it as a read-only property (4 lines) rather than reaching into a private attribute from the route layer.
 
@@ -236,7 +236,7 @@ The helper's signature is `post_job_gpu_cleanup(context: str = "job", device_ind
 - Modify: `server/backend/api/routes/openai_audio.py` (`create_transcription` finally ~465-468; `create_translation` finally ~583-586)
 - Test: `server/backend/tests/test_post_job_gpu_cleanup_sites.py` (new), `server/backend/tests/test_p0_durability.py` (extend), `server/backend/tests/test_retry_clears_gpu_cache.py` (extend)
 
-- [ ] **Step 1: Write the failing tests — new file**
+- [ ] **Step 1: Write the failing tests - new file**
 
 Create `server/backend/tests/test_post_job_gpu_cleanup_sites.py`:
 
@@ -410,7 +410,7 @@ def test_openai_translation_runs_gpu_cleanup(monkeypatch):
     assert ended == ["job-1"]
 ```
 
-Adaptation notes for the executor: (a) check `create_translation`'s actual signature in `openai_audio.py` before writing its test — mirror `create_transcription`'s calling convention with that function's own required params; (b) if either notebook/import function requires an additional keyword not listed in its signature shown here, read the signature at `transcription.py:839-857` / `notebook.py:835-852` — both were verified current at plan time.
+Adaptation notes for the executor: (a) check `create_translation`'s actual signature in `openai_audio.py` before writing its test - mirror `create_transcription`'s calling convention with that function's own required params; (b) if either notebook/import function requires an additional keyword not listed in its signature shown here, read the signature at `transcription.py:839-857` / `notebook.py:835-852` - both were verified current at plan time.
 
 - [ ] **Step 2: Extend the WS durability tests**
 
@@ -472,11 +472,11 @@ def test_gpu_cleanup_runs_after_retry_completes(monkeypatch):
     assert trace == ["clear_gpu_cache", "transcribe_file", "post_job_gpu_cleanup"]
 ```
 
-(If `_drive_retry` needs other assertions updated because the trace list now has an extra entry, adjust existing assertions to check membership/prefix rather than exact equality — do NOT delete existing order checks between `clear_gpu_cache` and `transcribe_file`.)
+(If `_drive_retry` needs other assertions updated because the trace list now has an extra entry, adjust existing assertions to check membership/prefix rather than exact equality - do NOT delete existing order checks between `clear_gpu_cache` and `transcribe_file`.)
 
 **Required in this file:** both `SimpleNamespace` model-manager fakes (the one inside `_drive_retry` and the one inside `test_retry_still_succeeds_if_cache_clear_fails`, ~line 113) lack a `gpu_device_index`. Add `gpu_device_index=0,` to each, otherwise the new `model_manager.gpu_device_index` lookup in `_run_retry`'s finally raises AttributeError and both pre-existing tests break. Apply the same check to every other fake model manager the suite feeds into the five edited paths.
 
-- [ ] **Step 4: Run all three test files — expect the new tests to FAIL**
+- [ ] **Step 4: Run all three test files - expect the new tests to FAIL**
 
 ```bash
 cd server/backend
@@ -485,15 +485,15 @@ cd server/backend
 
 - [ ] **Step 5: Implement the five site edits**
 
-Context strings must match the tests exactly. All five files already use lazy imports for audio_utils; use the absolute form (`from server.core.audio_utils import ...`) — the relative import inside `_run_retry` is a one-off, don't copy it.
+Context strings must match the tests exactly. All five files already use lazy imports for audio_utils; use the absolute form (`from server.core.audio_utils import ...`) - the relative import inside `_run_retry` is a one-off, don't copy it.
 
 **Ordering rule (learned from review, applies to every site): the cleanup goes LAST in each `finally`, after every pre-existing statement.** Two reasons, both concrete:
-1. The async sites `await asyncio.to_thread(...)`. If the surrounding task is cancelled while inside that await, `CancelledError` propagates immediately and skips whatever follows in the same `finally`. At the retry and OpenAI sites the thing that follows is `job_tracker.end_job(...)` — and `TranscriptionJobTracker` is a single slot with no timeout and no admin force-release, so skipping it makes the server answer 429 "a transcription is already running" for every future job until restart.
+1. The async sites `await asyncio.to_thread(...)`. If the surrounding task is cancelled while inside that await, `CancelledError` propagates immediately and skips whatever follows in the same `finally`. At the retry and OpenAI sites the thing that follows is `job_tracker.end_job(...)` - and `TranscriptionJobTracker` is a single slot with no timeout and no admin force-release, so skipping it makes the server answer 429 "a transcription is already running" for every future job until restart.
 2. The argument expression `model_manager.gpu_device_index` is evaluated unguarded. If it ever raised, it would abort the `finally` before the pre-existing temp-file unlink.
 
-Putting the cleanup last makes both failure modes harmless: nothing important is sequenced behind it. The cost is that the job slot is released a fraction of a second before the cache clear runs, which is fine — `empty_cache()` is safe to call while another thread allocates.
+Putting the cleanup last makes both failure modes harmless: nothing important is sequenced behind it. The cost is that the job slot is released a fraction of a second before the cache clear runs, which is fine - `empty_cache()` is safe to call while another thread allocates.
 
-**(0) `model_manager.py`** — add next to the other properties (e.g. above `transcription_engine`, line ~714):
+**(0) `model_manager.py`** - add next to the other properties (e.g. above `transcription_engine`, line ~714):
 
 ```python
     @property
@@ -510,7 +510,7 @@ Putting the cleanup last makes both failure modes harmless: nothing important is
             # workloads (e.g. a local LLM) get the VRAM between jobs. The
             # model stays warm; run in a thread because empty_cache blocks.
             # The local model_manager is bound inside the try, so resolve the
-            # device index from the singleton instead — a failure before that
+            # device index from the singleton instead - a failure before that
             # binding must not turn into a NameError in this finally.
             from server.core.audio_utils import post_job_gpu_cleanup
             from server.core.model_manager import get_model_manager
@@ -521,11 +521,11 @@ Putting the cleanup last makes both failure modes harmless: nothing important is
                 _device_index = 0
             await asyncio.to_thread(post_job_gpu_cleanup, "longform recording", _device_index)
 
-            # Only delete files in /tmp — persistent audio in recordings_dir must survive
+            # Only delete files in /tmp - persistent audio in recordings_dir must survive
 ```
-(`asyncio` is already imported in websocket.py — verify, add if not. Verified at plan time: `model_manager = get_model_manager()` sits at `websocket.py:429`, inside the same `try` whose `finally` this is, hence the guard.)
+(`asyncio` is already imported in websocket.py - verify, add if not. Verified at plan time: `model_manager = get_model_manager()` sits at `websocket.py:429`, inside the same `try` whose `finally` this is, hence the guard.)
 
-**(b) `transcription.py` `_run_file_import` finally (lines ~1182-1187)** — this is a sync function running in a thread; call directly. Insert at the top of the `finally:` block:
+**(b) `transcription.py` `_run_file_import` finally (lines ~1182-1187)** - this is a sync function running in a thread; call directly. Insert at the top of the `finally:` block:
 
 ```python
     finally:
@@ -536,7 +536,7 @@ Putting the cleanup last makes both failure modes harmless: nothing important is
         # Cleanup temp file
 ```
 
-**(c) `transcription.py` `_run_retry` finally (lines ~1642-1644)** — async function; keep the existing pre-flight `clear_gpu_cache` untouched and add post-job cleanup before `end_job`:
+**(c) `transcription.py` `_run_retry` finally (lines ~1642-1644)** - async function; keep the existing pre-flight `clear_gpu_cache` untouched and add post-job cleanup before `end_job`:
 
 ```python
     finally:
@@ -547,7 +547,7 @@ Putting the cleanup last makes both failure modes harmless: nothing important is
             model_manager.job_tracker.end_job(tracker_job_id)
 ```
 
-**(d) `notebook.py` `_run_transcription` finally (lines ~1250-1255)** — sync, direct call:
+**(d) `notebook.py` `_run_transcription` finally (lines ~1250-1255)** - sync, direct call:
 
 ```python
     finally:
@@ -558,7 +558,7 @@ Putting the cleanup last makes both failure modes harmless: nothing important is
         # Cleanup temp file
 ```
 
-**(e) `openai_audio.py` both handlers' finally blocks (~465-468 and ~583-586)** — async; cleanup goes LAST, after `end_job` and the temp-file unlink (see the ordering rule below):
+**(e) `openai_audio.py` both handlers' finally blocks (~465-468 and ~583-586)** - async; cleanup goes LAST, after `end_job` and the temp-file unlink (see the ordering rule below):
 
 ```python
     finally:
@@ -573,7 +573,7 @@ Putting the cleanup last makes both failure modes harmless: nothing important is
 ```
 (second handler: context string `"openai translation"`.)
 
-- [ ] **Step 6: Run the three test files again — all PASS — then the FULL suite**
+- [ ] **Step 6: Run the three test files again - all PASS - then the FULL suite**
 
 ```bash
 cd server/backend
@@ -591,13 +591,13 @@ git commit -m "feat(server): release cached GPU memory after every transcription
 
 ### Task 3: Fix the parallel-diarization VRAM leak
 
-`transcribe_and_diarize()` (`parallel_diarize.py:120-259`) loads the diarization model and never unloads it — it stays resident forever after the first parallel-diarize job. Its sequential sibling `transcribe_then_diarize()` unloads in a `finally` (lines 103-117). Mirror that. Known tradeoff (accepted): back-to-back diarized imports in parallel mode will reload the diarization model per job (~10-20 s); consistency and VRAM discipline win.
+`transcribe_and_diarize()` (`parallel_diarize.py:120-259`) loads the diarization model and never unloads it - it stays resident forever after the first parallel-diarize job. Its sequential sibling `transcribe_then_diarize()` unloads in a `finally` (lines 103-117). Mirror that. Known tradeoff (accepted): back-to-back diarized imports in parallel mode will reload the diarization model per job (~10-20 s); consistency and VRAM discipline win.
 
 **Files:**
 - Modify: `server/backend/core/parallel_diarize.py:120-259`
 - Test: `server/backend/tests/test_parallel_diarize.py`
 
-- [ ] **Step 1: Write the failing tests** — add to `test_parallel_diarize.py` (imports/patterns already in the file):
+- [ ] **Step 1: Write the failing tests** - add to `test_parallel_diarize.py` (imports/patterns already in the file):
 
 ```python
 @patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000))
@@ -637,7 +637,7 @@ def test_parallel_transcribe_failure_still_unloads_diarization_model(mock_load_a
 
 @patch("server.core.audio_utils.load_audio", side_effect=RuntimeError("bad audio"))
 def test_preload_failure_unloads_diarization_model(mock_load_audio):
-    """load_diarization_model may succeed before load_audio fails — release it."""
+    """load_diarization_model may succeed before load_audio fails - release it."""
     engine = MagicMock()
     engine.transcribe_file.return_value = MagicMock(words=[], segments=[])
     mm = MagicMock()
@@ -651,7 +651,7 @@ def test_preload_failure_unloads_diarization_model(mock_load_audio):
     mm.unload_diarization_model.assert_called_once()
 ```
 
-- [ ] **Step 2: Run — expect FAIL** (`unload_diarization_model` never called):
+- [ ] **Step 2: Run - expect FAIL** (`unload_diarization_model` never called):
 
 ```bash
 ../../build/.venv/bin/pytest tests/test_parallel_diarize.py -v --tb=short
@@ -659,7 +659,7 @@ def test_preload_failure_unloads_diarization_model(mock_load_audio):
 
 - [ ] **Step 3: Implement.** ONE edit: wrap everything after the Phase 1 pre-load block in a single `try/finally`.
 
-The `try:` opens immediately after the pre-load `except Exception:` block (i.e. just before the `# If pre-load failed, just transcribe normally` comment at `parallel_diarize.py:163`) and the `finally:` closes at the end of the function. Everything in between — the transcription-only fallback branch, the Sortformer sequential hand-off, and the whole `ThreadPoolExecutor` block — gets re-indented one level and is otherwise unchanged.
+The `try:` opens immediately after the pre-load `except Exception:` block (i.e. just before the `# If pre-load failed, just transcribe normally` comment at `parallel_diarize.py:163`) and the `finally:` closes at the end of the function. Everything in between - the transcription-only fallback branch, the Sortformer sequential hand-off, and the whole `ThreadPoolExecutor` block - gets re-indented one level and is otherwise unchanged.
 
 This single wrap covers all four exits (fallback return, Sortformer return, success return, exception) instead of duplicating the unload per branch. It also fixes the fallback path, where `load_diarization_model()` may have succeeded before `load_audio()` failed, leaving a loaded model behind while running transcription-only.
 
@@ -676,19 +676,19 @@ This single wrap covers all four exits (fallback return, Sortformer return, succ
         ...  # one level deeper
     finally:
         # Mirror transcribe_then_diarize: the diarization model is only
-        # needed during this job — release its VRAM instead of leaving it
+        # needed during this job - release its VRAM instead of leaving it
         # resident forever (this path never unloaded it before). Idempotent,
         # so the Sortformer branch unloading on its own is fine.
         model_manager.unload_diarization_model()
 ```
 
-**Superseded by review (2026-08-01):** guard it instead — `try: model_manager.unload_diarization_model() except Exception: logger.warning(...)` — and apply the same guard to the sequential sibling's call at line 110. Reason: the new `finally` also covers the cancellation exit, and an unload failure would replace an in-flight `TranscriptionCancelledError`, which the routes catch specifically to return HTTP 499 instead of a 500. The original instruction was:
+**Superseded by review (2026-08-01):** guard it instead - `try: model_manager.unload_diarization_model() except Exception: logger.warning(...)` - and apply the same guard to the sequential sibling's call at line 110. Reason: the new `finally` also covers the cancellation exit, and an unload failure would replace an in-flight `TranscriptionCancelledError`, which the routes catch specifically to return HTTP 499 instead of a 500. The original instruction was:
 
-~~Call `unload_diarization_model()` unguarded, exactly as the sequential sibling does at line 110 — it already swallows the failures it can (`AttributeError` on `unload()`, any error from `shutdown_mlx_thread`), and diverging from the sibling's shape here would be worse than the residual risk.~~
+~~Call `unload_diarization_model()` unguarded, exactly as the sequential sibling does at line 110 - it already swallows the failures it can (`AttributeError` on `unload()`, any error from `shutdown_mlx_thread`), and diverging from the sibling's shape here would be worse than the residual risk.~~
 
-Also add: a test proving a raising `unload_diarization_model` does not mask the original transcription exception, and a test pinning the real idempotency of `ModelManager.unload_diarization_model` (the outer `finally` depends on it, since the Sortformer branch already unloaded via the sibling). Do NOT assert `assert_called_once()` on a Sortformer-path mock — the mock is legitimately called twice there; the idempotency lives in the real implementation.
+Also add: a test proving a raising `unload_diarization_model` does not mask the original transcription exception, and a test pinning the real idempotency of `ModelManager.unload_diarization_model` (the outer `finally` depends on it, since the Sortformer branch already unloaded via the sibling). Do NOT assert `assert_called_once()` on a Sortformer-path mock - the mock is legitimately called twice there; the idempotency lives in the real implementation.
 
-- [ ] **Step 4: Run `test_parallel_diarize.py` — all PASS** (the pre-existing 12 tests use a MagicMock model_manager, so the new unload call cannot break them).
+- [ ] **Step 4: Run `test_parallel_diarize.py` - all PASS** (the pre-existing 12 tests use a MagicMock model_manager, so the new unload call cannot break them).
 
 - [ ] **Step 5: Commit**
 
@@ -701,13 +701,13 @@ git commit -m "fix(server): unload the diarization model after parallel diarizat
 
 ### Task 4: `shutdown()` must unload owned backends
 
-`AudioToTextRecorder.shutdown()` (`engine.py:1165-1187`) drops `self._backend` without calling `backend.unload()`, so VRAM release is left to the garbage collector and cached allocator blocks are never returned. `unload_model()` (lines 1196-1206) does it correctly — mirror it.
+`AudioToTextRecorder.shutdown()` (`engine.py:1165-1187`) drops `self._backend` without calling `backend.unload()`, so VRAM release is left to the garbage collector and cached allocator blocks are never returned. `unload_model()` (lines 1196-1206) does it correctly - mirror it.
 
 **Files:**
 - Modify: `server/backend/core/stt/engine.py:1180-1184` (the "Cleanup backend" tail of `shutdown()`)
-- Test: `server/backend/tests/test_stt_engine_helpers.py` (this file already imports the engine module successfully — follow ITS import style; do not invent a new import path, the engine module needs the conftest-provided mocks)
+- Test: `server/backend/tests/test_stt_engine_helpers.py` (this file already imports the engine module successfully - follow ITS import style; do not invent a new import path, the engine module needs the conftest-provided mocks)
 
-- [ ] **Step 1: Write the failing tests** — add to `test_stt_engine_helpers.py`. Verified in that file: `AudioToTextRecorder` is imported directly (no module alias), `MagicMock` is already imported, `object.__new__(AudioToTextRecorder)` is the established fixture pattern (see `_bare_recorder` at line 177), and `threading` is imported locally inside such helpers rather than at module top.
+- [ ] **Step 1: Write the failing tests** - add to `test_stt_engine_helpers.py`. Verified in that file: `AudioToTextRecorder` is imported directly (no module alias), `MagicMock` is already imported, `object.__new__(AudioToTextRecorder)` is the established fixture pattern (see `_bare_recorder` at line 177), and `threading` is imported locally inside such helpers rather than at module top.
 
 ```python
 def _make_recorder_for_shutdown(owns_backend: bool):
@@ -766,7 +766,7 @@ class TestShutdownUnloadsBackend:
         assert rec._backend is None
 ```
 
-- [ ] **Step 2: Run — expect FAIL** (`unload` never called):
+- [ ] **Step 2: Run - expect FAIL** (`unload` never called):
 
 ```bash
 ../../build/.venv/bin/pytest tests/test_stt_engine_helpers.py -v --tb=short -k Shutdown
@@ -783,7 +783,7 @@ class TestShutdownUnloadsBackend:
 with:
 
 ```python
-        # Cleanup backend — actually unload owned backends instead of just
+        # Cleanup backend - actually unload owned backends instead of just
         # dropping the reference: a dropped reference leaves the model's VRAM
         # to the garbage collector and never returns cached allocator blocks
         # to the driver. Shared backends belong to the caller (Live Mode).
@@ -806,9 +806,9 @@ git commit -m "fix(server): shutdown() unloads owned STT backends instead of dro
 
 ---
 
-### Task 5: `low_vram_mode` — batch cap
+### Task 5: `low_vram_mode` - batch cap
 
-One opt-in boolean (`main_transcriber.low_vram_mode`, default `false`). When ON, the transcription batch size is capped at 4, which shrinks the measured +2.8 GB transient peak roughly in half. Both the transcription model and the alignment model always stay warm — this mode changes nothing about model residency, only the per-job working set. **Dashboard UI is free:** `ServerConfigEditor.tsx` auto-renders every boolean template key as an AppleSwitch with the yaml comment as description — no dashboard code changes.
+One opt-in boolean (`main_transcriber.low_vram_mode`, default `false`). When ON, the transcription batch size is capped at 4, which shrinks the measured +2.8 GB transient peak roughly in half. Both the transcription model and the alignment model always stay warm - this mode changes nothing about model residency, only the per-job working set. **Dashboard UI is free:** `ServerConfigEditor.tsx` auto-renders every boolean template key as an AppleSwitch with the yaml comment as description - no dashboard code changes.
 
 **Do NOT** touch `whisperx_backend.py` or `engine.py` in this task. An earlier draft of this plan also released the alignment model in this mode; the user removed that from scope. There is no engine→backend plumbing to add: `_scale_batch_size` reads `self.config` directly.
 
@@ -818,7 +818,7 @@ One opt-in boolean (`main_transcriber.low_vram_mode`, default `false`). When ON,
 - Modify: `server/backend/core/model_manager.py` (`_scale_batch_size`, lines 672-712)
 - Test: `server/backend/tests/test_low_vram_mode.py` (new)
 
-- [ ] **Step 1: Write the failing tests — new file** `server/backend/tests/test_low_vram_mode.py`:
+- [ ] **Step 1: Write the failing tests - new file** `server/backend/tests/test_low_vram_mode.py`:
 
 ```python
 """Low VRAM mode: cap the transcription batch size at 4.
@@ -885,14 +885,14 @@ class TestScaleBatchSizeLowVram:
             assert mm._scale_batch_size(16) == 8
 ```
 
-- [ ] **Step 2: Run the new test file — expect FAIL** (`ImportError: cannot import name 'resolve_low_vram_mode'`):
+- [ ] **Step 2: Run the new test file - expect FAIL** (`ImportError: cannot import name 'resolve_low_vram_mode'`):
 
 ```bash
 cd server/backend
 ../../build/.venv/bin/pytest tests/test_low_vram_mode.py -v --tb=short
 ```
 
-- [ ] **Step 3: Implement — config layer.**
+- [ ] **Step 3: Implement - config layer.**
 
 `server/backend/config.py`: next to `DEFAULT_PARALLEL_DIARIZATION = False` (line 37) add:
 
@@ -931,7 +931,7 @@ def resolve_low_vram_mode(config: "ServerConfig | dict[str, Any]") -> bool:
     low_vram_mode: false
 ```
 
-- [ ] **Step 4: Implement — batch cap.** In `model_manager.py` `_scale_batch_size`, insert after the `if not self.gpu_available:` early return:
+- [ ] **Step 4: Implement - batch cap.** In `model_manager.py` `_scale_batch_size`, insert after the `if not self.gpu_available:` early return:
 
 ```python
         from server.config import resolve_low_vram_mode
@@ -945,7 +945,7 @@ def resolve_low_vram_mode(config: "ServerConfig | dict[str, Any]") -> bool:
             return configured_batch_size
 ```
 
-- [ ] **Step 5: Run the new test file — PASS — then the FULL backend suite.** Also check `test_model_manager*.py` specifically: any existing `_scale_batch_size` test builds its manager without a `low_vram_mode` key, so the resolver must tolerate a missing key (it does — that is what `test_default_is_off` pins).
+- [ ] **Step 5: Run the new test file - PASS - then the FULL backend suite.** Also check `test_model_manager*.py` specifically: any existing `_scale_batch_size` test builds its manager without a `low_vram_mode` key, so the resolver must tolerate a missing key (it does - that is what `test_default_is_off` pins).
 
 The toggle needs no dashboard work: `ServerConfigEditor` renders template keys generically (boolean → AppleSwitch, yaml comment → description). Note in the PR that the new key needs a server restart to apply, like every `main_transcriber` key.
 
@@ -960,7 +960,7 @@ git commit -m "feat(server): opt-in low VRAM mode that caps the transcription ba
 
 ### Task 6: Fix the stale dashboard type for `gpu_memory`
 
-`dashboard/src/api/types.ts:28` declares `gpu_memory?: string` at the top level of `ServerStatus`, but the backend actually nests a dict under `models.gpu_memory` (and sends no top-level `gpu_memory` at all). Verified: there are ZERO runtime consumers of this field anywhere in `dashboard/` — the fix is type-only, no UI, no ui-contract impact (no CSS classes touched).
+`dashboard/src/api/types.ts:28` declares `gpu_memory?: string` at the top level of `ServerStatus`, but the backend actually nests a dict under `models.gpu_memory` (and sends no top-level `gpu_memory` at all). Verified: there are ZERO runtime consumers of this field anywhere in `dashboard/` - the fix is type-only, no UI, no ui-contract impact (no CSS classes touched).
 
 **Files:**
 - Modify: `dashboard/src/api/types.ts:18-47`
@@ -1022,14 +1022,14 @@ cd server/backend
 
 - [ ] **Step 2: Dashboard suite** (`cd dashboard && nvm use && npx vitest run`).
 
-- [ ] **Step 3: GitNexus regression check:** `detect_changes({scope: "compare", base_ref: "main", repo: "TranscriptionSuite"})` — confirm only the intended symbols/flows changed.
+- [ ] **Step 3: GitNexus regression check:** `detect_changes({scope: "compare", base_ref: "main", repo: "TranscriptionSuite"})` - confirm only the intended symbols/flows changed.
 
 - [ ] **Step 4: Safety sweep:** `git diff main...HEAD` and check: no AI attribution anywhere, no leftover debug prints, comments state constraints (not narration).
 
 - [ ] **Step 5: Open the PR directly on GitHub** (no local draft files):
 
 ```bash
-gh pr create --title "feat(server): VRAM discipline — post-job cache release, leak fixes, low VRAM mode" --body "..."
+gh pr create --title "feat(server): VRAM discipline - post-job cache release, leak fixes, low VRAM mode" --body "..."
 ```
 
 PR body should cover: the measured baseline (5.83 GB anatomy, +2.8 GB transient peaks, motivation = LM Studio coexistence on a shared 3060), the five changes with one line each, the accepted tradeoffs (parallel diarization reloads the diarization model per job; low_vram_mode roughly halves batched throughput), and a **hardware smoke checklist** (not run in CI):
@@ -1045,9 +1045,9 @@ PR body should cover: the measured baseline (5.83 GB anatomy, +2.8 GB transient 
 
 ## Self-review notes (already applied)
 
-- The preview path (`preview_transcription`) is deliberately NOT wired to the cleanup — do not "fix" that during review.
+- The preview path (`preview_transcription`) is deliberately NOT wired to the cleanup - do not "fix" that during review.
 - The retry route keeps its pre-flight `clear_gpu_cache` AND gains the post-job cleanup; both are wanted.
-- `post_job_gpu_cleanup` contexts are load-bearing strings — tests assert them verbatim.
+- `post_job_gpu_cleanup` contexts are load-bearing strings - tests assert them verbatim.
 - `_scale_batch_size`'s existing tiered caps are unchanged when the mode is off; `test_tiered_caps_unchanged_when_off` pins that.
 - The WhisperX alignment model is never released between jobs (user decision). `whisperx_backend.py` is not touched by this plan at all.
 - All five completion-site edits use the absolute import form (`from server.core.audio_utils import post_job_gpu_cleanup`), matching house style; the relative import inside `_run_retry` predates this plan and stays as-is.

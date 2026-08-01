@@ -252,7 +252,7 @@ def test_parallel_transcribe_failure_still_unloads_diarization_model(mock_load_a
 @patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000))
 def test_parallel_unload_failure_does_not_mask_original_exception(mock_load_audio):
     """A raising unload_diarization_model in the outer finally must not replace
-    the exception already propagating from transcription (e.g. a cancellation) —
+    the exception already propagating from transcription (e.g. a cancellation) -
     it should be logged and swallowed, not let it clobber the real error."""
     engine = MagicMock()
     engine.transcribe_file.side_effect = RuntimeError("distinctive transcribe failure")
@@ -266,7 +266,7 @@ def test_parallel_unload_failure_does_not_mask_original_exception(mock_load_audi
 
 @patch("server.core.audio_utils.load_audio", side_effect=RuntimeError("bad audio"))
 def test_preload_failure_unloads_diarization_model(mock_load_audio):
-    """load_diarization_model may succeed before load_audio fails — release it."""
+    """load_diarization_model may succeed before load_audio fails - release it."""
     engine = MagicMock()
     engine.transcribe_file.return_value = MagicMock(words=[], segments=[])
     mm = MagicMock()
@@ -393,7 +393,7 @@ def test_sequential_passes_parameters(mock_load_audio):
 # guard so a future change to it can't silently reintroduce a double
 # teardown. Lives here rather than in test_model_manager_init.py (scoped to
 # init/feature-flag logic) or test_ensure_transcription_loaded.py (scoped to
-# the transcription-reload lock) — neither covers diarization unload
+# the transcription-reload lock) - neither covers diarization unload
 # lifecycle, and this file is where that lifecycle is exercised end to end.
 # ──────────────────────────────────────────────────────────────────────────────
 

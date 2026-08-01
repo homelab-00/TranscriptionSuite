@@ -268,11 +268,11 @@ def transcribe_and_diarize(
                 return result, None
     finally:
         # Mirror transcribe_then_diarize: the diarization model is only
-        # needed during this job — release its VRAM instead of leaving it
+        # needed during this job - release its VRAM instead of leaving it
         # resident forever (this path never unloaded it before). Idempotent,
         # so the Sortformer branch unloading on its own is fine.
         # Guarded: this finally also covers the parallel-execution cancellation
-        # exit above — an unguarded raise here would replace an in-flight
+        # exit above - an unguarded raise here would replace an in-flight
         # TranscriptionCancelledError, turning a clean user cancel (HTTP 499)
         # into a generic 500.
         try:

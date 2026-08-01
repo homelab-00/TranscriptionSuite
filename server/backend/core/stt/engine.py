@@ -1180,7 +1180,7 @@ class AudioToTextRecorder:
         if self.recording_thread and self.recording_thread.is_alive():
             self.recording_thread.join(timeout=5)
 
-        # Cleanup backend — actually unload owned backends instead of just
+        # Cleanup backend - actually unload owned backends instead of just
         # dropping the reference: a dropped reference leaves the model's VRAM
         # to the garbage collector and never returns cached allocator blocks
         # to the driver. Shared backends belong to the caller (Live Mode).

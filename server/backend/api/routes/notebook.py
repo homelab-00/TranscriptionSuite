@@ -1254,7 +1254,7 @@ def _run_transcription(
         except Exception as e:
             logger.warning(f"Failed to cleanup temp file {tmp_path}: {e}")
 
-        # Must stay LAST in this finally — nothing may sit behind it.
+        # Must stay LAST in this finally - nothing may sit behind it.
         from server.core.audio_utils import post_job_gpu_cleanup
 
         post_job_gpu_cleanup("notebook import", model_manager.gpu_device_index)

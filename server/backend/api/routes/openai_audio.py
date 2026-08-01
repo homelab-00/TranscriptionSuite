@@ -467,7 +467,7 @@ async def create_transcription(
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
 
-        # Must stay LAST in this finally — a cancellation landing inside the
+        # Must stay LAST in this finally - a cancellation landing inside the
         # await would otherwise skip end_job and the temp-file unlink above:
         # the single job slot has no timeout or admin force-release, so a
         # stranded slot 429s every later job until the server restarts.
@@ -595,7 +595,7 @@ async def create_translation(
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
 
-        # Must stay LAST in this finally — a cancellation landing inside the
+        # Must stay LAST in this finally - a cancellation landing inside the
         # await would otherwise skip end_job and the temp-file unlink above:
         # the single job slot has no timeout or admin force-release, so a
         # stranded slot 429s every later job until the server restarts.

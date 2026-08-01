@@ -148,7 +148,7 @@ def test_retry_still_succeeds_if_cache_clear_fails(monkeypatch):
 
 
 def test_gpu_cleanup_runs_after_retry_completes(monkeypatch):
-    # save_result also lands in the trace (patched in _drive_retry) — it runs
+    # save_result also lands in the trace (patched in _drive_retry) - it runs
     # inside the try, after transcribe_file and before the finally's cleanup.
     trace = _drive_retry(monkeypatch)
     assert trace == ["clear_gpu_cache", "transcribe_file", "save_result", "post_job_gpu_cleanup"]

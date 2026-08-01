@@ -141,7 +141,7 @@ def test_openai_transcription_runs_gpu_cleanup(monkeypatch):
     file.read = AsyncMock(return_value=b"riff")
 
     # Calling the route directly bypasses FastAPI's Form(...) resolution, so
-    # every Form-declared parameter must be passed explicitly — left at their
+    # every Form-declared parameter must be passed explicitly - left at their
     # signature defaults they are unresolved fastapi.params.Form sentinels,
     # not the values those defaults describe, and `response_format not in
     # _VALID_RESPONSE_FORMATS` trips before the try/finally is ever reached.

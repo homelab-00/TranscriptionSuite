@@ -215,7 +215,7 @@ def post_job_gpu_cleanup(context: str = "job", device_index: int = 0) -> None:
 
     Hands the caching allocators' unused blocks back to the driver so
     co-resident GPU workloads (e.g. a local LLM sharing the card) get the
-    VRAM between jobs. The transcription model itself stays warm — only
+    VRAM between jobs. The transcription model itself stays warm - only
     freed-but-cached blocks are returned. Best-effort: never raises.
 
     Args:
@@ -429,7 +429,7 @@ def get_gpu_memory_info(device_index: int = 0) -> dict:
       allocator only. The CTranslate2 transcription model allocates outside
       this allocator and is invisible here.
     - device_free_gb/device_used_gb: the whole device as the driver sees it
-      (includes CTranslate2 and other processes). Best-effort — absent when
+      (includes CTranslate2 and other processes). Best-effort - absent when
       the runtime does not support mem_get_info.
 
     Args:
