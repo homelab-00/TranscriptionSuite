@@ -325,6 +325,50 @@ def test_integrated_path_forwards_the_engine_decoding_options(fake_engine_module
     assert kwargs["vad_filter"] is False
 
 
+def test_initial_prompt_flows_to_plain_transcription():
+    """The OpenAI endpoints forward the client's ``prompt``; it must reach
+    ``transcribe_file`` when the plain path runs (GH-274)."""
+    engine = _make_engine()
+
+    transcribe_with_optional_diarization(
+        engine=engine,
+        model_manager=_make_model_manager(),
+        file_path="/tmp/a.wav",
+        enable_diarization=False,
+        initial_prompt="glossary: CUDA, VRAM",
+    )
+
+    assert engine.transcribe_file.call_args.kwargs["initial_prompt"] == "glossary: CUDA, VRAM"
+
+
+def test_initial_prompt_overrides_the_engine_prompt_on_the_integrated_path(fake_engine_module):
+    """A caller-supplied prompt wins over the engine's configured one,
+    matching the OpenAI route's ``initial_prompt or engine.initial_prompt``."""
+    backend = MagicMock()
+    backend.backend_name = "whisperx"
+    backend.preferred_input_sample_rate_hz = 16000
+    backend.transcribe_with_diarization.return_value = MagicMock(
+        segments=[], words=[], language="en", language_probability=0.99, num_speakers=0
+    )
+    engine = _make_engine(backend=backend)
+    engine.initial_prompt = "engine default"
+
+    with (
+        patch("server.core.audio_utils.load_audio", return_value=([0.0] * 16000, 16000)),
+        patch("server.core.stt.backends.base.use_integrated_diarization_for", return_value=True),
+    ):
+        transcribe_with_optional_diarization(
+            engine=engine,
+            model_manager=_make_model_manager(),
+            file_path="/tmp/a.wav",
+            enable_diarization=True,
+            initial_prompt="caller prompt",
+        )
+
+    kwargs = backend.transcribe_with_diarization.call_args.kwargs
+    assert kwargs["initial_prompt"] == "caller prompt"
+
+
 def test_integrated_backend_failure_falls_back_to_plain_transcription(fake_engine_module):
     backend = MagicMock()
     backend.backend_name = "whisperx"

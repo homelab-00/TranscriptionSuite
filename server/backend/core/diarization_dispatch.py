@@ -73,6 +73,7 @@ def transcribe_with_optional_diarization(
     task: str | None = None,
     translation_target_language: str | None = None,
     word_timestamps: bool = True,
+    initial_prompt: str | None = None,
     expected_speakers: int | None = None,
     parallel_diarization: bool | None = None,
     diarization_engine: str | None = None,
@@ -89,6 +90,7 @@ def transcribe_with_optional_diarization(
             task=task,
             translation_target_language=translation_target_language,
             word_timestamps=word_timestamps,
+            initial_prompt=initial_prompt,
             progress_callback=progress_callback,
             cancellation_check=cancellation_check,
         )
@@ -117,6 +119,7 @@ def transcribe_with_optional_diarization(
             file_path=file_path,
             language=language,
             task=task,
+            initial_prompt=initial_prompt,
             expected_speakers=expected_speakers,
             progress_callback=progress_callback,
         )
@@ -133,6 +136,7 @@ def transcribe_with_optional_diarization(
             task=task,
             translation_target_language=translation_target_language,
             word_timestamps=word_timestamps,
+            initial_prompt=initial_prompt,
             progress_callback=progress_callback,
             cancellation_check=cancellation_check,
         )
@@ -169,6 +173,7 @@ def _transcribe_plain(
     task: str | None,
     translation_target_language: str | None,
     word_timestamps: bool,
+    initial_prompt: str | None = None,
     progress_callback: Callable[[int, int], None] | None,
     cancellation_check: Callable[[], bool] | None,
 ) -> TranscriptionResult:
@@ -179,6 +184,7 @@ def _transcribe_plain(
         task=task,
         translation_target_language=translation_target_language,
         word_timestamps=word_timestamps,
+        initial_prompt=initial_prompt,
         progress_callback=progress_callback,
         cancellation_check=cancellation_check,
     )
@@ -191,6 +197,7 @@ def _run_integrated(
     file_path: str,
     language: str | None,
     task: str | None,
+    initial_prompt: str | None = None,
     expected_speakers: int | None,
     progress_callback: Callable[[int, int], None] | None,
 ) -> DiarizedTranscription | None:
@@ -214,8 +221,9 @@ def _run_integrated(
             beam_size=getattr(engine, "beam_size", 5),
             # Forward the engine's configured decoding options exactly as the
             # import route does. Omitting them would silently decode a recording
-            # differently from the same audio imported as a file.
-            initial_prompt=getattr(engine, "initial_prompt", None),
+            # differently from the same audio imported as a file. A caller-
+            # supplied prompt (the OpenAI endpoints' ``prompt`` field) wins.
+            initial_prompt=initial_prompt or getattr(engine, "initial_prompt", None),
             suppress_tokens=getattr(engine, "suppress_tokens", None),
             vad_filter=getattr(engine, "faster_whisper_vad_filter", True),
             num_speakers=expected_speakers,
