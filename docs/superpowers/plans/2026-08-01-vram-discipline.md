@@ -226,7 +226,10 @@ git commit -m "feat(server): device-wide GPU memory reporting and a post-job cle
 
 Today no job-completion path touches the GPU (verified). Add `post_job_gpu_cleanup()` to the `finally` of all five completion sites. Explicitly EXCLUDED: `preview_transcription()` (`websocket.py:339-346`) — the rolling preview fires every few seconds during recording and clearing the cache per preview chunk would thrash the allocator.
 
+The helper's signature is `post_job_gpu_cleanup(context: str = "job", device_index: int = 0)`. Every completion site has a `model_manager` in scope, so pass the server's configured device index instead of assuming GPU 0. `ModelManager` keeps that as the private `_gpu_device_index`; expose it as a read-only property (4 lines) rather than reaching into a private attribute from the route layer.
+
 **Files:**
+- Modify: `server/backend/core/model_manager.py` (add a `gpu_device_index` property next to the other properties)
 - Modify: `server/backend/api/routes/websocket.py` (`process_transcription` finally, lines ~645-658)
 - Modify: `server/backend/api/routes/transcription.py` (`_run_file_import` finally ~1182-1187; `_run_retry` finally ~1642-1644)
 - Modify: `server/backend/api/routes/notebook.py` (`_run_transcription` finally ~1250-1255)
@@ -265,7 +268,7 @@ def _trace_cleanup(monkeypatch) -> list[str]:
     monkeypatch.setattr(
         audio_utils,
         "post_job_gpu_cleanup",
-        lambda ctx="job": calls.append(ctx),
+        lambda ctx="job", device_index=0: calls.append(ctx),
         raising=False,
     )
     return calls
@@ -286,6 +289,7 @@ def test_file_import_runs_gpu_cleanup_even_on_failure(monkeypatch, tmp_path):
             is_cancelled=lambda: False,
         ),
         ensure_transcription_loaded=_raise_boom,
+        gpu_device_index=0,
     )
     wav = tmp_path / "a.wav"
     wav.write_bytes(b"RIFF")
@@ -322,6 +326,7 @@ def test_notebook_import_runs_gpu_cleanup_even_on_failure(monkeypatch, tmp_path)
             is_cancelled=lambda: False,
         ),
         ensure_transcription_loaded=_raise_boom,
+        gpu_device_index=0,
     )
     wav = tmp_path / "a.wav"
     wav.write_bytes(b"RIFF")
@@ -355,6 +360,7 @@ def _openai_request(mm: SimpleNamespace) -> SimpleNamespace:
 def _openai_model_manager(ended: list[Any]) -> SimpleNamespace:
     return SimpleNamespace(
         ensure_transcription_loaded=lambda: None,
+        gpu_device_index=0,
         job_tracker=SimpleNamespace(
             try_start_job=lambda _c: (True, "job-1", None),
             end_job=lambda job_id: ended.append(job_id),
@@ -422,7 +428,7 @@ class TestPostJobGpuCleanupOnWs(_BaseProcessTranscription):
         monkeypatch.setattr(
             audio_utils,
             "post_job_gpu_cleanup",
-            lambda ctx="job": calls.append(ctx),
+            lambda ctx="job", device_index=0: calls.append(ctx),
             raising=False,
         )
         return calls
@@ -453,7 +459,7 @@ In `server/backend/tests/test_retry_clears_gpu_cache.py`, inside `_drive_retry` 
     monkeypatch.setattr(
         audio_utils,
         "post_job_gpu_cleanup",
-        lambda ctx="job": trace.append("post_job_gpu_cleanup"),
+        lambda ctx="job", device_index=0: trace.append("post_job_gpu_cleanup"),
         raising=False,
     )
 ```
@@ -468,6 +474,8 @@ def test_gpu_cleanup_runs_after_retry_completes(monkeypatch):
 
 (If `_drive_retry` needs other assertions updated because the trace list now has an extra entry, adjust existing assertions to check membership/prefix rather than exact equality — do NOT delete existing order checks between `clear_gpu_cache` and `transcribe_file`.)
 
+**Required in this file:** both `SimpleNamespace` model-manager fakes (the one inside `_drive_retry` and the one inside `test_retry_still_succeeds_if_cache_clear_fails`, ~line 113) lack a `gpu_device_index`. Add `gpu_device_index=0,` to each, otherwise the new `model_manager.gpu_device_index` lookup in `_run_retry`'s finally raises AttributeError and both pre-existing tests break. Apply the same check to every other fake model manager the suite feeds into the five edited paths.
+
 - [ ] **Step 4: Run all three test files — expect the new tests to FAIL**
 
 ```bash
@@ -479,6 +487,15 @@ cd server/backend
 
 Context strings must match the tests exactly. All five files already use lazy imports for audio_utils; use the absolute form (`from server.core.audio_utils import ...`) — the relative import inside `_run_retry` is a one-off, don't copy it.
 
+**(0) `model_manager.py`** — add next to the other properties (e.g. above `transcription_engine`, line ~714):
+
+```python
+    @property
+    def gpu_device_index(self) -> int:
+        """Configured GPU device index (``transcription.gpu_device_index``)."""
+        return self._gpu_device_index
+```
+
 **(a) `websocket.py` `process_transcription` finally (lines ~645-658).** Insert at the TOP of the existing `finally:` block, before the temp-file cleanup:
 
 ```python
@@ -486,13 +503,21 @@ Context strings must match the tests exactly. All five files already use lazy im
             # Hand cached GPU blocks back to the driver so co-resident
             # workloads (e.g. a local LLM) get the VRAM between jobs. The
             # model stays warm; run in a thread because empty_cache blocks.
+            # The local model_manager is bound inside the try, so resolve the
+            # device index from the singleton instead — a failure before that
+            # binding must not turn into a NameError in this finally.
             from server.core.audio_utils import post_job_gpu_cleanup
+            from server.core.model_manager import get_model_manager
 
-            await asyncio.to_thread(post_job_gpu_cleanup, "longform recording")
+            try:
+                _device_index = get_model_manager().gpu_device_index
+            except Exception:
+                _device_index = 0
+            await asyncio.to_thread(post_job_gpu_cleanup, "longform recording", _device_index)
 
             # Only delete files in /tmp — persistent audio in recordings_dir must survive
 ```
-(`asyncio` is already imported in websocket.py — verify, add if not.)
+(`asyncio` is already imported in websocket.py — verify, add if not. Verified at plan time: `model_manager = get_model_manager()` sits at `websocket.py:429`, inside the same `try` whose `finally` this is, hence the guard.)
 
 **(b) `transcription.py` `_run_file_import` finally (lines ~1182-1187)** — this is a sync function running in a thread; call directly. Insert at the top of the `finally:` block:
 
@@ -500,7 +525,7 @@ Context strings must match the tests exactly. All five files already use lazy im
     finally:
         from server.core.audio_utils import post_job_gpu_cleanup
 
-        post_job_gpu_cleanup("file import")
+        post_job_gpu_cleanup("file import", model_manager.gpu_device_index)
 
         # Cleanup temp file
 ```
@@ -511,7 +536,7 @@ Context strings must match the tests exactly. All five files already use lazy im
     finally:
         from server.core.audio_utils import post_job_gpu_cleanup
 
-        await asyncio.to_thread(post_job_gpu_cleanup, "retry")
+        await asyncio.to_thread(post_job_gpu_cleanup, "retry", model_manager.gpu_device_index)
         if tracker_job_id:
             model_manager.job_tracker.end_job(tracker_job_id)
 ```
@@ -522,7 +547,7 @@ Context strings must match the tests exactly. All five files already use lazy im
     finally:
         from server.core.audio_utils import post_job_gpu_cleanup
 
-        post_job_gpu_cleanup("notebook import")
+        post_job_gpu_cleanup("notebook import", model_manager.gpu_device_index)
 
         # Cleanup temp file
 ```
@@ -533,7 +558,9 @@ Context strings must match the tests exactly. All five files already use lazy im
     finally:
         from server.core.audio_utils import post_job_gpu_cleanup
 
-        await asyncio.to_thread(post_job_gpu_cleanup, "openai transcription")
+        await asyncio.to_thread(
+            post_job_gpu_cleanup, "openai transcription", model_manager.gpu_device_index
+        )
         model_manager.job_tracker.end_job(job_id)
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
@@ -550,7 +577,7 @@ cd server/backend
 - [ ] **Step 7: Commit**
 
 ```bash
-git add server/backend/api/routes/websocket.py server/backend/api/routes/transcription.py server/backend/api/routes/notebook.py server/backend/api/routes/openai_audio.py server/backend/tests/test_post_job_gpu_cleanup_sites.py server/backend/tests/test_p0_durability.py server/backend/tests/test_retry_clears_gpu_cache.py
+git add server/backend/core/model_manager.py server/backend/api/routes/websocket.py server/backend/api/routes/transcription.py server/backend/api/routes/notebook.py server/backend/api/routes/openai_audio.py server/backend/tests/test_post_job_gpu_cleanup_sites.py server/backend/tests/test_p0_durability.py server/backend/tests/test_retry_clears_gpu_cache.py
 git commit -m "feat(server): release cached GPU memory after every transcription job"
 ```
 
