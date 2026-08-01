@@ -409,3 +409,69 @@ def test_unload_diarization_model_is_idempotent():
 
     engine.unload.assert_called_once()
     assert mgr._diarization_engine is None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GH-258: the swallowed diarization failure, exposed to an optional observer
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_sequential_reports_the_diarization_error_to_the_observer():
+    """GH-258: the caller needs the exception to classify it (e.g. as OOM)."""
+    boom = RuntimeError("CUDA out of memory")
+    seen: list[BaseException] = []
+
+    engine = _make_engine(result=MagicMock(words=[], segments=[]))
+    mm = _make_model_manager(diarize_error=boom)
+
+    with patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000)):
+        result, diar = transcribe_then_diarize(
+            engine=engine,
+            model_manager=mm,
+            file_path="/tmp/test.wav",
+            on_diarization_error=seen.append,
+        )
+
+    assert diar is None
+    assert result is not None
+    assert seen == [boom]
+
+
+def test_parallel_reports_the_diarization_error_to_the_observer():
+    boom = RuntimeError("CUDA failed with error out of memory")
+    seen: list[BaseException] = []
+
+    engine = _make_engine(result=MagicMock(words=[], segments=[]))
+    mm = _make_model_manager(diarize_error=boom)
+
+    with patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000)):
+        result, diar = transcribe_and_diarize(
+            engine=engine,
+            model_manager=mm,
+            file_path="/tmp/test.wav",
+            on_diarization_error=seen.append,
+        )
+
+    assert diar is None
+    assert result is not None
+    assert seen == [boom]
+
+
+def test_observer_is_optional_and_a_raising_observer_cannot_break_the_run():
+    """A misbehaving observer must never cost the user their transcript."""
+    engine = _make_engine(result=MagicMock(words=[], segments=[]))
+    mm = _make_model_manager(diarize_error=RuntimeError("nope"))
+
+    def _bad_observer(_exc: BaseException) -> None:
+        raise ValueError("observer blew up")
+
+    with patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000)):
+        result, diar = transcribe_and_diarize(
+            engine=engine,
+            model_manager=mm,
+            file_path="/tmp/test.wav",
+            on_diarization_error=_bad_observer,
+        )
+
+    assert diar is None
+    assert result is not None
