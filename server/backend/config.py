@@ -565,6 +565,10 @@ def resolve_low_vram_mode(config: ServerConfig | dict[str, Any]) -> bool:
     for smaller transient VRAM peaks during jobs. Intended for GPUs shared
     with other workloads (e.g. a local LLM). Loaded models are unaffected:
     the transcription and alignment models stay warm either way.
+
+    Scope: WhisperX is the only backend that reads ``batch_size``, so this
+    setting has no effect on NeMo (Parakeet/Canary), whisper.cpp, SenseVoice
+    (which batches by duration, not count), VibeVoice or the MLX backends.
     """
     if isinstance(config, ServerConfig):
         value = config.get("main_transcriber", "low_vram_mode", default=DEFAULT_LOW_VRAM_MODE)
