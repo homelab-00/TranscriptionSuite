@@ -102,6 +102,7 @@ def _save_session_to_notebook(
     duration_seconds: float,
     result: Any,
     model_name: str | None,
+    diarization_segments: list[dict[str, Any]] | None = None,
 ) -> int | None:
     """Promote a finished session recording into the Audio Notebook (GH #199).
 
@@ -115,6 +116,10 @@ def _save_session_to_notebook(
     would silently produce no entry) and returns None when ffmpeg is absent.
 
     Returns the new recording id, or None when no entry was written.
+
+    ``diarization_segments`` are the raw speaker turns; ``save_longform_to_database``
+    aligns them against ``word_timestamps`` itself (GH-258). Passing None keeps
+    the historical single-segment shape.
     """
     # Lazy imports: these pull in the audio/ML stack.
     from server.config import get_config
@@ -166,6 +171,7 @@ def _save_session_to_notebook(
         duration_seconds=duration_seconds,
         transcription_text=getattr(result, "text", "") or "",
         word_timestamps=word_timestamps,
+        diarization_segments=diarization_segments,
         transcription_backend=detect_backend_type(model_name or ""),
     )
 
@@ -211,6 +217,11 @@ class TranscriptionSession:
         # Resolved per-session at `start` from the client toggle OR the
         # server-wide config key.
         self.auto_add_to_notebook = False
+
+        # Speaker diarization for this recording (GH-258). Resolved per-session
+        # at `start` from the Session-tab toggle; OFF unless asked for.
+        self.diarization_enabled = False
+        self.expected_speakers: int | None = None
 
         # Job tracking for transcription
         self._current_job_id: str | None = None
@@ -446,15 +457,23 @@ class TranscriptionSession:
                 _progress["total"] = total
                 model_manager.job_tracker.update_progress(current, total)
 
+            from server.core.diarization_dispatch import transcribe_with_optional_diarization
+
             loop = asyncio.get_event_loop()
             transcribe_future = loop.run_in_executor(
                 None,
-                lambda: engine.transcribe_file(
+                lambda: transcribe_with_optional_diarization(
+                    engine=engine,
+                    model_manager=model_manager,
                     file_path=str(self.temp_file),
+                    enable_diarization=self.diarization_enabled,
                     language=self.language,
-                    word_timestamps=True,
                     task=task,
                     translation_target_language=translation_target,
+                    word_timestamps=True,
+                    expected_speakers=self.expected_speakers,
+                    # None: let the dispatcher read the server-wide default.
+                    parallel_diarization=None,
                     progress_callback=_on_progress,
                     # Two independent stop signals, both of which must reach the
                     # backend: the client vanished, or the user pressed Cancel
@@ -475,18 +494,36 @@ class TranscriptionSession:
                 done, _ = await asyncio.wait({transcribe_future}, timeout=_KEEPALIVE_INTERVAL)
                 if done:
                     break
+                # GH-258: sequential diarization spends minutes in a phase that
+                # reports no numeric progress. Forwarding the phase lets the
+                # client render "Identifying speakers" instead of a frozen bar.
+                _tracker_progress = model_manager.job_tracker.get_status().get("progress") or {}
                 await self.send_message(
                     "processing_progress",
                     {
                         "current": _progress["current"],
                         "total": _progress["total"],
+                        "phase": _tracker_progress.get("phase"),
                     },
                 )
 
-            result = transcribe_future.result()
+            dispatched = transcribe_future.result()
+            result = dispatched.result
+            diarization_outcome = dispatched.outcome
+
+            # Speaker labels must be baked into result.text BEFORE the payload
+            # is built: the payload is what gets persisted, and a recovery via
+            # GET /result/{job_id} would otherwise return bare text while the
+            # live client got labelled text.
+            if diarization_outcome.performed:
+                from server.core.formatters import format_speaker_text
+
+                result.text = format_speaker_text(result)
 
             # Build and sanitize result payload (full result — see GH #172).
             result_payload = _build_longform_result_payload(result)
+            if diarization_outcome.requested:
+                result_payload["diarization"] = diarization_outcome.to_dict()
 
             # PERSIST BEFORE DELIVER — result must survive even if delivery fails
             _result_persisted = False
@@ -569,6 +606,7 @@ class TranscriptionSession:
                         duration_seconds=result.duration,
                         result=result,
                         model_name=getattr(engine, "model_name", None),
+                        diarization_segments=dispatched.speaker_segments,
                     )
                     if recording_id:
                         logger.info("Saved session recording to notebook: id=%s", recording_id)
@@ -595,7 +633,7 @@ class TranscriptionSession:
                         "filename": "",
                         "duration": result.duration,
                         "language": result.language,
-                        "num_speakers": 0,
+                        "num_speakers": result.num_speakers,
                     },
                 )
             except Exception as wh_err:
@@ -682,6 +720,8 @@ class TranscriptionSession:
         translation_enabled: bool = False,
         translation_target_language: str = "en",
         auto_add_to_notebook: bool = False,
+        diarization: bool = False,
+        expected_speakers: int | None = None,
     ) -> None:
         """
         Start a recording session.
@@ -692,12 +732,16 @@ class TranscriptionSession:
             translation_enabled: Enable source→target translation
             translation_target_language: Translation target (v1: "en" only)
             auto_add_to_notebook: Save the finished recording to the Audio Notebook
+            diarization: Attach speaker labels to the finished transcript
+            expected_speakers: Exact speaker count (1-10), or None to auto-detect
         """
         self.is_recording = True
         self.language = language
         self.translation_enabled = translation_enabled
         self.translation_target_language = translation_target_language
         self.auto_add_to_notebook = auto_add_to_notebook
+        self.diarization_enabled = diarization
+        self.expected_speakers = expected_speakers
         self.audio_chunks = []
         self._sample_rate_mismatch_reported = False
         self._use_realtime_engine = use_vad and self.capabilities.supports_vad_events
@@ -919,12 +963,30 @@ async def handle_client_message(session: TranscriptionSession, message: dict[str
         except Exception as _cfg_err:
             logger.debug("Could not read auto_add_to_audio_notebook: %s", repr(_cfg_err))
 
+        # GH-258: speaker diarization for this recording. Untrusted input, so
+        # bool-only and an int strictly inside 1-10. The explicit bool guard on
+        # expected_speakers matters: in Python `True` IS an int, and
+        # `1 <= True <= 10` is True, so a client sending `true` would otherwise
+        # silently pin the run to one speaker.
+        _raw_diarization = _msg_data.get("diarization")
+        _diarization = _raw_diarization if isinstance(_raw_diarization, bool) else False
+        _raw_speakers = _msg_data.get("expected_speakers")
+        _expected_speakers: int | None = (
+            _raw_speakers
+            if isinstance(_raw_speakers, int)
+            and not isinstance(_raw_speakers, bool)
+            and 1 <= _raw_speakers <= 10
+            else None
+        )
+
         await session.start_recording(
             language,
             use_vad,
             translation_enabled,
             translation_target_language,
             auto_add_to_notebook=_client_auto_add or _server_auto_add,
+            diarization=_diarization,
+            expected_speakers=_expected_speakers,
         )
 
     elif msg_type == "stop":

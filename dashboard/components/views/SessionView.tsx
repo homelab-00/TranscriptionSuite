@@ -158,6 +158,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [monitorVolumePct, setMonitorVolumePct] = useState<number | null>(null);
   useEffect(() => loopbackOwner.subscribeVolumePct(setMonitorVolumePct), []);
 
+  // GH-258: speaker diarization for the main recording. Persisted client-side;
+  // the count is shared with Settings > Diarization so both surfaces agree.
+  const [diarizationEnabled, setDiarizationEnabled] = useState(false);
+  const [constrainSpeakers, setConstrainSpeakers] = useState(false);
+  const [numSpeakers, setNumSpeakers] = useState(2);
+
   // Runtime profile (read from persisted config)
   const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('cpu');
   useEffect(() => {
@@ -506,6 +512,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
         savedHideTimestamps,
         savedMainTranslate,
         savedMainBidiTarget,
+        savedDiarizationEnabled,
+        savedConstrainSpeakers,
+        savedNumSpeakers,
       ] = await Promise.all([
         getConfig<'mic' | 'system'>('session.audioSource'),
         getConfig<string>('session.micDevice'),
@@ -515,6 +524,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
         getConfig<boolean>('output.hideTimestamps'),
         getConfig<boolean>('session.mainTranslate'),
         getConfig<string>('session.mainBidiTarget'),
+        getConfig<boolean>('diarization.enabledForRecordings'),
+        getConfig<boolean>('diarization.constrainSpeakers'),
+        getConfig<number>('diarization.numSpeakers'),
       ]);
       if (!active) return;
 
@@ -546,6 +558,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
       if (typeof savedMainBidiTarget === 'string' && savedMainBidiTarget) {
         setMainBidiTargetRaw(savedMainBidiTarget);
       }
+      // GH-258: diarization preferences for the main recording.
+      if (typeof savedDiarizationEnabled === 'boolean') {
+        setDiarizationEnabled(savedDiarizationEnabled);
+      }
+      if (typeof savedConstrainSpeakers === 'boolean') setConstrainSpeakers(savedConstrainSpeakers);
+      if (typeof savedNumSpeakers === 'number' && savedNumSpeakers >= 1 && savedNumSpeakers <= 10) {
+        setNumSpeakers(savedNumSpeakers);
+      }
     })().catch(() => {});
 
     return () => {
@@ -557,6 +577,26 @@ export const SessionView: React.FC<SessionViewProps> = ({
     setAudioSource(source);
     persistedSelectionsRef.current.audioSource = source;
     void setConfig('session.audioSource', source).catch(() => {});
+  }, []);
+
+  const handleDiarizationToggle = useCallback((enabled: boolean) => {
+    setDiarizationEnabled(enabled);
+    void setConfig('diarization.enabledForRecordings', enabled).catch(() => {});
+  }, []);
+
+  const handleSpeakerCountChange = useCallback((next: number) => {
+    // 0 means auto-detect: the stepper's floor releases the constraint rather
+    // than pinning the run to a single speaker, which is never what is wanted.
+    const clamped = Math.max(0, Math.min(10, next));
+    if (clamped === 0) {
+      setConstrainSpeakers(false);
+      void setConfig('diarization.constrainSpeakers', false).catch(() => {});
+      return;
+    }
+    setConstrainSpeakers(true);
+    setNumSpeakers(clamped);
+    void setConfig('diarization.constrainSpeakers', true).catch(() => {});
+    void setConfig('diarization.numSpeakers', clamped).catch(() => {});
   }, []);
 
   const handleMicDeviceChange = useCallback((device: string) => {
@@ -825,6 +865,14 @@ export const SessionView: React.FC<SessionViewProps> = ({
     transcription.status === 'complete' ||
     transcription.status === 'error';
 
+  // GH-209 gate, same contract the Import tab uses: the server computes this
+  // ONCE at container startup, so adding a token in Settings needs a restart.
+  const diarizationFeature = (admin.status?.models as any)?.features?.diarization as
+    | { available: boolean; reason: string }
+    | undefined;
+  const diarizationUnavailable = diarizationFeature?.available === false;
+  const effectiveDiarization = diarizationUnavailable ? false : diarizationEnabled;
+
   const handleStartRecording = useCallback(() => {
     if (!canStartRecording || mainModelDisabled) return;
     // gh-102: refuse to start when the active model requires an explicit
@@ -868,6 +916,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
         // every teardown path releases it (GH-230).
         monitorSinkName: isSystemAudio && isLinux ? sinkNameMap[sysDevice] : undefined,
         autoAddToNotebook,
+        // GH-258: forced off when the server reports the feature unavailable.
+        diarization: effectiveDiarization,
+        expectedSpeakers: effectiveDiarization && constrainSpeakers ? numSpeakers : undefined,
       });
       // Apply persisted capture gain after capture starts
       if (isSystemAudio) {
@@ -886,6 +937,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
     micDeviceIds,
     resolveLanguage,
     mainModelDisabled,
+    effectiveDiarization,
+    constrainSpeakers,
+    numSpeakers,
     isLinux,
     sysDevice,
     sinkNameMap,
@@ -1816,42 +1870,51 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   }
                 >
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between gap-6 p-1">
-                      <div className="flex min-w-0 flex-1 flex-col">
-                        <label className="mb-2 ml-1 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
-                          Source Language
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 rounded-xl border p-2.5 shadow-inner">
-                            <Languages size={18} />
-                          </div>
-                          <CustomSelect
-                            value={mainLanguage}
-                            onChange={handleMainLanguageChange}
-                            options={mainLanguageOptions}
-                            accentColor="magenta"
-                            className="focus:ring-accent-magenta flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white transition-all outline-none hover:border-white/20 focus:ring-1"
-                          />
+                    {/* Source Language spans the full card now that Translate
+                      moved down into the per-recording toggle rows. */}
+                    <div className="flex min-w-0 flex-col p-1">
+                      <label className="mb-2 ml-1 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                        Source Language
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 rounded-xl border p-2.5 shadow-inner">
+                          <Languages size={18} />
                         </div>
+                        <CustomSelect
+                          value={mainLanguage}
+                          onChange={handleMainLanguageChange}
+                          options={mainLanguageOptions}
+                          accentColor="magenta"
+                          className="focus:ring-accent-magenta flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white transition-all outline-none hover:border-white/20 focus:ring-1"
+                        />
                       </div>
-                      <div className="mb-1 h-12 w-px self-end bg-white/10"></div>
+                    </div>
+
+                    {/* Per-recording toggles. One row each, label left and
+                      control right-aligned in a shared fixed-width column, so
+                      every control shares a right edge with the Source Language
+                      dropdown above (this block's px-1 matches that block's
+                      p-1). The width is fixed rather than content-driven
+                      because it also sizes the Canary bidirectional dropdown
+                      that replaces the Translate switch. */}
+                    <div className="space-y-2 border-t border-white/5 px-1 pt-3">
                       <div
-                        className="flex min-w-25 flex-col items-center"
+                        className="flex items-center gap-6"
                         title={canTranslate ? '' : 'Current model does not support translation'}
                       >
-                        <label
-                          className={`mt-1 mb-2 text-center text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslate ? 'text-slate-500' : 'text-slate-600 line-through'}`}
+                        <span
+                          className={`min-w-0 flex-1 text-sm font-medium ${canTranslate ? 'text-white/90' : 'text-slate-500 line-through'}`}
                         >
                           {isCanaryMainBidi ? 'Translate to' : 'Translate to English'}
-                        </label>
-                        <div className="flex h-11.5 items-center justify-center">
+                        </span>
+                        <div className="flex w-34 items-center justify-end">
                           {isCanaryMainBidi ? (
                             <CustomSelect
                               value={mainBidiTarget}
                               onChange={setMainBidiTarget}
                               options={['Off', ...CANARY_TRANSLATION_TARGETS]}
                               accentColor="magenta"
-                              className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                              className="focus:ring-accent-magenta w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
                             />
                           ) : (
                             <AppleSwitch
@@ -1859,10 +1922,67 @@ export const SessionView: React.FC<SessionViewProps> = ({
                               onChange={setMainTranslate}
                               size="sm"
                               disabled={!canTranslate}
+                              ariaLabel="Translate to English"
                             />
                           )}
                         </div>
                       </div>
+
+                      {/* GH-258: speaker diarization for this recording. Off by
+                        default so plain dictation is untouched; the count row
+                        only appears once it is on. */}
+                      <div
+                        className="flex items-center gap-6"
+                        title={
+                          diarizationUnavailable
+                            ? diarizationFeature?.reason === 'token_missing'
+                              ? 'Diarization needs a HuggingFace token. Add one in Settings and restart the server.'
+                              : 'Diarization is unavailable on this server.'
+                            : 'Label who said what in the finished transcript.'
+                        }
+                      >
+                        <span className="min-w-0 flex-1 text-sm font-medium text-white/90">
+                          Speaker Diarization
+                        </span>
+                        <div className="flex w-34 items-center justify-end">
+                          <AppleSwitch
+                            checked={effectiveDiarization}
+                            onChange={handleDiarizationToggle}
+                            disabled={diarizationUnavailable}
+                            ariaLabel="Speaker Diarization"
+                          />
+                        </div>
+                      </div>
+                      {effectiveDiarization && (
+                        <div className="flex items-center gap-6">
+                          <span className="min-w-0 flex-1 text-xs text-slate-400">Speakers</span>
+                          <div className="flex w-34 items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              aria-label="Fewer speakers"
+                              onClick={() =>
+                                handleSpeakerCountChange(constrainSpeakers ? numSpeakers - 1 : 0)
+                              }
+                              className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition-colors hover:bg-white/10"
+                            >
+                              &minus;
+                            </button>
+                            <span className="w-14 text-center text-xs text-slate-300">
+                              {constrainSpeakers ? numSpeakers : 'Auto'}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label="More speakers"
+                              onClick={() =>
+                                handleSpeakerCountChange(constrainSpeakers ? numSpeakers + 1 : 2)
+                              }
+                              className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition-colors hover:bg-white/10"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Record / Stop Button */}
@@ -2082,6 +2202,27 @@ export const SessionView: React.FC<SessionViewProps> = ({
                             </Button>
                           </div>
                         )}
+                        {/* GH-258: diarization degrades rather than failing, so a
+                          transcript can arrive with no speakers even though the
+                          user asked for them. Without this the silence reads as
+                          a broken toggle. */}
+                        {transcription.result.diarization?.requested &&
+                          !transcription.result.diarization.performed && (
+                            <div
+                              role="status"
+                              data-testid="diarization-skipped-notice"
+                              className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-300"
+                            >
+                              Speaker labels are missing from this transcript
+                              {transcription.result.diarization.reason
+                                ? ` (${transcription.result.diarization.reason.replace(/_/g, ' ')})`
+                                : ''}
+                              .
+                              {transcription.result.diarization.remedy
+                                ? ` ${transcription.result.diarization.remedy}`
+                                : ''}
+                            </div>
+                          )}
                         <FindReplaceTextEditor
                           value={editedResultText}
                           onChange={setEditedResultText}

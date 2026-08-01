@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.13.4
+  spec_version: 1.15.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -25,6 +25,7 @@ meta:
       - components/__tests__/SessionImportTab.output-format.test.tsx
       - components/__tests__/SessionView.canary-language.test.tsx
       - components/__tests__/SessionView.client-link-stop.test.tsx
+      - components/__tests__/SessionView.diarization.test.tsx
       - components/__tests__/SessionView.greek-sigma.test.tsx
       - components/__tests__/SessionView.retry-failed.test.tsx
       - components/__tests__/SessionView.test.tsx
@@ -130,7 +131,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-08-01T07:23:36.434Z
+    generated_at: 2026-08-01T21:22:30.557Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -777,7 +778,6 @@ utility_allowlist:
     - h-1
     - h-1.5
     - h-10
-    - h-11.5
     - h-12
     - h-14
     - h-16
@@ -1010,6 +1010,7 @@ utility_allowlist:
     - pt-1
     - pt-1.5
     - pt-2
+    - pt-3
     - pt-4
     - pt-6
     - pt-8
@@ -1214,6 +1215,7 @@ utility_allowlist:
     - w-3
     - w-3.5
     - w-32
+    - w-34
     - w-35
     - w-4
     - w-4.5

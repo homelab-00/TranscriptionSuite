@@ -29,6 +29,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _report_diarization_error(
+    on_diarization_error: Callable[[BaseException], None] | None,
+    exc: BaseException,
+) -> None:
+    """Hand a swallowed diarization failure to an optional observer (GH-258).
+
+    Diarization failures are swallowed here by design so a transcript is never
+    lost, but that erases the reason - a caller cannot tell an out-of-memory
+    failure from a missing model. The observer restores it without changing the
+    return contract. Never raises: an observer defect must not become the
+    failure that costs the user their transcript.
+    """
+    if on_diarization_error is None:
+        return
+    try:
+        on_diarization_error(exc)
+    except Exception:
+        logger.warning("on_diarization_error observer raised; ignoring", exc_info=True)
+
+
 def transcribe_then_diarize(
     *,
     engine: AudioToTextRecorder,
@@ -41,6 +61,7 @@ def transcribe_then_diarize(
     expected_speakers: int | None = None,
     cancellation_check: Callable[[], bool] | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
+    on_diarization_error: Callable[[BaseException], None] | None = None,
 ) -> tuple[TranscriptionResult, DiarizationResult | None]:
     """Run transcription and diarization **sequentially**.
 
@@ -94,11 +115,12 @@ def transcribe_then_diarize(
             diar_result.num_speakers,
         )
         return result, diar_result
-    except Exception:
+    except Exception as diar_exc:
         logger.warning(
             "Diarization failed during sequential run — returning transcript without speakers",
             exc_info=True,
         )
+        _report_diarization_error(on_diarization_error, diar_exc)
         return result, None
     finally:
         # Restore the pre-job model state:
@@ -138,6 +160,7 @@ def transcribe_and_diarize(
     expected_speakers: int | None = None,
     cancellation_check: Callable[[], bool] | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
+    on_diarization_error: Callable[[BaseException], None] | None = None,
 ) -> tuple[TranscriptionResult, DiarizationResult | None]:
     """Run transcription and diarization in parallel.
 
@@ -163,11 +186,12 @@ def transcribe_and_diarize(
         from server.core.audio_utils import load_audio
 
         audio_data, audio_sample_rate = load_audio(file_path, target_sample_rate=16000)
-    except Exception:
+    except Exception as preload_exc:
         logger.warning(
             "Diarization pre-load failed — falling back to transcription only",
             exc_info=True,
         )
+        _report_diarization_error(on_diarization_error, preload_exc)
 
     # If pre-load failed, just transcribe normally
     try:
@@ -202,6 +226,7 @@ def transcribe_and_diarize(
                 expected_speakers=expected_speakers,
                 cancellation_check=cancellation_check,
                 progress_callback=progress_callback,
+                on_diarization_error=on_diarization_error,
             )
 
         # ------------------------------------------------------------------
@@ -260,11 +285,12 @@ def transcribe_and_diarize(
                     diar_result.num_speakers,
                 )
                 return result, diar_result
-            except Exception:
+            except Exception as diar_exc:
                 logger.warning(
                     "Diarization failed during parallel run — returning transcript without speakers",
                     exc_info=True,
                 )
+                _report_diarization_error(on_diarization_error, diar_exc)
                 return result, None
     finally:
         # Mirror transcribe_then_diarize: the diarization model is only

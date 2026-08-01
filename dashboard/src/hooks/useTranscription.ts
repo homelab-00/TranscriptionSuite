@@ -34,6 +34,15 @@ export interface TranscriptionResult {
   partial?: boolean;
   /** Human-readable reason the transcript is incomplete. */
   partialReason?: string | null;
+  /** Speakers found when diarization ran (GH-258). */
+  numSpeakers?: number;
+  /** Why diarization did or did not happen. Absent when it was not requested. */
+  diarization?: {
+    requested: boolean;
+    performed: boolean;
+    reason: string | null;
+    remedy: string | null;
+  };
 }
 
 export interface TranscriptionState {
@@ -52,6 +61,10 @@ export interface TranscriptionState {
     monitorSinkName?: string;
     /** Save the finished recording to the Audio Notebook (GH-199). */
     autoAddToNotebook?: boolean;
+    /** Attach speaker labels to the finished transcript (GH-258). */
+    diarization?: boolean;
+    /** Exact speaker count (1-10), or undefined to auto-detect. */
+    expectedSpeakers?: number;
   }) => void;
   /** Stop recording and wait for the final result */
   stop: () => void;
@@ -60,7 +73,7 @@ export interface TranscriptionState {
   /** VAD state from the server */
   vadActive: boolean;
   /** Segment progress while server is processing (current/total segments) */
-  processingProgress: { current: number; total: number } | null;
+  processingProgress: { current: number; total: number; phase?: string | null } | null;
   /** Whether audio is muted (capture continues but chunks not sent) */
   muted: boolean;
   /** Toggle mute during recording */
@@ -104,6 +117,7 @@ export function useTranscription(): TranscriptionState {
   const [processingProgress, setProcessingProgress] = useState<{
     current: number;
     total: number;
+    phase?: string | null;
   } | null>(null);
   const [previewText, setPreviewText] = useState<string | null>(null);
   const [previewLanguage, setPreviewLanguage] = useState<string | undefined>(undefined);
@@ -160,6 +174,10 @@ export function useTranscription(): TranscriptionState {
     profileId?: number | null;
     /** Save the finished recording to the Audio Notebook (GH-199). */
     autoAddToNotebook?: boolean;
+    /** Attach speaker labels to the finished transcript (GH-258). */
+    diarization?: boolean;
+    /** Exact speaker count (1-10), or undefined to auto-detect. */
+    expectedSpeakers?: number;
   }>({});
 
   // Cleanup on unmount — skip disconnect if actively recording/processing
@@ -275,6 +293,9 @@ export function useTranscription(): TranscriptionState {
               profile_id: startOptsRef.current.profileId ?? null,
               // GH-199: server promotes the finished recording into the Notebook.
               auto_add_to_notebook: startOptsRef.current.autoAddToNotebook ?? false,
+              // GH-258: speaker diarization for this recording.
+              diarization: startOptsRef.current.diarization ?? false,
+              expected_speakers: startOptsRef.current.expectedSpeakers ?? null,
             },
           });
           break;
@@ -343,6 +364,7 @@ export function useTranscription(): TranscriptionState {
           setProcessingProgress({
             current: (msg.data?.current as number) ?? 0,
             total: (msg.data?.total as number) ?? 0,
+            phase: (msg.data?.phase as string | null | undefined) ?? null,
           });
           break;
 
@@ -354,6 +376,8 @@ export function useTranscription(): TranscriptionState {
             duration: msg.data?.duration as number | undefined,
             partial: (msg.data?.partial as boolean | undefined) ?? false,
             partialReason: (msg.data?.partial_reason as string | null | undefined) ?? null,
+            numSpeakers: (msg.data?.num_speakers as number | undefined) ?? 0,
+            diarization: msg.data?.diarization as TranscriptionResult['diarization'],
           });
           setProcessingProgress(null);
           setStatusTracked('complete');
@@ -381,6 +405,8 @@ export function useTranscription(): TranscriptionState {
                   duration: r.duration,
                   partial: r.partial ?? false,
                   partialReason: r.partial_reason ?? null,
+                  numSpeakers: r.num_speakers ?? 0,
+                  diarization: r.diarization,
                 });
                 setProcessingProgress(null);
                 setStatusTracked('complete');
@@ -472,6 +498,10 @@ export function useTranscription(): TranscriptionState {
       monitorSinkName?: string;
       profileId?: number | null;
       autoAddToNotebook?: boolean;
+      /** Attach speaker labels to the finished transcript (GH-258). */
+      diarization?: boolean;
+      /** Exact speaker count (1-10), or undefined to auto-detect. */
+      expectedSpeakers?: number;
     }) => {
       // Reset previous state
       setResult(null);

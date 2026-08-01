@@ -55,6 +55,9 @@ def _make_session(
     session._current_job_id = job_id
     session._client_disconnected = False
     session.auto_add_to_notebook = False
+    # GH-258: set by __init__ / start_recording, which this factory bypasses.
+    session.diarization_enabled = False
+    session.expected_speakers = None
     session.capabilities = SimpleNamespace(
         supports_binary_audio=True,
         preferred_sample_rate=sample_rate,
@@ -351,8 +354,11 @@ class TestDura005AudioPersistenceOrder(_BaseProcessTranscription):
         """Audio file must exist on disk before transcribe_file() is called."""
         audio_exists_at_transcribe_time = []
 
-        def _check_audio_then_transcribe(**kwargs):
-            file_path = kwargs.get("file_path")
+        # `file_path` is positional-or-keyword on the real engine, and callers
+        # use both forms (parallel_diarize passes it positionally). Accept
+        # either, so this stub tracks the real signature rather than one caller.
+        def _check_audio_then_transcribe(file_path=None, **kwargs):
+            file_path = file_path if file_path is not None else kwargs.get("file_path")
             assert file_path is not None, "transcribe_file must receive file_path"
             audio_exists_at_transcribe_time.append(Path(file_path).exists())
             return _fake_transcription_result()

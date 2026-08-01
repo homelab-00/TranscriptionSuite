@@ -42,6 +42,44 @@ def format_text(result: TranscriptionResult) -> str:
     return result.text
 
 
+def format_speaker_text(result: TranscriptionResult) -> str:
+    """Render a diarized result as speaker-labelled paragraphs (GH-258).
+
+    One paragraph per speaker turn: consecutive segments sharing a speaker are
+    joined with a space, turns are separated by a blank line, and a labelled
+    turn is prefixed ``"SPEAKER_00: "``. Segments whose speaker is missing,
+    empty or the ``UNKNOWN`` sentinel produce an unlabelled paragraph.
+
+    Returns ``result.text`` unchanged when no segment carries a speaker, so
+    callers can invoke this unconditionally on any result.
+
+    Labels stay in the raw ``SPEAKER_00`` form rather than the ``Speaker 1``
+    form ``subtitle_export.normalize_speaker_labels`` produces: this string is
+    persisted as the job's ``result_text`` and must match the ``speaker`` keys
+    stored alongside it on the segments.
+    """
+    segments = result.segments or []
+    if not any(_normalize_speaker_value(seg.get("speaker")) for seg in segments):
+        return result.text
+
+    # Accumulate (speaker, [text, ...]) turns, opening a new turn whenever the
+    # speaker changes. Building the list first keeps the join logic trivial.
+    turns: list[tuple[str | None, list[str]]] = []
+    for seg in segments:
+        text = str(seg.get("text") or "").strip()
+        if not text:
+            continue
+        speaker = _normalize_speaker_value(seg.get("speaker"))
+        if turns and turns[-1][0] == speaker:
+            turns[-1][1].append(text)
+        else:
+            turns.append((speaker, [text]))
+
+    return "\n\n".join(
+        f"{speaker}: {' '.join(parts)}" if speaker else " ".join(parts) for speaker, parts in turns
+    )
+
+
 def format_verbose_json(
     result: TranscriptionResult,
     task: str = "transcribe",

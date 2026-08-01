@@ -141,6 +141,7 @@ A **runtime** is the engine mode the app uses to run the models, and it maps to 
 >
 > - **Live Mode** always runs on faster-whisper or whisper.cpp models. On Apple Silicon the Metal server bundles faster-whisper for exactly this - Live Mode works, but decodes on the CPU rather than the GPU.
 > - **PyAnnote** diarization needs a free HuggingFace token and accepting the [model's terms](https://huggingface.co/pyannote/speaker-diarization-community-1); the app asks for the token during first-start setup. **CAM++** (SenseVoice), **Sortformer** (Apple Silicon), and VibeVoice's **built-in** diarization need no token.
+> - **Where diarization runs:** file imports (Session tab > Import, Notebook tab > Import) and normal recordings on the Session tab, when the **Speaker Diarization** switch is on. **Live Mode never diarizes** - speaker attribution needs the whole recording, which a streaming transcriber does not have.
 > - **Sortformer** handles up to 4 speakers; pick PyAnnote on Apple Silicon for larger groups.
 > - NeMo models (Parakeet/Canary) are unavailable on the CPU runtime - the app substitutes a faster-whisper model instead.
 > - NeMo models can't output the Greek final sigma (ς), so Greek word endings may be truncated; the app shows a warning when this applies.
