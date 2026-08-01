@@ -40,6 +40,16 @@ export interface ClientConfig {
   };
   /** Diarization settings */
   diarization: {
+    /**
+     * Run speaker diarization on Session-tab recordings (GH-258). Independent
+     * of the Import tab's own per-import toggle.
+     */
+    enabledForRecordings: boolean;
+    /**
+     * Pin the diarizer to an exact speaker count instead of auto-detecting.
+     * Shipped default is OFF: auto-detect is right for an unknown meeting, and
+     * a wrong pinned count silently degrades every recording.
+     */
     constrainSpeakers: boolean;
     numSpeakers: number;
   };
@@ -120,7 +130,8 @@ const DEFAULT_CONFIG: ClientConfig = {
     liveLanguage: 'Auto Detect',
   },
   diarization: {
-    constrainSpeakers: true,
+    enabledForRecordings: false,
+    constrainSpeakers: false,
     numSpeakers: 2,
   },
   notebook: {

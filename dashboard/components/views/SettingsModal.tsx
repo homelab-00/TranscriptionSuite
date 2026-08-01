@@ -253,7 +253,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [clientSettings, setClientSettings] = useState({
     gracePeriod: 1.0,
     previewDurationSeconds: 20,
-    constrainSpeakers: true,
+    constrainSpeakers: false,
     numSpeakers: 2,
     autoAddNotebook: false,
     localHost: 'localhost',
