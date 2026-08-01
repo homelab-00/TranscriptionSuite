@@ -356,7 +356,7 @@ class TestStartEngineSurfacesRealInitFailure:
         Widening it must not turn the pump into a task that never finishes on
         its own after the engine has stopped.
         """
-        _install_recorder_stub(monkeypatch, lambda **kwargs: _FakeRecorder(**kwargs))
+        _install_recorder_stub(monkeypatch, _FakeRecorder)
         mm = _mock_model_manager(is_same=True, backend=MagicMock())
         monkeypatch.setattr(live_mod, "get_model_manager", lambda: mm)
 
@@ -370,7 +370,7 @@ class TestStartEngineSurfacesRealInitFailure:
 
     async def test_successful_initialization_still_marks_the_session_running(self, monkeypatch):
         """Regression guard: the happy path is unchanged with a real engine."""
-        _install_recorder_stub(monkeypatch, lambda **kwargs: _FakeRecorder(**kwargs))
+        _install_recorder_stub(monkeypatch, _FakeRecorder)
         shared_backend = MagicMock(name="shared-backend")
         mm = _mock_model_manager(is_same=True, backend=shared_backend)
         monkeypatch.setattr(live_mod, "get_model_manager", lambda: mm)
