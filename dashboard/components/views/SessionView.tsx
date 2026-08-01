@@ -1891,10 +1891,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
                     </div>
 
                     {/* Per-recording toggles. One row each, label left and
-                      control in a shared fixed-width column, so every control
-                      sits on the same vertical axis. Fixed rather than
-                      content-driven: the Translate label changes for Canary
-                      bidirectional models, which would otherwise shift it. */}
+                      control right-aligned in a shared fixed-width column, so
+                      every control shares a right edge with the Source Language
+                      dropdown above (this block's px-1 matches that block's
+                      p-1). The width is fixed rather than content-driven
+                      because it also sizes the Canary bidirectional dropdown
+                      that replaces the Translate switch. */}
                     <div className="space-y-2 border-t border-white/5 px-1 pt-3">
                       <div
                         className="flex items-center gap-6"
@@ -1905,7 +1907,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         >
                           {isCanaryMainBidi ? 'Translate to' : 'Translate to English'}
                         </span>
-                        <div className="flex w-34 items-center justify-center">
+                        <div className="flex w-34 items-center justify-end">
                           {isCanaryMainBidi ? (
                             <CustomSelect
                               value={mainBidiTarget}
@@ -1942,7 +1944,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         <span className="min-w-0 flex-1 text-sm font-medium text-white/90">
                           Speaker Diarization
                         </span>
-                        <div className="flex w-34 items-center justify-center">
+                        <div className="flex w-34 items-center justify-end">
                           <AppleSwitch
                             checked={effectiveDiarization}
                             onChange={handleDiarizationToggle}
@@ -1954,7 +1956,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       {effectiveDiarization && (
                         <div className="flex items-center gap-6">
                           <span className="min-w-0 flex-1 text-xs text-slate-400">Speakers</span>
-                          <div className="flex w-34 items-center justify-center gap-2">
+                          <div className="flex w-34 items-center justify-end gap-2">
                             <button
                               type="button"
                               aria-label="Fewer speakers"
