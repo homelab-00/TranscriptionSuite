@@ -24,6 +24,72 @@ class BackendDependencyError(RuntimeError):
         self.remedy = remedy
 
 
+class GpuOutOfMemoryError(RuntimeError):
+    """Raised when a transcription failed because the GPU ran out of VRAM.
+
+    Attributes:
+        remedy: Actionable instruction for the user.
+    """
+
+    def __init__(self, message: str, *, remedy: str) -> None:
+        super().__init__(message)
+        self.remedy = remedy
+
+
+#: Wordings that mean "the GPU ran out of memory".
+#:
+#: CTranslate2 picks between the first two depending on which internal
+#: allocation trips first, which is a matter of timing — the same import of the
+#: same file at the same VRAM pressure alternates between them, with an
+#: identical Python traceback. The thrust variant reports whatever CUDA error
+#: code was current on the context rather than the allocation failure, so it
+#: surfaces as "invalid device ordinal" and reads like a GPU misconfiguration.
+_GPU_OOM_MARKERS = (
+    "cuda failed with error out of memory",
+    "parallel_for failed",
+    "cuda out of memory",
+    "cudaerrormemoryallocation",
+    "out of memory",
+)
+
+_GPU_OOM_REMEDY = (
+    "Free VRAM and try again: unload other GPU applications, press Unload Models "
+    "to release the transcription model, or switch to a smaller model or a lower "
+    "compute_type (int8) in the Server tab."
+)
+
+
+def as_gpu_oom(exc: BaseException) -> GpuOutOfMemoryError | None:
+    """Translate a GPU out-of-memory failure into a self-explanatory error.
+
+    Returns None for anything that is not an out-of-memory condition, so a
+    genuine fault — an out-of-range ``gpu_device_index`` raising a bare
+    "invalid device ordinal" at setup, for instance — keeps its own message
+    instead of being mislabelled.
+
+    The original text is always preserved in the translated message: the
+    classification is a reading of a third-party error string, and a wrong
+    reading must never destroy the evidence.
+    """
+    if isinstance(exc, GpuOutOfMemoryError):
+        return exc
+
+    # torch raises a dedicated class; trust the type over the wording, which
+    # changes between releases.
+    is_torch_oom = type(exc).__name__ == "OutOfMemoryError"
+
+    text = str(exc).lower()
+    if not is_torch_oom and not any(marker in text for marker in _GPU_OOM_MARKERS):
+        return None
+
+    translated = GpuOutOfMemoryError(
+        f"The GPU ran out of memory (VRAM). Original error: {exc}",
+        remedy=_GPU_OOM_REMEDY,
+    )
+    translated.__cause__ = exc
+    return translated
+
+
 class PartialTranscriptionError(RuntimeError):
     """Raised by a chunking backend when a chunk fails *after* ≥1 chunk succeeded.
 
