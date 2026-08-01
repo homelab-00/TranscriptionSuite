@@ -214,6 +214,57 @@ def test_passes_language_and_task_to_transcribe(mock_load_audio):
     assert call_kwargs["translation_target_language"] == "en"
 
 
+@patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000))
+def test_parallel_success_unloads_diarization_model(mock_load_audio):
+    """After a successful parallel run the diarization model must be unloaded."""
+    engine = MagicMock()
+    engine.transcribe_file.return_value = MagicMock(words=[], segments=[])
+    mm = MagicMock()
+    diar_engine = MagicMock()
+    diar_result = MagicMock()
+    diar_result.segments = [MagicMock()]
+    diar_result.num_speakers = 2
+    diar_engine.diarize_audio.return_value = diar_result
+    mm.diarization_engine = diar_engine
+
+    result, diar = transcribe_and_diarize(
+        engine=engine, model_manager=mm, file_path="/tmp/test.wav"
+    )
+
+    assert diar is diar_result
+    mm.unload_diarization_model.assert_called_once()
+
+
+@patch("server.core.audio_utils.load_audio", return_value=(MagicMock(), 16000))
+def test_parallel_transcribe_failure_still_unloads_diarization_model(mock_load_audio):
+    """A transcription crash must not leave the diarization model resident."""
+    engine = MagicMock()
+    engine.transcribe_file.side_effect = RuntimeError("boom")
+    mm = MagicMock()
+    mm.diarization_engine = MagicMock()
+
+    with pytest.raises(RuntimeError):
+        transcribe_and_diarize(engine=engine, model_manager=mm, file_path="/tmp/test.wav")
+
+    mm.unload_diarization_model.assert_called_once()
+
+
+@patch("server.core.audio_utils.load_audio", side_effect=RuntimeError("bad audio"))
+def test_preload_failure_unloads_diarization_model(mock_load_audio):
+    """load_diarization_model may succeed before load_audio fails — release it."""
+    engine = MagicMock()
+    engine.transcribe_file.return_value = MagicMock(words=[], segments=[])
+    mm = MagicMock()
+    mm.diarization_engine = MagicMock()
+
+    result, diar = transcribe_and_diarize(
+        engine=engine, model_manager=mm, file_path="/tmp/test.wav"
+    )
+
+    assert diar is None
+    mm.unload_diarization_model.assert_called_once()
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Sequential: transcribe_then_diarize
 # ──────────────────────────────────────────────────────────────────────────────
