@@ -1870,46 +1870,49 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   }
                 >
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between gap-6 p-1">
-                      <div className="flex min-w-0 flex-1 flex-col">
-                        <label className="mb-2 ml-1 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
-                          Source Language
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 rounded-xl border p-2.5 shadow-inner">
-                            <Languages size={18} />
-                          </div>
-                          <CustomSelect
-                            value={mainLanguage}
-                            onChange={handleMainLanguageChange}
-                            options={mainLanguageOptions}
-                            accentColor="magenta"
-                            className="focus:ring-accent-magenta flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white transition-all outline-none hover:border-white/20 focus:ring-1"
-                          />
+                    {/* Source Language spans the full card now that Translate
+                      moved down into the per-recording toggle rows. */}
+                    <div className="flex min-w-0 flex-col p-1">
+                      <label className="mb-2 ml-1 text-[11px] font-semibold tracking-wider text-slate-500 uppercase">
+                        Source Language
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <div className="bg-accent-magenta/10 text-accent-magenta border-accent-magenta/5 rounded-xl border p-2.5 shadow-inner">
+                          <Languages size={18} />
                         </div>
+                        <CustomSelect
+                          value={mainLanguage}
+                          onChange={handleMainLanguageChange}
+                          options={mainLanguageOptions}
+                          accentColor="magenta"
+                          className="focus:ring-accent-magenta flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white transition-all outline-none hover:border-white/20 focus:ring-1"
+                        />
                       </div>
-                      <div className="mb-1 h-12 w-px self-end bg-white/10"></div>
-                      {/* GH-258: fixed width rather than min-w-25, so the
-                        Speaker Diarization row below can share the exact same
-                        control column. Content-driven width would drift the
-                        moment this label changes (it does, for Canary bidi). */}
+                    </div>
+
+                    {/* Per-recording toggles. One row each, label left and
+                      control in a shared fixed-width column, so every control
+                      sits on the same vertical axis. Fixed rather than
+                      content-driven: the Translate label changes for Canary
+                      bidirectional models, which would otherwise shift it. */}
+                    <div className="space-y-2 border-t border-white/5 px-1 pt-3">
                       <div
-                        className="flex w-34 flex-col items-center"
+                        className="flex items-center gap-6"
                         title={canTranslate ? '' : 'Current model does not support translation'}
                       >
-                        <label
-                          className={`mt-1 mb-2 text-center text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslate ? 'text-slate-500' : 'text-slate-600 line-through'}`}
+                        <span
+                          className={`min-w-0 flex-1 text-sm font-medium ${canTranslate ? 'text-white/90' : 'text-slate-500 line-through'}`}
                         >
                           {isCanaryMainBidi ? 'Translate to' : 'Translate to English'}
-                        </label>
-                        <div className="flex h-11.5 items-center justify-center">
+                        </span>
+                        <div className="flex w-34 items-center justify-center">
                           {isCanaryMainBidi ? (
                             <CustomSelect
                               value={mainBidiTarget}
                               onChange={setMainBidiTarget}
                               options={['Off', ...CANARY_TRANSLATION_TARGETS]}
                               accentColor="magenta"
-                              className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                              className="focus:ring-accent-magenta w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
                             />
                           ) : (
                             <AppleSwitch
@@ -1917,33 +1920,29 @@ export const SessionView: React.FC<SessionViewProps> = ({
                               onChange={setMainTranslate}
                               size="sm"
                               disabled={!canTranslate}
+                              ariaLabel="Translate to English"
                             />
                           )}
                         </div>
                       </div>
-                    </div>
 
-                    {/* GH-258: speaker diarization for this recording. Off by
-                      default so plain dictation is untouched; the count row
-                      only appears once it is on. The control column is the same
-                      fixed width as the Translate column above and the padding
-                      matches that row's p-1, so both switches sit on one
-                      vertical axis. */}
-                    <div
-                      className="border-t border-white/5 px-1 pt-2"
-                      title={
-                        diarizationUnavailable
-                          ? diarizationFeature?.reason === 'token_missing'
-                            ? 'Diarization needs a HuggingFace token. Add one in Settings and restart the server.'
-                            : 'Diarization is unavailable on this server.'
-                          : 'Label who said what in the finished transcript.'
-                      }
-                    >
-                      <div className="flex items-center gap-6">
+                      {/* GH-258: speaker diarization for this recording. Off by
+                        default so plain dictation is untouched; the count row
+                        only appears once it is on. */}
+                      <div
+                        className="flex items-center gap-6"
+                        title={
+                          diarizationUnavailable
+                            ? diarizationFeature?.reason === 'token_missing'
+                              ? 'Diarization needs a HuggingFace token. Add one in Settings and restart the server.'
+                              : 'Diarization is unavailable on this server.'
+                            : 'Label who said what in the finished transcript.'
+                        }
+                      >
                         <span className="min-w-0 flex-1 text-sm font-medium text-white/90">
                           Speaker Diarization
                         </span>
-                        <div className="flex w-34 flex-col items-center">
+                        <div className="flex w-34 items-center justify-center">
                           <AppleSwitch
                             checked={effectiveDiarization}
                             onChange={handleDiarizationToggle}
@@ -1953,7 +1952,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         </div>
                       </div>
                       {effectiveDiarization && (
-                        <div className="mt-1 flex items-center gap-6">
+                        <div className="flex items-center gap-6">
                           <span className="min-w-0 flex-1 text-xs text-slate-400">Speakers</span>
                           <div className="flex w-34 items-center justify-center gap-2">
                             <button

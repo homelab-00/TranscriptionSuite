@@ -269,6 +269,22 @@ describe('SessionView - speaker diarization for recordings (GH-258)', () => {
     expect(toggle).toBeTruthy();
   });
 
+  it('stacks Translate and Speaker Diarization as two named toggle rows', async () => {
+    // The two switches share one row style and one control column. Both must
+    // carry an accessible name: they are icon-only switches, so without one a
+    // screen reader announces two anonymous toggles on the same card.
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    const diarization = await screen.findByRole('switch', { name: 'Speaker Diarization' });
+    const translate = await screen.findByRole('switch', { name: 'Translate to English' });
+
+    expect(translate).toBeTruthy();
+    // Translate is rendered above Speaker Diarization in document order.
+    expect(
+      translate.compareDocumentPosition(diarization) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('disables the switch when the server reports diarization unavailable', async () => {
     mockDiarizationFeature.value = { available: false, reason: 'token_missing' };
     render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
