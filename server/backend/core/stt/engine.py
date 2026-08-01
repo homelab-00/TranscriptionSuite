@@ -1184,6 +1184,10 @@ class AudioToTextRecorder:
         # dropping the reference: a dropped reference leaves the model's VRAM
         # to the garbage collector and never returns cached allocator blocks
         # to the driver. Shared backends belong to the caller (Live Mode).
+        # unload_model() runs during normal operation and should surface
+        # failures, but shutdown() runs during teardown, where the CUDA
+        # context may already be gone and a failure must not block the rest
+        # of the cleanup - hence the try/except here that unload_model() omits.
         if self._backend is not None and self._owns_backend:
             try:
                 self._backend.unload()
