@@ -78,6 +78,9 @@ def _make_session(*, auto_add: bool = False, job_id: str | None = "job-001"):
     session._client_disconnected = False
     session._current_job_id = job_id
     session.auto_add_to_notebook = auto_add
+    # GH-258: set by __init__ / start_recording, which this factory bypasses.
+    session.diarization_enabled = False
+    session.expected_speakers = None
     session.send_message = AsyncMock()
     return session
 

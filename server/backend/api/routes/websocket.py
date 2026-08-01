@@ -451,15 +451,23 @@ class TranscriptionSession:
                 _progress["total"] = total
                 model_manager.job_tracker.update_progress(current, total)
 
+            from server.core.diarization_dispatch import transcribe_with_optional_diarization
+
             loop = asyncio.get_event_loop()
             transcribe_future = loop.run_in_executor(
                 None,
-                lambda: engine.transcribe_file(
+                lambda: transcribe_with_optional_diarization(
+                    engine=engine,
+                    model_manager=model_manager,
                     file_path=str(self.temp_file),
+                    enable_diarization=self.diarization_enabled,
                     language=self.language,
-                    word_timestamps=True,
                     task=task,
                     translation_target_language=translation_target,
+                    word_timestamps=True,
+                    expected_speakers=self.expected_speakers,
+                    # None: let the dispatcher read the server-wide default.
+                    parallel_diarization=None,
                     progress_callback=_on_progress,
                     # Two independent stop signals, both of which must reach the
                     # backend: the client vanished, or the user pressed Cancel
@@ -480,18 +488,36 @@ class TranscriptionSession:
                 done, _ = await asyncio.wait({transcribe_future}, timeout=_KEEPALIVE_INTERVAL)
                 if done:
                     break
+                # GH-258: sequential diarization spends minutes in a phase that
+                # reports no numeric progress. Forwarding the phase lets the
+                # client render "Identifying speakers" instead of a frozen bar.
+                _tracker_progress = model_manager.job_tracker.get_status().get("progress") or {}
                 await self.send_message(
                     "processing_progress",
                     {
                         "current": _progress["current"],
                         "total": _progress["total"],
+                        "phase": _tracker_progress.get("phase"),
                     },
                 )
 
-            result = transcribe_future.result()
+            dispatched = transcribe_future.result()
+            result = dispatched.result
+            diarization_outcome = dispatched.outcome
+
+            # Speaker labels must be baked into result.text BEFORE the payload
+            # is built: the payload is what gets persisted, and a recovery via
+            # GET /result/{job_id} would otherwise return bare text while the
+            # live client got labelled text.
+            if diarization_outcome.performed:
+                from server.core.formatters import format_speaker_text
+
+                result.text = format_speaker_text(result)
 
             # Build and sanitize result payload (full result — see GH #172).
             result_payload = _build_longform_result_payload(result)
+            if diarization_outcome.requested:
+                result_payload["diarization"] = diarization_outcome.to_dict()
 
             # PERSIST BEFORE DELIVER — result must survive even if delivery fails
             _result_persisted = False
@@ -600,7 +626,7 @@ class TranscriptionSession:
                         "filename": "",
                         "duration": result.duration,
                         "language": result.language,
-                        "num_speakers": 0,
+                        "num_speakers": result.num_speakers,
                     },
                 )
             except Exception as wh_err:
