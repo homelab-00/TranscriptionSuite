@@ -24,6 +24,14 @@ logger = logging.getLogger(__name__)
 # Target sample rate for Whisper
 SAMPLE_RATE = 16000
 
+# How long ``start()`` waits for the background thread to finish building the
+# recorder before it gives up and reports failure (GH-271).  Initialization can
+# legitimately take minutes: the whisper.cpp sidecar gets up to 180s to report
+# /health, and a first-run faster-whisper model still has to be downloaded.
+# This ceiling exists only so ``start()`` always reaches a definite answer
+# instead of blocking a client forever; pass ``timeout=None`` to wait outright.
+INIT_TIMEOUT_SECONDS = 300.0
+
 
 class LiveModeState(Enum):
     """State of the Live Mode engine."""
@@ -103,7 +111,18 @@ class LiveModeEngine:
         self._recorder: Any | None = None
         self._state = LiveModeState.STOPPED
         self._loop_thread: threading.Thread | None = None
+        self._feeder_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+
+        # GH-271: initialization handshake between start() and
+        # _transcription_loop.  The recorder (and therefore the model load) is
+        # built on the background thread, so start() waits on this event to
+        # report the REAL outcome instead of "thread spawned successfully".
+        # The loop writes _init_ok / _init_error BEFORE setting the event, so a
+        # released caller always reads a settled result.
+        self._init_complete = threading.Event()
+        self._init_ok = False
+        self._init_error: BaseException | None = None
 
         # Track history for the UI
         self._sentence_history: list[str] = []
@@ -126,6 +145,16 @@ class LiveModeEngine:
     def sentence_history(self) -> list[str]:
         """Get history of transcribed sentences."""
         return self._sentence_history.copy()
+
+    @property
+    def start_error(self) -> BaseException | None:
+        """Exception that aborted the last ``start()``, or None if it succeeded.
+
+        Set by the transcription thread when the recorder cannot be built, and
+        by ``start()`` itself when initialization exceeds its timeout.  Callers
+        use it to tell the client *why* Live Mode did not come up (GH-271).
+        """
+        return self._init_error
 
     def _set_state(self, state: LiveModeState) -> None:
         """Set state and trigger callback."""
@@ -168,39 +197,69 @@ class LiveModeEngine:
                 logger.error(f"Sentence callback error: {e}")
 
     def _transcription_loop(self) -> None:
-        """Main transcription loop (runs in separate thread)."""
+        """Main transcription loop (runs in separate thread).
+
+        Initialization - importing and constructing the recorder, which loads
+        the model - happens here rather than in ``start()`` because it can take
+        minutes.  ``start()`` blocks on ``_init_complete`` until this method has
+        published a definite outcome, so a model-load failure can no longer be
+        reported to the caller as a successful start (GH-271).
+        """
         try:
             self._set_state(LiveModeState.STARTING)
 
-            # Import server's AudioToTextRecorder (not RealtimeSTT's)
-            from server.core.stt.engine import AudioToTextRecorder
+            try:
+                # Import server's AudioToTextRecorder (not RealtimeSTT's)
+                from server.core.stt.engine import AudioToTextRecorder
 
-            # Create recorder with configuration
-            self._recorder = AudioToTextRecorder(
-                instance_name="live_mode",
-                model=self.config.model,
-                language=self.config.language if self.config.language else "",
-                task="translate" if self.config.translation_enabled else "transcribe",
-                translation_target_language=self.config.translation_target_language,
-                compute_type=self.config.compute_type,
-                device=self.config.device,
-                gpu_device_index=self.config.gpu_device_index,
-                silero_sensitivity=self.config.silero_sensitivity,
-                webrtc_sensitivity=self.config.webrtc_sensitivity,
-                post_speech_silence_duration=self.config.post_speech_silence_duration,
-                min_length_of_recording=self.config.min_length_of_recording,
-                min_gap_between_recordings=self.config.min_gap_between_recordings,
-                ensure_sentence_starting_uppercase=self.config.ensure_sentence_starting_uppercase,
-                ensure_sentence_ends_with_period=self.config.ensure_sentence_ends_with_period,
-                beam_size=self.config.beam_size,
-                batch_size=self.config.batch_size,
-                on_recording_start=self._on_recording_start,
-                on_recording_stop=self._on_recording_stop,
-                shared_backend=self._shared_backend,
-            )
+                # Create recorder with configuration
+                self._recorder = AudioToTextRecorder(
+                    instance_name="live_mode",
+                    model=self.config.model,
+                    language=self.config.language if self.config.language else "",
+                    task="translate" if self.config.translation_enabled else "transcribe",
+                    translation_target_language=self.config.translation_target_language,
+                    compute_type=self.config.compute_type,
+                    device=self.config.device,
+                    gpu_device_index=self.config.gpu_device_index,
+                    silero_sensitivity=self.config.silero_sensitivity,
+                    webrtc_sensitivity=self.config.webrtc_sensitivity,
+                    post_speech_silence_duration=self.config.post_speech_silence_duration,
+                    min_length_of_recording=self.config.min_length_of_recording,
+                    min_gap_between_recordings=self.config.min_gap_between_recordings,
+                    ensure_sentence_starting_uppercase=(
+                        self.config.ensure_sentence_starting_uppercase
+                    ),
+                    ensure_sentence_ends_with_period=self.config.ensure_sentence_ends_with_period,
+                    beam_size=self.config.beam_size,
+                    batch_size=self.config.batch_size,
+                    on_recording_start=self._on_recording_start,
+                    on_recording_stop=self._on_recording_stop,
+                    shared_backend=self._shared_backend,
+                )
+            except Exception as e:
+                # Record the failure and publish the terminal state BEFORE
+                # releasing start(), so the caller reads a settled outcome
+                # rather than racing this thread for it.
+                logger.error(f"Live Mode initialization error: {e}")
+                self._init_error = e
+                self._set_state(LiveModeState.ERROR)
+                self._init_complete.set()
+                return
 
+            if self._stop_event.is_set():
+                # start() already gave up (timeout), or stop() raced us. Do not
+                # advertise LISTENING for a session nobody is waiting for - the
+                # client would begin streaming audio into a dead session. The
+                # finally block below shuts the freshly built recorder down.
+                logger.warning("Live Mode initialized after the start was abandoned - discarding")
+                self._init_complete.set()
+                return
+
+            self._init_ok = True
             self._set_state(LiveModeState.LISTENING)
             logger.info("Live Mode started")
+            self._init_complete.set()
 
             # Process sentences in a loop
             while not self._stop_event.is_set():
@@ -216,9 +275,14 @@ class LiveModeEngine:
                         break
 
         except Exception as e:
-            logger.error(f"Live Mode initialization error: {e}")
+            logger.error(f"Live Mode loop error: {e}")
             self._set_state(LiveModeState.ERROR)
         finally:
+            # Backstop: an exotic exit (a BaseException such as SystemExit
+            # escaping the recorder constructor) must never leave start()
+            # blocked. _init_ok is still False there, so it reports failure.
+            self._init_complete.set()
+
             if self._recorder:
                 try:
                     self._recorder.shutdown()
@@ -273,18 +337,32 @@ class LiveModeEngine:
         except queue.Full:
             logger.warning("Live Mode audio queue full, dropping chunk")
 
-    def start(self) -> bool:
+    def start(self, timeout: float | None = INIT_TIMEOUT_SECONDS) -> bool:
         """
         Start Live Mode transcription.
 
+        Blocks until initialization reaches a definite outcome - the recorder is
+        built and listening, or it failed - and reports that outcome (GH-271).
+        The model load runs on the background thread, so callers on an event
+        loop must run this in a worker thread (``asyncio.to_thread``) to keep
+        the loop responsive while the model is loading.
+
+        Args:
+            timeout: Seconds to wait for initialization before giving up.
+                ``None`` waits indefinitely.
+
         Returns:
-            True if started successfully
+            True when Live Mode is listening.  False when initialization failed
+            or timed out - ``start_error`` then holds the reason.
         """
         if self.is_running:
             logger.warning("Live Mode already running")
             return False
 
         self._stop_event.clear()
+        self._init_complete.clear()
+        self._init_ok = False
+        self._init_error = None
 
         # Clear audio queue
         while not self._audio_queue.empty():
@@ -304,6 +382,19 @@ class LiveModeEngine:
             target=self._audio_feeder_loop, daemon=True, name="LiveModeAudioFeeder"
         )
         self._feeder_thread.start()
+
+        if not self._init_complete.wait(timeout):
+            self._init_error = TimeoutError(
+                f"Live Mode initialization did not finish within {timeout}s"
+            )
+            logger.error(str(self._init_error))
+
+        if not self._init_ok:
+            # Release the feeder thread and let the (possibly still-loading)
+            # transcription thread unwind on its own: it discards whatever it
+            # builds as soon as it sees the stop event.
+            self._stop_event.set()
+            return False
 
         return True
 
@@ -328,10 +419,11 @@ class LiveModeEngine:
             if self._loop_thread.is_alive():
                 logger.warning("Live Mode thread did not stop gracefully")
 
-        if hasattr(self, "_feeder_thread") and self._feeder_thread.is_alive():
+        if self._feeder_thread and self._feeder_thread.is_alive():
             self._feeder_thread.join(timeout=2.0)
 
         self._loop_thread = None
+        self._feeder_thread = None
         self._recorder = None
 
     def clear_history(self) -> None:
