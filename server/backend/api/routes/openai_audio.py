@@ -463,6 +463,11 @@ async def create_transcription(
         logger.exception("OpenAI transcription endpoint error")
         return _openai_error(500, "Internal server error", error_type="server_error")
     finally:
+        from server.core.audio_utils import post_job_gpu_cleanup
+
+        await asyncio.to_thread(
+            post_job_gpu_cleanup, "openai transcription", model_manager.gpu_device_index
+        )
         model_manager.job_tracker.end_job(job_id)
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
@@ -581,6 +586,11 @@ async def create_translation(
         logger.exception("OpenAI translation endpoint error")
         return _openai_error(500, "Internal server error", error_type="server_error")
     finally:
+        from server.core.audio_utils import post_job_gpu_cleanup
+
+        await asyncio.to_thread(
+            post_job_gpu_cleanup, "openai translation", model_manager.gpu_device_index
+        )
         model_manager.job_tracker.end_job(job_id)
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)

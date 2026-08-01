@@ -71,6 +71,7 @@ def openai_client():
     app.state.model_manager = SimpleNamespace(
         ensure_transcription_loaded=lambda: mock_engine,
         transcription_engine=mock_engine,
+        gpu_device_index=0,
         job_tracker=SimpleNamespace(
             try_start_job=lambda client_name: (True, "job-1", None),
             end_job=lambda job_id: None,
@@ -257,6 +258,7 @@ def test_no_model_loaded_returns_503():
     app.state.model_manager = SimpleNamespace(
         ensure_transcription_loaded=lambda: fake_engine,
         transcription_engine=fake_engine,
+        gpu_device_index=0,
         job_tracker=SimpleNamespace(
             try_start_job=lambda cn: (True, "j", None),
             end_job=lambda j: None,
@@ -283,6 +285,7 @@ def test_job_busy_returns_429():
     app.state.model_manager = SimpleNamespace(
         ensure_transcription_loaded=lambda: fake_engine,
         transcription_engine=fake_engine,
+        gpu_device_index=0,
         job_tracker=SimpleNamespace(
             try_start_job=lambda cn: (False, None, "other-user"),
             end_job=lambda j: None,
@@ -506,6 +509,7 @@ class TestEnsureTranscriptionLoadedIntegration:
         app.state.model_manager = SimpleNamespace(
             ensure_transcription_loaded=ensure_loaded,
             transcription_engine=transcription_engine,
+            gpu_device_index=0,
             job_tracker=SimpleNamespace(
                 try_start_job=lambda cn: try_start_job_result,
                 end_job=end_job,
@@ -752,6 +756,7 @@ def diarization_client():
     app.state.model_manager = SimpleNamespace(
         ensure_transcription_loaded=lambda: mock_engine,
         transcription_engine=mock_engine,
+        gpu_device_index=0,
         job_tracker=SimpleNamespace(
             try_start_job=lambda client_name: (True, "job-1", None),
             end_job=lambda job_id: None,
@@ -1198,6 +1203,7 @@ def _build_engine_resolver_app(*, backend, model_name: str, sensevoice_engine: s
     app.state.model_manager = SimpleNamespace(
         ensure_transcription_loaded=lambda: mock_engine,
         transcription_engine=mock_engine,
+        gpu_device_index=0,
         job_tracker=SimpleNamespace(
             try_start_job=lambda cn: (True, "job-1", None),
             end_job=lambda j: None,

@@ -712,6 +712,11 @@ class ModelManager:
         return configured_batch_size
 
     @property
+    def gpu_device_index(self) -> int:
+        """Configured GPU device index (``transcription.gpu_device_index``)."""
+        return self._gpu_device_index
+
+    @property
     def transcription_engine(self) -> "AudioToTextRecorder":
         """Get or create the unified transcription engine."""
         if self._transcription_engine is None:

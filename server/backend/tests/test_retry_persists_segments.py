@@ -77,6 +77,7 @@ def _make_app_state(fake_result: _FakeResult) -> SimpleNamespace:
     model_manager = SimpleNamespace(
         job_tracker=job_tracker,
         ensure_transcription_loaded=lambda: fake_engine,
+        gpu_device_index=0,
     )
     return SimpleNamespace(model_manager=model_manager)
 

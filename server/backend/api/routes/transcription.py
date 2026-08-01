@@ -1180,6 +1180,10 @@ def _run_file_import(
         )
 
     finally:
+        from server.core.audio_utils import post_job_gpu_cleanup
+
+        post_job_gpu_cleanup("file import", model_manager.gpu_device_index)
+
         # Cleanup temp file
         try:
             tmp_path.unlink()
@@ -1640,6 +1644,9 @@ async def _run_retry(job_id: str, audio_path: str, job: dict[str, Any], app_stat
                 "Failed to mark retry job %s as failed: %s", sanitize_log_value(job_id), _mf_err
             )
     finally:
+        from server.core.audio_utils import post_job_gpu_cleanup
+
+        await asyncio.to_thread(post_job_gpu_cleanup, "retry", model_manager.gpu_device_index)
         if tracker_job_id:
             model_manager.job_tracker.end_job(tracker_job_id)
 

@@ -1248,6 +1248,10 @@ def _run_transcription(
         )
 
     finally:
+        from server.core.audio_utils import post_job_gpu_cleanup
+
+        post_job_gpu_cleanup("notebook import", model_manager.gpu_device_index)
+
         # Cleanup temp file
         try:
             tmp_path.unlink()
