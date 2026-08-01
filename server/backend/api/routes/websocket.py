@@ -212,6 +212,11 @@ class TranscriptionSession:
         # server-wide config key.
         self.auto_add_to_notebook = False
 
+        # Speaker diarization for this recording (GH-258). Resolved per-session
+        # at `start` from the Session-tab toggle; OFF unless asked for.
+        self.diarization_enabled = False
+        self.expected_speakers: int | None = None
+
         # Job tracking for transcription
         self._current_job_id: str | None = None
 
@@ -682,6 +687,8 @@ class TranscriptionSession:
         translation_enabled: bool = False,
         translation_target_language: str = "en",
         auto_add_to_notebook: bool = False,
+        diarization: bool = False,
+        expected_speakers: int | None = None,
     ) -> None:
         """
         Start a recording session.
@@ -692,12 +699,16 @@ class TranscriptionSession:
             translation_enabled: Enable source→target translation
             translation_target_language: Translation target (v1: "en" only)
             auto_add_to_notebook: Save the finished recording to the Audio Notebook
+            diarization: Attach speaker labels to the finished transcript
+            expected_speakers: Exact speaker count (1-10), or None to auto-detect
         """
         self.is_recording = True
         self.language = language
         self.translation_enabled = translation_enabled
         self.translation_target_language = translation_target_language
         self.auto_add_to_notebook = auto_add_to_notebook
+        self.diarization_enabled = diarization
+        self.expected_speakers = expected_speakers
         self.audio_chunks = []
         self._sample_rate_mismatch_reported = False
         self._use_realtime_engine = use_vad and self.capabilities.supports_vad_events
@@ -919,12 +930,30 @@ async def handle_client_message(session: TranscriptionSession, message: dict[str
         except Exception as _cfg_err:
             logger.debug("Could not read auto_add_to_audio_notebook: %s", repr(_cfg_err))
 
+        # GH-258: speaker diarization for this recording. Untrusted input, so
+        # bool-only and an int strictly inside 1-10. The explicit bool guard on
+        # expected_speakers matters: in Python `True` IS an int, and
+        # `1 <= True <= 10` is True, so a client sending `true` would otherwise
+        # silently pin the run to one speaker.
+        _raw_diarization = _msg_data.get("diarization")
+        _diarization = _raw_diarization if isinstance(_raw_diarization, bool) else False
+        _raw_speakers = _msg_data.get("expected_speakers")
+        _expected_speakers: int | None = (
+            _raw_speakers
+            if isinstance(_raw_speakers, int)
+            and not isinstance(_raw_speakers, bool)
+            and 1 <= _raw_speakers <= 10
+            else None
+        )
+
         await session.start_recording(
             language,
             use_vad,
             translation_enabled,
             translation_target_language,
             auto_add_to_notebook=_client_auto_add or _server_auto_add,
+            diarization=_diarization,
+            expected_speakers=_expected_speakers,
         )
 
     elif msg_type == "stop":
