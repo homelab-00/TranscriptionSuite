@@ -1,12 +1,13 @@
 """Shared transcribe-with-optional-diarization dispatch (GH-258).
 
 One place that turns "an audio file plus a diarization request" into a
-:class:`TranscriptionResult` whose segments carry speaker labels. Extracted so
-the WebSocket recording path does not become a fourth copy of logic already
-duplicated across ``transcription.py``, ``notebook.py`` and ``openai_audio.py``.
-Those three routes are deliberately NOT migrated in this change; each has its
-own HTTP status codes, response headers and database writes, and moving them is
-a separate PR.
+:class:`TranscriptionResult` whose segments carry speaker labels. Extracted for
+the WebSocket recording path (GH-258); since GH-274 it is the single decision
+tree for every consumer: ``websocket.py``, ``transcription.py`` (both the
+synchronous /audio route and the /import background worker), ``notebook.py``
+and ``openai_audio.py``. Route-specific edges — HTTP status codes, the
+``X-Diarization-Status`` header, database writes, job payloads and the OpenAI
+endpoints' plain-retry failure tolerance — stay in the routes.
 
 Error contract, which is about which operation raised rather than which type:
   * anything from the DIARIZATION attempt is swallowed - the transcript is

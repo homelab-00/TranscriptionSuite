@@ -75,6 +75,7 @@ def openai_client():
         job_tracker=SimpleNamespace(
             try_start_job=lambda client_name: (True, "job-1", None),
             end_job=lambda job_id: None,
+            is_cancelled=lambda: False,
         ),
     )
     app.state.config = SimpleNamespace(
@@ -262,6 +263,7 @@ def test_no_model_loaded_returns_503():
         job_tracker=SimpleNamespace(
             try_start_job=lambda cn: (True, "j", None),
             end_job=lambda j: None,
+            is_cancelled=lambda: False,
         ),
     )
     app.state.config = SimpleNamespace(
@@ -289,6 +291,7 @@ def test_job_busy_returns_429():
         job_tracker=SimpleNamespace(
             try_start_job=lambda cn: (False, None, "other-user"),
             end_job=lambda j: None,
+            is_cancelled=lambda: False,
         ),
     )
     app.state.config = SimpleNamespace(
@@ -328,6 +331,15 @@ def test_openai_error_shape(openai_client):
 @pytest.mark.openai_api
 class TestOpenaiEdgeCases:
     """P3-OAPI-001: Edge cases for OpenAI-compatible API format."""
+
+    def test_prompt_reaches_the_engine_as_initial_prompt(self, openai_client):
+        """The OpenAI ``prompt`` field must survive the diarization_dispatch
+        migration (GH-274) — it flows through as ``initial_prompt``."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result()
+        resp = _upload(client, prompt="glossary: CUDA, VRAM")
+        assert resp.status_code == 200
+        assert engine.transcribe_file.call_args.kwargs["initial_prompt"] == "glossary: CUDA, VRAM"
 
     def test_empty_transcription_json(self, openai_client):
         """Empty transcription text returns valid JSON with empty string."""
@@ -513,6 +525,7 @@ class TestEnsureTranscriptionLoadedIntegration:
             job_tracker=SimpleNamespace(
                 try_start_job=lambda cn: try_start_job_result,
                 end_job=end_job,
+                is_cancelled=lambda: False,
             ),
         )
         app.state.config = SimpleNamespace(

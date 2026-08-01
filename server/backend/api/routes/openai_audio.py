@@ -6,17 +6,15 @@ following the OpenAI Audio API spec so that any OpenAI-compatible client
 
 Diarization support (GH-88): both endpoints accept optional ``diarization``,
 ``expected_speakers`` and ``parallel_diarization`` form fields. When diarization
-is requested, the orchestration mirrors ``routes/transcription.py``: WhisperX
-integrated single-pass path → ``transcribe_and_diarize`` / ``transcribe_then_diarize``
-+ ``speaker_merge.build_speaker_segments``. Any diarization failure falls
-through to a plain transcript — the endpoint never raises because the speaker
-engine hiccuped.
+is requested, the orchestration is delegated to
+``core/diarization_dispatch.transcribe_with_optional_diarization`` (GH-274).
+Any diarization failure falls through to a plain transcript — the endpoint
+never raises because the speaker engine hiccuped.
 """
 
 from __future__ import annotations
 
 import asyncio
-import functools
 import logging
 import tempfile
 from pathlib import Path
@@ -114,189 +112,81 @@ async def _run_transcription(
 ) -> Any:
     """Run transcription (optionally with diarization) and return a TranscriptionResult.
 
-    Mirrors the three-path orchestration from ``routes/transcription.py``:
+    GH-274: the whole diarization decision tree (integrated single-pass,
+    two-pass parallel/sequential, plain transcription, speaker merge, failure
+    classification) lives in ``core/diarization_dispatch``.
 
-    1. **Integrated single-pass** — if the active backend overrides
-       ``transcribe_with_diarization`` (WhisperX, VibeVoice-ASR). On exception
-       we fall back to the standard path with ``diarization`` disabled (same
-       policy the reference route uses).
-    2. **Parallel or sequential diarize+transcribe** via ``parallel_diarize``.
-       Choice is driven by ``parallel_diarization`` form param, else
-       ``config.diarization.parallel``. After STT + diar finish, word-level
-       speaker merge is performed via ``speaker_merge.build_speaker_segments``
-       (with a segment-level fallback when no word timestamps exist).
-    3. **Plain transcription** via ``engine.transcribe_file`` when diarization
-       was not requested, or every diarization branch fell through.
-
-    Diarization failures at any stage log a warning and return the transcript
-    without speakers — consistent with the non-OpenAI route's behavior.
+    The one route-specific edge kept here is the documented failure-tolerance
+    contract ("never 5xxs on a diarization hiccup"): if the diarization
+    orchestration itself crashes, fall back to ONE plain transcription attempt
+    instead of surfacing a server error for a speaker-engine problem.
+    Cancellation and audio-decode errors propagate — plain transcription would
+    fail on them too, and the outer handlers own them (500-cancel / 400).
     """
+    from server.core.audio_utils import AudioDecodeError
+    from server.core.diarization_dispatch import transcribe_with_optional_diarization
+
     model_manager = request.app.state.model_manager
     engine = model_manager.transcription_engine
 
-    # Diarization requires word-level alignment data. Force it on internally —
-    # the caller controls whether words are *emitted* via include_words on the
-    # response formatter, separate from whether they are *computed* here.
-    need_word_timestamps = word_timestamps or diarization
-
-    # --- Path 1: integrated single-pass diarization (WhisperX / VibeVoice-ASR) ---
-    # Resolve the diarization engine (funasr CAM++ single-pass vs pyannote
-    # two-pass) only when diarization is requested. For SenseVoice this honors
-    # the server-wide engine setting (config diarization.sensevoice_engine);
-    # every other integrated backend keeps its single-pass path unconditionally.
-    backend = getattr(engine, "_backend", None)
-    use_integrated_diarization = False
+    sensevoice_engine_default = "funasr"
+    resolved_parallel = parallel_diarization
     if diarization:
-        from server.config import resolve_sensevoice_diarization_engine
-        from server.core.stt.backends.base import use_integrated_diarization_for
-
         app_config = getattr(request.app.state, "config", None)
-        sensevoice_engine_default = (
-            app_config.get("diarization", "sensevoice_engine", default="funasr")
-            if app_config is not None
-            else "funasr"
+        if app_config is not None:
+            sensevoice_engine_default = app_config.get(
+                "diarization", "sensevoice_engine", default="funasr"
+            )
+            if resolved_parallel is None:
+                resolved_parallel = resolve_parallel_diarization_default(app_config)
+
+    # Lambdas rather than functools.partial so the call sites stay visible to
+    # the AST cancel-wiring guard (test_cancel_wiring.py).
+    try:
+        dispatched = await asyncio.to_thread(
+            lambda: transcribe_with_optional_diarization(
+                engine=engine,
+                model_manager=model_manager,
+                file_path=tmp_path,
+                enable_diarization=diarization,
+                language=language,
+                task=task,
+                translation_target_language=translation_target_language,
+                word_timestamps=word_timestamps,
+                initial_prompt=initial_prompt,
+                expected_speakers=expected_speakers,
+                parallel_diarization=resolved_parallel,
+                sensevoice_engine_default=sensevoice_engine_default,
+                cancellation_check=model_manager.job_tracker.is_cancelled,
+            )
         )
-        resolved_diar_engine = resolve_sensevoice_diarization_engine(
-            getattr(engine, "model_name", None),
-            None,
-            sensevoice_engine_default,
-            funasr_diar_available=getattr(backend, "_diarization_loaded", False),
-        )
-        use_integrated_diarization = use_integrated_diarization_for(backend, resolved_diar_engine)
-
-    if use_integrated_diarization:
-        try:
-            from server.core.audio_utils import load_audio
-            from server.core.stt.engine import TranscriptionResult
-
-            backend_label = getattr(backend, "backend_name", "integrated")
-            logger.info("OpenAI endpoint using %s single-pass diarization", backend_label)
-            preferred_rate = int(getattr(backend, "preferred_input_sample_rate_hz", 16000) or 16000)
-            audio_data, audio_sample_rate = await asyncio.to_thread(
-                load_audio, tmp_path, target_sample_rate=preferred_rate
-            )
-
-            diar_result = await asyncio.to_thread(
-                functools.partial(
-                    backend.transcribe_with_diarization,
-                    audio_data,
-                    audio_sample_rate=audio_sample_rate,
-                    language=language,
-                    task=task,
-                    beam_size=engine.beam_size,
-                    initial_prompt=initial_prompt or engine.initial_prompt,
-                    suppress_tokens=engine.suppress_tokens,
-                    vad_filter=engine.faster_whisper_vad_filter,
-                    num_speakers=expected_speakers,
-                )
-            )
-
-            return TranscriptionResult(
-                text=" ".join(seg.get("text", "") for seg in diar_result.segments).strip(),
-                segments=diar_result.segments,
-                words=diar_result.words,
-                language=diar_result.language,
-                language_probability=diar_result.language_probability,
-                duration=len(audio_data) / audio_sample_rate,
-                num_speakers=diar_result.num_speakers,
-            )
-        except TranscriptionCancelledError:
+        return dispatched.result
+    except (TranscriptionCancelledError, AudioDecodeError):
+        raise
+    except Exception:
+        if not diarization:
+            # Plain transcription failed — a genuine error the caller owns.
             raise
-        except Exception:
-            # Fail open — the spec's I/O matrix lists missing HF token as a
-            # fail-open case, and WhisperX raises ``ValueError`` for that
-            # specific misconfiguration. Treat every non-cancellation error
-            # as a fallback trigger. If the error was a genuine client-input
-            # problem (malformed language code, etc.), Path 3 (plain
-            # ``engine.transcribe_file``) will surface it again and the route's
-            # outer ``except ValueError`` handler still returns a 400.
-            logger.warning(
-                "OpenAI endpoint: integrated backend diarization failed — falling back to transcript without speakers",
-                exc_info=True,
-            )
-            diarization = False
-            # Fall through to the standard path below.
-
-    # --- Path 2: parallel / sequential diarize + merge ---
-    if diarization:
-        config = request.app.state.config
-        use_parallel = (
-            parallel_diarization
-            if parallel_diarization is not None
-            else resolve_parallel_diarization_default(config)
+        logger.warning(
+            "OpenAI endpoint: diarization orchestration failed — falling back to plain transcription",
+            exc_info=True,
         )
 
-        if use_parallel:
-            from server.core.parallel_diarize import transcribe_and_diarize as diarize_fn
-        else:
-            from server.core.parallel_diarize import transcribe_then_diarize as diarize_fn
-
-        try:
-            result, diar_result = await asyncio.to_thread(
-                functools.partial(
-                    diarize_fn,
-                    engine=engine,
-                    model_manager=model_manager,
-                    file_path=tmp_path,
-                    language=language,
-                    task=task,
-                    translation_target_language=translation_target_language,
-                    word_timestamps=need_word_timestamps,
-                    expected_speakers=expected_speakers,
-                    cancellation_check=model_manager.job_tracker.is_cancelled,
-                )
-            )
-        except TranscriptionCancelledError:
-            raise
-        except Exception:
-            logger.warning(
-                "OpenAI endpoint: diarization orchestration failed — falling back to plain transcription",
-                exc_info=True,
-            )
-            result, diar_result = None, None
-
-        if result is not None and diar_result is not None:
-            try:
-                from server.core.speaker_merge import build_speaker_segments
-
-                diar_dicts = [seg.to_dict() for seg in diar_result.segments]
-                merged_segments, merged_words, num_speakers = build_speaker_segments(
-                    result.words, diar_dicts
-                )
-                if merged_segments:
-                    result.segments = merged_segments
-                    result.words = merged_words
-                    result.num_speakers = num_speakers
-                elif not result.words and result.segments:
-                    from server.core.speaker_merge import build_speaker_segments_nowords
-
-                    fallback = build_speaker_segments_nowords(result.segments, diar_dicts)
-                    if fallback:
-                        speakers = {s["speaker"] for s in fallback} - {"UNKNOWN"}
-                        result.segments = fallback
-                        result.num_speakers = len(speakers)
-            except Exception:
-                logger.warning(
-                    "OpenAI endpoint: speaker merge failed — returning transcript without speakers",
-                    exc_info=True,
-                )
-
-        if result is not None:
-            return result
-        # diarize_fn failed entirely — fall through to plain transcription.
-
-    # --- Path 3: plain transcription ---
-    return await asyncio.to_thread(
-        functools.partial(
-            engine.transcribe_file,
-            tmp_path,
+    dispatched = await asyncio.to_thread(
+        lambda: transcribe_with_optional_diarization(
+            engine=engine,
+            model_manager=model_manager,
+            file_path=tmp_path,
+            enable_diarization=False,
             language=language,
             task=task,
             translation_target_language=translation_target_language,
-            word_timestamps=need_word_timestamps,
+            word_timestamps=word_timestamps,
             initial_prompt=initial_prompt,
+            cancellation_check=model_manager.job_tracker.is_cancelled,
         )
     )
+    return dispatched.result
 
 
 def _validate_expected_speakers(expected_speakers: int | None) -> JSONResponse | None:
