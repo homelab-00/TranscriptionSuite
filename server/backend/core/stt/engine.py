@@ -1180,7 +1180,15 @@ class AudioToTextRecorder:
         if self.recording_thread and self.recording_thread.is_alive():
             self.recording_thread.join(timeout=5)
 
-        # Cleanup backend
+        # Cleanup backend — actually unload owned backends instead of just
+        # dropping the reference: a dropped reference leaves the model's VRAM
+        # to the garbage collector and never returns cached allocator blocks
+        # to the driver. Shared backends belong to the caller (Live Mode).
+        if self._backend is not None and self._owns_backend:
+            try:
+                self._backend.unload()
+            except Exception:
+                logger.warning("Backend unload during shutdown failed", exc_info=True)
         self._backend = None
         self._model_loaded = False
 
