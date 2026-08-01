@@ -638,7 +638,7 @@ def _run_integrated_diarization_with_raise(
         def _should_not_be_called(*_a, **_kw):
             raise AssertionError(
                 "engine.transcribe_file must NOT be called — cancellation/"
-                "validation errors should propagate instead of falling through"
+                "decode errors should propagate instead of falling through"
             )
 
         engine_kwargs["transcribe_file"] = _should_not_be_called
@@ -663,12 +663,14 @@ def _run_integrated_diarization_with_raise(
 
 
 class TestIntegratedDiarizationFallback:
-    """The fallback `except Exception:` in the integrated diarization path must
-    NOT swallow cancellations or input-validation errors — those propagate to
-    the outer exception handlers (HTTP 499 / HTTP 400 + mark_failed).
+    """The integrated diarization path (via diarization_dispatch, GH-274) must
+    NOT swallow cancellations or audio-decode errors — those propagate to the
+    outer exception handlers (HTTP 499 / HTTP 400 + mark_failed).
 
-    Other failures (CUDA OOM, missing optional deps, etc.) still trigger the
-    graceful "fall back to standard transcription" degradation."""
+    Every other failure — including WhisperX's missing-HF-token ValueError —
+    degrades to plain transcription, per the documented contract ("diarization
+    hiccups never 5xx the call"; docs/README.md). A genuine client-input
+    ValueError still surfaces as 400 because the plain fallback re-raises it."""
 
     def test_cancellation_in_integrated_path_propagates_to_499(self, repo_mocks, monkeypatch):
         with pytest.raises(HTTPException) as exc:
@@ -677,12 +679,30 @@ class TestIntegratedDiarizationFallback:
         assert exc.value.status_code == 499
         repo_mocks.mark_failed.assert_called_once_with("job-abc", "Transcription cancelled by user")
 
-    def test_value_error_in_integrated_path_propagates_to_400(self, repo_mocks, monkeypatch):
+    def test_audio_decode_error_in_integrated_path_propagates_to_400(self, repo_mocks, monkeypatch):
+        from server.core.audio_utils import AudioDecodeError
+
         with pytest.raises(HTTPException) as exc:
-            _run_integrated_diarization_with_raise(monkeypatch, ValueError("corrupted audio"))
+            _run_integrated_diarization_with_raise(monkeypatch, AudioDecodeError("corrupted audio"))
 
         assert exc.value.status_code == 400
         repo_mocks.mark_failed.assert_called_once_with("job-abc", "corrupted audio")
+
+    def test_value_error_in_integrated_path_degrades_to_plain_transcript(
+        self, repo_mocks, monkeypatch
+    ):
+        """A missing HF token is a server misconfig, not a client error: the
+        user still gets their transcript (GH-274 — this used to 400)."""
+        fallback = _ResultStub(text="standard-path transcript", num_speakers=0)
+
+        result = _run_integrated_diarization_with_raise(
+            monkeypatch,
+            ValueError("needs a HuggingFace token"),
+            fallback_result=fallback,
+        )
+
+        assert result["text"] == "standard-path transcript"
+        assert repo_mocks.order == ["create_job", "save_result", "mark_delivered"]
 
     def test_generic_runtime_error_still_falls_through(self, repo_mocks, monkeypatch):
         """Preserve the existing degradation: a CUDA OOM or other non-cancel,
@@ -802,6 +822,72 @@ class TestIntegratedDiarizationFallback:
         call = end_job_calls[0]
         assert call["job_id"] == "import-job-abc"
         assert call["result"]["error"] == "Transcription cancelled by user"
+
+    def test_import_route_two_pass_oom_is_classified_in_the_job_payload(self, monkeypatch):
+        """GH-274: the import route now reaches the two-pass path through
+        diarization_dispatch, which passes on_diarization_error — a diarizer
+        OOM surfaces as an actionable reason + remedy instead of a generic
+        'unavailable'."""
+        from pathlib import Path
+
+        end_job_calls: list[dict] = []
+
+        class _FakeTracker:
+            def update_progress(self, current, total):
+                pass
+
+            def set_phase(self, phase):
+                pass
+
+            def is_cancelled(self):
+                return False
+
+            def end_job(self, job_id, result=None):
+                end_job_calls.append({"job_id": job_id, "result": result})
+
+        result_stub = _ResultStub(text="two-pass transcript", num_speakers=0)
+
+        def _fake_diarize(*_a, on_diarization_error=None, **_kw):
+            if on_diarization_error is not None:
+                on_diarization_error(RuntimeError("CUDA failed with error out of memory"))
+            return result_stub, None
+
+        monkeypatch.setattr("server.core.parallel_diarize.transcribe_and_diarize", _fake_diarize)
+
+        # _backend=None keeps the dispatch on the standard (two-pass) path.
+        engine = SimpleNamespace(_backend=None)
+        model_manager = SimpleNamespace(
+            transcription_engine=engine,
+            ensure_transcription_loaded=lambda: engine,
+            job_tracker=_FakeTracker(),
+            get_diarization_feature_status=lambda: {"reason": "unavailable"},
+            gpu_device_index=0,
+        )
+
+        transcription._run_file_import(
+            model_manager=model_manager,
+            tmp_path=Path("/tmp/nonexistent-for-test.wav"),
+            filename="test.wav",
+            language=None,
+            translation_enabled=False,
+            translation_target_language=None,
+            enable_diarization=True,
+            enable_word_timestamps=True,
+            expected_speakers=None,
+            parallel_diarization=True,
+            use_parallel_default=True,
+            multitrack=False,
+            job_id="import-job-oom",
+            event_loop=None,
+        )
+
+        assert len(end_job_calls) == 1
+        payload = end_job_calls[0]["result"]
+        assert payload["transcription"]["text"] == "two-pass transcript"
+        assert payload["diarization"]["requested"] is True
+        assert payload["diarization"]["performed"] is False
+        assert payload["diarization"]["reason"] == "out_of_memory"
+        assert payload["diarization"]["remedy"]
 
 
 # ── Diarization-outcome surfacing (GH #127 hardening) ───────────────────────
