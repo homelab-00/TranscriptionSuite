@@ -76,9 +76,11 @@ main_transcriber:
     beam_size: 5
 
     # Low VRAM mode: trade some speed for a smaller GPU footprint. Caps the
-    # transcription batch size at 4, which roughly halves the extra VRAM used
-    # while a job runs. Useful when sharing the GPU with other apps (e.g. a
-    # local LLM). Loaded models are not affected - they stay in VRAM either way.
+    # transcription batch size at 4 regardless of card size, which shrinks the
+    # extra VRAM a job needs at its peak. Useful when sharing the GPU with
+    # other apps (e.g. a local LLM). Cards with 8 GB or less already cap at 4,
+    # so this is a no-op there. Loaded models are not affected - they stay in
+    # VRAM either way.
     low_vram_mode: false
 
     # Optional initial prompt to guide transcription style/context.

@@ -21,7 +21,7 @@ import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from server.config import resolve_main_transcriber_model
+from server.config import resolve_low_vram_mode, resolve_main_transcriber_model
 
 # Type-only imports for hints (no runtime cost)
 if TYPE_CHECKING:
@@ -680,11 +680,13 @@ class ModelManager:
 
         The scaling is conservative — it only reduces, never increases, and
         logs when it does so.
+
+        When ``main_transcriber.low_vram_mode`` is on, this short-circuits to a
+        flat cap of 4 before the GPU-tier detection below ever runs, so the
+        tiered caps and the low-VRAM cap are never combined or compared.
         """
         if not self.gpu_available:
             return configured_batch_size
-
-        from server.config import resolve_low_vram_mode
 
         if resolve_low_vram_mode(self.config):
             if configured_batch_size > 4:

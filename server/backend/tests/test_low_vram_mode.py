@@ -53,6 +53,16 @@ class TestScaleBatchSizeLowVram:
         ):
             assert mm._scale_batch_size(2) == 2
 
+    def test_low_vram_leaves_exactly_4_unchanged(self):
+        # Pins the boundary at the cap itself: the comparison is a strict `>`,
+        # so a configured size of exactly 4 must pass through, not be re-capped.
+        mm = self._manager({"main_transcriber": {"low_vram_mode": True}})
+        with patch(
+            "server.core.audio_utils.get_gpu_memory_info",
+            return_value={"available": True, "total_gb": 24.0},
+        ):
+            assert mm._scale_batch_size(4) == 4
+
     def test_tiered_caps_unchanged_when_off(self):
         mm = self._manager({"main_transcriber": {"low_vram_mode": False}})
         with patch(
