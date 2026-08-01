@@ -196,9 +196,11 @@ All WS endpoints frame messages as JSON `{type, data, timestamp}`. Binary audio 
 
 ### `/ws` — Longform / File Transcription
 - **Auth:** client → `{type:"auth", data:{token}}`; server → `{type:"auth_ok", data:{client_name, capabilities}}`.
-- **Start:** client → `{type:"start", data:{language?, use_vad?, translation_enabled?, translation_target_language?, profile_id?}}`. Slot busy → `{type:"session_busy"}`; else → `{type:"session_started", data:{vad_enabled, job_id, ...}}`.
-- **Audio:** binary frames (metadata `{sample_rate}` + PCM); progress via `{type:"processing_progress"}` every 5 s.
+- **Start:** client → `{type:"start", data:{language?, use_vad?, translation_enabled?, translation_target_language?, profile_id?, auto_add_to_notebook?, diarization?, expected_speakers?}}`. Slot busy → `{type:"session_busy"}`; else → `{type:"session_started", data:{vad_enabled, job_id, ...}}`.
+  - `diarization` (bool, default `false`) attaches speaker labels to the finished transcript. `expected_speakers` (int 1-10, default `null` = auto-detect) pins the count; **any other value, including `true`, is treated as `null`** — a bool is an `int` in Python, so an unguarded range check would silently pin the run to one speaker.
+- **Audio:** binary frames (metadata `{sample_rate}` + PCM); progress via `{type:"processing_progress"}` every 5 s, carrying `{current, total, phase}` — `phase` is the job-tracker phase (e.g. `transcribing`, `diarizing`), so a diarization pass that reports no numeric progress is still visible.
 - **Stop:** client → `{type:"stop"}`. Result inline `{type:"final", ...}` when ≤1 MB, else `{type:"result_ready", data:{job_id}}` → client fetches `GET /api/transcribe/result/{job_id}`. **Persist-before-deliver:** result saved to DB before send; `mark_delivered` only after inline send.
+- **Diarization outcome:** when `diarization` was requested, the `final` payload (and the HTTP-fetched result) carries `{"diarization": {"requested": true, "performed": false, "reason": "out_of_memory", "remedy": "..."}}`. `reason` is one of `ready`, `token_missing`, `out_of_memory`, `unavailable`. **Diarization degrades rather than failing:** a transcript is always delivered, and when it succeeds the speaker labels are baked into `text` as `SPEAKER_NN:` paragraphs before the result is persisted.
 
 ### `/ws/live` — Live Mode
 - **Single session only** — a second connection gets an error + close.
