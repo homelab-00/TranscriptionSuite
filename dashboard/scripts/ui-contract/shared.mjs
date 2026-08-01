@@ -324,11 +324,105 @@ function extractCssBlock(styleText, selector) {
   return `${selector} ${block}`.trim();
 }
 
+/**
+ * Blank out comments so their prose cannot be read as source strings.
+ *
+ * The string scanner below pairs quote characters positionally: 1st with 2nd,
+ * 3rd with 4th, and so on. A lone apostrophe anywhere — including inside a
+ * comment, as in "the job's audio" — shifts that pairing for the entire rest
+ * of the file, so real className strings get read as the *gaps between*
+ * strings and silently vanish from the contract while unrelated fragments
+ * appear in their place. The failure surfaces as a closed-set CSS mismatch,
+ * which points nowhere near the comment that caused it.
+ *
+ * Walking the file with an explicit state machine (rather than a regex) is
+ * what makes this safe in both directions: comment markers inside a string
+ * literal such as 'https://example.com' stay put, and quotes inside a comment
+ * are discarded before they can be paired.
+ *
+ * Newlines inside comments are preserved so any line-based diagnostics that
+ * run downstream keep their line numbers.
+ */
+export function stripComments(content) {
+  const CODE = 0;
+  const LINE_COMMENT = 1;
+  const BLOCK_COMMENT = 2;
+  const STRING = 3;
+
+  let out = '';
+  let state = CODE;
+  let quote = '';
+  let i = 0;
+
+  while (i < content.length) {
+    const ch = content[i];
+    const next = content[i + 1];
+
+    if (state === CODE) {
+      if (ch === '/' && next === '/') {
+        state = LINE_COMMENT;
+        i += 2;
+        continue;
+      }
+      if (ch === '/' && next === '*') {
+        state = BLOCK_COMMENT;
+        i += 2;
+        continue;
+      }
+      if (ch === "'" || ch === '"' || ch === '`') {
+        state = STRING;
+        quote = ch;
+      }
+      out += ch;
+      i += 1;
+      continue;
+    }
+
+    if (state === LINE_COMMENT) {
+      if (ch === '\n') {
+        state = CODE;
+        out += ch;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (state === BLOCK_COMMENT) {
+      if (ch === '*' && next === '/') {
+        state = CODE;
+        i += 2;
+        continue;
+      }
+      if (ch === '\n') {
+        out += ch;
+      }
+      i += 1;
+      continue;
+    }
+
+    // Inside a string literal: copy verbatim, honouring escapes, until the
+    // matching close quote. Comment markers in here are data, not comments.
+    if (ch === '\\') {
+      out += ch + (next ?? '');
+      i += 2;
+      continue;
+    }
+    if (ch === quote) {
+      state = CODE;
+      quote = '';
+    }
+    out += ch;
+    i += 1;
+  }
+
+  return out;
+}
+
 function extractQuotedStrings(content) {
   const matches = [];
   const re = /(['"`])((?:\\.|(?!\1)[\s\S])*)\1/g;
   let match;
-  while ((match = re.exec(content)) !== null) {
+  while ((match = re.exec(stripComments(content))) !== null) {
     matches.push(match[2]);
   }
   return matches;
