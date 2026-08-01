@@ -112,13 +112,21 @@ Internal flow, mirroring the proven sequence in `transcription.py:349-529`:
 4. **Plain path** — `engine.transcribe_file()` when diarization is off, unavailable, or already failed.
 5. **Return** the result plus the outcome.
 
-**Error contract (load-bearing).** The helper degrades rather than fails: any diarization error yields `outcome.performed=False`, `outcome.reason` from `model_manager.get_diarization_feature_status()`, and the full transcript. Three exception types propagate unchanged, matching `transcription.py:435-451`:
+**Error contract (load-bearing).** The rule is about *which operation* raised, not which exception type:
 
-- `TranscriptionCancelledError` — user pressed Cancel; must reach the caller's cancellation handling, not be laundered into "diarization unavailable".
-- `ValueError` — input validation; the caller decides the status code.
-- `AudioDecodeError` — a corrupt file is not a diarization problem (this is the FINDING #1 carve-out already documented at `notebook.py:961-964`).
+- Anything raised by the **diarization attempt** is swallowed: `outcome.performed=False`, `outcome.reason` from `model_manager.get_diarization_feature_status()`, and the full transcript is still returned.
+- Anything raised by the **plain transcription** call propagates — that is a genuine transcription failure, and the caller owns it.
+- Two exceptions propagate from either operation:
+  - `TranscriptionCancelledError` — the user pressed Cancel; it must reach the caller's cancellation handling, not be laundered into "diarization unavailable".
+  - `AudioDecodeError` — a corrupt file is not a diarization problem, and plain transcription would fail on it too (the FINDING #1 carve-out at `notebook.py:961-964`).
 
-**OOM classification.** Before falling back to the generic `"unavailable"` reason, a swallowed diarization exception is passed through `as_gpu_oom()`. When it classifies, the outcome becomes `reason="out_of_memory"` with the error's `remedy` attached. This is precisely the #256 reporter's failure mode — a 4 GB RTX 500 Ada running concurrent STT + PyAnnote — and "Diarization ran out of VRAM; free some and retry, or switch to sequential mode" is a far better message than "unavailable". Note that OOM is deliberately excluded from the CUDA retry backoff (`diarization_engine.py::_is_transient_cuda_error`, line 53: `if "out of memory" in msg: return False`), so classification at this layer is the only place the condition can be made legible to the user.
+This deliberately diverges from `transcription.py:440`, which re-raises `ValueError` so the route can answer HTTP 400. The WebSocket path has no status code to choose and one overriding invariant — never lose a completed transcript — so a `ValueError` out of the diarizer (the "diarization requires a HuggingFace token" case) degrades instead, matching the background-worker behaviour at `notebook.py:965-972`.
+
+**Integrated-path fallback.** When a backend's own `transcribe_with_diarization()` fails, the helper falls back to **plain transcription**, not to the two-pass PyAnnote path. This follows `transcription.py:451` rather than `notebook.py:979-985`, which retries. Rationale: the dominant failure is a missing HF token, which the retry cannot fix either, and a user is waiting on a live recording — a second full pass buys nothing and costs minutes.
+
+**OOM classification.** Before falling back to the generic `"unavailable"` reason, a swallowed diarization exception is passed through `as_gpu_oom()`. When it classifies, the outcome becomes `reason="out_of_memory"` with the error's `remedy` attached.
+
+There is a wrinkle: on the standard path, `parallel_diarize` swallows the diarization exception itself and returns `(result, None)`, so no exception ever reaches the helper — exactly the path where a small GPU OOMs. This design therefore adds an optional `on_diarization_error: Callable[[BaseException], None] | None = None` keyword to both `parallel_diarize` entry points, invoked from their existing `except` blocks. Existing callers pass nothing and are byte-for-byte unaffected; the helper passes a collector so the error stays classifiable. This is precisely the #256 reporter's failure mode — a 4 GB RTX 500 Ada running concurrent STT + PyAnnote — and "Diarization ran out of VRAM; free some and retry, or switch to sequential mode" is a far better message than "unavailable". Note that OOM is deliberately excluded from the CUDA retry backoff (`diarization_engine.py::_is_transient_cuda_error`, line 53: `if "out of memory" in msg: return False`), so classification at this layer is the only place the condition can be made legible to the user.
 
 **Word timestamps.** Diarization forces `word_timestamps=True` internally regardless of the caller's flag, because speaker alignment needs them. This mirrors `need_word_timestamps = word_timestamps or diarization` at `transcription.py:455`.
 
