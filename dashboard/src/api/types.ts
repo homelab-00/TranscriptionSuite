@@ -15,17 +15,30 @@ export interface ReadyResponse {
   models?: Record<string, unknown>;
 }
 
+export interface GpuMemoryInfo {
+  available: boolean;
+  /** This process's PyTorch caching allocator only (excludes CTranslate2). */
+  allocated_gb?: number;
+  reserved_gb?: number;
+  total_gb?: number;
+  free_gb?: number;
+  /** Device-wide numbers from the driver (include all processes). */
+  device_free_gb?: number;
+  device_used_gb?: number;
+  error?: string;
+}
+
 export interface ServerStatus {
   status: string;
   version?: string;
   models?: Record<string, unknown> & {
     transcription?: { selected_model?: string; loaded?: boolean; disabled?: boolean };
+    gpu_memory?: GpuMemoryInfo | null;
   };
   features?: Record<string, unknown>;
   ready?: boolean;
   uptime?: number;
   gpu_available?: boolean;
-  gpu_memory?: string;
   gpu_error?: string;
   gpu_error_action?: string;
   /**
