@@ -229,6 +229,12 @@ describe('[P1] useTranscription', () => {
         // from false at the type level but noisier to reason about.
         partial: false,
         partialReason: null,
+        // GH-258: same normalisation rationale. A server that never ran
+        // diarization sends neither key, and `diarization: undefined` is what
+        // the skipped-diarization notice checks for, so it must stay undefined
+        // rather than becoming a fabricated "not performed" object.
+        numSpeakers: 0,
+        diarization: undefined,
       });
       expect(lastSocket.disconnect).toHaveBeenCalled();
     });
@@ -438,6 +444,9 @@ describe('[P1] useTranscription', () => {
       expect(result.current.processingProgress).toEqual({
         current: 2,
         total: 5,
+        // GH-258: the server forwards the job phase so a silent diarization
+        // pass is visible; null when it sent none.
+        phase: null,
       });
     });
 
