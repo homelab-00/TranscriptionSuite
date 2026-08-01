@@ -68,3 +68,33 @@ def test_bool_true_is_not_accepted_as_a_speaker_count():
     """`True` is an int in Python and 1 <= True <= 10 - it must still be rejected."""
     kwargs = _dispatch({"diarization": True, "expected_speakers": True})
     assert kwargs["expected_speakers"] is None
+
+
+def test_notebook_auto_add_forwards_speaker_segments(tmp_path):
+    """GH-258: a diarized recording must reach the Notebook WITH its speakers."""
+    segments = [{"speaker": "SPEAKER_00", "start": 0.0, "end": 1.0}]
+    result = MagicMock(text="SPEAKER_00: hi", segments=[{"text": "hi", "words": []}])
+
+    # Real files on purpose. `_free_path` loops `while candidate.exists()`, so
+    # patching Path.exists to a blanket True spins forever looking for a free
+    # name; a real (absent) destination terminates on the first candidate.
+    audio_path = tmp_path / "session.wav"
+    audio_path.write_bytes(b"\x00\x00")
+
+    with (
+        patch("server.config.get_config") as get_config,
+        patch("server.core.audio_utils.convert_to_mp3"),
+        patch("server.core.stt.backends.factory.detect_backend_type", return_value="whisperx"),
+        patch("server.database.database.save_longform_to_database", return_value=7) as save,
+    ):
+        get_config.return_value.get.return_value = str(tmp_path / "audio")
+        recording_id = ws._save_session_to_notebook(
+            audio_path=audio_path,
+            duration_seconds=12.0,
+            result=result,
+            model_name="large-v3",
+            diarization_segments=segments,
+        )
+
+    assert recording_id == 7
+    assert save.call_args.kwargs["diarization_segments"] == segments

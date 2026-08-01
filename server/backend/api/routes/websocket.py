@@ -102,6 +102,7 @@ def _save_session_to_notebook(
     duration_seconds: float,
     result: Any,
     model_name: str | None,
+    diarization_segments: list[dict[str, Any]] | None = None,
 ) -> int | None:
     """Promote a finished session recording into the Audio Notebook (GH #199).
 
@@ -115,6 +116,10 @@ def _save_session_to_notebook(
     would silently produce no entry) and returns None when ffmpeg is absent.
 
     Returns the new recording id, or None when no entry was written.
+
+    ``diarization_segments`` are the raw speaker turns; ``save_longform_to_database``
+    aligns them against ``word_timestamps`` itself (GH-258). Passing None keeps
+    the historical single-segment shape.
     """
     # Lazy imports: these pull in the audio/ML stack.
     from server.config import get_config
@@ -166,6 +171,7 @@ def _save_session_to_notebook(
         duration_seconds=duration_seconds,
         transcription_text=getattr(result, "text", "") or "",
         word_timestamps=word_timestamps,
+        diarization_segments=diarization_segments,
         transcription_backend=detect_backend_type(model_name or ""),
     )
 
@@ -600,6 +606,7 @@ class TranscriptionSession:
                         duration_seconds=result.duration,
                         result=result,
                         model_name=getattr(engine, "model_name", None),
+                        diarization_segments=dispatched.speaker_segments,
                     )
                     if recording_id:
                         logger.info("Saved session recording to notebook: id=%s", recording_id)
