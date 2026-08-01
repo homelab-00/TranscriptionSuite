@@ -487,6 +487,12 @@ cd server/backend
 
 Context strings must match the tests exactly. All five files already use lazy imports for audio_utils; use the absolute form (`from server.core.audio_utils import ...`) — the relative import inside `_run_retry` is a one-off, don't copy it.
 
+**Ordering rule (learned from review, applies to every site): the cleanup goes LAST in each `finally`, after every pre-existing statement.** Two reasons, both concrete:
+1. The async sites `await asyncio.to_thread(...)`. If the surrounding task is cancelled while inside that await, `CancelledError` propagates immediately and skips whatever follows in the same `finally`. At the retry and OpenAI sites the thing that follows is `job_tracker.end_job(...)` — and `TranscriptionJobTracker` is a single slot with no timeout and no admin force-release, so skipping it makes the server answer 429 "a transcription is already running" for every future job until restart.
+2. The argument expression `model_manager.gpu_device_index` is evaluated unguarded. If it ever raised, it would abort the `finally` before the pre-existing temp-file unlink.
+
+Putting the cleanup last makes both failure modes harmless: nothing important is sequenced behind it. The cost is that the job slot is released a fraction of a second before the cache clear runs, which is fine — `empty_cache()` is safe to call while another thread allocates.
+
 **(0) `model_manager.py`** — add next to the other properties (e.g. above `transcription_engine`, line ~714):
 
 ```python
@@ -552,7 +558,7 @@ Context strings must match the tests exactly. All five files already use lazy im
         # Cleanup temp file
 ```
 
-**(e) `openai_audio.py` both handlers' finally blocks (~465-468 and ~583-586)** — async; cleanup BEFORE `end_job` so the single job slot is still held while the cache clears (no race with the next job):
+**(e) `openai_audio.py` both handlers' finally blocks (~465-468 and ~583-586)** — async; cleanup goes LAST, after `end_job` and the temp-file unlink (see the ordering rule below):
 
 ```python
     finally:
@@ -627,6 +633,22 @@ def test_parallel_transcribe_failure_still_unloads_diarization_model(mock_load_a
         transcribe_and_diarize(engine=engine, model_manager=mm, file_path="/tmp/test.wav")
 
     mm.unload_diarization_model.assert_called_once()
+
+
+@patch("server.core.audio_utils.load_audio", side_effect=RuntimeError("bad audio"))
+def test_preload_failure_unloads_diarization_model(mock_load_audio):
+    """load_diarization_model may succeed before load_audio fails — release it."""
+    engine = MagicMock()
+    engine.transcribe_file.return_value = MagicMock(words=[], segments=[])
+    mm = MagicMock()
+    mm.diarization_engine = MagicMock()
+
+    result, diar = transcribe_and_diarize(
+        engine=engine, model_manager=mm, file_path="/tmp/test.wav"
+    )
+
+    assert diar is None
+    mm.unload_diarization_model.assert_called_once()
 ```
 
 - [ ] **Step 2: Run — expect FAIL** (`unload_diarization_model` never called):
@@ -635,33 +657,36 @@ def test_parallel_transcribe_failure_still_unloads_diarization_model(mock_load_a
 ../../build/.venv/bin/pytest tests/test_parallel_diarize.py -v --tb=short
 ```
 
-- [ ] **Step 3: Implement.** Two edits in `transcribe_and_diarize()`:
+- [ ] **Step 3: Implement.** ONE edit: wrap everything after the Phase 1 pre-load block in a single `try/finally`.
 
-(1) In the pre-load-failed fallback branch (the `if diar_engine is None or audio_data is None:` block), add a best-effort unload before transcribing — `load_diarization_model()` may have succeeded before `load_audio()` failed:
+The `try:` opens immediately after the pre-load `except Exception:` block (i.e. just before the `# If pre-load failed, just transcribe normally` comment at `parallel_diarize.py:163`) and the `finally:` closes at the end of the function. Everything in between — the transcription-only fallback branch, the Sortformer sequential hand-off, and the whole `ThreadPoolExecutor` block — gets re-indented one level and is otherwise unchanged.
 
-```python
-    if diar_engine is None or audio_data is None:
-        # Pre-load may have loaded the diarization model before load_audio
-        # failed — release it, we are about to run transcription-only.
-        model_manager.unload_diarization_model()
-        result = engine.transcribe_file(
-```
-
-(2) Wrap everything from the Sortformer check to the end of the function in `try/finally` (re-indent the existing code one level; the Sortformer branch's inner `transcribe_then_diarize` unloads on its own, so the outer finally is a harmless no-op there — `unload_diarization_model()` is idempotent):
+This single wrap covers all four exits (fallback return, Sortformer return, success return, exception) instead of duplicating the unload per branch. It also fixes the fallback path, where `load_diarization_model()` may have succeeded before `load_audio()` failed, leaving a loaded model behind while running transcription-only.
 
 ```python
+    # If pre-load failed, just transcribe normally
     try:
-        # Sortformer uses MLX/Metal — running it in parallel with MLX Whisper
-        # (also Metal) deadlocks the GPU.  Fall back to sequential mode.
-        from server.core.sortformer_engine import SortformerEngine
-        ...  # existing code through the end of the ThreadPoolExecutor block,
-        ...  # unchanged apart from one indentation level
+        if diar_engine is None or audio_data is None:
+            result = engine.transcribe_file(
+                ...  # unchanged, one level deeper
+            )
+            return result, None
+
+        ...  # Sortformer branch and ThreadPoolExecutor block, unchanged,
+        ...  # one level deeper
     finally:
         # Mirror transcribe_then_diarize: the diarization model is only
-        # needed during this job — release its VRAM instead of keeping it
-        # resident forever (it was never unloaded on this path before).
+        # needed during this job — release its VRAM instead of leaving it
+        # resident forever (this path never unloaded it before). Idempotent,
+        # so the Sortformer branch unloading on its own is fine.
         model_manager.unload_diarization_model()
 ```
+
+**Superseded by review (2026-08-01):** guard it instead — `try: model_manager.unload_diarization_model() except Exception: logger.warning(...)` — and apply the same guard to the sequential sibling's call at line 110. Reason: the new `finally` also covers the cancellation exit, and an unload failure would replace an in-flight `TranscriptionCancelledError`, which the routes catch specifically to return HTTP 499 instead of a 500. The original instruction was:
+
+~~Call `unload_diarization_model()` unguarded, exactly as the sequential sibling does at line 110 — it already swallows the failures it can (`AttributeError` on `unload()`, any error from `shutdown_mlx_thread`), and diverging from the sibling's shape here would be worse than the residual risk.~~
+
+Also add: a test proving a raising `unload_diarization_model` does not mask the original transcription exception, and a test pinning the real idempotency of `ModelManager.unload_diarization_model` (the outer `finally` depends on it, since the Sortformer branch already unloaded via the sibling). Do NOT assert `assert_called_once()` on a Sortformer-path mock — the mock is legitimately called twice there; the idempotency lives in the real implementation.
 
 - [ ] **Step 4: Run `test_parallel_diarize.py` — all PASS** (the pre-existing 12 tests use a MagicMock model_manager, so the new unload call cannot break them).
 
@@ -682,11 +707,13 @@ git commit -m "fix(server): unload the diarization model after parallel diarizat
 - Modify: `server/backend/core/stt/engine.py:1180-1184` (the "Cleanup backend" tail of `shutdown()`)
 - Test: `server/backend/tests/test_stt_engine_helpers.py` (this file already imports the engine module successfully — follow ITS import style; do not invent a new import path, the engine module needs the conftest-provided mocks)
 
-- [ ] **Step 1: Write the failing tests** — add to `test_stt_engine_helpers.py`, reusing that file's existing engine-module import (call it `engine_mod` below) plus `threading` and `MagicMock`:
+- [ ] **Step 1: Write the failing tests** — add to `test_stt_engine_helpers.py`. Verified in that file: `AudioToTextRecorder` is imported directly (no module alias), `MagicMock` is already imported, `object.__new__(AudioToTextRecorder)` is the established fixture pattern (see `_bare_recorder` at line 177), and `threading` is imported locally inside such helpers rather than at module top.
 
 ```python
 def _make_recorder_for_shutdown(owns_backend: bool):
-    rec = object.__new__(engine_mod.AudioToTextRecorder)
+    import threading
+
+    rec = object.__new__(AudioToTextRecorder)
     rec.instance_name = "test"
     rec.is_shut_down = False
     rec.is_running = True
