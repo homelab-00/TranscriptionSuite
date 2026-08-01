@@ -590,8 +590,14 @@ class WhisperXBackend(STTBackend):
                     self._align_language,
                     lang,
                 )
-                del self._align_model
-                del self._align_metadata
+                # Assign None rather than `del`: load_align_model() below can
+                # raise (a CUDA OOM here is routine, since the transcription
+                # model is still resident), and a deleted attribute makes the
+                # `is None` guard above raise AttributeError on every later
+                # call — permanently disabling alignment for the process.
+                self._align_model = None
+                self._align_metadata = None
+                self._align_language = None
                 gc.collect()
                 clear_gpu_cache()
             self._align_model, self._align_metadata = whisperx.load_align_model(
