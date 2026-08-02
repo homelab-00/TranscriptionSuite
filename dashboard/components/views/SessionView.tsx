@@ -1333,7 +1333,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [recoveryJobs, setRecoveryJobs] = useState<
     Array<{ job_id: string; completed_at: string; text_preview: string }>
   >([]);
-  useEffect(() => {
+  const refreshRecoveryJobs = useCallback(() => {
     // Absolute base URL via apiClient — a relative fetch resolves to the
     // packaged renderer file:// origin and never reaches the backend (GH-202).
     apiClient
@@ -1344,6 +1344,31 @@ export const SessionView: React.FC<SessionViewProps> = ({
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    refreshRecoveryJobs();
+  }, [refreshRecoveryJobs]);
+
+  // GH-239: a mid-recording drop leaves the server transcribing the audio it
+  // already received, and that salvage can outlast the poll the hook runs while
+  // waiting for it. Once the poll gives up, re-check: the result may have landed
+  // in the database in the meantime, with nothing else on screen pointing at it.
+  useEffect(() => {
+    if (transcription.status === 'error') refreshRecoveryJobs();
+  }, [transcription.status, refreshRecoveryJobs]);
+
+  // Same reasoning for the longer absence: a mount-only fetch cannot see a
+  // result that arrives while the user is elsewhere, and this view can stay
+  // mounted for days.
+  useEffect(() => {
+    window.addEventListener('focus', refreshRecoveryJobs);
+    return () => window.removeEventListener('focus', refreshRecoveryJobs);
+  }, [refreshRecoveryJobs]);
+
+  // mark_delivered is best-effort, so the job whose transcript is already on
+  // screen can still come back from /recent. Offering to recover it there reads
+  // as a second, missing result.
+  const visibleRecoveryJobs = recoveryJobs.filter((job) => job.job_id !== transcription.jobId);
 
   // Scroll State
   const leftScrollRef = useRef<HTMLDivElement>(null);
@@ -1500,9 +1525,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
       </div>
 
       {/* Recovery Notifications */}
-      {recoveryJobs.length > 0 && (
+      {visibleRecoveryJobs.length > 0 && (
         <div className="mb-4 flex flex-none flex-col gap-2">
-          {recoveryJobs.map((job) => {
+          {visibleRecoveryJobs.map((job) => {
             const relativeTime = (() => {
               try {
                 const completed = new Date(job.completed_at);

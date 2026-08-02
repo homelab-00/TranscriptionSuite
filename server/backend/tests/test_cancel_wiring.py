@@ -76,6 +76,33 @@ def test_cancellation_check_consults_the_job_tracker(module: str) -> None:
         )
 
 
+def test_websocket_disconnect_signal_is_muted_for_a_salvage() -> None:
+    """GH-239: the disconnect term must stay, and must stay salvage-aware.
+
+    ``_client_disconnected`` reads like dead code on this path, and today it is:
+    the receive loop that sets it is blocked inside ``handle_client_message``
+    for the whole of ``process_transcription``, so it cannot flip mid-run. That
+    is a property of the loop being synchronous, not a guarantee - ``preview``
+    already runs as a background task, and any future change that stops the
+    loop blocking makes this signal live again.
+
+    So it is kept deliberately, and this pins BOTH halves of the expression:
+    remove the disconnect term and a future non-blocking loop silently loses its
+    abort signal; remove the salvage mute and the GH-239 salvage cancels itself
+    on its first poll, re-losing exactly the audio it exists to rescue.
+    """
+    for call in _transcribe_calls(ROUTES / "websocket.py"):
+        src = _cancellation_source(call) or ""
+        assert "_client_disconnected" in src, (
+            f"cancellation_check={src!r} dropped the disconnect signal - see this "
+            "test's docstring before deleting it as unused"
+        )
+        assert "_salvage_reason" in src, (
+            f"cancellation_check={src!r} no longer mutes the disconnect signal "
+            "during a salvage, so the GH-239 salvage will cancel itself"
+        )
+
+
 def test_diarization_dispatch_forwards_cancellation_to_the_engine() -> None:
     """The GH-258 wrapper is only as cancellable as what it passes down.
 
