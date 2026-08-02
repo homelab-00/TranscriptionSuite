@@ -2034,6 +2034,9 @@ def test_is_transient_network_failure_matches_other_transport_faults() -> None:
         "error decoding response body: connection closed before message completed",
         "Temporary failure in name resolution",
         "503 Service Unavailable",
+        # Rate limiting is exactly the transient index/CDN hiccup this feature
+        # exists for: ten concurrent multi-hundred-MB downloads can trip it.
+        "HTTP status client error (429 Too Many Requests) for url (https://pypi.org/...)",
     ]
     for text in samples:
         assert module.is_transient_network_failure(text) is True, text
@@ -2141,10 +2144,18 @@ def test_sync_retry_progress_event_uses_the_documented_protocol(
     )
 
     assert len(events) == 2
-    for args, kwargs in events:
+    for attempt_no, (args, kwargs) in enumerate(events, start=1):
         assert args[0] == "bootstrap-retry"
-        assert args[1] in {"download", "server", "warning", "info"}
-        assert kwargs["status"] in {"active", "complete", "error"}
+        # Exact values, not just protocol membership: the mapper derives the
+        # rendered state from `severity` (status alone leaves the item looking
+        # like a completed green entry), and an in-progress retry must be an
+        # active warning.
+        assert args[1] == "warning"
+        assert kwargs["status"] == "active"
+        assert kwargs["severity"] == "warning"
+        # Same attempt/total fraction as the container log, so an operator
+        # cross-referencing the two surfaces sees one consistent count.
+        assert f"(attempt {attempt_no}/3)" in args[2]
 
 
 def test_sync_retries_are_exhausted_then_raises(
@@ -2381,6 +2392,104 @@ def test_raise_dependency_sync_failure_emits_network_hint(
     assert any(kwargs.get("status") == "error" for _, kwargs in events)
     # A network failure must not be mislabeled as a certificate problem.
     assert "EXTRA_CA_CERTS_DIR" not in hint
+
+
+def test_is_transient_network_exception_excludes_subprocess_timeout() -> None:
+    """A whole-sync TimeoutExpired must never be treated as a network blip.
+
+    str(TimeoutExpired) renders as "Command '[...]' timed out after N seconds",
+    which satisfies the "timed out" transient marker even though the retry loop
+    deliberately refuses to retry this exception. The exception-aware wrapper is
+    what every post-retry decision point must use.
+    """
+    module = _load_bootstrap_module()
+    timeout_exc = subprocess.TimeoutExpired(cmd=["uv", "sync"], timeout=10800)
+    assert "timed out" in str(timeout_exc)
+    assert module.is_transient_network_failure(str(timeout_exc)) is True
+    assert module.is_transient_network_exception(timeout_exc) is False
+    # The wrapper stays equivalent to the text classifier for real network faults.
+    assert module.is_transient_network_exception(RuntimeError(_REPORTED_DOWNLOAD_FAILURE)) is True
+
+
+def test_delta_sync_subprocess_timeout_still_escalates_to_rebuild(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A whole-sync timeout in delta-sync keeps the pre-retry escalation path.
+
+    Only *network* failures may keep the venv (see
+    test_delta_sync_network_failure_keeps_existing_venv); a sync that blew its
+    subprocess budget proves nothing about the network, so it must still fall
+    back to the venv-wiping rebuild-sync exactly as before the retry feature.
+    """
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            "fingerprint": "old-fingerprint",
+            "python_abi": "abi",
+            "arch": "arch",
+            "structural_fingerprint": "struct-fp",
+            "lock_fingerprint": "old-lock-fp",
+        },
+    )
+    _patch_fingerprint_context(module, monkeypatch)
+    monkeypatch.setattr(module, "_sleep_between_sync_attempts", lambda _s: None)
+
+    rmtree_calls: list[Path] = []
+    calls = 0
+
+    def fake_sync(**_: object) -> None:
+        nonlocal calls
+        calls += 1
+        raise subprocess.TimeoutExpired(cmd=["uv", "sync"], timeout=10800)
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+    monkeypatch.setattr(module.shutil, "rmtree", lambda p, **_: rmtree_calls.append(Path(p)))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        module.ensure_runtime_dependencies(
+            runtime_dir=runtime_dir,
+            cache_dir=cache_dir,
+            timeout_seconds=300,
+            log_changes=False,
+        )
+
+    assert "Dependency sync failed for mode=rebuild-sync" in str(excinfo.value)
+    assert rmtree_calls == [runtime_dir / ".venv"], "timeout must still wipe and rebuild"
+    # One delta attempt plus one rebuild attempt; TimeoutExpired is never retried.
+    assert calls == 2
+
+
+def test_raise_dependency_sync_failure_no_network_hint_for_subprocess_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The network remedy must not fire for a whole-sync timeout.
+
+    The hint claims the download "did not recover after the automatic retries";
+    for TimeoutExpired no retry was ever attempted, so showing it would send the
+    operator down the wrong path.
+    """
+    module = _load_bootstrap_module()
+    logs: list[str] = []
+    events: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(module, "log", lambda msg: logs.append(msg))
+    monkeypatch.setattr(module, "emit_event", lambda *a, **k: events.append((a, k)))
+
+    with pytest.raises(RuntimeError):
+        module._raise_dependency_sync_failure(
+            subprocess.TimeoutExpired(cmd=["uv", "sync"], timeout=10800), "rebuild-sync"
+        )
+
+    hint = "\n".join(logs)
+    assert "start the server again" not in hint
+    assert events == []
 
 
 def test_pyproject_declares_vibevoice_dependency_metadata() -> None:

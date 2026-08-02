@@ -207,11 +207,13 @@ Failed to download `nvidia-cudnn-cu12==9.10.2.21`
   operation timed out
 ```
 
-The bootstrap now handles this itself: each request gets a 900s budget
-(`UV_HTTP_TIMEOUT`) instead of uv's 30s default, and the whole sync is retried up
-to 3 times with a 30s/60s backoff. TLS-certificate failures, a full disk and
-unsatisfiable requirements are *not* retried — those never succeed on a second
-attempt.
+The bootstrap now handles this itself: a stalled transfer gets 900s between
+reads (`UV_HTTP_TIMEOUT`, uv's read timeout) instead of uv's 30s default, and
+the whole sync is retried up to 3 times with a 30s/60s backoff. TLS-certificate
+failures, a full disk and unsatisfiable requirements are *not* retried — those
+never succeed on a second attempt. The flip side of the larger timeout: a
+connection that dies silently can take up to 15 minutes per request to be
+detected, so on a genuinely dead link the final error takes longer to appear.
 
 If it still fails after the retries:
 

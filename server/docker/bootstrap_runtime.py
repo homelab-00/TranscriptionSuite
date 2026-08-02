@@ -37,8 +37,9 @@ DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 BOOTSTRAP_SCHEMA_VERSION = 2
 _BOOTSTRAP_START = time.perf_counter()
 
-# Per-HTTP-request timeout handed to uv (seconds). uv defaults to 30s, which is
-# far too tight for the multi-hundred-MB CUDA wheels this project installs.
+# uv read-timeout (seconds): how long a download may stall between reads before
+# uv abandons it. uv's 30s default is too twitchy for a congested link fetching
+# the multi-hundred-MB CUDA wheels this project installs.
 DEFAULT_UV_HTTP_TIMEOUT_SECONDS = 900
 # Total `uv sync` attempts (1 initial + retries) when the failure looks like a
 # transient network fault. Overridable via BOOTSTRAP_SYNC_ATTEMPTS.
@@ -429,12 +430,14 @@ def build_uv_sync_env(venv_dir: Path, cache_dir: Path) -> dict[str, str]:
     env["UV_PROJECT_ENVIRONMENT"] = str(venv_dir)
     env["UV_CACHE_DIR"] = str(cache_dir)
     env["UV_PYTHON"] = "/usr/bin/python3.13"
-    # The CUDA wheel set is ~4GB and individual wheels reach 674MB
-    # (nvidia-cudnn-cu12), all fetched concurrently. uv's default 30s per-request
-    # timeout is sized for ordinary PyPI packages and trips as soon as a slow or
-    # congested link stalls one of those transfers, aborting the whole sync with
-    # "operation timed out". Give each request a much larger budget; the sync as
-    # a whole is still bounded by run_dependency_sync's subprocess timeout.
+    # UV_HTTP_TIMEOUT is uv's *read* timeout: how long a transfer may stall
+    # between reads before uv abandons the request (connection establishment is
+    # governed separately by UV_HTTP_CONNECT_TIMEOUT). The 30s default is fine
+    # for ordinary PyPI packages, but this project pulls ~4GB of CUDA wheels
+    # (674MB for nvidia-cudnn-cu12 alone) concurrently, where a brief stall on a
+    # slow or congested link is routine and aborts the whole sync with
+    # "operation timed out". Give a stalled read a much larger budget; the sync
+    # as a whole is still bounded by run_dependency_sync's subprocess timeout.
     # An explicit UV_HTTP_TIMEOUT from the user always wins.
     env.setdefault("UV_HTTP_TIMEOUT", str(DEFAULT_UV_HTTP_TIMEOUT_SECONDS))
     # GH #125: on TLS-intercepting networks (corporate proxy / antivirus HTTPS
@@ -601,6 +604,9 @@ _TRANSIENT_NETWORK_MARKERS: tuple[str, ...] = (
     "502 bad gateway",
     "503 service unavailable",
     "504 gateway timeout",
+    # Concurrent multi-hundred-MB downloads are exactly the burst pattern that
+    # trips CDN/PyPI rate limiting; a 429 clears on its own, so retry it.
+    "429 too many requests",
 )
 
 # Failures that also mention transport-sounding words but will never succeed on a
@@ -627,6 +633,20 @@ def is_transient_network_failure(error_text: str) -> bool:
     if any(marker in lowered for marker in _PERMANENT_FAILURE_MARKERS):
         return False
     return any(marker in lowered for marker in _TRANSIENT_NETWORK_MARKERS)
+
+
+def is_transient_network_exception(exc: Exception) -> bool:
+    """Exception-aware wrapper over :func:`is_transient_network_failure`.
+
+    ``str(subprocess.TimeoutExpired)`` renders as "Command '[...]' timed out
+    after N seconds", which satisfies the "timed out" transient marker even
+    though a whole-sync timeout says nothing about the network. Every decision
+    made *after* the retry loop (keep-the-venv, the network hint) must go
+    through this wrapper so a timeout is never dressed up as a network fault.
+    """
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return False
+    return is_transient_network_failure(str(exc))
 
 
 def _sleep_between_sync_attempts(seconds: int) -> None:
@@ -694,13 +714,17 @@ def run_dependency_sync_with_retries(
             )
             # Same id on every retry: the events protocol treats a repeated id as
             # an update, so the dashboard shows one line that counts up rather
-            # than a stack of scary-looking failures.
+            # than a stack of scary-looking failures. severity="warning" is what
+            # the dashboard mapper keys the rendered state off for this category
+            # (status alone would render as a completed green item), and the
+            # attempt fraction matches the log line above so both surfaces agree.
             emit_event(
                 "bootstrap-retry",
                 "warning",
-                f"Network error while downloading dependencies; "
-                f"retrying ({attempt}/{total_attempts - 1}) in {delay}s",
+                f"Network error while downloading dependencies "
+                f"(attempt {attempt}/{total_attempts}); retrying in {delay}s",
                 status="active",
+                severity="warning",
                 phase="bootstrap",
             )
             _sleep_between_sync_attempts(delay)
@@ -717,7 +741,7 @@ _NETWORK_FAILURE_HINT = (
     "BOOTSTRAP_PRUNE_UV_CACHE=true while you are fighting this, it throws that progress away. "
     "(2) If you are on Wi-Fi or a VPN, switch to a wired connection or drop the VPN for the "
     "first start. "
-    "(3) On a slow link, raise the per-download budget and the retry count: "
+    "(3) On a slow link, allow longer stalls and more retries: "
     "UV_HTTP_TIMEOUT=1800 and BOOTSTRAP_SYNC_ATTEMPTS=6. "
     "(4) If your machine has no NVIDIA GPU, use the CPU build instead — it skips the CUDA "
     "wheels entirely and downloads a fraction of the data."
@@ -741,7 +765,7 @@ def _raise_dependency_sync_failure(exc: Exception, final_sync_mode: str) -> None
             status="error",
             phase="bootstrap",
         )
-    elif is_transient_network_failure(error_text):
+    elif is_transient_network_exception(exc):
         log(_NETWORK_FAILURE_HINT)
         emit_event(
             "bootstrap-network",
@@ -969,9 +993,10 @@ def ensure_runtime_dependencies(
                 # A network fault says nothing about the venv's shape, and the
                 # rebuild path would delete a working venv only to re-download
                 # everything over the same broken link. Keep the venv and fail;
-                # the next boot retries the (much cheaper) delta-sync.
-                if is_transient_network_failure(str(delta_exc)):
-                    diagnostics["network_failure"] = True
+                # the next boot retries the (much cheaper) delta-sync. The
+                # exception-aware check keeps a whole-sync TimeoutExpired on the
+                # escalation path below, same as before the retry feature.
+                if is_transient_network_exception(delta_exc):
                     log("Delta-sync failed on a network error; keeping the existing venv")
                     _raise_dependency_sync_failure(delta_exc, final_sync_mode)
                 log("Delta-sync failed, falling back to rebuild-sync")
