@@ -49,7 +49,9 @@ def _cancellation_source(call: ast.Call) -> str | None:
     return None
 
 
-@pytest.mark.parametrize("module", ["websocket.py", "notebook.py", "transcription.py"])
+@pytest.mark.parametrize(
+    "module", ["websocket.py", "notebook.py", "transcription.py", "openai_audio.py"]
+)
 def test_every_transcribe_call_passes_cancellation_check(module: str) -> None:
     calls = _transcribe_calls(ROUTES / module)
     assert calls, f"expected at least one transcribe entry-point call in {module}"
@@ -61,7 +63,9 @@ def test_every_transcribe_call_passes_cancellation_check(module: str) -> None:
         )
 
 
-@pytest.mark.parametrize("module", ["websocket.py", "notebook.py", "transcription.py"])
+@pytest.mark.parametrize(
+    "module", ["websocket.py", "notebook.py", "transcription.py", "openai_audio.py"]
+)
 def test_cancellation_check_consults_the_job_tracker(module: str) -> None:
     """POST /cancel flips job_tracker._cancelled. Every path must read it."""
     for call in _transcribe_calls(ROUTES / module):

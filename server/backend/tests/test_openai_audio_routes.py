@@ -75,6 +75,7 @@ def openai_client():
         job_tracker=SimpleNamespace(
             try_start_job=lambda client_name: (True, "job-1", None),
             end_job=lambda job_id: None,
+            is_cancelled=lambda: False,
         ),
     )
     app.state.config = SimpleNamespace(
@@ -262,6 +263,7 @@ def test_no_model_loaded_returns_503():
         job_tracker=SimpleNamespace(
             try_start_job=lambda cn: (True, "j", None),
             end_job=lambda j: None,
+            is_cancelled=lambda: False,
         ),
     )
     app.state.config = SimpleNamespace(
@@ -289,6 +291,7 @@ def test_job_busy_returns_429():
         job_tracker=SimpleNamespace(
             try_start_job=lambda cn: (False, None, "other-user"),
             end_job=lambda j: None,
+            is_cancelled=lambda: False,
         ),
     )
     app.state.config = SimpleNamespace(
@@ -328,6 +331,15 @@ def test_openai_error_shape(openai_client):
 @pytest.mark.openai_api
 class TestOpenaiEdgeCases:
     """P3-OAPI-001: Edge cases for OpenAI-compatible API format."""
+
+    def test_prompt_reaches_the_engine_as_initial_prompt(self, openai_client):
+        """The OpenAI ``prompt`` field must survive the diarization_dispatch
+        migration (GH-274) — it flows through as ``initial_prompt``."""
+        client, engine = openai_client
+        engine.transcribe_file.return_value = _make_result()
+        resp = _upload(client, prompt="glossary: CUDA, VRAM")
+        assert resp.status_code == 200
+        assert engine.transcribe_file.call_args.kwargs["initial_prompt"] == "glossary: CUDA, VRAM"
 
     def test_empty_transcription_json(self, openai_client):
         """Empty transcription text returns valid JSON with empty string."""
@@ -513,6 +525,7 @@ class TestEnsureTranscriptionLoadedIntegration:
             job_tracker=SimpleNamespace(
                 try_start_job=lambda cn: try_start_job_result,
                 end_job=end_job,
+                is_cancelled=lambda: False,
             ),
         )
         app.state.config = SimpleNamespace(
@@ -934,6 +947,52 @@ class TestDiarizationOverOpenAI:
         # No segments carry a `speaker` field because diarization never ran successfully.
         assert all("speaker" not in seg for seg in body["segments"])
         assert any("diarization" in rec.message.lower() for rec in caplog.records)
+
+    def test_cancellation_propagates_without_a_plain_retry(self, diarization_client):
+        """GH-274: a user cancel must NOT be swallowed into the plain-retry
+        fallback — it propagates and the route answers the cancel error."""
+        from server.core.model_manager import TranscriptionCancelledError
+
+        client, engine = diarization_client
+
+        def _cancel(**kwargs):
+            raise TranscriptionCancelledError("cancelled")
+
+        def _no_retry(*_a, **_kw):
+            raise AssertionError("plain retry must not run after a cancellation")
+
+        with (
+            patch("server.core.parallel_diarize.transcribe_and_diarize", side_effect=_cancel),
+            patch("server.core.parallel_diarize.transcribe_then_diarize", side_effect=_cancel),
+        ):
+            engine.transcribe_file.side_effect = _no_retry
+            resp = _upload(client, diarization="true")
+
+        assert resp.status_code == 500
+        assert "cancelled" in resp.json()["error"]["message"].lower()
+
+    def test_audio_decode_error_propagates_without_a_plain_retry(self, diarization_client):
+        """GH-274: a corrupt file fails the plain path too — it propagates to
+        the 400 handler instead of triggering a doomed retry."""
+        from server.core.audio_utils import AudioDecodeError
+
+        client, engine = diarization_client
+
+        def _corrupt(**kwargs):
+            raise AudioDecodeError("corrupt upload")
+
+        def _no_retry(*_a, **_kw):
+            raise AssertionError("plain retry must not run after a decode error")
+
+        with (
+            patch("server.core.parallel_diarize.transcribe_and_diarize", side_effect=_corrupt),
+            patch("server.core.parallel_diarize.transcribe_then_diarize", side_effect=_corrupt),
+        ):
+            engine.transcribe_file.side_effect = _no_retry
+            resp = _upload(client, diarization="true")
+
+        assert resp.status_code == 400
+        assert resp.json()["error"]["type"] == "invalid_request_error"
 
     def test_diarized_json_without_diarization_flag(self, diarization_client):
         """response_format=diarized_json without diarization=true returns num_speakers=0."""

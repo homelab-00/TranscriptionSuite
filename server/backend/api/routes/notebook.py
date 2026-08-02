@@ -861,7 +861,7 @@ def _run_transcription(
     in model_manager.job_tracker so that clients can poll for completion.
     """
     # Lazy import to avoid loading torch at module import time
-    from server.core.audio_utils import AudioDecodeError, convert_to_mp3, load_audio
+    from server.core.audio_utils import convert_to_mp3
 
     try:
         # Progress callback to update job tracker with chunk progress
@@ -874,171 +874,47 @@ def _run_transcription(
         # (Issue #76).
         engine = model_manager.ensure_transcription_loaded()
 
-        # Resolve the diarization engine (funasr CAM++ single-pass vs pyannote
-        # two-pass) only when diarization is requested. For SenseVoice this honors
-        # the server-wide engine setting (config diarization.sensevoice_engine);
-        # every other integrated backend (WhisperX, VibeVoice) keeps its
-        # single-pass path unconditionally. This is a threaded worker with no
-        # request object, so the config default comes from the get_config()
-        # singleton rather than app.state.config.
-        backend = engine._backend
-        use_integrated_diarization = False
+        # GH-274: the whole diarization decision tree (integrated single-pass,
+        # two-pass parallel/sequential, plain transcription, speaker merge,
+        # failure classification) lives in core/diarization_dispatch. This is a
+        # threaded worker with no request object, so the SenseVoice engine
+        # default comes from the get_config() singleton — resolved only when
+        # diarization is requested.
+        sensevoice_engine_default = "funasr"
         if enable_diarization:
-            from server.config import resolve_sensevoice_diarization_engine
-            from server.core.stt.backends.base import use_integrated_diarization_for
-
             app_config = get_config()
-            sensevoice_engine_default = (
-                app_config.get("diarization", "sensevoice_engine", default="funasr")
-                if app_config is not None
-                else "funasr"
-            )
-            resolved_diar_engine = resolve_sensevoice_diarization_engine(
-                getattr(engine, "model_name", None),
-                None,
-                sensevoice_engine_default,
-                funasr_diar_available=getattr(backend, "_diarization_loaded", False),
-            )
-            use_integrated_diarization = use_integrated_diarization_for(
-                backend, resolved_diar_engine
-            )
-
-        # Run diarization if enabled
-        diarization_segments = None
-        diarization_outcome: dict[str, Any] = {
-            "requested": bool(enable_diarization),
-            "performed": False,
-            "reason": None,
-        }
-
-        if use_integrated_diarization:
-            # --- Integrated backend single-pass path (e.g. WhisperX, VibeVoice) ---
-            try:
-                backend_label = getattr(backend, "backend_name", "integrated")
-                logger.info(
-                    "Using %s single-pass diarization for: %s",
-                    backend_label,
-                    filename,
-                )
-                preferred_rate = int(
-                    getattr(backend, "preferred_input_sample_rate_hz", 16000) or 16000
-                )
-                audio_data, audio_sample_rate = load_audio(
-                    str(tmp_path), target_sample_rate=preferred_rate
+            if app_config is not None:
+                sensevoice_engine_default = app_config.get(
+                    "diarization", "sensevoice_engine", default="funasr"
                 )
 
-                diar_result = backend.transcribe_with_diarization(
-                    audio_data,
-                    audio_sample_rate=audio_sample_rate,
-                    language=language,
-                    task="translate" if translation_enabled else "transcribe",
-                    beam_size=engine.beam_size,
-                    num_speakers=expected_speakers,
-                    progress_callback=on_progress,
-                )
+        from server.core.diarization_dispatch import transcribe_with_optional_diarization
 
-                from server.core.stt.engine import TranscriptionResult
-
-                result = TranscriptionResult(
-                    text=" ".join(seg.get("text", "") for seg in diar_result.segments).strip(),
-                    segments=diar_result.segments,
-                    words=diar_result.words,
-                    language=diar_result.language,
-                    language_probability=diar_result.language_probability,
-                    duration=len(audio_data) / audio_sample_rate,
-                    num_speakers=diar_result.num_speakers,
-                )
-
-                diarization_segments = diar_result.segments
-                diarization_outcome["performed"] = True
-                diarization_outcome["reason"] = "ready"
-                logger.info(
-                    "%s diarization complete: %s speakers found",
-                    backend_label,
-                    diar_result.num_speakers,
-                )
-
-            except AudioDecodeError:
-                # A corrupt/undecodable file is not a diarization-token problem —
-                # re-raise the clean error rather than mislabeling it (FINDING #1).
-                raise
-            except ValueError as e:
-                logger.error(f"Diarization requires HuggingFace token: {e}")
-                logger.error("Set HUGGINGFACE_TOKEN env var when starting docker compose")
-                diarization_outcome["reason"] = model_manager.get_diarization_feature_status().get(
-                    "reason", "token_missing"
-                )
-                # Fall back to transcription without diarization
-                use_integrated_diarization = False
-            except Exception as e:
-                logger.error("Integrated backend diarization failed (continuing without): %s", e)
-                diarization_outcome["reason"] = "unavailable"
-                # Fall back to transcription without diarization
-                use_integrated_diarization = False
-
-        if not use_integrated_diarization:
-            # --- Standard path (NeMo backends or WhisperX fallback) ---
-            # Force word timestamps if diarization is enabled
-            # (needed for proper text-to-speaker alignment, even if user doesn't want to save words)
-            need_word_timestamps = enable_word_timestamps or enable_diarization
-
-            if enable_diarization and not diarization_outcome["performed"]:
-                # Resolve parallel vs sequential diarization
-                use_parallel = (
-                    parallel_diarization
-                    if parallel_diarization is not None
-                    else use_parallel_default
-                )
-
-                if use_parallel:
-                    from server.core.parallel_diarize import transcribe_and_diarize
-
-                    diarize_fn = transcribe_and_diarize
-                else:
-                    from server.core.parallel_diarize import transcribe_then_diarize
-
-                    diarize_fn = transcribe_then_diarize
-
-                result, diar_result = diarize_fn(
-                    engine=engine,
-                    model_manager=model_manager,
-                    file_path=str(tmp_path),
-                    language=language,
-                    task="translate" if translation_enabled else "transcribe",
-                    translation_target_language=(
-                        translation_target_language if translation_enabled else None
-                    ),
-                    word_timestamps=need_word_timestamps,
-                    expected_speakers=expected_speakers,
-                    progress_callback=on_progress,
-                )
-
-                if diar_result is not None:
-                    diarization_segments = [seg.to_dict() for seg in diar_result.segments]
-                    diarization_outcome["performed"] = True
-                    diarization_outcome["reason"] = "ready"
-                    logger.info(
-                        "Diarization complete: %s speakers found",
-                        diar_result.num_speakers,
-                    )
-                else:
-                    diarization_outcome["reason"] = (
-                        model_manager.get_diarization_feature_status().get("reason", "unavailable")
-                    )
-            else:
-                # Transcribe without diarization
-                logger.info(f"Transcribing uploaded file for notebook: {filename}")
-                result = engine.transcribe_file(
-                    str(tmp_path),
-                    language=language,
-                    task="translate" if translation_enabled else "transcribe",
-                    translation_target_language=(
-                        translation_target_language if translation_enabled else None
-                    ),
-                    word_timestamps=need_word_timestamps,
-                    progress_callback=on_progress,
-                    cancellation_check=model_manager.job_tracker.is_cancelled,
-                )
+        logger.info(f"Transcribing uploaded file for notebook: {filename}")
+        dispatched = transcribe_with_optional_diarization(
+            engine=engine,
+            model_manager=model_manager,
+            file_path=str(tmp_path),
+            enable_diarization=enable_diarization,
+            language=language,
+            task="translate" if translation_enabled else "transcribe",
+            translation_target_language=(
+                translation_target_language if translation_enabled else None
+            ),
+            word_timestamps=enable_word_timestamps,
+            expected_speakers=expected_speakers,
+            parallel_diarization=(
+                parallel_diarization if parallel_diarization is not None else use_parallel_default
+            ),
+            sensevoice_engine_default=sensevoice_engine_default,
+            progress_callback=on_progress,
+            cancellation_check=model_manager.job_tracker.is_cancelled,
+        )
+        result = dispatched.result
+        # Raw speaker turns in the shape save_longform_to_database aligns
+        # itself; None when diarization did not run or did not succeed.
+        diarization_segments = dispatched.speaker_segments
+        diarization_outcome: dict[str, Any] = dispatched.outcome.to_dict()
 
         # Determine recorded_at timestamp
         recorded_at = None
@@ -1117,15 +993,13 @@ def _run_transcription(
                 if "words" in seg:
                     word_timestamps_list.extend(seg["words"])
 
-        # When diarization was performed but no word timestamps are available
-        # (e.g. MLX Canary backend), fall back to segment-level speaker
-        # attribution so that the DB segments carry text instead of being empty.
+        # When diarization ran without word timestamps (e.g. MLX Canary), the
+        # DB segments must carry text instead of bare turn intervals. The
+        # dispatch already did that attribution (GH-274): its nowords fallback
+        # mutated result.segments into text-carrying speaker segments — reuse
+        # them instead of re-splitting the already-attributed segments.
         if diarization_segments and not word_timestamps_list:
-            from server.core.speaker_merge import build_speaker_segments_nowords
-
-            diarization_segments = build_speaker_segments_nowords(
-                result.segments, diarization_segments
-            )
+            diarization_segments = result.segments
 
         # Save to database
         # Use provided title if given, otherwise database falls back to filename stem

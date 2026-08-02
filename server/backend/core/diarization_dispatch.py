@@ -1,12 +1,13 @@
 """Shared transcribe-with-optional-diarization dispatch (GH-258).
 
 One place that turns "an audio file plus a diarization request" into a
-:class:`TranscriptionResult` whose segments carry speaker labels. Extracted so
-the WebSocket recording path does not become a fourth copy of logic already
-duplicated across ``transcription.py``, ``notebook.py`` and ``openai_audio.py``.
-Those three routes are deliberately NOT migrated in this change; each has its
-own HTTP status codes, response headers and database writes, and moving them is
-a separate PR.
+:class:`TranscriptionResult` whose segments carry speaker labels. Extracted for
+the WebSocket recording path (GH-258); since GH-274 it is the single decision
+tree for every consumer: ``websocket.py``, ``transcription.py`` (both the
+synchronous /audio route and the /import background worker), ``notebook.py``
+and ``openai_audio.py``. Route-specific edges — HTTP status codes, the
+``X-Diarization-Status`` header, database writes, job payloads and the OpenAI
+endpoints' plain-retry failure tolerance — stay in the routes.
 
 Error contract, which is about which operation raised rather than which type:
   * anything from the DIARIZATION attempt is swallowed - the transcript is
@@ -73,6 +74,7 @@ def transcribe_with_optional_diarization(
     task: str | None = None,
     translation_target_language: str | None = None,
     word_timestamps: bool = True,
+    initial_prompt: str | None = None,
     expected_speakers: int | None = None,
     parallel_diarization: bool | None = None,
     diarization_engine: str | None = None,
@@ -89,6 +91,7 @@ def transcribe_with_optional_diarization(
             task=task,
             translation_target_language=translation_target_language,
             word_timestamps=word_timestamps,
+            initial_prompt=initial_prompt,
             progress_callback=progress_callback,
             cancellation_check=cancellation_check,
         )
@@ -117,6 +120,7 @@ def transcribe_with_optional_diarization(
             file_path=file_path,
             language=language,
             task=task,
+            initial_prompt=initial_prompt,
             expected_speakers=expected_speakers,
             progress_callback=progress_callback,
         )
@@ -133,6 +137,7 @@ def transcribe_with_optional_diarization(
             task=task,
             translation_target_language=translation_target_language,
             word_timestamps=word_timestamps,
+            initial_prompt=initial_prompt,
             progress_callback=progress_callback,
             cancellation_check=cancellation_check,
         )
@@ -169,6 +174,7 @@ def _transcribe_plain(
     task: str | None,
     translation_target_language: str | None,
     word_timestamps: bool,
+    initial_prompt: str | None = None,
     progress_callback: Callable[[int, int], None] | None,
     cancellation_check: Callable[[], bool] | None,
 ) -> TranscriptionResult:
@@ -179,6 +185,7 @@ def _transcribe_plain(
         task=task,
         translation_target_language=translation_target_language,
         word_timestamps=word_timestamps,
+        initial_prompt=initial_prompt,
         progress_callback=progress_callback,
         cancellation_check=cancellation_check,
     )
@@ -191,6 +198,7 @@ def _run_integrated(
     file_path: str,
     language: str | None,
     task: str | None,
+    initial_prompt: str | None = None,
     expected_speakers: int | None,
     progress_callback: Callable[[int, int], None] | None,
 ) -> DiarizedTranscription | None:
@@ -214,8 +222,9 @@ def _run_integrated(
             beam_size=getattr(engine, "beam_size", 5),
             # Forward the engine's configured decoding options exactly as the
             # import route does. Omitting them would silently decode a recording
-            # differently from the same audio imported as a file.
-            initial_prompt=getattr(engine, "initial_prompt", None),
+            # differently from the same audio imported as a file. A caller-
+            # supplied prompt (the OpenAI endpoints' ``prompt`` field) wins.
+            initial_prompt=initial_prompt or getattr(engine, "initial_prompt", None),
             suppress_tokens=getattr(engine, "suppress_tokens", None),
             vad_filter=getattr(engine, "faster_whisper_vad_filter", True),
             num_speakers=expected_speakers,
@@ -305,7 +314,22 @@ def _run_standard(
             outcome=_failure_outcome(model_manager, observed[0] if observed else None),
         )
 
-    diar_dicts = [seg.to_dict() for seg in diar_result.segments]
+    try:
+        diar_dicts = [seg.to_dict() for seg in diar_result.segments]
+    except Exception:
+        # A completed transcript must never be lost to a broken diarization
+        # payload — degrade exactly like any other diarization failure (the
+        # pre-GH-274 routes kept this conversion inside their merge guard).
+        logger.warning(
+            "Diarization segment conversion failed; returning the transcript without speakers",
+            exc_info=True,
+        )
+        return DiarizedTranscription(
+            result=result,
+            speaker_segments=None,
+            outcome=_failure_outcome(model_manager, observed[0] if observed else None),
+        )
+
     merged = _merge_speakers(result, diar_dicts)
     if not merged:
         return DiarizedTranscription(

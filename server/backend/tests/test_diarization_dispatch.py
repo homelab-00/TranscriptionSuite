@@ -210,6 +210,31 @@ def test_observed_out_of_memory_is_classified_with_a_remedy():
     assert "VRAM" in dispatched.outcome.remedy
 
 
+def test_broken_diarization_segment_conversion_degrades_instead_of_losing_the_transcript():
+    """GH-274 review finding: `seg.to_dict()` sits before the merge guard — a
+    broken diarization payload must degrade, never discard a completed
+    transcript (persist-before-deliver invariant)."""
+    base = _plain_result()
+    bad_seg = MagicMock()
+    bad_seg.to_dict.side_effect = TypeError("start is None")
+
+    with patch(
+        "server.core.parallel_diarize.transcribe_and_diarize",
+        return_value=(base, MagicMock(segments=[bad_seg], num_speakers=1)),
+    ):
+        dispatched = transcribe_with_optional_diarization(
+            engine=_make_engine(),
+            model_manager=_make_model_manager(),
+            file_path="/tmp/a.wav",
+            enable_diarization=True,
+            parallel_diarization=True,
+        )
+
+    assert dispatched.result is base
+    assert dispatched.speaker_segments is None
+    assert dispatched.outcome.performed is False
+
+
 def test_speaker_merge_failure_degrades_instead_of_raising():
     base = _plain_result()
     diar_seg = MagicMock()
@@ -325,6 +350,50 @@ def test_integrated_path_forwards_the_engine_decoding_options(fake_engine_module
     assert kwargs["vad_filter"] is False
 
 
+def test_initial_prompt_flows_to_plain_transcription():
+    """The OpenAI endpoints forward the client's ``prompt``; it must reach
+    ``transcribe_file`` when the plain path runs (GH-274)."""
+    engine = _make_engine()
+
+    transcribe_with_optional_diarization(
+        engine=engine,
+        model_manager=_make_model_manager(),
+        file_path="/tmp/a.wav",
+        enable_diarization=False,
+        initial_prompt="glossary: CUDA, VRAM",
+    )
+
+    assert engine.transcribe_file.call_args.kwargs["initial_prompt"] == "glossary: CUDA, VRAM"
+
+
+def test_initial_prompt_overrides_the_engine_prompt_on_the_integrated_path(fake_engine_module):
+    """A caller-supplied prompt wins over the engine's configured one,
+    matching the OpenAI route's ``initial_prompt or engine.initial_prompt``."""
+    backend = MagicMock()
+    backend.backend_name = "whisperx"
+    backend.preferred_input_sample_rate_hz = 16000
+    backend.transcribe_with_diarization.return_value = MagicMock(
+        segments=[], words=[], language="en", language_probability=0.99, num_speakers=0
+    )
+    engine = _make_engine(backend=backend)
+    engine.initial_prompt = "engine default"
+
+    with (
+        patch("server.core.audio_utils.load_audio", return_value=([0.0] * 16000, 16000)),
+        patch("server.core.stt.backends.base.use_integrated_diarization_for", return_value=True),
+    ):
+        transcribe_with_optional_diarization(
+            engine=engine,
+            model_manager=_make_model_manager(),
+            file_path="/tmp/a.wav",
+            enable_diarization=True,
+            initial_prompt="caller prompt",
+        )
+
+    kwargs = backend.transcribe_with_diarization.call_args.kwargs
+    assert kwargs["initial_prompt"] == "caller prompt"
+
+
 def test_integrated_backend_failure_falls_back_to_plain_transcription(fake_engine_module):
     backend = MagicMock()
     backend.backend_name = "whisperx"
@@ -342,12 +411,16 @@ def test_integrated_backend_failure_falls_back_to_plain_transcription(fake_engin
             model_manager=_make_model_manager(reason="token_missing"),
             file_path="/tmp/a.wav",
             enable_diarization=True,
+            word_timestamps=False,
         )
 
     assert dispatched.result is expected
     assert dispatched.outcome.performed is False
     assert dispatched.outcome.reason == "token_missing"
     engine.transcribe_file.assert_called_once()
+    # The degraded fallback honors the caller's word_timestamps choice rather
+    # than forcing it on (GH-274 delta).
+    assert engine.transcribe_file.call_args.kwargs["word_timestamps"] is False
 
 
 def test_audio_decode_error_propagates_from_the_integrated_path(fake_engine_module):
