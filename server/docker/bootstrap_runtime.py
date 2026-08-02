@@ -36,6 +36,16 @@ DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 
 BOOTSTRAP_SCHEMA_VERSION = 2
 _BOOTSTRAP_START = time.perf_counter()
+
+# Per-HTTP-request timeout handed to uv (seconds). uv defaults to 30s, which is
+# far too tight for the multi-hundred-MB CUDA wheels this project installs.
+DEFAULT_UV_HTTP_TIMEOUT_SECONDS = 900
+# Total `uv sync` attempts (1 initial + retries) when the failure looks like a
+# transient network fault. Overridable via BOOTSTRAP_SYNC_ATTEMPTS.
+DEFAULT_SYNC_ATTEMPTS = 3
+# Backoff between sync attempts: 30s, 60s, 120s … capped.
+_SYNC_RETRY_BASE_DELAY_SECONDS = 30
+_SYNC_RETRY_MAX_DELAY_SECONDS = 300
 _VIBEVOICE_ASR_IMPORT_CANDIDATES: tuple[tuple[str, str, str, str, str], ...] = (
     (
         "legacy",
@@ -419,6 +429,14 @@ def build_uv_sync_env(venv_dir: Path, cache_dir: Path) -> dict[str, str]:
     env["UV_PROJECT_ENVIRONMENT"] = str(venv_dir)
     env["UV_CACHE_DIR"] = str(cache_dir)
     env["UV_PYTHON"] = "/usr/bin/python3.13"
+    # The CUDA wheel set is ~4GB and individual wheels reach 674MB
+    # (nvidia-cudnn-cu12), all fetched concurrently. uv's default 30s per-request
+    # timeout is sized for ordinary PyPI packages and trips as soon as a slow or
+    # congested link stalls one of those transfers, aborting the whole sync with
+    # "operation timed out". Give each request a much larger budget; the sync as
+    # a whole is still bounded by run_dependency_sync's subprocess timeout.
+    # An explicit UV_HTTP_TIMEOUT from the user always wins.
+    env.setdefault("UV_HTTP_TIMEOUT", str(DEFAULT_UV_HTTP_TIMEOUT_SECONDS))
     # GH #125: on TLS-intercepting networks (corporate proxy / antivirus HTTPS
     # scanning) uv's bundled webpki roots reject the re-signed certificate
     # ("UnknownIssuer"). Opt-in UV_NATIVE_TLS makes uv trust the system/container
@@ -561,6 +579,151 @@ def detect_tls_interception(error_text: str) -> bool:
     return any(marker in lowered for marker in _TLS_INTERCEPTION_MARKERS)
 
 
+# Substrings that indicate the download died for a transport reason a retry can
+# plausibly clear: a stalled connection, a dropped socket, a flaky DNS lookup, a
+# PyPI/CDN hiccup. uv's own in-request retries (4) all happen inside one short
+# window, so they do not survive a link that is down for a minute.
+_TRANSIENT_NETWORK_MARKERS: tuple[str, ...] = (
+    "operation timed out",
+    "timed out",
+    "error sending request for url",
+    "client error (connect)",
+    "request failed after",
+    "connection reset",
+    "connection closed",
+    "connection refused",
+    "connection aborted",
+    "broken pipe",
+    "error decoding response body",
+    "temporary failure in name resolution",
+    "dns error",
+    "failed to lookup address information",
+    "502 bad gateway",
+    "503 service unavailable",
+    "504 gateway timeout",
+)
+
+# Failures that also mention transport-sounding words but will never succeed on a
+# retry — retrying them only burns another multi-GB download window.
+_PERMANENT_FAILURE_MARKERS: tuple[str, ...] = (
+    "no space left on device",
+    "unsatisfiable",
+    "404 not found",
+    "was not found in the package registry",
+)
+
+
+def is_transient_network_failure(error_text: str) -> bool:
+    """Return True when *error_text* is a retryable network fault.
+
+    TLS interception is deliberately excluded: an untrusted corporate CA
+    produces "client error (Connect)" / "Failed to fetch" text too, but no
+    number of retries will make the container trust that certificate — it needs
+    the operator action described in ``_TLS_INTERCEPTION_HINT``.
+    """
+    lowered = error_text.lower()
+    if detect_tls_interception(lowered):
+        return False
+    if any(marker in lowered for marker in _PERMANENT_FAILURE_MARKERS):
+        return False
+    return any(marker in lowered for marker in _TRANSIENT_NETWORK_MARKERS)
+
+
+def _sleep_between_sync_attempts(seconds: int) -> None:
+    """Pause before the next sync attempt (indirection so tests can stub it).
+
+    Same exemption as :func:`_utc_now_iso`: this is a synchronous, stdlib-only
+    bootstrap script with no event loop, so the project's asyncio/frozen-clock
+    discipline does not apply. Tests stub this function rather than the clock.
+    """
+    time.sleep(seconds)  # noqa: TID251 - bootstrap backoff, no event loop here
+
+
+def run_dependency_sync_with_retries(
+    venv_dir: Path,
+    cache_dir: Path,
+    timeout_seconds: int,
+    extras: tuple[str, ...] = (),
+    pytorch_variant: str = "cu129",
+    attempts: int | None = None,
+) -> None:
+    """Run :func:`run_dependency_sync`, retrying transient network failures.
+
+    A single dropped connection while fetching one of the ~4GB of CUDA wheels
+    used to abort the entire bootstrap, and the container exited without a
+    runtime venv — after having already downloaded everything else. Retrying is
+    cheap because uv writes completed downloads into ``UV_CACHE_DIR`` (persisted
+    on the ``/runtime`` volume), so a retry resumes with only the wheels that
+    never landed still to fetch.
+
+    Only transport-level faults are retried; deterministic failures (TLS
+    interception, unsatisfiable requirements, a full disk) and a subprocess
+    timeout of the sync as a whole propagate on the first attempt.
+    """
+    total_attempts = max(
+        1,
+        attempts
+        if attempts is not None
+        else parse_int_env("BOOTSTRAP_SYNC_ATTEMPTS", DEFAULT_SYNC_ATTEMPTS),
+    )
+
+    for attempt in range(1, total_attempts + 1):
+        try:
+            run_dependency_sync(
+                venv_dir=venv_dir,
+                cache_dir=cache_dir,
+                timeout_seconds=timeout_seconds,
+                extras=extras,
+                pytorch_variant=pytorch_variant,
+            )
+            return
+        except subprocess.TimeoutExpired:
+            # The whole sync exceeded its (already 3h) budget — a retry would
+            # just spend another one.
+            raise
+        except Exception as exc:
+            if attempt >= total_attempts or not is_transient_network_failure(str(exc)):
+                raise
+            delay = min(
+                _SYNC_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1)),
+                _SYNC_RETRY_MAX_DELAY_SECONDS,
+            )
+            log(
+                f"Dependency download hit a network error (attempt {attempt}/{total_attempts}); "
+                f"retrying in {delay}s — already-downloaded wheels are kept in the uv cache"
+            )
+            # Same id on every retry: the events protocol treats a repeated id as
+            # an update, so the dashboard shows one line that counts up rather
+            # than a stack of scary-looking failures.
+            emit_event(
+                "bootstrap-retry",
+                "warning",
+                f"Network error while downloading dependencies; "
+                f"retrying ({attempt}/{total_attempts - 1}) in {delay}s",
+                status="active",
+                phase="bootstrap",
+            )
+            _sleep_between_sync_attempts(delay)
+
+
+_NETWORK_FAILURE_HINT = (
+    "Downloading the Python dependencies failed for a network reason and did not recover "
+    "after the automatic retries. This is a connectivity problem, not a broken install: "
+    "the PyTorch/CUDA wheels are about 4GB and a single one is 674MB, so an unstable or "
+    "throttled connection can drop a transfer. What to do: "
+    "(1) Simply start the server again — every wheel that finished downloading is kept in "
+    "the uv cache on the 'transcriptionsuite-runtime' volume, so the next attempt only "
+    "fetches what is missing and gets further each time. Do NOT set "
+    "BOOTSTRAP_PRUNE_UV_CACHE=true while you are fighting this, it throws that progress away. "
+    "(2) If you are on Wi-Fi or a VPN, switch to a wired connection or drop the VPN for the "
+    "first start. "
+    "(3) On a slow link, raise the per-download budget and the retry count: "
+    "UV_HTTP_TIMEOUT=1800 and BOOTSTRAP_SYNC_ATTEMPTS=6. "
+    "(4) If your machine has no NVIDIA GPU, use the CPU build instead — it skips the CUDA "
+    "wheels entirely and downloads a fraction of the data."
+)
+
+
 def _raise_dependency_sync_failure(exc: Exception, final_sync_mode: str) -> None:
     """Log an actionable hint for recognized causes, then raise a RuntimeError.
 
@@ -575,6 +738,15 @@ def _raise_dependency_sync_failure(exc: Exception, final_sync_mode: str) -> None
             "bootstrap-tls",
             "server",
             _TLS_INTERCEPTION_HINT,
+            status="error",
+            phase="bootstrap",
+        )
+    elif is_transient_network_failure(error_text):
+        log(_NETWORK_FAILURE_HINT)
+        emit_event(
+            "bootstrap-network",
+            "server",
+            _NETWORK_FAILURE_HINT,
             status="error",
             phase="bootstrap",
         )
@@ -778,7 +950,7 @@ def ensure_runtime_dependencies(
             log(f"Installing Python runtime dependencies (mode={final_sync_mode})...")
             sync_start = time.perf_counter()
             try:
-                run_dependency_sync(
+                run_dependency_sync_with_retries(
                     venv_dir=venv_dir,
                     cache_dir=cache_dir,
                     timeout_seconds=timeout_seconds,
@@ -794,6 +966,14 @@ def ensure_runtime_dependencies(
                     f"dependency sync failed (mode={final_sync_mode})",
                     sync_start,
                 )
+                # A network fault says nothing about the venv's shape, and the
+                # rebuild path would delete a working venv only to re-download
+                # everything over the same broken link. Keep the venv and fail;
+                # the next boot retries the (much cheaper) delta-sync.
+                if is_transient_network_failure(str(delta_exc)):
+                    diagnostics["network_failure"] = True
+                    log("Delta-sync failed on a network error; keeping the existing venv")
+                    _raise_dependency_sync_failure(delta_exc, final_sync_mode)
                 log("Delta-sync failed, falling back to rebuild-sync")
                 diagnostics["escalated_to_rebuild"] = True
                 diagnostics["delta_sync_error"] = str(delta_exc)[:240]
@@ -805,7 +985,7 @@ def ensure_runtime_dependencies(
                 log(f"Installing Python runtime dependencies (mode={final_sync_mode})...")
                 sync_start = time.perf_counter()
                 try:
-                    run_dependency_sync(
+                    run_dependency_sync_with_retries(
                         venv_dir=venv_dir,
                         cache_dir=cache_dir,
                         timeout_seconds=timeout_seconds,
@@ -845,7 +1025,7 @@ def ensure_runtime_dependencies(
             log(f"Installing Python runtime dependencies (mode={final_sync_mode})...")
             sync_start = time.perf_counter()
             try:
-                run_dependency_sync(
+                run_dependency_sync_with_retries(
                     venv_dir=venv_dir,
                     cache_dir=cache_dir,
                     timeout_seconds=timeout_seconds,
