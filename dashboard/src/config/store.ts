@@ -13,7 +13,7 @@ export interface ClientConfig {
     port: number;
     https: boolean;
   };
-  /** Connection settings (SettingsModal Client tab) */
+  /** Connection settings (Server tab Remote card + SettingsModal Client tab) */
   connection: {
     localHost: string;
     remoteHost: string;
@@ -23,6 +23,12 @@ export interface ClientConfig {
     authToken: string;
     port: number;
     useHttps: boolean;
+    /**
+     * Snapshot of useHttps taken when entering remote mode (which forces
+     * useHttps=true); restored when leaving, so a deliberately TLS-enabled
+     * local setup survives a round-trip through the Remote runtime tile.
+     */
+    localUseHttps: boolean;
   };
   /** Audio capture settings */
   audio: {
@@ -117,6 +123,7 @@ const DEFAULT_CONFIG: ClientConfig = {
     authToken: '',
     port: DEFAULT_SERVER_PORT,
     useHttps: false,
+    localUseHttps: false,
   },
   audio: {
     gracePeriod: 1.0,

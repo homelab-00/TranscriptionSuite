@@ -22,7 +22,7 @@ import { ErrorFallback } from './components/ui/ErrorFallback';
 import { queryClient } from './src/queryClient';
 import { useServerStatus } from './src/hooks/useServerStatus';
 import { useAdminStatus } from './src/hooks/useAdminStatus';
-import { initApiClient } from './src/api/client';
+import { apiClient, initApiClient } from './src/api/client';
 import { DockerProvider, useDockerContext } from './src/hooks/DockerContext';
 import { getConfig, setConfig } from './src/config/store';
 import { useLiveMode } from './src/hooks/useLiveMode';
@@ -98,14 +98,25 @@ const AppInner: React.FC = () => {
     }
   }, []);
 
-  // Track remote mode so useAuthTokenSync re-evaluates on mode switch
+  // Track remote mode so useAuthTokenSync re-evaluates on mode switch.
+  // Besides the reachability-driven re-read, subscribe to
+  // apiClient.onConfigChanged: every connection.* writer (Server tab Remote
+  // tile, SessionView Client Link, SettingsModal) ends with syncFromConfig(),
+  // which fires that event. Without it, a mode switch that does not flip
+  // reachability leaves this stale and useAuthTokenSync keeps (or skips)
+  // Docker-log token scanning for the WRONG mode — the local container's
+  // admin token could silently overwrite a freshly entered remote token.
   const [useRemote, setUseRemote] = useState(false);
   useEffect(() => {
-    const api = (window as any).electronAPI;
-    api?.config
-      ?.get?.('connection.useRemote')
-      .then((v: unknown) => setUseRemote(v === true))
-      .catch(() => {});
+    const readUseRemote = () => {
+      const api = (window as any).electronAPI;
+      api?.config
+        ?.get?.('connection.useRemote')
+        .then((v: unknown) => setUseRemote(v === true))
+        .catch(() => {});
+    };
+    readUseRemote();
+    return apiClient.onConfigChanged(readUseRemote);
   }, [serverConnection.reachable]);
 
   // Always-on Docker log token scanner
@@ -740,6 +751,7 @@ const AppInner: React.FC = () => {
             <ServerView
               onStartServer={startServerWithOnboarding}
               startupFlowPending={startupFlowPending}
+              clientRunning={clientRunning}
             />
           </ErrorBoundary>
         );
