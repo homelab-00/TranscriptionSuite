@@ -81,6 +81,8 @@ def _make_session(*, auto_add: bool = False, job_id: str | None = "job-001"):
     # GH-258: set by __init__ / start_recording, which this factory bypasses.
     session.diarization_enabled = False
     session.expected_speakers = None
+    # GH-239: None means "not a salvage run" - process_transcription reads it.
+    session._salvage_reason = None
     session.send_message = AsyncMock()
     return session
 

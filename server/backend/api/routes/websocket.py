@@ -226,17 +226,31 @@ class TranscriptionSession:
         # Job tracking for transcription
         self._current_job_id: str | None = None
 
-        # Set to True when the client disconnects mid-transcription so the
-        # worker thread can abort via cancellation_check.
+        # Set to True when the client disconnects so the worker thread can
+        # abort via cancellation_check. Only ever set from the receive loop,
+        # which is why it never fires mid-transcription on this path - and why
+        # ``_salvage_reason`` has to neutralise it during a salvage (GH-239).
         self._client_disconnected = False
+
+        # Non-None while finalizing a recording the client dropped out of
+        # (GH-239). Doubles as the ``partial_reason`` stamped on the result.
+        self._salvage_reason: str | None = None
 
         # Get client capabilities
         self.capabilities = get_client_capabilities({"x-client-type": client_type.value}, {})
 
-    async def send_message(self, msg_type: str, data: dict[str, Any] | None = None) -> None:
-        """Send a JSON message to the client."""
+    async def send_message(self, msg_type: str, data: dict[str, Any] | None = None) -> bool:
+        """Send a JSON message to the client. Returns whether it actually went out.
+
+        Callers that persist delivery state MUST branch on the return value:
+        ``client_state`` only flips to DISCONNECTED inside starlette's
+        ``receive()``, so a socket whose peer has vanished still reads
+        CONNECTED here and the failure surfaces as a raised send. Treating that
+        as delivered marks the job ``delivered=1`` and hides a result nobody
+        received from the ``/recent`` recovery list (GH-239).
+        """
         if self.websocket.client_state != WebSocketState.CONNECTED:
-            return
+            return False
 
         message = {
             "type": msg_type,
@@ -245,8 +259,10 @@ class TranscriptionSession:
         }
         try:
             await self.websocket.send_json(message)
+            return True
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
+            return False
 
     def add_audio_chunk(self, pcm_data: bytes) -> None:
         """Add a chunk of PCM audio data."""
@@ -479,8 +495,14 @@ class TranscriptionSession:
                     # backend: the client vanished, or the user pressed Cancel
                     # (POST /cancel -> job_tracker). Binding only the former left
                     # Cancel a no-op on this, the main longform path.
+                    # A salvage run is the one case where the client is gone BY
+                    # DEFINITION (GH-239), so the disconnect signal is muted for
+                    # it - otherwise the salvage aborts on its first poll and
+                    # re-loses exactly the audio it exists to rescue. An
+                    # explicit Cancel still stops it.
                     cancellation_check=lambda: (
-                        self._client_disconnected or model_manager.job_tracker.is_cancelled()
+                        (self._client_disconnected and self._salvage_reason is None)
+                        or model_manager.job_tracker.is_cancelled()
                     ),
                 ),
             )
@@ -510,6 +532,19 @@ class TranscriptionSession:
             dispatched = transcribe_future.result()
             result = dispatched.result
             diarization_outcome = dispatched.outcome
+
+            # A salvaged recording covers only the audio that arrived before the
+            # drop, so it must carry the same truncation signal a chunking
+            # backend raises - the dashboard already renders partial/
+            # partial_reason. Stamped before the payload is built, since the
+            # payload is what gets persisted and later re-fetched.
+            if self._salvage_reason:
+                result.partial_reason = (
+                    f"{result.partial_reason}; {self._salvage_reason}"
+                    if result.partial and result.partial_reason
+                    else self._salvage_reason
+                )
+                result.partial = True
 
             # Speaker labels must be baked into result.text BEFORE the payload
             # is built: the payload is what gets persisted, and a recovery via
@@ -553,6 +588,7 @@ class TranscriptionSession:
             # fetch the result via HTTP. Wave 1 already persisted it to DB.
             _result_size = len(json.dumps(result_payload))
             _sent_as_reference = False
+            _final_delivered = False
             if _result_size > 1_000_000 and self._current_job_id:
                 # Send a lightweight reference so the client fetches via HTTP.
                 # Do NOT call mark_delivered here — the client hasn't fetched yet.
@@ -561,13 +597,21 @@ class TranscriptionSession:
                 _sent_as_reference = True
             else:
                 # Send final result (best-effort — result is in DB regardless, or logged as lost above)
-                await self.send_message("final", result_payload)
+                _final_delivered = await self.send_message("final", result_payload)
 
             # Only mark delivered when result was actually sent inline (not as reference).
             # For result_ready, the GET /result/{job_id} endpoint marks delivered on fetch.
             # Skip mark_delivered entirely if save_result failed — the row is stuck in
             # 'processing' state and will be cleaned up by orphan recovery on restart.
-            if self._current_job_id and _result_persisted and not _sent_as_reference:
+            # ``_final_delivered`` is the honest signal: a salvage sends into a
+            # dead socket, and so does any client that vanished mid-processing.
+            # Marking those delivered would bury the result (GH-239).
+            if (
+                self._current_job_id
+                and _result_persisted
+                and not _sent_as_reference
+                and _final_delivered
+            ):
                 try:
                     _mark_delivered(self._current_job_id)
                 except Exception as _e:
@@ -858,6 +902,94 @@ class TranscriptionSession:
         finally:
             # Release the job slot when transcription is done
             self._release_job()
+
+    async def finalize_interrupted_recording(self) -> None:
+        """Salvage the buffered audio when the client vanishes mid-recording (GH-239).
+
+        A recording is only ever finalized by the ``stop`` message. When the
+        socket dies first, everything the user already streamed used to be
+        dropped on the floor and the job row sat in 'processing' until the
+        orphan sweep guessed at it - a once-in-a-lifetime lecture lost to a
+        Wi-Fi blip.
+
+        Runs the ordinary ``process_transcription()`` path rather than a
+        parallel one, which is what makes the head recoverable at all: that
+        path writes the PCM to ``recordings_dir`` and records ``audio_path``
+        before its first ``await``, so even a server that dies mid-salvage
+        leaves a job the user can drive through ``POST /retry/{job_id}``.
+
+        Called from the endpoint's ``finally`` while the job slot is still
+        held, so it cannot race a second job onto the single-slot tracker, and
+        the orphan sweep's ``is_busy()`` guard skips the row while it runs.
+        Never raises: teardown must continue no matter what happens here.
+        """
+        if not self.is_recording:
+            # A clean `stop` already finalized this session - or there was
+            # never a recording to finalize.
+            return
+
+        self.is_recording = False
+        if self._realtime_engine:
+            try:
+                self._realtime_engine.stop_recording()
+            except Exception as _engine_err:
+                logger.warning("Realtime engine stop failed during salvage: %s", _engine_err)
+
+        buffered_seconds = sum(len(chunk) for chunk in self.audio_chunks) / (2 * self.sample_rate)
+        if buffered_seconds < self._min_salvage_seconds():
+            # Junk-job guard: a connect-then-drop must not manufacture an empty
+            # result. Fail the row here rather than leaving the orphan sweep to
+            # infer a reason minutes later - this one is known exactly.
+            self.audio_chunks = []
+            logger.info(
+                "Discarding %.2fs of buffered audio for %s - below the salvage minimum",
+                buffered_seconds,
+                self.client_name,
+            )
+            if self._current_job_id:
+                try:
+                    _mark_failed(
+                        self._current_job_id,
+                        "Client disconnected mid-recording - "
+                        f"only {buffered_seconds:.1f}s of audio was captured, nothing to salvage",
+                    )
+                except Exception as _mf_err:
+                    logger.warning(
+                        "Failed to mark job %s as failed: %s", self._current_job_id, _mf_err
+                    )
+            return
+
+        logger.warning(
+            "Client %s disconnected mid-recording - salvaging %.1fs of buffered audio (job %s)",
+            self.client_name,
+            buffered_seconds,
+            sanitize_log_value(self._current_job_id or "none"),
+        )
+        self._salvage_reason = (
+            "Client disconnected mid-recording - this transcript covers only "
+            "the audio received before the connection dropped"
+        )
+        try:
+            await self.process_transcription()
+        except Exception:
+            # process_transcription() already persists and reports its own
+            # failures; anything escaping it must not abort session teardown.
+            logger.exception("Salvage of interrupted recording failed for %s", self.client_name)
+        finally:
+            self.audio_chunks = []
+
+    def _min_salvage_seconds(self) -> float:
+        """Shortest buffered head worth transcribing, in seconds."""
+        _DEFAULT = 3.0
+        try:
+            from server.config import get_config as _get_config
+
+            return float(
+                _get_config().get("durability", "min_salvage_seconds", default=_DEFAULT) or _DEFAULT
+            )
+        except Exception as _cfg_err:
+            logger.debug("Could not read min_salvage_seconds: %s", repr(_cfg_err))
+            return _DEFAULT
 
     def _release_job(self) -> None:
         """Release the job slot in the job tracker."""
@@ -1186,6 +1318,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     finally:
         # Clean up session
         if session:
+            # GH-239: rescue whatever the client already streamed BEFORE
+            # cleanup() runs - cleanup() calls _release_job(), which clears
+            # _current_job_id and hands the single job slot to the next
+            # session, leaving the salvaged result with no row to land in.
+            await session.finalize_interrupted_recording()
             await session.cleanup()
             async with _sessions_lock:
                 if session.session_id in _connected_sessions:

@@ -762,6 +762,15 @@ durability:
     # Default: 30
     orphan_sweep_interval_minutes: 30
 
+    # GH-239: when a recording session's connection drops before the client
+    # sends `stop`, the server transcribes and saves whatever audio it already
+    # received, flagged as a partial result. This is the shortest buffered head
+    # worth doing that for, in seconds - below it the audio is discarded and the
+    # job is marked failed, so a client that connects and immediately drops does
+    # not litter the job history with empty results.
+    # Default: 3
+    min_salvage_seconds: 3
+
 # Issue #104, Sprint 4 — auto-summary and auto-export coordinator settings.
 auto_actions:
     # How often (in seconds) the deferred-export sweeper re-checks rows whose

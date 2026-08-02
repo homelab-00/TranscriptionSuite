@@ -58,6 +58,8 @@ def _make_session(
     # GH-258: set by __init__ / start_recording, which this factory bypasses.
     session.diarization_enabled = False
     session.expected_speakers = None
+    # GH-239: None means "not a salvage run" - process_transcription reads it.
+    session._salvage_reason = None
     session.capabilities = SimpleNamespace(
         supports_binary_audio=True,
         preferred_sample_rate=sample_rate,
