@@ -193,6 +193,45 @@ CUDA wheels. Selecting the **CPU profile** in the dashboard (or
 A whisper/nemo-only CPU install no longer needs any git access — the VibeVoice
 git dependency is resolved from declared metadata, not cloned (GH #125).
 
+### Dependency download fails on a network error (`operation timed out`)
+
+A first start downloads ~4GB of PyTorch/CUDA wheels, one of which
+(`nvidia-cudnn-cu12`) is 674MB on its own. If the connection drops or stalls
+mid-transfer, `uv sync` fails with text like:
+
+```
+Failed to download `nvidia-cudnn-cu12==9.10.2.21`
+  Request failed after 4 retries
+  error sending request for url (https://files.pythonhosted.org/...)
+  client error (Connect)
+  operation timed out
+```
+
+The bootstrap now handles this itself: a stalled transfer gets 900s between
+reads (`UV_HTTP_TIMEOUT`, uv's read timeout) instead of uv's 30s default, and
+the whole sync is retried up to 3 times with a 30s/60s backoff. TLS-certificate
+failures, a full disk and unsatisfiable requirements are *not* retried — those
+never succeed on a second attempt. The flip side of the larger timeout: a
+connection that dies silently can take up to 15 minutes per request to be
+detected, so on a genuinely dead link the final error takes longer to appear.
+
+If it still fails after the retries:
+
+1. **Just start the server again.** Every wheel that finished downloading stays
+   in the uv cache on the `transcriptionsuite-runtime` volume, so each attempt
+   picks up where the last one stopped. Do not set
+   `BOOTSTRAP_PRUNE_UV_CACHE=true` while you are working through this — it
+   deletes exactly that progress.
+2. Prefer a wired connection over Wi-Fi/VPN for the first start.
+3. On a slow link, give it more room: `UV_HTTP_TIMEOUT=1800` and
+   `BOOTSTRAP_SYNC_ATTEMPTS=6`.
+4. No NVIDIA GPU? Use the **CPU profile** (`PYTORCH_VARIANT=cpu`) — it skips the
+   CUDA wheels entirely.
+
+A network failure during a *delta*-sync (only `uv.lock` changed) no longer wipes
+the existing venv: the environment is intact, so the next start retries the cheap
+delta-sync instead of re-downloading everything.
+
 ## TLS / Remote Access
 
 ### Tailscale Setup

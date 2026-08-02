@@ -1996,6 +1996,502 @@ def test_build_uv_sync_env_does_not_override_user_ca_vars(
     assert env["REQUESTS_CA_BUNDLE"] == str(ca)  # filled in from SSL_CERT_FILE
 
 
+# ---------------------------------------------------------------------------
+# Transient network failures during dependency download
+#
+# Regression: a single dropped connection while fetching nvidia-cudnn-cu12
+# (674MB, one of ~4GB of CUDA wheels) aborted the whole bootstrap after 40
+# minutes of downloading, and the container exited with no runtime venv.
+# ---------------------------------------------------------------------------
+
+
+# The failure exactly as it reached the user, trimmed to the parts the
+# classifier sees.
+_REPORTED_DOWNLOAD_FAILURE = (
+    "Command failed (1): uv sync --frozen --no-dev --project /app/server "
+    "--extra nemo --extra whisper\n"
+    "x Failed to download `nvidia-cudnn-cu12==9.10.2.21`\n"
+    "|-> Request failed after 4 retries\n"
+    "|-> Failed to fetch: `https://files.pythonhosted.org/packages/ba/51/"
+    "nvidia_cudnn_cu12-9.10.2.21-py3-none-manylinux_2_27_x86_64.whl`\n"
+    "|-> error sending request for url (https://files.pythonhosted.org/...)\n"
+    "|-> client error (Connect)\n"
+    "`-> operation timed out\n"
+)
+
+
+def test_is_transient_network_failure_matches_reported_download_timeout() -> None:
+    """The exact wheel-download timeout from the bug report must be retryable."""
+    module = _load_bootstrap_module()
+    assert module.is_transient_network_failure(_REPORTED_DOWNLOAD_FAILURE) is True
+
+
+def test_is_transient_network_failure_matches_other_transport_faults() -> None:
+    module = _load_bootstrap_module()
+    samples = [
+        "error sending request for url (https://pypi.org/simple/torch/)",
+        "connection reset by peer",
+        "error decoding response body: connection closed before message completed",
+        "Temporary failure in name resolution",
+        "503 Service Unavailable",
+        # Rate limiting is exactly the transient index/CDN hiccup this feature
+        # exists for: ten concurrent multi-hundred-MB downloads can trip it.
+        "HTTP status client error (429 Too Many Requests) for url (https://pypi.org/...)",
+    ]
+    for text in samples:
+        assert module.is_transient_network_failure(text) is True, text
+
+
+def test_is_transient_network_failure_excludes_tls_interception() -> None:
+    """TLS interception reads like a connect failure but no retry can fix it.
+
+    Retrying would hide the actionable CA hint behind three more multi-GB
+    download attempts, so it must classify as permanent (GH #125).
+    """
+    module = _load_bootstrap_module()
+    tls_error = (
+        "Failed to download `torch`: client error (Connect): "
+        "invalid peer certificate: UnknownIssuer"
+    )
+    assert module.detect_tls_interception(tls_error) is True
+    assert module.is_transient_network_failure(tls_error) is False
+
+
+def test_is_transient_network_failure_excludes_permanent_errors() -> None:
+    module = _load_bootstrap_module()
+    for text in (
+        "failed to write to the cache: No space left on device",
+        "your project's requirements are unsatisfiable",
+        "error sending request for url ... 404 Not Found",
+    ):
+        assert module.is_transient_network_failure(text) is False, text
+
+
+def _stub_sync_attempts(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    outcomes: list[Exception | None],
+    events: list[tuple[tuple[object, ...], dict[str, object]]] | None = None,
+) -> tuple[list[int], list[int]]:
+    """Drive run_dependency_sync through *outcomes*; capture attempts and sleeps."""
+    attempts: list[int] = []
+    sleeps: list[int] = []
+    sink = events if events is not None else []
+
+    def fake_sync(**_: object) -> None:
+        attempts.append(len(attempts) + 1)
+        outcome = outcomes[len(attempts) - 1]
+        if outcome is not None:
+            raise outcome
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+    monkeypatch.setattr(module, "_sleep_between_sync_attempts", lambda s: sleeps.append(s))
+    monkeypatch.setattr(module, "log", lambda _msg: None)
+    monkeypatch.setattr(module, "emit_event", lambda *a, **k: sink.append((a, k)))
+    return attempts, sleeps
+
+
+def test_sync_retries_transient_failure_and_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two dropped downloads then success — the bootstrap must not fail."""
+    module = _load_bootstrap_module()
+    attempts, sleeps = _stub_sync_attempts(
+        module,
+        monkeypatch,
+        [
+            RuntimeError(_REPORTED_DOWNLOAD_FAILURE),
+            RuntimeError("error sending request for url (https://files.pythonhosted.org/...)"),
+            None,
+        ],
+    )
+
+    module.run_dependency_sync_with_retries(
+        venv_dir=Path("/tmp/venv"),
+        cache_dir=Path("/tmp/cache"),
+        timeout_seconds=300,
+        attempts=3,
+    )
+
+    assert len(attempts) == 3, "must retry until a download attempt succeeds"
+    # Exponential backoff, so a link that is down for a minute still recovers.
+    assert sleeps == [30, 60]
+
+
+def test_sync_retry_progress_event_uses_the_documented_protocol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry progress reaches the dashboard as a single updating warning item.
+
+    startup_events only accepts active/complete/error statuses and
+    download/server/warning/info categories, and treats a repeated id as an
+    update — so all retries must share one id instead of stacking up.
+    """
+    module = _load_bootstrap_module()
+    events: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    _stub_sync_attempts(
+        module,
+        monkeypatch,
+        [RuntimeError(_REPORTED_DOWNLOAD_FAILURE), RuntimeError(_REPORTED_DOWNLOAD_FAILURE), None],
+        events=events,
+    )
+
+    module.run_dependency_sync_with_retries(
+        venv_dir=Path("/tmp/venv"),
+        cache_dir=Path("/tmp/cache"),
+        timeout_seconds=300,
+        attempts=3,
+    )
+
+    assert len(events) == 2
+    for attempt_no, (args, kwargs) in enumerate(events, start=1):
+        assert args[0] == "bootstrap-retry"
+        # Exact values, not just protocol membership: the mapper derives the
+        # rendered state from `severity` (status alone leaves the item looking
+        # like a completed green entry), and an in-progress retry must be an
+        # active warning.
+        assert args[1] == "warning"
+        assert kwargs["status"] == "active"
+        assert kwargs["severity"] == "warning"
+        # Same attempt/total fraction as the container log, so an operator
+        # cross-referencing the two surfaces sees one consistent count.
+        assert f"(attempt {attempt_no}/3)" in args[2]
+
+
+def test_sync_retries_are_exhausted_then_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    attempts, sleeps = _stub_sync_attempts(
+        module,
+        monkeypatch,
+        [RuntimeError(_REPORTED_DOWNLOAD_FAILURE)] * 3,
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        module.run_dependency_sync_with_retries(
+            venv_dir=Path("/tmp/venv"),
+            cache_dir=Path("/tmp/cache"),
+            timeout_seconds=300,
+            attempts=3,
+        )
+
+    assert len(attempts) == 3
+    assert len(sleeps) == 2, "no sleep after the final attempt"
+    # The original uv output survives so the hint/classification still works.
+    assert "nvidia-cudnn-cu12" in str(excinfo.value)
+
+
+def test_sync_does_not_retry_non_transient_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A TLS/CA failure must surface immediately, not after three downloads."""
+    module = _load_bootstrap_module()
+    attempts, sleeps = _stub_sync_attempts(
+        module,
+        monkeypatch,
+        [RuntimeError("invalid peer certificate: UnknownIssuer")] * 3,
+    )
+
+    with pytest.raises(RuntimeError):
+        module.run_dependency_sync_with_retries(
+            venv_dir=Path("/tmp/venv"),
+            cache_dir=Path("/tmp/cache"),
+            timeout_seconds=300,
+            attempts=3,
+        )
+
+    assert len(attempts) == 1
+    assert sleeps == []
+
+
+def test_sync_does_not_retry_subprocess_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sync blowing its own 3h budget is not a retryable blip."""
+    module = _load_bootstrap_module()
+    attempts, _ = _stub_sync_attempts(
+        module,
+        monkeypatch,
+        [subprocess.TimeoutExpired(cmd=["uv", "sync"], timeout=10800)] * 2,
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        module.run_dependency_sync_with_retries(
+            venv_dir=Path("/tmp/venv"),
+            cache_dir=Path("/tmp/cache"),
+            timeout_seconds=300,
+            attempts=2,
+        )
+
+    assert len(attempts) == 1
+
+
+def test_sync_attempt_count_is_configurable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    monkeypatch.setenv("BOOTSTRAP_SYNC_ATTEMPTS", "5")
+    attempts, _ = _stub_sync_attempts(
+        module,
+        monkeypatch,
+        [RuntimeError(_REPORTED_DOWNLOAD_FAILURE)] * 5,
+    )
+
+    with pytest.raises(RuntimeError):
+        module.run_dependency_sync_with_retries(
+            venv_dir=Path("/tmp/venv"),
+            cache_dir=Path("/tmp/cache"),
+            timeout_seconds=300,
+        )
+
+    assert len(attempts) == 5
+
+
+def test_build_uv_sync_env_raises_http_timeout_for_large_wheels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """uv's 30s default per-request timeout is too tight for 674MB wheels."""
+    module = _load_bootstrap_module()
+    monkeypatch.delenv("UV_HTTP_TIMEOUT", raising=False)
+
+    env = module.build_uv_sync_env(venv_dir=tmp_path / "venv", cache_dir=tmp_path / "cache")
+
+    assert int(env["UV_HTTP_TIMEOUT"]) >= 600
+
+
+def test_build_uv_sync_env_keeps_user_http_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    monkeypatch.setenv("UV_HTTP_TIMEOUT", "45")
+
+    env = module.build_uv_sync_env(venv_dir=tmp_path / "venv", cache_dir=tmp_path / "cache")
+
+    assert env["UV_HTTP_TIMEOUT"] == "45"
+
+
+def test_rebuild_sync_survives_transient_network_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end: the reported first-run failure now completes the bootstrap."""
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _patch_fingerprint_context(module, monkeypatch)
+    monkeypatch.setattr(module, "_sleep_between_sync_attempts", lambda _s: None)
+
+    calls = 0
+
+    def fake_sync(**_: object) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError(_REPORTED_DOWNLOAD_FAILURE)
+        _touch_runtime_python(runtime_dir)
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+
+    _, sync_mode, _, diagnostics = module.ensure_runtime_dependencies(
+        runtime_dir=runtime_dir,
+        cache_dir=cache_dir,
+        timeout_seconds=300,
+        log_changes=False,
+    )
+
+    assert sync_mode == "rebuild-sync"
+    assert diagnostics["selection_reason"] == "venv_missing"
+    assert calls == 2
+    persisted = json.loads(
+        (runtime_dir / ".runtime-bootstrap-marker.json").read_text(encoding="utf-8")
+    )
+    assert persisted["sync_mode"] == "rebuild-sync"
+
+
+def test_delta_sync_network_failure_keeps_existing_venv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A network fault must not escalate to a venv-wiping rebuild.
+
+    The venv is fine; deleting it would discard a working environment and force
+    a full multi-GB re-download over the same broken link. Contrast with
+    test_delta_sync_fallback_to_rebuild, where a non-network failure still
+    escalates.
+    """
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            "fingerprint": "old-fingerprint",
+            "python_abi": "abi",
+            "arch": "arch",
+            "structural_fingerprint": "struct-fp",
+            "lock_fingerprint": "old-lock-fp",
+        },
+    )
+    _patch_fingerprint_context(module, monkeypatch)
+    monkeypatch.setattr(module, "_sleep_between_sync_attempts", lambda _s: None)
+
+    rmtree_calls: list[Path] = []
+    calls = 0
+
+    def fake_sync(**_: object) -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError(_REPORTED_DOWNLOAD_FAILURE)
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+    monkeypatch.setattr(module.shutil, "rmtree", lambda p, **_: rmtree_calls.append(Path(p)))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        module.ensure_runtime_dependencies(
+            runtime_dir=runtime_dir,
+            cache_dir=cache_dir,
+            timeout_seconds=300,
+            log_changes=False,
+        )
+
+    assert "Dependency sync failed for mode=delta-sync" in str(excinfo.value)
+    assert rmtree_calls == [], "the venv must survive a network failure"
+    assert (runtime_dir / ".venv/bin/python").exists()
+    # Retried within delta-sync, but never re-attempted as a full rebuild.
+    assert calls == module.DEFAULT_SYNC_ATTEMPTS
+
+
+def test_raise_dependency_sync_failure_emits_network_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After retries are exhausted the user gets a network-specific remedy."""
+    module = _load_bootstrap_module()
+    logs: list[str] = []
+    events: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(module, "log", lambda msg: logs.append(msg))
+    monkeypatch.setattr(module, "emit_event", lambda *a, **k: events.append((a, k)))
+
+    with pytest.raises(RuntimeError):
+        module._raise_dependency_sync_failure(
+            RuntimeError(_REPORTED_DOWNLOAD_FAILURE), "rebuild-sync"
+        )
+
+    hint = "\n".join(logs)
+    # The single most useful instruction: restart, the cache keeps the progress.
+    assert "start the server again" in hint
+    assert "BOOTSTRAP_PRUNE_UV_CACHE" in hint
+    assert any(kwargs.get("status") == "error" for _, kwargs in events)
+    # A network failure must not be mislabeled as a certificate problem.
+    assert "EXTRA_CA_CERTS_DIR" not in hint
+
+
+def test_is_transient_network_exception_excludes_subprocess_timeout() -> None:
+    """A whole-sync TimeoutExpired must never be treated as a network blip.
+
+    str(TimeoutExpired) renders as "Command '[...]' timed out after N seconds",
+    which satisfies the "timed out" transient marker even though the retry loop
+    deliberately refuses to retry this exception. The exception-aware wrapper is
+    what every post-retry decision point must use.
+    """
+    module = _load_bootstrap_module()
+    timeout_exc = subprocess.TimeoutExpired(cmd=["uv", "sync"], timeout=10800)
+    assert "timed out" in str(timeout_exc)
+    assert module.is_transient_network_failure(str(timeout_exc)) is True
+    assert module.is_transient_network_exception(timeout_exc) is False
+    # The wrapper stays equivalent to the text classifier for real network faults.
+    assert module.is_transient_network_exception(RuntimeError(_REPORTED_DOWNLOAD_FAILURE)) is True
+
+
+def test_delta_sync_subprocess_timeout_still_escalates_to_rebuild(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A whole-sync timeout in delta-sync keeps the pre-retry escalation path.
+
+    Only *network* failures may keep the venv (see
+    test_delta_sync_network_failure_keeps_existing_venv); a sync that blew its
+    subprocess budget proves nothing about the network, so it must still fall
+    back to the venv-wiping rebuild-sync exactly as before the retry feature.
+    """
+    module = _load_bootstrap_module()
+    runtime_dir = tmp_path / "runtime"
+    cache_dir = tmp_path / "runtime-cache"
+    runtime_dir.mkdir()
+    cache_dir.mkdir()
+    _touch_runtime_python(runtime_dir)
+    _write_marker(
+        runtime_dir,
+        {
+            "schema_version": module.BOOTSTRAP_SCHEMA_VERSION,
+            "fingerprint": "old-fingerprint",
+            "python_abi": "abi",
+            "arch": "arch",
+            "structural_fingerprint": "struct-fp",
+            "lock_fingerprint": "old-lock-fp",
+        },
+    )
+    _patch_fingerprint_context(module, monkeypatch)
+    monkeypatch.setattr(module, "_sleep_between_sync_attempts", lambda _s: None)
+
+    rmtree_calls: list[Path] = []
+    calls = 0
+
+    def fake_sync(**_: object) -> None:
+        nonlocal calls
+        calls += 1
+        raise subprocess.TimeoutExpired(cmd=["uv", "sync"], timeout=10800)
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+    monkeypatch.setattr(module.shutil, "rmtree", lambda p, **_: rmtree_calls.append(Path(p)))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        module.ensure_runtime_dependencies(
+            runtime_dir=runtime_dir,
+            cache_dir=cache_dir,
+            timeout_seconds=300,
+            log_changes=False,
+        )
+
+    assert "Dependency sync failed for mode=rebuild-sync" in str(excinfo.value)
+    assert rmtree_calls == [runtime_dir / ".venv"], "timeout must still wipe and rebuild"
+    # One delta attempt plus one rebuild attempt; TimeoutExpired is never retried.
+    assert calls == 2
+
+
+def test_raise_dependency_sync_failure_no_network_hint_for_subprocess_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The network remedy must not fire for a whole-sync timeout.
+
+    The hint claims the download "did not recover after the automatic retries";
+    for TimeoutExpired no retry was ever attempted, so showing it would send the
+    operator down the wrong path.
+    """
+    module = _load_bootstrap_module()
+    logs: list[str] = []
+    events: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(module, "log", lambda msg: logs.append(msg))
+    monkeypatch.setattr(module, "emit_event", lambda *a, **k: events.append((a, k)))
+
+    with pytest.raises(RuntimeError):
+        module._raise_dependency_sync_failure(
+            subprocess.TimeoutExpired(cmd=["uv", "sync"], timeout=10800), "rebuild-sync"
+        )
+
+    hint = "\n".join(logs)
+    assert "start the server again" not in hint
+    assert events == []
+
+
 def test_pyproject_declares_vibevoice_dependency_metadata() -> None:
     """P0 regression guard for the reopen: the [tool.uv.dependency-metadata] entry
     for vibevoice must exist so a whisper/nemo-only CPU re-resolve never git-clones
