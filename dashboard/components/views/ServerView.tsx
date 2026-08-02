@@ -38,6 +38,7 @@ import { AppleIcon } from '../ui/icons/AppleIcon';
 import { GpuHealthCard } from './GpuHealthCard';
 import { GpuDiagnosticModal, type GpuDiagnosticResultProp } from './GpuDiagnosticModal';
 import { InstanceSettingsSelectors } from './server/InstanceSettingsSelectors';
+import { RemoteClientSettingsCard } from './server/RemoteClientSettingsCard';
 import { RemoteConnectionCard } from './server/RemoteConnectionCard';
 import { StartupActivityInline } from './server/StartupActivityInline';
 
@@ -104,6 +105,13 @@ interface ServerViewProps {
     },
   ) => Promise<void>;
   startupFlowPending: boolean;
+  /**
+   * True while the Session tab's client link is running. Mirrors the guard on
+   * SessionView's own Start Local / Start Remote buttons: switching the
+   * connection mode silently retargets the live apiClient, so it is blocked
+   * while a client session is active.
+   */
+  clientRunning?: boolean;
 }
 
 // The diarization option strings (CAM++, Sortformer, pyannote, Custom) are
@@ -270,7 +278,11 @@ function mapDiarizationModelToSelection(modelName: string): { selection: string;
   return { selection: DIARIZATION_MODEL_CUSTOM_OPTION, custom: modelName };
 }
 
-export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFlowPending }) => {
+export const ServerView: React.FC<ServerViewProps> = ({
+  onStartServer,
+  startupFlowPending,
+  clientRunning = false,
+}) => {
   const { status: adminStatus, refresh: refreshAdminStatus } = useAdminStatus();
   const docker = useDockerContext();
 
@@ -295,6 +307,89 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
 
   // Runtime profile (persisted in electron-store)
   const [runtimeProfile, setRuntimeProfile] = useState<RuntimeProfile>('cpu');
+
+  // Remote connection mode — the Remote tile in the Runtime selector.
+  // Deliberately NOT part of the RuntimeProfile union: it is a connection
+  // mode (this dashboard is a client of another machine's server), not a
+  // hardware runtime, mirroring compatGuard's `deployment` derivation from
+  // the same key. server.runtimeProfile keeps its last local value while
+  // remote is active, so switching back restores the previous runtime.
+  const [remoteModeActive, setRemoteModeActive] = useState(false);
+  useEffect(() => {
+    let active = true;
+    getConfig<boolean>('connection.useRemote')
+      .then((v) => {
+        if (active) setRemoteModeActive(v === true);
+      })
+      .catch(() => {});
+    // Re-read after every apiClient.syncFromConfig() — the only signal that
+    // connection.* changed (SessionView's Client Link buttons and the
+    // Settings modal both write the same key).
+    const unsubscribe = apiClient.onConfigChanged(() => {
+      getConfig<boolean>('connection.useRemote')
+        .then((v) => {
+          if (active) setRemoteModeActive(v === true);
+        })
+        .catch(() => {});
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
+  // Switch between remote-client mode and local mode. Follows the established
+  // contract (SettingsModal.handleSave / SessionView.handleStartClient*):
+  // write connection.* keys, then syncFromConfig + setAuthToken so the cached
+  // apiClient target updates immediately — polling alone never picks it up.
+  // Leaving remote resets useHttps like SessionView's Start Local does: the
+  // remote save forced it on, and a stale `true` would break plain-HTTP
+  // localhost probes.
+  //
+  // Switches are SERIALIZED through a promise queue, and the target state is
+  // re-checked from config inside the queued task rather than from React
+  // state: a switch is ~10 sequential IPC round-trips, so a fast
+  // Remote→CPU click sequence would otherwise interleave writes or branch on
+  // a stale remoteModeActive closure and drop one of the switches.
+  const modeSwitchQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const applyConnectionModeChange = useCallback(
+    (useRemote: boolean): Promise<void> => {
+      const run = async () => {
+        const current = await getConfig<boolean>('connection.useRemote');
+        if ((current === true) === useRemote) return;
+        // Same guard as SessionView's Start Local / Start Remote buttons: an
+        // actual mode change retargets the live apiClient mid-session.
+        if (clientRunning) {
+          toast.error('Stop the client link in the Session tab before switching connection mode.');
+          return;
+        }
+        if (useRemote) {
+          // Snapshot the local HTTPS preference before remote forces it on,
+          // so leaving remote restores a deliberately TLS-enabled local
+          // setup instead of clobbering it to plain HTTP.
+          const priorHttps = (await getConfig<boolean>('connection.useHttps')) === true;
+          await setConfig('connection.localUseHttps', priorHttps);
+          await setConfig('connection.useRemote', true);
+          await setConfig('connection.useHttps', true);
+        } else {
+          const restoreHttps = (await getConfig<boolean>('connection.localUseHttps')) === true;
+          await setConfig('connection.useRemote', false);
+          await setConfig('connection.useHttps', restoreHttps);
+        }
+        await apiClient.syncFromConfig();
+        const token = ((await getConfig<string>('connection.authToken')) ?? '').trim();
+        apiClient.setAuthToken(token || null);
+        setRemoteModeActive(useRemote);
+        refreshAdminStatus();
+      };
+      const queued = modeSwitchQueueRef.current.then(run).catch(() => {
+        toast.error('Could not switch the connection mode.');
+      });
+      modeSwitchQueueRef.current = queued;
+      return queued;
+    },
+    [refreshAdminStatus, clientRunning],
+  );
 
   // Legacy-GPU image variant (Issue #83 — Pascal/Maxwell support).
   // Persisted in electron-store under `server.useLegacyGpu`.
@@ -747,6 +842,25 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       docker.cancelSidecarPull,
     ],
   );
+
+  // Tile-click wrapper for the LOCAL runtime tiles: leaving remote mode is a
+  // side effect of picking any local runtime. The hardware auto-detect effect
+  // below still calls handleRuntimeProfileChange directly — it must never
+  // yank the user out of remote mode, only refresh the stored local profile.
+  // No remoteModeActive pre-check here: the queued switch no-ops against
+  // fresh config when already local, and a React-state check would read a
+  // stale closure during a rapid Remote→local click sequence.
+  const handleSelectLocalRuntime = useCallback(
+    async (profile: RuntimeProfile) => {
+      await applyConnectionModeChange(false);
+      await handleRuntimeProfileChange(profile);
+    },
+    [applyConnectionModeChange, handleRuntimeProfileChange],
+  );
+
+  const handleSelectRemoteMode = useCallback(async () => {
+    await applyConnectionModeChange(true);
+  }, [applyConnectionModeChange]);
 
   // Pulls the Vulkan sidecar image, tracking progress in the notifications
   // store. Triggered from the Start Local click handler below — only for
@@ -1728,16 +1842,22 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
   // Hardware check (arm64 mac) passes immediately via Electron; server report only
   // refines whether mlx_whisper is actually installed.
   const metalSatisfied = isAppleSilicon && (mlxFeature === undefined || metalSupported);
-  const needsDocker = runtimeProfile !== 'metal';
-  const needsNvidia = runtimeProfile === 'gpu';
-  const needsMetal = runtimeProfile === 'metal';
+  // Remote mode needs nothing local: no Docker, no GPU, no Metal — the whole
+  // point of the Remote tile is a machine that cannot (or should not) run an
+  // instance itself.
+  const needsDocker = !remoteModeActive && runtimeProfile !== 'metal';
+  const needsNvidia = !remoteModeActive && runtimeProfile === 'gpu';
+  const needsMetal = !remoteModeActive && runtimeProfile === 'metal';
+  const notNeededHint = remoteModeActive
+    ? 'Not needed for Remote connection'
+    : 'Not needed for Metal runtime';
   const setupChecks = [
     {
       label: `${rtName} installed`,
       ok: docker.available,
       na: !needsDocker,
       hint: !needsDocker
-        ? 'Not needed for Metal runtime'
+        ? notNeededHint
         : (docker.detectionGuidance ?? 'Install Docker Engine, Docker Desktop, or Podman'),
     },
     {
@@ -1745,14 +1865,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
       ok: docker.composeAvailable,
       na: !needsDocker,
       hint: !needsDocker
-        ? 'Not needed for Metal runtime'
+        ? notNeededHint
         : 'Install docker-compose-v2 (Debian/Ubuntu) or Docker Desktop',
     },
     {
       label: `${rtName} image pulled`,
       ok: docker.images.length > 0,
       na: !needsDocker,
-      hint: !needsDocker ? 'Not needed for Metal runtime' : 'Pull an image below to get started',
+      hint: !needsDocker ? notNeededHint : 'Pull an image below to get started',
     },
     {
       label: 'NVIDIA GPU detected',
@@ -2067,10 +2187,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     label="CUDA"
                     sublabel="NVIDIA"
                     accent="green"
-                    selected={runtimeProfile === 'gpu'}
-                    disabled={isRunning || hostPlatform === 'darwin'}
+                    selected={!remoteModeActive && runtimeProfile === 'gpu'}
+                    disabled={
+                      isRunning || hostPlatform === 'darwin' || (clientRunning && remoteModeActive)
+                    }
                     badge={hostPlatform === 'darwin' ? 'Requires NVIDIA' : undefined}
-                    onSelect={() => handleRuntimeProfileChange('gpu')}
+                    onSelect={() => handleSelectLocalRuntime('gpu')}
                   />
                   {/* Vulkan-WSL2 (GH-101 follow-up) — always rendered so the
                       full runtime matrix stays readable; selectable only on
@@ -2087,12 +2209,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     label="Vulkan Windows"
                     sublabel="AMD / Intel · WSL2"
                     accent="red"
-                    selected={runtimeProfile === 'vulkan-wsl2'}
+                    selected={!remoteModeActive && runtimeProfile === 'vulkan-wsl2'}
                     disabled={
                       isRunning ||
                       vulkanBlockedByNvidia ||
                       (hostPlatform !== 'unknown' && hostPlatform !== 'win32') ||
-                      (hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected)
+                      (hostPlatform === 'win32' && !gpuInfo?.wslSupport?.gpuPassthroughDetected) ||
+                      (clientRunning && remoteModeActive)
                     }
                     badge={
                       hostPlatform !== 'unknown' && hostPlatform !== 'win32'
@@ -2104,7 +2227,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                             : undefined
                     }
                     hint="Experimental"
-                    onSelect={() => handleRuntimeProfileChange('vulkan-wsl2')}
+                    onSelect={() => handleSelectLocalRuntime('vulkan-wsl2')}
                   />
                   <SelectorTile
                     icon={
@@ -2116,12 +2239,13 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     label="Vulkan Linux"
                     sublabel="AMD / Intel"
                     accent="red"
-                    selected={runtimeProfile === 'vulkan'}
+                    selected={!remoteModeActive && runtimeProfile === 'vulkan'}
                     disabled={
                       isRunning ||
                       vulkanBlockedByNvidia ||
                       hostPlatform === 'win32' ||
-                      hostPlatform === 'darwin'
+                      hostPlatform === 'darwin' ||
+                      (clientRunning && remoteModeActive)
                     }
                     badge={
                       hostPlatform === 'win32' || hostPlatform === 'darwin'
@@ -2130,18 +2254,19 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           ? 'NVIDIA detected'
                           : undefined
                     }
-                    onSelect={() => handleRuntimeProfileChange('vulkan')}
+                    onSelect={() => handleSelectLocalRuntime('vulkan')}
                   />
                   <SelectorTile
                     icon={<AppleIcon size={16} />}
                     label="Metal"
                     sublabel="Apple Silicon"
                     accent="purple"
-                    selected={runtimeProfile === 'metal'}
+                    selected={!remoteModeActive && runtimeProfile === 'metal'}
                     disabled={
                       isRunning ||
                       nvidiaDetected ||
-                      (hostPlatform !== 'unknown' && hostPlatform !== 'darwin')
+                      (hostPlatform !== 'unknown' && hostPlatform !== 'darwin') ||
+                      (clientRunning && remoteModeActive)
                     }
                     badge={
                       hostPlatform !== 'unknown' && hostPlatform !== 'darwin'
@@ -2150,16 +2275,26 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           ? 'NVIDIA detected'
                           : undefined
                     }
-                    onSelect={() => handleRuntimeProfileChange('metal')}
+                    onSelect={() => handleSelectLocalRuntime('metal')}
                   />
                   <SelectorTile
                     icon={<Cpu size={16} />}
                     label="CPU Only"
                     sublabel="Universal"
                     accent="orange"
-                    selected={runtimeProfile === 'cpu'}
-                    disabled={isRunning}
-                    onSelect={() => handleRuntimeProfileChange('cpu')}
+                    selected={!remoteModeActive && runtimeProfile === 'cpu'}
+                    disabled={isRunning || (clientRunning && remoteModeActive)}
+                    onSelect={() => handleSelectLocalRuntime('cpu')}
+                  />
+                  <SelectorTile
+                    icon={<Globe size={16} />}
+                    label="Remote"
+                    sublabel="Another machine"
+                    accent="magenta"
+                    selected={remoteModeActive}
+                    disabled={isRunning || (clientRunning && !remoteModeActive)}
+                    badge={clientRunning && !remoteModeActive ? 'Client running' : undefined}
+                    onSelect={() => handleSelectRemoteMode()}
                   />
                 </SelectorGroup>
                 {/* Multi-GPU picker: only rendered when the host has more than
@@ -2168,7 +2303,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     compose variable; Automatic keeps the previous single-GPU
                     behavior. Uses the shared CustomSelect so the popup matches
                     the app styling instead of the OS-native menu. */}
-                {runtimeProfile === 'gpu' && nvidiaGpus.length > 1 && (
+                {!remoteModeActive && runtimeProfile === 'gpu' && nvidiaGpus.length > 1 && (
                   <div className="mt-3">
                     <p className="mb-1 text-xs font-medium text-slate-300">GPU for inference</p>
                     <CustomSelect
@@ -2185,7 +2320,8 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                     </p>
                   </div>
                 )}
-                {runtimeProfile === 'gpu' &&
+                {!remoteModeActive &&
+                  runtimeProfile === 'gpu' &&
                   nvidiaDetected &&
                   nonNvidiaGpuPresent &&
                   !isRunning && (
@@ -2194,34 +2330,51 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                       GPU instead
                     </p>
                   )}
-                {runtimeProfile === 'vulkan' && !isRunning && (
+                {!remoteModeActive && runtimeProfile === 'vulkan' && !isRunning && (
                   <p className="mt-2 text-xs text-slate-500 italic">
                     AMD/Intel GPU via whisper.cpp — no diarization; live mode via GGML models
                   </p>
                 )}
-                {runtimeProfile === 'vulkan' && nvidiaDetected && !isRunning && (
-                  <p className="mt-1 text-xs text-slate-500 italic">
-                    The NVIDIA card stays idle here - the whisper.cpp sidecar (Mesa drivers) uses
-                    the AMD / Intel GPU
-                  </p>
-                )}
-                {runtimeProfile === 'vulkan-wsl2' && !isRunning && (
+                {!remoteModeActive &&
+                  runtimeProfile === 'vulkan' &&
+                  nvidiaDetected &&
+                  !isRunning && (
+                    <p className="mt-1 text-xs text-slate-500 italic">
+                      The NVIDIA card stays idle here - the whisper.cpp sidecar (Mesa drivers) uses
+                      the AMD / Intel GPU
+                    </p>
+                  )}
+                {!remoteModeActive && runtimeProfile === 'vulkan-wsl2' && !isRunning && (
                   <p className="text-accent-orange mt-2 text-xs italic">
                     Experimental: AMD/Intel GPU via WSL2 + Mesa dzn — see README §2.5.2
                   </p>
                 )}
-                {runtimeProfile === 'cpu' && !isRunning && (
+                {!remoteModeActive && runtimeProfile === 'cpu' && !isRunning && (
                   <p className="mt-2 text-xs text-slate-500 italic">
                     Slower transcription, no NVIDIA GPU required
+                  </p>
+                )}
+                {remoteModeActive && (
+                  <p className="mt-2 text-xs text-slate-500 italic">
+                    This dashboard connects to a remote TranscriptionSuite server — no local
+                    instance runs on this machine
                   </p>
                 )}
               </div>
             </GlassCard>
           </div>
 
-          {/* 2. Docker Image or Inference Server (metal) Card */}
+          {/* 2. Docker Image or Inference Server (metal) Card — inert while
+              the Remote runtime is selected (no local instance). The `inert`
+              attribute (React 19) blocks keyboard focus and assistive tech,
+              not just pointer events — the dimming alone left every control
+              tabbable. */}
           {runtimeProfile === 'metal' ? (
-            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+            <div
+              className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0"
+              aria-disabled={remoteModeActive || undefined}
+              inert={remoteModeActive || undefined}
+            >
               <div
                 className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${mlxStatus === 'running' ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : mlxStatus === 'starting' || mlxStatus === 'stopping' ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
               >
@@ -2229,7 +2382,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               </div>
               <GlassCard
                 title="2. Inference Server"
-                className={`transition-all duration-500 ease-in-out ${mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+                className={`transition-all duration-500 ease-in-out ${mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''} ${remoteModeActive ? 'pointer-events-none opacity-50 select-none' : ''}`}
               >
                 <div className="flex flex-wrap items-center gap-5">
                   <div className="flex h-6 shrink-0 items-center space-x-3 border-r border-white/10 pr-5">
@@ -2306,7 +2459,11 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               </GlassCard>
             </div>
           ) : (
-            <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+            <div
+              className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0"
+              aria-disabled={remoteModeActive || undefined}
+              inert={remoteModeActive || undefined}
+            >
               <div
                 className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${hasImages ? 'bg-accent-cyan text-slate-900 shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-slate-800 text-slate-300'}`}
               >
@@ -2314,7 +2471,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
               </div>
               <GlassCard
                 title="2. Docker Image"
-                className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+                className={`transition-all duration-500 ease-in-out ${hasImages ? ACTIVE_CARD_ACCENT_CLASS : ''} ${remoteModeActive ? 'pointer-events-none opacity-50 select-none' : ''}`}
               >
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                   <div className="space-y-4">
@@ -2554,8 +2711,14 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             </div>
           )}
 
-          {/* 3. Instance Settings Card */}
-          <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
+          {/* 3. Instance Settings Card — inert while the Remote runtime is
+              selected: there is no local instance to configure, so the whole
+              card dims and stops receiving pointer events. */}
+          <div
+            className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0"
+            aria-disabled={remoteModeActive || undefined}
+            inert={remoteModeActive || undefined}
+          >
             <div
               className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunning || mlxStatus === 'running' ? `bg-accent-cyan text-slate-900 ${isRunningAndHealthy || mlxStatus === 'running' ? 'shadow-[0_0_15px_rgba(34,211,238,0.5)]' : ''}` : containerStatus.exists ? 'bg-accent-orange text-slate-900 shadow-[0_0_15px_rgba(251,146,60,0.5)]' : 'bg-slate-800 text-slate-300'}`}
             >
@@ -2563,7 +2726,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             </div>
             <GlassCard
               title="3. Instance Settings"
-              className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy || mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''}`}
+              className={`transition-all duration-500 ease-in-out ${isRunningAndHealthy || mlxStatus === 'running' ? ACTIVE_CARD_ACCENT_CLASS : ''} ${remoteModeActive ? 'pointer-events-none opacity-50 select-none' : ''}`}
             >
               <div className="space-y-6">
                 {/* Unified instance control panel: container lifecycle controls
@@ -2652,6 +2815,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                               });
                             }}
                             disabled={
+                              remoteModeActive ||
                               docker.operating ||
                               isRunning ||
                               startupFlowPending ||
@@ -2678,6 +2842,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                               })
                             }
                             disabled={
+                              remoteModeActive ||
                               docker.operating ||
                               isRunning ||
                               startupFlowPending ||
@@ -2691,7 +2856,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                             variant="danger"
                             className="h-9 px-4 whitespace-nowrap"
                             onClick={() => docker.stopContainer()}
-                            disabled={docker.operating || !isRunning}
+                            disabled={remoteModeActive || docker.operating || !isRunning}
                           >
                             Stop
                           </Button>
@@ -2709,7 +2874,7 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                           variant={modelsLoaded === false ? 'secondary' : 'danger'}
                           className="h-9 px-4 whitespace-nowrap"
                           onClick={modelsLoaded === false ? handleLoadModels : handleUnloadModels}
-                          disabled={modelsLoading || !isRunning}
+                          disabled={remoteModeActive || modelsLoading || !isRunning}
                         >
                           {modelsLoading ? (
                             <>
@@ -2726,7 +2891,12 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
                             variant="danger"
                             className="h-9 px-4 whitespace-nowrap"
                             onClick={() => docker.removeContainer()}
-                            disabled={docker.operating || isRunning || !containerStatus.exists}
+                            disabled={
+                              remoteModeActive ||
+                              docker.operating ||
+                              isRunning ||
+                              !containerStatus.exists
+                            }
                           >
                             Remove Container
                           </Button>
@@ -2798,17 +2968,25 @@ export const ServerView: React.FC<ServerViewProps> = ({ onStartServer, startupFl
             </GlassCard>
           </div>
 
-          {/* 4. Remote Connection Card */}
+          {/* 4. Remote Connection Card — mode-aware. Local runtimes: the
+              host-side view (this machine's token + Tailscale hostname for
+              OTHER clients). Remote runtime: the client-side settings that
+              used to live in Settings > Client > Connection (which server
+              THIS machine connects to). */}
           <div className="relative shrink-0 border-l-2 border-white/10 pb-8 pl-8 last:border-0 last:pb-0">
             <div
-              className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${isRunningAndHealthy && serverMode === 'remote' ? 'bg-accent-magenta text-slate-900 shadow-[0_0_15px_rgba(232,121,249,0.5)]' : 'bg-slate-800 text-slate-300'}`}
+              className={`absolute top-0 -left-4.25 z-10 flex h-8 w-8 items-center justify-center rounded-full border-4 border-slate-900 transition-colors duration-300 ${remoteModeActive || (isRunningAndHealthy && serverMode === 'remote') ? 'bg-accent-magenta text-slate-900 shadow-[0_0_15px_rgba(232,121,249,0.5)]' : 'bg-slate-800 text-slate-300'}`}
             >
               <Globe size={14} />
             </div>
-            <RemoteConnectionCard
-              title="4. Remote Connection"
-              isRunningAndHealthy={isRunningAndHealthy}
-            />
+            {remoteModeActive ? (
+              <RemoteClientSettingsCard title="4. Remote Connection" />
+            ) : (
+              <RemoteConnectionCard
+                title="4. Remote Connection"
+                isRunningAndHealthy={isRunningAndHealthy}
+              />
+            )}
           </div>
 
           {/* 5. Volumes Card */}

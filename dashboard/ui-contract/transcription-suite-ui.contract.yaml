@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.15.0
+  spec_version: 1.16.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -113,8 +113,10 @@ meta:
       - components/views/NotebookView.tsx
       - components/views/NotificationsView.tsx
       - components/views/server/__tests__/MainModelPicker.test.tsx
+      - components/views/server/__tests__/RemoteClientSettingsCard.test.tsx
       - components/views/server/InstanceSettingsSelectors.tsx
       - components/views/server/MainModelPicker.tsx
+      - components/views/server/RemoteClientSettingsCard.tsx
       - components/views/server/RemoteConnectionCard.tsx
       - components/views/server/StartupActivityInline.tsx
       - components/views/ServerConfigEditor.tsx
@@ -131,7 +133,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-08-01T21:22:30.557Z
+    generated_at: 2026-08-02T10:20:32.229Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -986,6 +988,7 @@ utility_allowlist:
     - pb-1
     - pb-10
     - pb-2
+    - pb-3
     - pb-4
     - pb-8
     - pl-0
@@ -2636,6 +2639,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   QueuePausedBanner:
     file: components/ui/QueuePausedBanner.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  RemoteClientSettingsCard:
+    file: components/views/server/RemoteClientSettingsCard.tsx
     required_tokens:
       - colors
       - motion

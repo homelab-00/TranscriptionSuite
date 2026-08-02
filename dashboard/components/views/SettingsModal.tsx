@@ -68,7 +68,6 @@ const DEFAULT_SHORTCUTS = {
   startRecording: 'Alt+Ctrl+Z',
   stopTranscribe: 'Alt+Ctrl+X',
 } as const;
-const REMOTE_PROFILE_OPTIONS = ['Tailscale', 'LAN'] as const;
 const MAIN_MODEL_CUSTOM_OPTION = 'Custom (HuggingFace repo)';
 const MODEL_DEFAULT_LOADING_PLACEHOLDER = 'Loading server default...';
 // GH-120 — Folder Watch duplicate-handling policy. Display order + labels for
@@ -257,16 +256,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     numSpeakers: 2,
     autoAddNotebook: false,
     localHost: 'localhost',
-    remoteHost: '',
-    lanHost: '',
-    remoteProfile: 'tailscale',
-    useRemote: false,
     authToken: '',
     port: DEFAULT_SERVER_PORT,
     useHttps: false,
     hfToken: '',
     hideTimestamps: false,
   });
+
+  // Display-only mirror of connection.useRemote, loaded when the modal opens.
+  // The remote-client fields themselves (profile, hosts, the mode switch)
+  // moved to the Server tab's Remote runtime tile + connection card; this
+  // modal never writes connection.useRemote anymore — a stale copy saved
+  // here would clobber a mode switch made in the Server tab while the modal
+  // sat open. Still needed to force-display HTTPS as on while remote.
+  const [remoteModeActive, setRemoteModeActive] = useState(false);
 
   // Sync auth token from the centralized useAuthTokenSync hook's cache.
   // Handles both new tokens (from Docker log detection) and token clearing
@@ -412,14 +415,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             if (cfg) {
               const useRemote = (cfg['connection.useRemote'] as boolean) ?? false;
               const useHttps = (cfg['connection.useHttps'] as boolean) ?? false;
+              setRemoteModeActive(useRemote);
               setClientSettings((prev) => ({
                 ...prev,
                 localHost: (cfg['connection.localHost'] as string) ?? prev.localHost,
-                remoteHost: (cfg['connection.remoteHost'] as string) ?? prev.remoteHost,
-                lanHost: (cfg['connection.lanHost'] as string) ?? prev.lanHost,
-                remoteProfile:
-                  (cfg['connection.remoteProfile'] as string) === 'lan' ? 'lan' : 'tailscale',
-                useRemote,
                 authToken: (cfg['connection.authToken'] as string) ?? prev.authToken,
                 port: (cfg['connection.port'] as number) ?? prev.port,
                 useHttps: useRemote ? true : useHttps,
@@ -545,33 +544,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const handleSave = useCallback(async () => {
     const api = (window as any).electronAPI;
-    const normalizedRemoteProfile = clientSettings.remoteProfile === 'lan' ? 'lan' : 'tailscale';
     const normalizedLocalHost = clientSettings.localHost.trim();
-    const normalizedRemoteHost = clientSettings.remoteHost.trim();
-    const normalizedLanHost = clientSettings.lanHost.trim();
-    const normalizedUseHttps = clientSettings.useRemote ? true : clientSettings.useHttps;
-
-    if (
-      clientSettings.useRemote &&
-      normalizedRemoteProfile === 'tailscale' &&
-      !normalizedRemoteHost
-    ) {
-      toast.error('Tailscale remote mode requires a host or IP address.');
-      return;
-    }
-
-    if (clientSettings.useRemote && normalizedRemoteProfile === 'lan' && !normalizedLanHost) {
-      toast.error('LAN remote mode requires a host or IP address.');
-      return;
-    }
+    // Remote-client fields (useRemote, remoteProfile, remote/LAN host) are
+    // owned by the Server tab's Remote runtime card now — deliberately NOT
+    // written here, so a stale modal snapshot can never clobber a mode
+    // switch made while the modal was open. HTTPS stays forced on while
+    // remote mode is active (same invariant as before the move).
+    const normalizedUseHttps = remoteModeActive ? true : clientSettings.useHttps;
 
     if (api?.config) {
       const entries: [string, unknown][] = [
         ['connection.localHost', normalizedLocalHost || clientSettings.localHost],
-        ['connection.remoteHost', normalizedRemoteHost],
-        ['connection.lanHost', normalizedLanHost],
-        ['connection.remoteProfile', normalizedRemoteProfile],
-        ['connection.useRemote', clientSettings.useRemote],
         ['connection.authToken', clientSettings.authToken],
         ['connection.port', clientSettings.port],
         ['connection.useHttps', normalizedUseHttps],
@@ -661,7 +644,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
     setIsDirty(false);
     onClose();
-  }, [clientSettings, appSettings, shortcutSettings, serverConfigUpdates, onClose]);
+  }, [
+    clientSettings,
+    appSettings,
+    shortcutSettings,
+    serverConfigUpdates,
+    remoteModeActive,
+    onClose,
+  ]);
 
   const handleServerConfigFieldChange = useCallback((path: string, value: unknown) => {
     setServerConfigUpdates((prev) => ({ ...prev, [path]: value }));
@@ -1482,105 +1472,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
       <Section title="Connection">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
-                Local Host
-              </label>
-              <input
-                type="text"
-                value={clientSettings.localHost}
-                onChange={(e) =>
-                  setClientSettings((prev) => ({ ...prev, localHost: e.target.value }))
-                }
-                className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
-              />
-            </div>
-            <div className={!clientSettings.useRemote ? 'opacity-50' : ''}>
-              <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
-                {clientSettings.remoteProfile === 'lan' ? 'LAN Host / IP' : 'Tailscale Host'}
-              </label>
-              <input
-                type="text"
-                placeholder={
-                  clientSettings.remoteProfile === 'lan'
-                    ? 'e.g. 192.168.1.50 or k8s-gpu.local'
-                    : 'e.g. my-server.tail123.ts.net'
-                }
-                value={
-                  clientSettings.remoteProfile === 'lan'
-                    ? clientSettings.lanHost
-                    : clientSettings.remoteHost
-                }
-                onChange={(e) =>
-                  setClientSettings((prev) =>
-                    prev.remoteProfile === 'lan'
-                      ? { ...prev, lanHost: e.target.value }
-                      : { ...prev, remoteHost: e.target.value },
-                  )
-                }
-                disabled={!clientSettings.useRemote}
-                className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
-              />
-              {clientSettings.useRemote &&
-                clientSettings.remoteProfile !== 'lan' &&
-                /^[^.]+\.ts\.net$/i.test(clientSettings.remoteHost.trim()) && (
-                  <p className="mt-1.5 text-xs text-amber-300/80">
-                    This looks like a tailnet name. The hostname should include the machine name,
-                    e.g.{' '}
-                    <span className="font-mono">
-                      machine-name.{clientSettings.remoteHost.trim()}
-                    </span>
-                  </p>
-                )}
-            </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
+              Local Host
+            </label>
+            <input
+              type="text"
+              value={clientSettings.localHost}
+              onChange={(e) =>
+                setClientSettings((prev) => ({ ...prev, localHost: e.target.value }))
+              }
+              className="focus:border-accent-cyan/50 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white focus:outline-none"
+            />
           </div>
 
-          <AppleSwitch
-            checked={clientSettings.useRemote}
-            onChange={(v) =>
-              setClientSettings((prev) => ({
-                ...prev,
-                useRemote: v,
-                useHttps: v ? true : prev.useHttps,
-              }))
-            }
-            label="Use remote server instead of local"
-          />
-
-          {clientSettings.useRemote && (
-            <div className="rounded-lg border border-white/10 bg-white/5 p-3">
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] md:items-end">
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium tracking-wider text-slate-500 uppercase">
-                    Remote Profile
-                  </label>
-                  <CustomSelect
-                    value={clientSettings.remoteProfile === 'lan' ? 'LAN' : 'Tailscale'}
-                    onChange={(value) =>
-                      setClientSettings((prev) => ({
-                        ...prev,
-                        remoteProfile: value === 'LAN' ? 'lan' : 'tailscale',
-                        useHttps: true,
-                      }))
-                    }
-                    options={[...REMOTE_PROFILE_OPTIONS]}
-                    className="h-10 rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-white"
-                  />
-                </div>
-                <p className="text-xs text-slate-400">
-                  {clientSettings.remoteProfile === 'lan'
-                    ? 'LAN mode uses the same HTTPS + token auth as remote mode, but targets a local-network host/IP instead of a Tailnet DNS name.'
-                    : 'Tailscale mode uses your Tailnet hostname and the existing HTTPS + token auth flow.'}
-                </p>
-              </div>
-              {clientSettings.remoteProfile === 'lan' && !clientSettings.lanHost.trim() && (
-                <p className="mt-2 text-xs text-amber-300/80">
-                  Enter a LAN host or IP before saving this profile.
-                </p>
-              )}
-            </div>
-          )}
+          <p className="text-xs text-slate-500">
+            Connecting to a remote server? Select the <span className="font-medium">Remote</span>{' '}
+            runtime in the Server tab — the hostname and token settings live there now.
+          </p>
 
           <div className="my-2 h-px bg-white/5"></div>
 
@@ -1812,14 +1721,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </div>
             <div className="pb-1">
               <AppleSwitch
-                checked={clientSettings.useRemote ? true : clientSettings.useHttps}
+                checked={remoteModeActive ? true : clientSettings.useHttps}
                 onChange={(v) => setClientSettings((prev) => ({ ...prev, useHttps: v }))}
-                disabled={clientSettings.useRemote}
+                disabled={remoteModeActive}
                 label="Use HTTPS"
               />
             </div>
           </div>
-          {clientSettings.useRemote && (
+          {remoteModeActive && (
             <p className="text-xs text-slate-500">
               HTTPS is required for remote profiles (Tailscale and LAN) to keep token auth enabled.
             </p>

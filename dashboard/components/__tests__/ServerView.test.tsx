@@ -94,7 +94,8 @@ vi.mock('../../src/stores/notificationsStore', () => {
   return { useNotificationsStore };
 });
 
-// apiClient
+// apiClient — onConfigChanged/syncFromConfig/setAuthToken are exercised by
+// the Remote runtime tile (mount subscription + mode-switch handlers).
 vi.mock('../../src/api/client', () => ({
   apiClient: {
     checkConnection: vi.fn().mockResolvedValue({ reachable: true, ready: true }),
@@ -102,6 +103,9 @@ vi.mock('../../src/api/client', () => ({
     loadModels: vi.fn().mockResolvedValue(undefined),
     unloadModels: vi.fn().mockResolvedValue(undefined),
     setModel: vi.fn().mockResolvedValue(undefined),
+    onConfigChanged: vi.fn().mockReturnValue(() => {}),
+    syncFromConfig: vi.fn().mockResolvedValue(undefined),
+    setAuthToken: vi.fn(),
   },
 }));
 
@@ -1339,6 +1343,9 @@ describe('Multi-GPU selection', () => {
     expect(pickerButton()?.textContent).toContain('Automatic (Docker default)');
   });
 
+  // 10s timeout: chronically ~3.4s of real mount work — the default 5s budget
+  // tips over under full-suite parallel load now that this file carries more
+  // tests.
   it('persists a picked card to server.gpuDevice as its UUID', async () => {
     const { setSpy } = setupApi([RTX_3060, RTX_3090]);
     await mountAndRedetect();
@@ -1350,7 +1357,7 @@ describe('Multi-GPU selection', () => {
       expect(setSpy).toHaveBeenCalledWith('server.gpuDevice', 'GPU-bbb');
     });
     expect(pickerButton()?.textContent).toContain('GPU 1: NVIDIA GeForce RTX 3090 (24 GB)');
-  });
+  }, 10_000);
 
   it('hydrates a persisted selection from server.gpuDevice', async () => {
     setupApi([RTX_3060, RTX_3090], { storedGpuDevice: 'GPU-bbb' });
@@ -1427,5 +1434,240 @@ describe('Multi-GPU selection', () => {
         name: 'Previously selected GPU not detected - starts as Automatic',
       }),
     ).toBeTruthy();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Remote runtime tile: connection.useRemote drives the tile selection, greys
+// the local-instance cards and swaps card 4 to the client settings.
+// remoteModeActive is read through the mocked config/store getConfig (NOT
+// electronAPI.config.get), so each test seeds it via mockImplementation.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { apiClient } from '../../src/api/client';
+
+describe('Remote runtime tile', () => {
+  function setupElectronAPI() {
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockImplementation(async (key: string) => {
+          if (key === 'server.runtimeProfile') return 'cpu';
+          if (key === 'server.gpuAutoDetectDone') return true;
+          return undefined;
+        }),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+        checkModelCache: vi.fn().mockResolvedValue({}),
+        checkGpu: vi.fn().mockResolvedValue({ gpu: false, toolkit: false, vulkan: false }),
+      },
+      app: {
+        getArch: vi.fn().mockReturnValue('x64'),
+        getConfigDir: vi.fn().mockResolvedValue('/mock/config'),
+      },
+      mlx: {
+        getStatus: vi.fn().mockResolvedValue('stopped'),
+        onStatusChanged: vi.fn().mockReturnValue(vi.fn()),
+      },
+      tailscale: {
+        getHostname: vi.fn().mockResolvedValue('my-server.tail1234.ts.net'),
+      },
+      server: {
+        checkFirewallPort: vi.fn().mockResolvedValue(null),
+      },
+    };
+  }
+
+  function seedRemoteMode(useRemote: boolean) {
+    vi.mocked(getConfig).mockImplementation(async (key: string) => {
+      if (key === 'connection.useRemote') return useRemote;
+      if (key === 'connection.remoteProfile') return 'tailscale';
+      if (key === 'connection.remoteHost') return 'gpu-box.tail1234.ts.net';
+      if (key === 'connection.authToken') return 'remote-token';
+      if (key === 'connection.port') return 9786;
+      return undefined;
+    });
+  }
+
+  function runtimeGroup() {
+    return within(screen.getByText('Runtime').closest('.space-y-2') as HTMLElement);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDocker.available = true;
+    mockDocker.images = [];
+    mockDocker.remoteTags = [];
+    mockDocker.variantTags = null;
+    mockDocker.container = { exists: false, running: false, status: 'unknown', health: undefined };
+    mockDocker.operationError = null;
+    mockDocker.operating = false;
+    mockDocker.composeAvailable = true;
+    mockAdminStatus.status = { models: {} };
+    vi.mocked(setConfig).mockResolvedValue(undefined);
+    setupElectronAPI();
+  });
+
+  it('renders the Remote tile unselected in local mode', async () => {
+    seedRemoteMode(false);
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    const tile = runtimeGroup().getByText('Remote').closest('button') as HTMLButtonElement;
+    await waitFor(() => {
+      expect(tile.getAttribute('aria-pressed')).toBe('false');
+    });
+    // Local mode keeps the host-side card 4 (self-loading credentials view).
+    expect(screen.queryByText('Remote Profile')).toBeNull();
+  });
+
+  it('selecting the Remote tile writes useRemote + useHttps and re-syncs the api client', async () => {
+    seedRemoteMode(false);
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    const tile = runtimeGroup().getByText('Remote').closest('button') as HTMLButtonElement;
+    fireEvent.click(tile);
+    await waitFor(() => {
+      expect(vi.mocked(setConfig).mock.calls).toEqual(
+        expect.arrayContaining([
+          ['connection.useRemote', true],
+          ['connection.useHttps', true],
+        ]),
+      );
+      expect(apiClient.syncFromConfig).toHaveBeenCalled();
+    });
+  });
+
+  it('reflects a persisted remote mode: tile selected, instance cards inert, client card shown', async () => {
+    seedRemoteMode(true);
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    await waitFor(() => {
+      const tile = runtimeGroup().getByText('Remote').closest('button') as HTMLButtonElement;
+      expect(tile.getAttribute('aria-pressed')).toBe('true');
+    });
+    // Cards 2 + 3 dim and stop receiving pointer events.
+    expect(
+      screen.getByText('3. Instance Settings').closest('[aria-disabled="true"]'),
+    ).not.toBeNull();
+    expect(screen.getByText('2. Docker Image').closest('[aria-disabled="true"]')).not.toBeNull();
+    // Card 4 swaps to the client-side settings.
+    await waitFor(() => {
+      expect(screen.getByText('Remote Profile')).toBeDefined();
+    });
+    expect(screen.getAllByText('Not needed for Remote connection').length).toBeGreaterThanOrEqual(
+      3,
+    );
+    // Local runtime tiles read unselected even though runtimeProfile === 'cpu'.
+    const cpuTile = runtimeGroup().getByText('CPU Only').closest('button') as HTMLButtonElement;
+    expect(cpuTile.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('selecting a local runtime exits remote mode and restores the local profile flow', async () => {
+    seedRemoteMode(true);
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    await waitFor(() => {
+      const tile = runtimeGroup().getByText('Remote').closest('button') as HTMLButtonElement;
+      expect(tile.getAttribute('aria-pressed')).toBe('true');
+    });
+    fireEvent.click(runtimeGroup().getByText('CPU Only').closest('button') as HTMLButtonElement);
+    await waitFor(() => {
+      expect(vi.mocked(setConfig).mock.calls).toEqual(
+        expect.arrayContaining([
+          ['connection.useRemote', false],
+          ['connection.useHttps', false],
+        ]),
+      );
+      expect((window as any).electronAPI.config.set).toHaveBeenCalledWith(
+        'server.runtimeProfile',
+        'cpu',
+      );
+    });
+  });
+
+  it('serializes a rapid Remote→local click sequence so the final state is local', async () => {
+    // Stateful config store: the queued mode switches re-read
+    // connection.useRemote from config, so the mock must persist writes for
+    // the second switch to see the first one's result.
+    const store = new Map<string, unknown>();
+    vi.mocked(getConfig).mockImplementation(async (key: string) => store.get(key));
+    vi.mocked(setConfig).mockImplementation(async (key: string, value: unknown) => {
+      store.set(key, value);
+    });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    const remoteTile = runtimeGroup().getByText('Remote').closest('button') as HTMLButtonElement;
+    const cpuTile = runtimeGroup().getByText('CPU Only').closest('button') as HTMLButtonElement;
+    fireEvent.click(remoteTile);
+    fireEvent.click(cpuTile);
+    await waitFor(() => {
+      expect(store.get('connection.useRemote')).toBe(false);
+    });
+    // Both switches ran, in click order — neither was dropped or interleaved.
+    const useRemoteWrites = vi
+      .mocked(setConfig)
+      .mock.calls.filter((c) => c[0] === 'connection.useRemote')
+      .map((c) => c[1]);
+    expect(useRemoteWrites).toEqual([true, false]);
+  });
+
+  it('restores a deliberately enabled local HTTPS preference after a remote round-trip', async () => {
+    const store = new Map<string, unknown>([['connection.useHttps', true]]);
+    vi.mocked(getConfig).mockImplementation(async (key: string) => store.get(key));
+    vi.mocked(setConfig).mockImplementation(async (key: string, value: unknown) => {
+      store.set(key, value);
+    });
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    fireEvent.click(runtimeGroup().getByText('Remote').closest('button') as HTMLButtonElement);
+    await waitFor(() => {
+      expect(store.get('connection.useRemote')).toBe(true);
+    });
+    // Entering remote snapshotted the pref and forced HTTPS on.
+    expect(store.get('connection.localUseHttps')).toBe(true);
+    expect(store.get('connection.useHttps')).toBe(true);
+    fireEvent.click(runtimeGroup().getByText('CPU Only').closest('button') as HTMLButtonElement);
+    await waitFor(() => {
+      expect(store.get('connection.useRemote')).toBe(false);
+    });
+    // Leaving remote restored the snapshot instead of clobbering to false.
+    expect(store.get('connection.useHttps')).toBe(true);
+  });
+
+  it('re-reads connection.useRemote when apiClient fires onConfigChanged', async () => {
+    seedRemoteMode(false);
+    render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+    const tile = () => runtimeGroup().getByText('Remote').closest('button') as HTMLButtonElement;
+    await waitFor(() => {
+      expect(tile().getAttribute('aria-pressed')).toBe('false');
+    });
+    // Another writer (SessionView Client Link, SettingsModal) flips the key
+    // and syncFromConfig() fires the config-changed event.
+    seedRemoteMode(true);
+    const listener = vi.mocked(apiClient.onConfigChanged).mock.calls[0][0] as () => void;
+    listener();
+    await waitFor(() => {
+      expect(tile().getAttribute('aria-pressed')).toBe('true');
+    });
+  });
+
+  it('blocks entering remote mode while the client link is running', async () => {
+    seedRemoteMode(false);
+    render(React.createElement(ServerView, { ...baseProps, clientRunning: true }), {
+      wrapper: createWrapper(),
+    });
+    const remoteTile = runtimeGroup().getByText('Remote').closest('button') as HTMLButtonElement;
+    await waitFor(() => {
+      expect(remoteTile.disabled).toBe(true);
+    });
+    expect(runtimeGroup().getByText('Client running')).toBeDefined();
+  });
+
+  it('blocks leaving remote mode while the client link is running', async () => {
+    seedRemoteMode(true);
+    render(React.createElement(ServerView, { ...baseProps, clientRunning: true }), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => {
+      const remoteTile = runtimeGroup().getByText('Remote').closest('button') as HTMLButtonElement;
+      expect(remoteTile.getAttribute('aria-pressed')).toBe('true');
+    });
+    const cpuTile = runtimeGroup().getByText('CPU Only').closest('button') as HTMLButtonElement;
+    expect(cpuTile.disabled).toBe(true);
   });
 });
