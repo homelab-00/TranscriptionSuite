@@ -451,6 +451,99 @@ class TestNotebookDiarizationDispatch:
         assert saved["diarization_segments"] is None
         engine.transcribe_file.assert_called_once()
 
+    def test_no_word_timestamps_saves_the_dispatch_attributed_segments_once(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """GH-274 review finding: the dispatch's nowords fallback already
+        attributed speakers onto result.segments — the route must reuse that
+        output, not re-split it against the raw turns a second time."""
+        saved = self._stub_route_io(tmp_path, monkeypatch)
+
+        stt_result = SimpleNamespace(
+            text="hello there",
+            segments=[{"text": "hello there", "start": 0.0, "end": 2.0}],
+            words=[],
+            language="en",
+            language_probability=0.99,
+            duration=2.0,
+            num_speakers=0,
+        )
+        raw_turn = {"speaker": "SPEAKER_00", "start": 0.0, "end": 2.0}
+        diar_seg = MagicMock()
+        diar_seg.to_dict.return_value = raw_turn
+        attributed = [{"text": "hello there", "start": 0.0, "end": 2.0, "speaker": "SPEAKER_00"}]
+
+        monkeypatch.setattr(
+            "server.core.parallel_diarize.transcribe_and_diarize",
+            lambda **_kw: (stt_result, MagicMock(segments=[diar_seg], num_speakers=1)),
+        )
+        # No words -> the word-level merge finds nothing and the dispatch takes
+        # the segment-level (nowords) fallback.
+        monkeypatch.setattr(
+            "server.core.speaker_merge.build_speaker_segments",
+            lambda *_a, **_kw: ([], [], 0),
+        )
+        nowords_calls: list = []
+
+        def _nowords(segments, turns):
+            nowords_calls.append((list(segments), list(turns)))
+            return attributed
+
+        monkeypatch.setattr("server.core.speaker_merge.build_speaker_segments_nowords", _nowords)
+
+        engine = _make_engine()
+        engine._backend = None
+        mgr = _ModelManager(engine)
+
+        tmp_file = tmp_path / "input.wav"
+        tmp_file.write_bytes(b"\x00" * 1024)
+        self._run(mgr, tmp_file)
+
+        result = mgr.job_tracker.results["job-diar"]
+        assert "error" not in result, f"expected success, got: {result}"
+        # Attribution ran exactly ONCE (inside the dispatch)...
+        assert len(nowords_calls) == 1
+        # ...and the DB save received its output, not a re-split of it.
+        assert saved["diarization_segments"] == attributed
+        assert saved["word_timestamps"] is None
+
+    def test_two_pass_oom_reason_reaches_the_job_payload(self, tmp_path: Path, monkeypatch):
+        """GH-274: a diarizer OOM in the notebook worker surfaces as an
+        actionable reason + remedy in the job payload."""
+        saved = self._stub_route_io(tmp_path, monkeypatch)
+
+        stt_result = SimpleNamespace(
+            text="hello",
+            segments=[{"text": "hello", "start": 0.0, "end": 1.0}],
+            words=[],
+            language="en",
+            language_probability=0.99,
+            duration=1.0,
+            num_speakers=0,
+        )
+
+        def _fake_diarize(*_a, on_diarization_error=None, **_kw):
+            if on_diarization_error is not None:
+                on_diarization_error(RuntimeError("CUDA failed with error out of memory"))
+            return stt_result, None
+
+        monkeypatch.setattr("server.core.parallel_diarize.transcribe_and_diarize", _fake_diarize)
+
+        engine = _make_engine()
+        engine._backend = None
+        mgr = _ModelManager(engine)
+
+        tmp_file = tmp_path / "input.wav"
+        tmp_file.write_bytes(b"\x00" * 1024)
+        self._run(mgr, tmp_file)
+
+        result = mgr.job_tracker.results["job-diar"]
+        assert "error" not in result, f"transcript lost on diarizer OOM: {result}"
+        assert result["diarization"]["performed"] is False
+        assert result["diarization"]["reason"] == "out_of_memory"
+        assert result["diarization"]["remedy"]
+        assert saved["diarization_segments"] is None
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # File import (_run_file_import)

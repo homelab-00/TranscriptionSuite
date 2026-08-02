@@ -948,6 +948,52 @@ class TestDiarizationOverOpenAI:
         assert all("speaker" not in seg for seg in body["segments"])
         assert any("diarization" in rec.message.lower() for rec in caplog.records)
 
+    def test_cancellation_propagates_without_a_plain_retry(self, diarization_client):
+        """GH-274: a user cancel must NOT be swallowed into the plain-retry
+        fallback — it propagates and the route answers the cancel error."""
+        from server.core.model_manager import TranscriptionCancelledError
+
+        client, engine = diarization_client
+
+        def _cancel(**kwargs):
+            raise TranscriptionCancelledError("cancelled")
+
+        def _no_retry(*_a, **_kw):
+            raise AssertionError("plain retry must not run after a cancellation")
+
+        with (
+            patch("server.core.parallel_diarize.transcribe_and_diarize", side_effect=_cancel),
+            patch("server.core.parallel_diarize.transcribe_then_diarize", side_effect=_cancel),
+        ):
+            engine.transcribe_file.side_effect = _no_retry
+            resp = _upload(client, diarization="true")
+
+        assert resp.status_code == 500
+        assert "cancelled" in resp.json()["error"]["message"].lower()
+
+    def test_audio_decode_error_propagates_without_a_plain_retry(self, diarization_client):
+        """GH-274: a corrupt file fails the plain path too — it propagates to
+        the 400 handler instead of triggering a doomed retry."""
+        from server.core.audio_utils import AudioDecodeError
+
+        client, engine = diarization_client
+
+        def _corrupt(**kwargs):
+            raise AudioDecodeError("corrupt upload")
+
+        def _no_retry(*_a, **_kw):
+            raise AssertionError("plain retry must not run after a decode error")
+
+        with (
+            patch("server.core.parallel_diarize.transcribe_and_diarize", side_effect=_corrupt),
+            patch("server.core.parallel_diarize.transcribe_then_diarize", side_effect=_corrupt),
+        ):
+            engine.transcribe_file.side_effect = _no_retry
+            resp = _upload(client, diarization="true")
+
+        assert resp.status_code == 400
+        assert resp.json()["error"]["type"] == "invalid_request_error"
+
     def test_diarized_json_without_diarization_flag(self, diarization_client):
         """response_format=diarized_json without diarization=true returns num_speakers=0."""
         client, engine = diarization_client

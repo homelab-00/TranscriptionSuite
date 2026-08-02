@@ -210,6 +210,31 @@ def test_observed_out_of_memory_is_classified_with_a_remedy():
     assert "VRAM" in dispatched.outcome.remedy
 
 
+def test_broken_diarization_segment_conversion_degrades_instead_of_losing_the_transcript():
+    """GH-274 review finding: `seg.to_dict()` sits before the merge guard — a
+    broken diarization payload must degrade, never discard a completed
+    transcript (persist-before-deliver invariant)."""
+    base = _plain_result()
+    bad_seg = MagicMock()
+    bad_seg.to_dict.side_effect = TypeError("start is None")
+
+    with patch(
+        "server.core.parallel_diarize.transcribe_and_diarize",
+        return_value=(base, MagicMock(segments=[bad_seg], num_speakers=1)),
+    ):
+        dispatched = transcribe_with_optional_diarization(
+            engine=_make_engine(),
+            model_manager=_make_model_manager(),
+            file_path="/tmp/a.wav",
+            enable_diarization=True,
+            parallel_diarization=True,
+        )
+
+    assert dispatched.result is base
+    assert dispatched.speaker_segments is None
+    assert dispatched.outcome.performed is False
+
+
 def test_speaker_merge_failure_degrades_instead_of_raising():
     base = _plain_result()
     diar_seg = MagicMock()
@@ -386,12 +411,16 @@ def test_integrated_backend_failure_falls_back_to_plain_transcription(fake_engin
             model_manager=_make_model_manager(reason="token_missing"),
             file_path="/tmp/a.wav",
             enable_diarization=True,
+            word_timestamps=False,
         )
 
     assert dispatched.result is expected
     assert dispatched.outcome.performed is False
     assert dispatched.outcome.reason == "token_missing"
     engine.transcribe_file.assert_called_once()
+    # The degraded fallback honors the caller's word_timestamps choice rather
+    # than forcing it on (GH-274 delta).
+    assert engine.transcribe_file.call_args.kwargs["word_timestamps"] is False
 
 
 def test_audio_decode_error_propagates_from_the_integrated_path(fake_engine_module):

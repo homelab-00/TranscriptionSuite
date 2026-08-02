@@ -314,7 +314,22 @@ def _run_standard(
             outcome=_failure_outcome(model_manager, observed[0] if observed else None),
         )
 
-    diar_dicts = [seg.to_dict() for seg in diar_result.segments]
+    try:
+        diar_dicts = [seg.to_dict() for seg in diar_result.segments]
+    except Exception:
+        # A completed transcript must never be lost to a broken diarization
+        # payload — degrade exactly like any other diarization failure (the
+        # pre-GH-274 routes kept this conversion inside their merge guard).
+        logger.warning(
+            "Diarization segment conversion failed; returning the transcript without speakers",
+            exc_info=True,
+        )
+        return DiarizedTranscription(
+            result=result,
+            speaker_segments=None,
+            outcome=_failure_outcome(model_manager, observed[0] if observed else None),
+        )
+
     merged = _merge_speakers(result, diar_dicts)
     if not merged:
         return DiarizedTranscription(

@@ -118,10 +118,14 @@ async def _run_transcription(
 
     The one route-specific edge kept here is the documented failure-tolerance
     contract ("never 5xxs on a diarization hiccup"): if the diarization
-    orchestration itself crashes, fall back to ONE plain transcription attempt
-    instead of surfacing a server error for a speaker-engine problem.
-    Cancellation and audio-decode errors propagate — plain transcription would
-    fail on them too, and the outer handlers own them (500-cancel / 400).
+    orchestration crashes out of the dispatch, make at most one route-level
+    plain-transcription fallback attempt instead of surfacing a server error
+    for a speaker-engine problem. (When the crash came from the dispatch's own
+    internal plain fallback after an integrated failure, this retry duplicates
+    a doomed attempt — accepted: plain STT is already failing there, and the
+    retry's error reaches the same outer handlers.) Cancellation and
+    audio-decode errors propagate — plain transcription would fail on them
+    too, and the outer handlers own them (500-cancel / 400).
     """
     from server.core.audio_utils import AudioDecodeError
     from server.core.diarization_dispatch import transcribe_with_optional_diarization

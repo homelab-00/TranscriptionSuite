@@ -993,15 +993,13 @@ def _run_transcription(
                 if "words" in seg:
                     word_timestamps_list.extend(seg["words"])
 
-        # When diarization was performed but no word timestamps are available
-        # (e.g. MLX Canary backend), fall back to segment-level speaker
-        # attribution so that the DB segments carry text instead of being empty.
+        # When diarization ran without word timestamps (e.g. MLX Canary), the
+        # DB segments must carry text instead of bare turn intervals. The
+        # dispatch already did that attribution (GH-274): its nowords fallback
+        # mutated result.segments into text-carrying speaker segments — reuse
+        # them instead of re-splitting the already-attributed segments.
         if diarization_segments and not word_timestamps_list:
-            from server.core.speaker_merge import build_speaker_segments_nowords
-
-            diarization_segments = build_speaker_segments_nowords(
-                result.segments, diarization_segments
-            )
+            diarization_segments = result.segments
 
         # Save to database
         # Use provided title if given, otherwise database falls back to filename stem

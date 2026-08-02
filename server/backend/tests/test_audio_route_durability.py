@@ -356,9 +356,12 @@ class TestIntegratedDiarizationPath:
         )
 
         assert result["num_speakers"] == 1
-        # Note: integrated diarization path does NOT dispatch a webhook today —
-        # we only assert the persist-before-deliver ordering here.
         assert repo_mocks.order == ["create_job", "save_result", "mark_delivered"]
+        # GH-274: every /audio path now funnels through the shared dispatch and
+        # fires longform_complete — the integrated path's old early return used
+        # to skip the webhook, which was an accident of code structure.
+        assert len(_mute_webhook) == 1
+        assert _mute_webhook[0][0] == "longform_complete"
 
 
 # ── Failure handlers ────────────────────────────────────────────────────────
@@ -888,6 +891,96 @@ class TestIntegratedDiarizationFallback:
         assert payload["diarization"]["performed"] is False
         assert payload["diarization"]["reason"] == "out_of_memory"
         assert payload["diarization"]["remedy"]
+
+    def test_import_route_integrated_failure_degrades_without_two_pass_retry(self, monkeypatch):
+        """GH-274: an integrated-backend failure falls back to PLAIN
+        transcription. The old code accidentally retried the two-pass PyAnnote
+        pipeline; this pins the decided behavior at the /import call site."""
+        from pathlib import Path
+
+        _install_fake_engine_module(monkeypatch)
+
+        from server.core import audio_utils
+
+        monkeypatch.setattr(audio_utils, "load_audio", lambda *a, **kw: ([0.0] * 16000, 16000))
+
+        def _no_two_pass(**_kw):
+            raise AssertionError("two-pass pipeline must not run after an integrated failure")
+
+        monkeypatch.setattr("server.core.parallel_diarize.transcribe_and_diarize", _no_two_pass)
+        monkeypatch.setattr("server.core.parallel_diarize.transcribe_then_diarize", _no_two_pass)
+
+        class _TokenErrorBackend:
+            preferred_input_sample_rate_hz = 16000
+            backend_name = "fake-whisperx"
+
+            def transcribe_with_diarization(self, audio_data, *, audio_sample_rate, **kwargs):
+                raise ValueError("needs a HuggingFace token")
+
+        fallback = _ResultStub(text="plain transcript", num_speakers=0)
+        plain_calls: list[dict] = []
+
+        def _plain(*_a, **kw):
+            plain_calls.append(kw)
+            return fallback
+
+        engine = SimpleNamespace(
+            _backend=_TokenErrorBackend(),
+            beam_size=5,
+            initial_prompt=None,
+            suppress_tokens=None,
+            faster_whisper_vad_filter=False,
+            transcribe_file=_plain,
+        )
+
+        end_job_calls: list[dict] = []
+
+        class _FakeTracker:
+            def update_progress(self, current, total):
+                pass
+
+            def set_phase(self, phase):
+                pass
+
+            def is_cancelled(self):
+                return False
+
+            def end_job(self, job_id, result=None):
+                end_job_calls.append({"job_id": job_id, "result": result})
+
+        model_manager = SimpleNamespace(
+            transcription_engine=engine,
+            ensure_transcription_loaded=lambda: engine,
+            job_tracker=_FakeTracker(),
+            get_diarization_feature_status=lambda: {"reason": "token_missing"},
+            gpu_device_index=0,
+        )
+
+        transcription._run_file_import(
+            model_manager=model_manager,
+            tmp_path=Path("/tmp/nonexistent-for-test.wav"),
+            filename="test.wav",
+            language=None,
+            translation_enabled=False,
+            translation_target_language=None,
+            enable_diarization=True,
+            enable_word_timestamps=False,
+            expected_speakers=None,
+            parallel_diarization=None,
+            use_parallel_default=True,
+            multitrack=False,
+            job_id="import-job-val",
+            event_loop=None,
+        )
+
+        assert len(end_job_calls) == 1
+        payload = end_job_calls[0]["result"]
+        assert payload["transcription"]["text"] == "plain transcript"
+        assert payload["diarization"]["performed"] is False
+        assert payload["diarization"]["reason"] == "token_missing"
+        assert len(plain_calls) == 1
+        # The degraded fallback honors the caller's word_timestamps choice.
+        assert plain_calls[0]["word_timestamps"] is False
 
 
 # ── Diarization-outcome surfacing (GH #127 hardening) ───────────────────────
