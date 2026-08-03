@@ -988,20 +988,26 @@ describe('[P1] useTranscription', () => {
     });
 
     it('fails loudly when the socket closes unexpectedly while recording', async () => {
+      (apiClient.fetchTranscriptionResult as Mock).mockResolvedValue({ status: 202 });
       const { result } = renderHook(() => useTranscription());
       await driveToRecording(result);
       lastSocket.disconnect.mockClear();
       lastCapture.stop.mockClear();
 
-      act(() => {
+      await act(async () => {
         lastSocketCbs.onClose!(1001, 'server going away');
+        await Promise.resolve();
       });
 
-      expect(result.current.status).toBe('error');
       expect(result.current.error).toMatch(/connection.*lost/i);
       expect(lastCapture.stop).toHaveBeenCalled();
       // Auto-reconnect is halted so no zombie session is created.
       expect(lastSocket.disconnect).toHaveBeenCalledTimes(1);
+      // The status is no longer terminal: GH-239 made the server salvage the
+      // audio it already received, so the hook waits on that instead of
+      // stopping at the error. The interruption is still announced above -
+      // what changed is that it is now recoverable, not that it is quiet.
+      expect(result.current.status).toBe('processing');
     });
 
     it('does not re-send start on a reconnect during processing (poll owns recovery)', async () => {
@@ -1042,6 +1048,194 @@ describe('[P1] useTranscription', () => {
       // lastSocket is now the second socket — it sent exactly one start.
       expect(startSends()).toBe(1);
       expect(result.current.status).toBe('recording');
+    });
+  });
+
+  // ── GH-239: recover the head audio the server salvaged ──────────────
+
+  describe('GH-239: mid-recording drop recovers the salvaged partial', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** Advance one poll interval and let the fetch promise settle. */
+    async function tickPoll(times = 1): Promise<void> {
+      for (let i = 0; i < times; i++) {
+        await act(async () => {
+          vi.advanceTimersByTime(3000);
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+      }
+    }
+
+    it('polls for the salvaged result when the socket drops while recording', async () => {
+      (apiClient.fetchTranscriptionResult as Mock).mockResolvedValue({
+        status: 200,
+        json: async () => ({
+          result: {
+            text: 'the half that made it',
+            words: [],
+            partial: true,
+            partial_reason: 'Client disconnected mid-recording',
+          },
+        }),
+      });
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      await act(async () => {
+        lastSocketCbs.onClose!(1001, 'server going away');
+        await Promise.resolve();
+      });
+
+      expect(apiClient.fetchTranscriptionResult).toHaveBeenCalledWith('job-1');
+      expect(result.current.status).toBe('complete');
+      expect(result.current.result?.text).toBe('the half that made it');
+    });
+
+    it('surfaces the truncation so the transcript is never mistaken for whole', async () => {
+      (apiClient.fetchTranscriptionResult as Mock).mockResolvedValue({
+        status: 200,
+        json: async () => ({
+          result: {
+            text: 'the half that made it',
+            words: [],
+            partial: true,
+            partial_reason: 'Client disconnected mid-recording',
+          },
+        }),
+      });
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      await act(async () => {
+        lastSocketCbs.onClose!(1001, 'server going away');
+        await Promise.resolve();
+      });
+
+      expect(result.current.result?.partial).toBe(true);
+      expect(result.current.result?.partialReason).toMatch(/disconnected/i);
+      // The red "connection lost" banner has served its purpose - the amber
+      // partial banner now carries the signal. Leaving both reads as a failure.
+      expect(result.current.error).toBeNull();
+    });
+
+    it('still halts the auto-reconnect so no zombie session is spawned', async () => {
+      (apiClient.fetchTranscriptionResult as Mock).mockResolvedValue({ status: 202 });
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+      lastSocket.disconnect.mockClear();
+      lastCapture.stop.mockClear();
+
+      await act(async () => {
+        lastSocketCbs.onClose!(1001, 'server going away');
+        await Promise.resolve();
+      });
+
+      expect(lastSocket.disconnect).toHaveBeenCalledTimes(1);
+      expect(lastCapture.stop).toHaveBeenCalled();
+    });
+
+    it('tells the user recovery is under way rather than going quiet', async () => {
+      (apiClient.fetchTranscriptionResult as Mock).mockResolvedValue({ status: 202 });
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      await act(async () => {
+        lastSocketCbs.onClose!(1001, 'server going away');
+        await Promise.resolve();
+      });
+
+      expect(result.current.error).toMatch(/lost/i);
+      expect(result.current.status).toBe('processing');
+    });
+
+    it('keeps polling well past the old ten-attempt cap', async () => {
+      // Salvaging a long recording means transcribing all of it. Ten tries at
+      // 3s gave up after 30 seconds - far short of any real recording.
+      (apiClient.fetchTranscriptionResult as Mock).mockResolvedValue({ status: 202 });
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      await act(async () => {
+        lastSocketCbs.onClose!(1001, 'server going away');
+        await Promise.resolve();
+      });
+      await tickPoll(30);
+
+      expect((apiClient.fetchTranscriptionResult as Mock).mock.calls.length).toBeGreaterThan(11);
+      expect(result.current.status).toBe('processing');
+    });
+
+    it('gives up loudly when the server reports the job failed', async () => {
+      (apiClient.fetchTranscriptionResult as Mock).mockResolvedValue({ status: 410 });
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      await act(async () => {
+        lastSocketCbs.onClose!(1001, 'server going away');
+        await Promise.resolve();
+      });
+
+      expect(result.current.status).toBe('error');
+      expect(result.current.error).toMatch(/failed/i);
+    });
+
+    it('fails loudly without polling when the recording never got a job id', async () => {
+      // create_job failed server-side, so session_started carries no job_id.
+      // There is no row to salvage into - the GH-237 fail-loudly behaviour is
+      // still the only honest answer.
+      const { result } = renderHook(() => useTranscription());
+      act(() => {
+        result.current.start();
+      });
+      await act(async () => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      await act(async () => {
+        lastSocketCbs.onMessage!({
+          type: 'session_started',
+          data: { capture_sample_rate_hz: 16000 },
+        });
+      });
+      expect(result.current.status).toBe('recording');
+      expect(result.current.jobId).toBeNull();
+      (apiClient.fetchTranscriptionResult as Mock).mockClear();
+
+      await act(async () => {
+        lastSocketCbs.onClose!(1001, 'server going away');
+        await Promise.resolve();
+      });
+
+      expect(apiClient.fetchTranscriptionResult).not.toHaveBeenCalled();
+      expect(result.current.status).toBe('error');
+      expect(result.current.error).toMatch(/lost/i);
+    });
+
+    it('does not poll for a drop during the connecting handshake', async () => {
+      // Pre-existing GH-237 contract: no session was established yet, so the
+      // auto-reconnect re-establishes the FIRST session. Nothing to recover,
+      // and flipping to an error state here would break that.
+      const { result } = renderHook(() => useTranscription());
+      act(() => {
+        result.current.start();
+      });
+      await act(async () => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      (apiClient.fetchTranscriptionResult as Mock).mockClear();
+
+      await act(async () => {
+        lastSocketCbs.onClose!(1001, 'drop before session');
+        await Promise.resolve();
+      });
+
+      expect(apiClient.fetchTranscriptionResult).not.toHaveBeenCalled();
+      expect(result.current.status).toBe('connecting');
     });
   });
 });

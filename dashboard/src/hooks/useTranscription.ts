@@ -19,6 +19,20 @@ export type TranscriptionStatus =
   | 'complete'
   | 'error';
 
+/** Gap between attempts when polling for a result the socket cannot deliver. */
+const POLL_INTERVAL_MS = 3000;
+
+/**
+ * How long to keep polling for such a result before giving up.
+ *
+ * Sized for the slow case rather than the common one: after a mid-recording
+ * drop the server still has to transcribe everything it received (GH-239), so
+ * the wait scales with the length of the recording, not with the round-trip.
+ * Giving up early would strand a result that is already saved in the database -
+ * it stays reachable from the recovery list, but the user has to find it.
+ */
+const POLL_BUDGET_MS = 15 * 60 * 1000;
+
 export interface TranscriptionResult {
   text: string;
   words: Array<{ word: string; start: number; end: number; probability?: number }>;
@@ -542,25 +556,41 @@ export function useTranscription(): TranscriptionState {
           stopPreview();
           previewLoadingRef.current = false;
 
-          // GH-237: a drop WHILE recording is an unrecoverable interruption.
-          // The server cannot resume a dropped session, and the start-gate now
-          // stops the auto-reconnect from spawning a fresh job — which would
-          // leave the UI frozen in a false 'recording' state. Fail loudly
-          // instead of silently truncating: surface the interruption and halt
-          // the reconnect so no zombie session is created. (Data-loss invariant.)
-          if (statusRef.current === 'recording') {
+          // GH-237: a drop WHILE recording is an interruption the server cannot
+          // resume - every connection gets a fresh session_id and job_id. The
+          // start-gate stops the auto-reconnect from spawning a second job,
+          // which would leave the UI frozen in a false 'recording' state, so
+          // halt the reconnect here and say plainly what happened rather than
+          // silently truncating. (Data-loss invariant.)
+          const currentJobId = jobIdRef.current;
+          const wasRecording = statusRef.current === 'recording';
+          if (wasRecording) {
             setError('Connection to the server was lost. The recording was interrupted.');
-            setStatusTracked('error');
             socketRef.current?.disconnect();
-            return;
+            if (!currentJobId) {
+              // The drop landed before session_started, so no job was ever
+              // issued and there is nothing on the server to recover.
+              setStatusTracked('error');
+              return;
+            }
+            // GH-239: the server salvages whatever audio it already received
+            // into that job. Fall through to the poll so the user gets the
+            // head of their recording back instead of just an error.
+            setStatusTracked('processing');
           }
 
-          // If we were processing when the socket closed, poll for the result
-          const currentJobId = jobIdRef.current;
-          if (statusRef.current === 'processing' && currentJobId) {
-            let pollRetries = 0;
+          // Poll for a result the socket can no longer deliver: either the
+          // server was already transcribing, or it is now salvaging the
+          // interrupted recording.
+          if ((wasRecording || statusRef.current === 'processing') && currentJobId) {
             let networkErrors = 0;
             const maxRetries = 10;
+            // A wall-clock budget, not an attempt count: the server has to
+            // transcribe the whole recording before the result exists, and the
+            // old ten-attempt cap gave up after 30 seconds - short of any real
+            // recording. Date.now() is read once so a suspended machine that
+            // wakes up late gives up rather than polling forever.
+            const pollDeadline = Date.now() + POLL_BUDGET_MS;
             pollCancelledRef.current = false;
 
             // Cancel polling if the hook re-initialises a new session
@@ -582,14 +612,20 @@ export function useTranscription(): TranscriptionState {
                     duration: r.duration,
                     partial: r.partial ?? false,
                     partialReason: r.partial_reason ?? null,
+                    numSpeakers: r.num_speakers ?? 0,
+                    diarization: r.diarization,
                   });
                   setProcessingProgress(null);
+                  // The recovery succeeded, so the "connection lost" banner has
+                  // done its job. A salvaged transcript still carries `partial`,
+                  // which SessionView renders as its own amber banner - showing
+                  // a red error next to a recovered transcript reads as failure.
+                  setError(null);
                   setStatusTracked('complete');
                   return;
                 }
-                if (resp.status === 202 && pollRetries < maxRetries) {
-                  pollRetries++;
-                  pollTimerRef.current = setTimeout(poll, 3000);
+                if (resp.status === 202 && Date.now() < pollDeadline) {
+                  pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
                   return;
                 }
                 // 410 = server says job failed
@@ -602,9 +638,12 @@ export function useTranscription(): TranscriptionState {
                 setStatusTracked('error');
                 setError('Transcription result unavailable');
               } catch {
+                // Network errors keep their own small budget: an unreachable
+                // server will not produce a result no matter how long we wait,
+                // so this must not inherit the long transcription budget.
                 if (!pollCancelledRef.current && networkErrors < maxRetries) {
                   networkErrors++;
-                  pollTimerRef.current = setTimeout(poll, 3000);
+                  pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
                 } else if (!pollCancelledRef.current) {
                   setStatusTracked('error');
                   setError('Could not retrieve transcription result');
