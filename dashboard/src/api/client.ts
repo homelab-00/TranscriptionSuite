@@ -840,6 +840,16 @@ export class APIClient {
   }
 
   /**
+   * POST /api/notebook/recordings/{id}/diarize — GH-279.
+   * Retroactively diarize an already-transcribed recording using its stored
+   * audio + word timestamps (no re-transcription). Returns 202 Accepted with
+   * { job_id }; poll /api/admin/status for the result.
+   */
+  async diarizeRecording(recordingId: number): Promise<{ job_id: string }> {
+    return this.post(`/api/notebook/recordings/${recordingId}/diarize`);
+  }
+
+  /**
    * POST /api/notebook/recordings/{id}/auto-actions/retry — Issue #104, Stories 6.6 + 6.9.
    * Idempotent retry of a failed/deferred/empty/truncated auto-action.
    * Returns:

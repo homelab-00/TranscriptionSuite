@@ -1783,6 +1783,113 @@ def save_longform_to_database(
             conn.close()
 
 
+def replace_recording_segments_with_diarization(
+    recording_id: int,
+    diarization_segments: list[dict[str, Any]],
+    alignment_words: list[dict[str, Any]],
+) -> bool:
+    """Atomically replace a recording's segments/words with diarized ones (GH-279).
+
+    Retroactive diarization: the recording already has a plain (speaker-less)
+    transcript with word timestamps; a fresh diarization run produced raw
+    speaker turns. Re-insert the stored words under the new speaker segments
+    using the SAME alignment helper the initial-import path uses, so a
+    retroactively diarized recording is indistinguishable from one diarized
+    at import time.
+
+    All mutations run in a single BEGIN IMMEDIATE transaction: delete old
+    words+segments, re-insert, flip ``has_diarization``, refresh
+    ``word_count``. Any failure rolls back — the original transcript is
+    never lost to a failed diarization write.
+
+    Args:
+        recording_id: Existing recording to rewrite.
+        diarization_segments: Raw speaker turns (``start``/``end``/``speaker``).
+        alignment_words: The recording's stored word rows
+            (``word``/``start_time``/``end_time``/``confidence``).
+
+    Returns:
+        True on success, False on any failure (recording left unchanged).
+    """
+    if not diarization_segments:
+        logger.error(
+            "Refusing to replace segments for recording %d: empty diarization segments "
+            "would discard the transcript",
+            recording_id,
+        )
+        return False
+    if not alignment_words:
+        logger.error(
+            "Refusing to replace segments for recording %d: no alignment words",
+            recording_id,
+        )
+        return False
+
+    db_path = get_db_path()
+    if not db_path.exists():
+        logger.warning(f"Database not found at {db_path}.")
+        return False
+
+    conn = None
+    try:
+        conn = sqlite3.connect(
+            db_path,
+            timeout=30.0,
+            check_same_thread=False,
+        )
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        cursor.execute("BEGIN IMMEDIATE")
+        try:
+            cursor.execute("SELECT id FROM recordings WHERE id = ?", (recording_id,))
+            if cursor.fetchone() is None:
+                raise ValueError(f"Recording {recording_id} not found")
+
+            # Delete words BEFORE segments so the words_fts sync triggers see
+            # consistent rows; both cascades would also fire on segment delete,
+            # but explicit ordering keeps the intent auditable.
+            cursor.execute("DELETE FROM words WHERE recording_id = ?", (recording_id,))
+            cursor.execute("DELETE FROM segments WHERE recording_id = ?", (recording_id,))
+
+            _insert_diarization_segments_with_words(
+                cursor,
+                recording_id,
+                diarization_segments,
+                alignment_words=alignment_words,
+                save_words=True,
+            )
+
+            cursor.execute(
+                """
+                UPDATE recordings
+                SET has_diarization = 1,
+                    word_count = (SELECT COUNT(*) FROM words WHERE recording_id = ?)
+                WHERE id = ?
+                """,
+                (recording_id, recording_id),
+            )
+
+            conn.commit()
+            logger.info(f"Recording {recording_id} segments replaced with diarized turns")
+            return True
+
+        except Exception:
+            conn.rollback()
+            raise
+
+    except Exception as e:
+        logger.error(
+            f"Error replacing segments for recording {recording_id}: {e}",
+            exc_info=True,
+        )
+        return False
+
+    finally:
+        if conn:
+            conn.close()
+
+
 def find_recordings_by_audio_hash(
     audio_hash: str,
     limit: int = 10,

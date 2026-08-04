@@ -254,6 +254,8 @@ export interface JobTrackerResult {
     performed: boolean;
     reason: string | null;
   };
+  // GH-279 — set by the retro-diarize job on success.
+  num_speakers?: number;
   error?: string;
 }
 
@@ -298,7 +300,9 @@ export interface TimeslotResponse {
   is_full: boolean;
 }
 
-export type ExportFormat = 'txt' | 'srt' | 'ass';
+// 'plaintext' is the FR9 streaming transcript (Story 3.4); 'md' is the
+// Markdown conversation export (GH-279).
+export type ExportFormat = 'txt' | 'srt' | 'ass' | 'plaintext' | 'md';
 
 // ─── File Import (Session) ────────────────────────────────────────────────────
 

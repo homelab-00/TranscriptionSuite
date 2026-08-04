@@ -62,9 +62,10 @@
 | GET | `/api/notebook/recordings/{id}/audio` | user (+`?token=`) | Stream audio with HTTP Range (206) |
 | GET | `/api/notebook/recordings/{id}/transcription` | user | Transcription as segments-with-embedded-words |
 | POST | `/api/notebook/transcribe/upload` | user | Upload + background transcribe + save to notebook; 202 + `job_id`; supports diarization, `profile_id` |
+| POST | `/api/notebook/recordings/{id}/diarize` | user | **NEW** (GH-279) — retroactively diarize a saved recording from its stored audio + word timestamps (no re-transcription); 202 + `job_id`, poll `/api/admin/status`; 400 without word timestamps, 409 if already diarized / audio missing / job slot busy |
 | GET | `/api/notebook/calendar` | user | Recordings grouped by day for a `year`/`month` |
 | GET | `/api/notebook/timeslot` | user | Time-slot occupancy for `date`+`hour` |
-| GET | `/api/notebook/recordings/{id}/export` | user (+`?token=`) | Export transcript: `txt`/`plaintext`/`srt`/`ass` (alias-substituted) |
+| GET | `/api/notebook/recordings/{id}/export` | user (+`?token=`) | Export transcript: `txt`/`plaintext`/`md`/`srt`/`ass` (alias-substituted; `md` is the GH-279 Markdown conversation format) |
 | POST | `/api/notebook/recordings/{id}/reexport` | user | **NEW** — re-render plaintext export with a `profile_id` to its destination folder |
 | POST | `/api/notebook/recordings/{id}/auto-actions/retry` | user | **NEW** — idempotent retry of `auto_summary`/`auto_export`/`webhook` |
 | GET | `/api/notebook/backups` | user | List database backups |

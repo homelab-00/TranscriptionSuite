@@ -29,6 +29,7 @@ import {
   Copy,
   MoreHorizontal,
   Download,
+  Users,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { StatusLight } from '../ui/StatusLight';
@@ -37,6 +38,7 @@ import { useRecording } from '../../src/hooks/useRecording';
 import { apiClient } from '../../src/api/client';
 import { FindReplaceTextEditor } from '../editor/FindReplaceTextEditor';
 import { flattenSegmentsToText } from '../../src/services/transcriptFlatten';
+import { diarizeRecordingAndWait } from '../../src/services/retroDiarize';
 import { toast } from 'sonner';
 import { useConfirm } from '../../src/hooks/useConfirm';
 import { ConfidenceChip } from '../recording/ConfidenceChip';
@@ -578,6 +580,16 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   // the modal header. Mirrors the row-level NoteActionMenu in NotebookView so
   // users can manage the recording without closing the modal first.
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false);
+  // GH-279 — retroactive diarization in-flight flag (disables the menu item).
+  const [diarizeRunning, setDiarizeRunning] = useState(false);
+  // GH-279 — the modal instance survives note switches (no key prop), so an
+  // in-flight diarize job must know whether the note it started for is still
+  // the one on screen before touching shared useRecording state.
+  const activeRecordingIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    activeRecordingIdRef.current = note?.recordingId ?? null;
+    setDiarizeRunning(false);
+  }, [note?.recordingId]);
   const [recordingRenameDialog, setRecordingRenameDialog] = useState<{
     currentTitle: string;
   } | null>(null);
@@ -1730,7 +1742,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
 
   /** Open the recording export download for the requested format. */
   const handleRecordingExport = useCallback(
-    (format: 'txt' | 'srt' | 'ass') => {
+    (format: 'txt' | 'srt' | 'ass' | 'md') => {
       setOptionsMenuOpen(false);
       if (!note?.recordingId) return;
       const url = apiClient.getExportUrl(note.recordingId, format);
@@ -1746,6 +1758,42 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   );
 
   /**
+   * GH-279 — retroactively diarize this recording. Waits for the server job
+   * and reloads the transcript so the speaker turns appear in place.
+   *
+   * The completion path only touches useRecording state while the note it
+   * started for is still the active one: the modal instance is shared across
+   * notes, so a stale `refresh()` after a note switch would clobber the
+   * currently-open note's transcript with this recording's data.
+   */
+  const handleDiarize = useCallback(async () => {
+    setOptionsMenuOpen(false);
+    const startedForId = note?.recordingId;
+    if (!startedForId || diarizeRunning) return;
+    setDiarizeRunning(true);
+    toast.info('Diarization started — identifying speakers.');
+    try {
+      const result = await diarizeRecordingAndWait(startedForId);
+      if (result.error) {
+        toast.error(`Diarization failed: ${result.error}`);
+        return;
+      }
+      toast.success(result.message || 'Diarization complete.');
+      onRecordingMutated?.();
+      if (activeRecordingIdRef.current === startedForId) {
+        refresh();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Diarization failed.';
+      toast.error(message);
+    } finally {
+      if (activeRecordingIdRef.current === startedForId) {
+        setDiarizeRunning(false);
+      }
+    }
+  }, [note?.recordingId, diarizeRunning, refresh, onRecordingMutated]);
+
+  /**
    * Issue #104, Story 3.5 — download the FR9-format plain-text transcript
    * via the native OS file-save dialog. Uses the new `format=plaintext`
    * branch on the export route (StreamingResponse, paragraph per speaker
@@ -1754,7 +1802,7 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
   const handleDownloadPlaintextTranscript = useCallback(async () => {
     setOptionsMenuOpen(false);
     if (!note?.recordingId) return;
-    const url = apiClient.getExportUrl(note.recordingId, 'plaintext' as never);
+    const url = apiClient.getExportUrl(note.recordingId, 'plaintext');
     if (url === null) {
       toast.error('Remote host not configured. Open Settings → Connection.');
       return;
@@ -2058,6 +2106,30 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                           >
                             <Edit2 size={14} /> Rename
                           </button>
+                          {/* GH-279 — retroactive diarization. Hidden once
+                              diarized; disabled with a tooltip when the note
+                              has no word-level timestamps to align against. */}
+                          {!hasDiarizationTranscript && (
+                            <button
+                              onClick={handleDiarize}
+                              disabled={!hasWordTimestamps || diarizeRunning}
+                              title={
+                                !hasWordTimestamps
+                                  ? 'Diarization requires word-level timestamps, which this note was transcribed without.'
+                                  : diarizeRunning
+                                    ? 'Diarization in progress.'
+                                    : undefined
+                              }
+                              className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-slate-300"
+                            >
+                              {diarizeRunning ? (
+                                <Loader2 size={14} className="animate-spin" />
+                              ) : (
+                                <Users size={14} />
+                              )}
+                              {diarizeRunning ? 'Diarizing…' : 'Diarize'}
+                            </button>
+                          )}
                           {/* Issue #104, Story 3.5 — Download transcript /
                               Download summary use the new plain-text streaming
                               format + native save dialog. The verbose Export
@@ -2100,6 +2172,12 @@ export const AudioNoteModal: React.FC<AudioNoteModalProps> = ({
                             className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
                           >
                             <Download size={14} /> Export ASS
+                          </button>
+                          <button
+                            onClick={() => handleRecordingExport('md')}
+                            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-slate-300 hover:bg-white/10 hover:text-white"
+                          >
+                            <Download size={14} /> Export Markdown
                           </button>
                           <div className="my-1 h-px bg-white/10"></div>
                           <button

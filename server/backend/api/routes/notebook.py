@@ -1280,6 +1280,97 @@ async def upload_and_transcribe(
     return {"job_id": job_id[:8]}
 
 
+class DiarizeRequest(BaseModel):
+    """Body for ``POST /recordings/{id}/diarize`` (GH-279). All fields optional."""
+
+    expected_speakers: int | None = None
+
+
+@router.post(
+    "/recordings/{recording_id}/diarize",
+    response_model=AcceptedResponse,
+    status_code=202,
+)
+async def diarize_recording(
+    recording_id: int,
+    request: Request,
+    body: DiarizeRequest | None = None,
+) -> dict[str, Any]:
+    """
+    Retroactively diarize an already-transcribed recording (GH-279).
+
+    Diarizes the stored audio file WITHOUT re-running transcription, then
+    aligns the speaker turns onto the recording's stored word timestamps.
+    Returns 202 Accepted with a job_id; clients poll GET /api/admin/status
+    for completion, exactly like /transcribe/upload.
+
+    Preconditions (checked before the job slot is taken):
+    - the recording exists and is not already diarized
+    - word-level timestamps exist (the alignment substrate)
+    - the original audio file is still present on disk
+
+    Returns 409 Conflict if another transcription job is already running.
+    """
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    if bool(recording.get("has_diarization")):
+        raise HTTPException(
+            status_code=409,
+            detail="Recording is already diarized.",
+        )
+
+    words = get_words(recording_id)
+    if not words:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Diarization requires word-level timestamps, which this recording "
+                "was transcribed without."
+            ),
+        )
+
+    audio_path = Path(recording.get("filepath") or "")
+    if not audio_path.exists():
+        raise HTTPException(
+            status_code=409,
+            detail="Original audio file not found on disk.",
+        )
+
+    expected_speakers = body.expected_speakers if body else None
+    if expected_speakers is not None and not (1 <= expected_speakers <= 10):
+        raise HTTPException(
+            status_code=400,
+            detail="expected_speakers must be between 1 and 10",
+        )
+
+    model_manager = request.app.state.model_manager
+    client_name = get_client_name(request)
+
+    success, job_id, active_user = model_manager.job_tracker.try_start_job(client_name)
+    if not success:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A transcription is already running for {active_user}",
+        )
+
+    from server.core.retro_diarize import run_retro_diarization
+
+    loop = asyncio.get_running_loop()
+    loop.create_task(
+        asyncio.to_thread(
+            run_retro_diarization,
+            model_manager=model_manager,
+            recording_id=recording_id,
+            job_id=job_id,
+            expected_speakers=expected_speakers,
+        )
+    )
+
+    return {"job_id": job_id[:8]}
+
+
 @router.get("/calendar")
 async def get_calendar_data(
     year: int = Query(..., description="Year"),
@@ -1349,7 +1440,7 @@ async def export_recording(
     recording_id: int,
     format: str = Query(
         "txt",
-        description="Export format: 'txt', 'srt', 'ass', or 'plaintext'",
+        description="Export format: 'txt', 'srt', 'ass', 'plaintext', or 'md'",
     ),
 ) -> Response:
     """
@@ -1366,14 +1457,45 @@ async def export_recording(
     - plaintext: FR9 streaming format — paragraph-per-speaker-turn, no
       subtitle timestamps, no metadata header. Used by the Sprint 2
       "Download transcript" button (Issue #104, Story 3.4).
+    - md: Markdown conversation (GH-279) — title + date header, then one
+      "**Speaker N** *[MM:SS]*: text" line per speaker turn. Degrades to
+      plain paragraphs for recordings without diarization.
     - srt: SubRip subtitle format
     - ass: Advanced SubStation Alpha subtitle format
     """
     requested_format = format.strip().lower()
-    if requested_format not in {"txt", "srt", "ass", "plaintext"}:
+    if requested_format not in {"txt", "srt", "ass", "plaintext", "md"}:
         raise HTTPException(
             status_code=400,
-            detail="Unsupported export format. Supported formats: txt, plaintext, srt, ass.",
+            detail="Unsupported export format. Supported formats: txt, plaintext, md, srt, ass.",
+        )
+
+    # GH-279 — markdown streams like plaintext: early branch, alias-aware,
+    # available for every recording (non-diarized notes degrade to plain
+    # paragraphs under the same title/date header).
+    if requested_format == "md":
+        recording = get_recording(recording_id)
+        if not recording:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        from server.core.alias_substitution import apply_aliases
+        from server.core.markdown_export import stream_markdown
+        from server.database import alias_repository
+        from server.database.database import iter_segments
+
+        title = recording.get("title") or recording.get("filename") or "Recording"
+        rendered_filename = (
+            f"{title.replace(' ', '_')}.md" if title else f"recording_{recording_id}.md"
+        )
+        aliases = alias_repository.alias_map(recording_id)
+        return StreamingResponse(
+            stream_markdown(
+                recording,
+                apply_aliases(iter_segments(recording_id), aliases),
+            ),
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": _content_disposition("attachment", rendered_filename),
+            },
         )
 
     # Story 3.4 — plaintext is a streaming response that bypasses the

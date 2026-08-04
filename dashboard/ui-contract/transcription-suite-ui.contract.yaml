@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.16.0
+  spec_version: 1.16.2
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -13,6 +13,7 @@ meta:
       - components/__tests__/CustomSelect.test.tsx
       - components/__tests__/HfTokenExplainer.test.tsx
       - components/__tests__/LogsView.test.tsx
+      - components/__tests__/NoteActionMenu.test.tsx
       - components/__tests__/NotebookView.canary-language.test.tsx
       - components/__tests__/NotebookView.profile-id.test.tsx
       - components/__tests__/NotebookView.test.tsx
@@ -27,6 +28,7 @@ meta:
       - components/__tests__/SessionView.client-link-stop.test.tsx
       - components/__tests__/SessionView.diarization.test.tsx
       - components/__tests__/SessionView.greek-sigma.test.tsx
+      - components/__tests__/SessionView.recovery-refresh.test.tsx
       - components/__tests__/SessionView.retry-failed.test.tsx
       - components/__tests__/SessionView.test.tsx
       - components/__tests__/StartupActivityInline.test.tsx
@@ -98,6 +100,7 @@ meta:
       - components/ui/UpdateBanner.tsx
       - components/ui/UpdateModal.tsx
       - components/views/__tests__/AudioNoteModal.auto-actions.test.tsx
+      - components/views/__tests__/AudioNoteModal.diarize.test.tsx
       - components/views/__tests__/AudioNoteModal.summary.test.tsx
       - components/views/__tests__/GpuDiagnosticModal.test.tsx
       - components/views/__tests__/GpuHealthCard.test.tsx
@@ -133,7 +136,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-08-02T10:20:32.229Z
+    generated_at: 2026-08-04T14:27:10.407Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:

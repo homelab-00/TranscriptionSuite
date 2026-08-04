@@ -27,6 +27,7 @@ import {
   Pause,
   FolderOpen,
   WifiOff,
+  Users,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -52,6 +53,7 @@ import { apiClient } from '../../src/api/client';
 import type { AdminStatus, Recording } from '../../src/api/types';
 import { jobTrackerFromAdminStatus } from '../../src/api/types';
 import { describeJobProgress } from '../../src/services/jobProgress';
+import { diarizeRecordingAndWait } from '../../src/services/retroDiarize';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
 import {
   isCanaryModel,
@@ -255,16 +257,24 @@ interface MenuProps {
   noteEventId: string;
   recordingId: number | null;
   noteTitle: string;
+  // GH-279 — Diarize gating: hidden when already diarized, disabled with a
+  // tooltip when the note has no word-level timestamps (wordCount === 0).
+  wordCount: number;
+  hasDiarization: boolean;
   onRefresh: () => void | Promise<void>;
   onPlay: (id: string) => void;
 }
 
-const NoteActionMenu: React.FC<MenuProps> = ({
+// Exported for direct component testing (NoteActionMenu.test.tsx) — the menu
+// is otherwise reachable only through the full calendar render tree.
+export const NoteActionMenu: React.FC<MenuProps> = ({
   trigger,
   onClose,
   noteEventId,
   recordingId,
   noteTitle,
+  wordCount,
+  hasDiarization,
   onRefresh,
   onPlay,
 }) => {
@@ -312,7 +322,7 @@ const NoteActionMenu: React.FC<MenuProps> = ({
     onClose();
   };
 
-  const handleExport = (format: 'txt' | 'srt' | 'ass') => {
+  const handleExport = (format: 'txt' | 'srt' | 'ass' | 'md') => {
     const targetId = getValidRecordingId();
     if (targetId === null) {
       toast.error('Invalid recording ID.');
@@ -326,6 +336,32 @@ const NoteActionMenu: React.FC<MenuProps> = ({
       return;
     }
     window.open(url, '_blank');
+    onClose();
+  };
+
+  // GH-279 — fire-and-forget: the poll survives the menu unmount, and the
+  // captured onRefresh repaints the calendar when the job completes.
+  const handleDiarize = () => {
+    const targetId = getValidRecordingId();
+    if (targetId === null) {
+      toast.error('Invalid recording ID.');
+      onClose();
+      return;
+    }
+    toast.info(`Diarization started for "${noteTitle}" — identifying speakers.`);
+    diarizeRecordingAndWait(targetId)
+      .then(async (result) => {
+        if (result.error) {
+          toast.error(`Diarization failed: ${result.error}`);
+          return;
+        }
+        await Promise.resolve(onRefresh());
+        toast.success(result.message || `Diarization complete for "${noteTitle}".`);
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : 'Diarization failed.';
+        toast.error(message);
+      });
     onClose();
   };
 
@@ -500,6 +536,21 @@ const NoteActionMenu: React.FC<MenuProps> = ({
                 Rename
               </button>
             )}
+            {!hasDiarization && (
+              <button
+                onClick={handleDiarize}
+                disabled={wordCount === 0}
+                title={
+                  wordCount === 0
+                    ? 'Diarization requires word-level timestamps, which this note was transcribed without.'
+                    : undefined
+                }
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-slate-300"
+              >
+                <Users size={14} />
+                Diarize
+              </button>
+            )}
             <button
               onClick={() => handleExport('txt')}
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
@@ -520,6 +571,13 @@ const NoteActionMenu: React.FC<MenuProps> = ({
             >
               <Download size={14} />
               Export ASS
+            </button>
+            <button
+              onClick={() => handleExport('md')}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <Download size={14} />
+              Export Markdown
             </button>
             <div className="mx-2 my-1 h-px bg-white/5"></div>
             <button
@@ -675,6 +733,10 @@ interface EventData {
   tag?: string;
   startTime: number;
   recordingId?: number;
+  // GH-279 — gate the context-menu Diarize action without a per-note fetch.
+  // wordCount > 0 means word-level timestamps exist in the words table.
+  wordCount?: number;
+  hasDiarization?: boolean;
 }
 
 const TimeSection: React.FC<{
@@ -711,6 +773,8 @@ const TimeSection: React.FC<{
     id: string;
     recordingId: number | null;
     title: string;
+    wordCount: number;
+    hasDiarization: boolean;
     trigger: MenuTrigger;
   } | null>(null);
   const isCompact = visibleSlots >= 4;
@@ -806,6 +870,8 @@ const TimeSection: React.FC<{
       id: evt.id,
       recordingId: evt.recordingId ?? null,
       title: evt.title,
+      wordCount: evt.wordCount ?? 0,
+      hasDiarization: evt.hasDiarization ?? false,
       trigger: { type: 'point', x: e.clientX, y: e.clientY },
     });
   };
@@ -928,6 +994,8 @@ const TimeSection: React.FC<{
                                     id: evt.id,
                                     recordingId: evt.recordingId ?? null,
                                     title: evt.title,
+                                    wordCount: evt.wordCount ?? 0,
+                                    hasDiarization: evt.hasDiarization ?? false,
                                     trigger: { type: 'rect', rect },
                                   });
                                 }}
@@ -983,6 +1051,8 @@ const TimeSection: React.FC<{
           noteEventId={activeMenu.id}
           recordingId={activeMenu.recordingId}
           noteTitle={activeMenu.title}
+          wordCount={activeMenu.wordCount}
+          hasDiarization={activeMenu.hasDiarization}
           onRefresh={onRefresh}
           onPlay={(id) => {
             const evt = events.find((e) => e.id === id);
@@ -1015,6 +1085,8 @@ const recordingToEvent = (rec: Recording): EventData => {
     duration: formatDuration(rec.duration_seconds),
     tag: rec.has_diarization ? 'Diarized' : undefined,
     recordingId: rec.id,
+    wordCount: rec.word_count ?? 0,
+    hasDiarization: Boolean(rec.has_diarization),
   };
 };
 
@@ -1089,6 +1161,17 @@ const CalendarTab: React.FC<{
 
   // Live calendar data from API
   const calendar = useCalendar(year, month);
+
+  // GH-279 — latest-ref wrapper for menu-triggered refreshes. Menu actions
+  // (rename, delete, and especially the long-running Diarize completion)
+  // capture onRefresh in closures that may resolve after the user navigated
+  // to another month; calling the captured calendar.refresh directly would
+  // refetch the OLD month and overwrite the current month's day data.
+  const calendarRefreshRef = useRef(calendar.refresh);
+  useEffect(() => {
+    calendarRefreshRef.current = calendar.refresh;
+  }, [calendar.refresh]);
+  const refreshCurrentMonth = useCallback(() => calendarRefreshRef.current(), []);
 
   // Build calendar grid: day-of-month (1-indexed) → array of recording summaries
   const eventsByDay: Record<number, EventData[]> = useMemo(() => {
@@ -1320,7 +1403,7 @@ const CalendarTab: React.FC<{
             onNoteClick={onNoteClick}
             onAddNote={(hour) => onAddNote(hour, addNoteDateKey)}
             onDropFilesAtSlot={handleDropAtHour}
-            onRefresh={calendar.refresh}
+            onRefresh={refreshCurrentMonth}
           />
           <TimeSection
             title="Afternoon"
@@ -1334,7 +1417,7 @@ const CalendarTab: React.FC<{
             onNoteClick={onNoteClick}
             onAddNote={(hour) => onAddNote(hour, addNoteDateKey)}
             onDropFilesAtSlot={handleDropAtHour}
-            onRefresh={calendar.refresh}
+            onRefresh={refreshCurrentMonth}
           />
         </div>
         <HistoryPicker
