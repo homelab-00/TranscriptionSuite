@@ -6,6 +6,7 @@ import {
   renderSrt,
   renderAss,
   renderTxt,
+  renderMarkdown,
   resolveTranscriptionOutput,
   resolveTranscriptionOutputs,
 } from './transcriptionFormatters';
@@ -89,6 +90,43 @@ describe('renderAss', () => {
     const ass = renderAss(diarizedResponse, 'Test');
     expect(ass).toContain('[Speaker 1]');
     expect(ass).toContain('[Speaker 2]');
+  });
+});
+
+describe('renderMarkdown', () => {
+  it('renders speaker turns with normalized labels and MM:SS timestamps', () => {
+    const md = renderMarkdown(diarizedResponse, 'memo');
+    expect(md).toContain('# memo');
+    expect(md).toContain('---');
+    expect(md).toContain('**Speaker 1** *[00:00]*: Hello world.');
+    expect(md).toContain('**Speaker 2** *[00:02]*: Goodbye world.');
+  });
+
+  it('coalesces consecutive segments from the same speaker into one turn', () => {
+    const coalesced: TranscriptionResponse = {
+      ...diarizedResponse,
+      segments: [
+        { text: 'Hello world.', start: 0, end: 1.5, speaker: 'SPEAKER_00' },
+        { text: 'Still me.', start: 1.6, end: 2.0, speaker: 'SPEAKER_00' },
+        { text: 'Goodbye world.', start: 2.0, end: 3.5, speaker: 'SPEAKER_01' },
+      ],
+    };
+    const md = renderMarkdown(coalesced, 'memo');
+    // One turn line per speaker, terminated with a Markdown hard break.
+    expect(md).toContain('**Speaker 1** *[00:00]*: Hello world. Still me.  \n');
+    expect(md).toContain('**Speaker 2** *[00:02]*: Goodbye world.  \n');
+  });
+
+  it('degrades to plain paragraphs when no speaker labels are present', () => {
+    const md = renderMarkdown(timedResponse, 'memo');
+    expect(md).toContain('# memo');
+    expect(md).not.toContain('**');
+    expect(md).toContain('Hello world. Goodbye world.');
+  });
+
+  it('degrades to the transcript text when there are no usable segments', () => {
+    const md = renderMarkdown(textOnlyResponse, 'memo');
+    expect(md).toBe('# memo\n\n---\n\nHello world. Goodbye world.\n');
   });
 });
 
@@ -212,6 +250,27 @@ describe('resolveTranscriptionOutputs (explicit format, GH-212)', () => {
       subtitleFormat: 'srt',
     });
     expect(outs.map((o) => o.outputFilename)).toEqual(['memo.txt', 'memo.srt']);
+  });
+
+  it('outputFormat=md → single .md file with the markdown document', () => {
+    const outs = resolveTranscriptionOutputs('memo.m4a', diarizedResponse, {
+      outputFormat: 'md',
+      subtitleFormat: 'srt',
+    });
+    expect(outs).toHaveLength(1);
+    expect(outs[0].outputFilename).toBe('memo.md');
+    expect(outs[0].content).toContain('# memo');
+    expect(outs[0].content).toContain('**Speaker 1**');
+  });
+
+  it('outputFormat=md without segments still writes .md, not the .txt fallback', () => {
+    const outs = resolveTranscriptionOutputs('memo.m4a', textOnlyResponse, {
+      outputFormat: 'md',
+      subtitleFormat: 'srt',
+    });
+    expect(outs).toHaveLength(1);
+    expect(outs[0].outputFilename).toBe('memo.md');
+    expect(outs[0].content).toContain('Hello world. Goodbye world.');
   });
 
   it('falls back to .txt only when the response has no usable segments, regardless of format', () => {

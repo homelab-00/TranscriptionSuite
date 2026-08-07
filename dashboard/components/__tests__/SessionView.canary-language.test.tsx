@@ -197,7 +197,6 @@ vi.mock('../../src/types/runtime', () => ({
 }));
 
 import { SessionView } from '../views/SessionView';
-import { SessionTab } from '../../types';
 import { useTraySync } from '../../src/hooks/useTraySync';
 import { apiClient } from '../../src/api/client';
 
@@ -242,8 +241,6 @@ const baseProps = {
   startupFlowPending: false,
   isUploading: false,
   live: baseLiveState,
-  sessionTab: SessionTab.MAIN,
-  onChangeSessionTab: vi.fn(),
 };
 
 const NEMO_LANGUAGES_FOR_TEST: Array<{ code: string; name: string }> = [

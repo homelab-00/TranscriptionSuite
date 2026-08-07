@@ -215,7 +215,6 @@ vi.mock('../../src/types/runtime', () => ({
 }));
 
 import { SessionView } from '../views/SessionView';
-import { SessionTab } from '../../types';
 
 function createWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -256,8 +255,6 @@ const baseProps = {
     clearHistory: vi.fn(),
     getText: vi.fn().mockReturnValue(''),
   },
-  sessionTab: SessionTab.MAIN,
-  onChangeSessionTab: vi.fn(),
 };
 
 function renderSessionView() {

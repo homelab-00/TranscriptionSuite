@@ -186,7 +186,6 @@ vi.mock('../../src/types/runtime', () => ({
 }));
 
 import { SessionView } from '../views/SessionView';
-import { SessionTab } from '../../types';
 
 function createWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -229,8 +228,6 @@ const baseProps = {
   startupFlowPending: false,
   isUploading: false,
   live: baseLiveState,
-  sessionTab: SessionTab.MAIN,
-  onChangeSessionTab: vi.fn(),
 };
 
 function setPersistedLanguages(main: string | undefined, live?: string | undefined) {

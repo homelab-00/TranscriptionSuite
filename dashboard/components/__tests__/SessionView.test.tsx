@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -184,6 +184,12 @@ vi.mock('../views/FullscreenVisualizer', () => ({
   FullscreenVisualizer: () => null,
 }));
 
+// The embedded import surface has its own test suite; stub it so this file
+// only exercises the Transcribe File disclosure wiring in SessionView.
+vi.mock('../views/SessionImportTab', () => ({
+  SessionImportTab: () => React.createElement('div', { 'data-testid': 'session-import-surface' }),
+}));
+
 vi.mock('../AudioVisualizer', () => ({
   AudioVisualizer: () => React.createElement('div', { 'data-testid': 'audio-visualizer' }),
 }));
@@ -194,7 +200,6 @@ vi.mock('../../src/types/runtime', () => ({
 }));
 
 import { SessionView } from '../views/SessionView';
-import { SessionTab } from '../../types';
 import { isModelDisabled } from '../../src/services/modelSelection';
 import { useNotificationsStore } from '../../src/stores/notificationsStore';
 
@@ -240,8 +245,6 @@ const baseProps = {
   startupFlowPending: false,
   isUploading: false,
   live: baseLiveState,
-  sessionTab: SessionTab.MAIN,
-  onChangeSessionTab: vi.fn(),
 };
 
 // ── Tests ───────────────────────────────────────────────────────────────���──
@@ -306,6 +309,26 @@ describe('[P2] SessionView', () => {
     // Copy and Download buttons may appear more than once in the DOM
     expect(screen.getAllByText('Copy').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Download').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('expands the Transcribe File import surface from the Main Transcription card', () => {
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    // The surface stays MOUNTED while collapsed (hidden attribute, not a
+    // conditional render) so the folder watcher it owns keeps running.
+    const surface = screen.getByTestId('session-import-surface');
+    const toggle = screen.getByRole('button', { name: /transcribe file/i });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(surface).not.toBeVisible();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(surface).toBeVisible();
+
+    fireEvent.click(toggle);
+    expect(surface).not.toBeVisible();
+    expect(screen.getByTestId('session-import-surface')).toBeDefined();
   });
 });
 
