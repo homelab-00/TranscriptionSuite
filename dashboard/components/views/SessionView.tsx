@@ -827,6 +827,19 @@ export const SessionView: React.FC<SessionViewProps> = ({
       if (isLive) live.stop();
       else handleStopRecording();
     },
+    onPttStopRecording: () => {
+      // Wayland portal press-and-hold release: only affects the one-shot
+      // session. Live Mode and the processing phase stay untouched, unlike
+      // onStopRecording which also stops Live Mode.
+      if (transcription.status === 'recording') {
+        handleStopRecording();
+      } else if (transcription.status === 'connecting') {
+        // Released before the session came up: no audio was captured yet, so
+        // cancel the pending session instead of leaving the mic hot. Same
+        // treatment as handleStopClient gives the connecting state.
+        transcription.reset();
+      }
+    },
     onCancelRecording: () => handleCancelProcessing(),
     onToggleMute: () => {
       if (transcription.status === 'recording' || transcription.status === 'connecting') {

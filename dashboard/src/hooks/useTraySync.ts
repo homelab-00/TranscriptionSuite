@@ -39,6 +39,13 @@ interface TrySyncDeps {
   /** Callbacks to forward tray context-menu actions */
   onStartRecording?: () => void;
   onStopRecording?: () => void;
+  /**
+   * Push-to-talk release from the Wayland portal layer (start shortcut held
+   * past the hold threshold). Only affects the one-shot session: stops an
+   * active recording or cancels a still-connecting one. Unlike
+   * onStopRecording, Live Mode stays untouched.
+   */
+  onPttStopRecording?: () => void;
   onCancelRecording?: () => void;
   onToggleMute?: () => void;
   onTranscribeFile?: (filePath: string) => void;
@@ -248,6 +255,9 @@ export function useTraySync(deps: TrySyncDeps): void {
           break;
         case 'stop-recording':
           callbacksRef.current.onStopRecording?.();
+          break;
+        case 'ptt-stop-recording':
+          callbacksRef.current.onPttStopRecording?.();
           break;
         case 'cancel-recording':
           callbacksRef.current.onCancelRecording?.();
