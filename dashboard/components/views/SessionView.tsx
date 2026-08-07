@@ -23,10 +23,12 @@ import {
   Minimize2,
   AlertTriangle,
   Zap,
+  Users,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
+import { ToggleButton } from '../ui/ToggleButton';
 import { StatusLight } from '../ui/StatusLight';
 import { AudioVisualizer } from '../AudioVisualizer';
 import { CustomSelect } from '../ui/CustomSelect';
@@ -1915,97 +1917,81 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Per-recording toggles. One row each, label left and
-                      control right-aligned in a shared fixed-width column, so
-                      every control shares a right edge with the Source Language
-                      dropdown above (this block's px-1 matches that block's
-                      p-1). The width is fixed rather than content-driven
-                      because it also sizes the Canary bidirectional dropdown
-                      that replaces the Translate switch. */}
-                    <div className="space-y-2 border-t border-white/5 px-1 pt-3">
-                      <div
-                        className="flex items-center gap-6"
-                        title={canTranslate ? '' : 'Current model does not support translation'}
-                      >
-                        <span
-                          className={`min-w-0 flex-1 text-sm font-medium ${canTranslate ? 'text-white/90' : 'text-slate-500 line-through'}`}
-                        >
-                          {isCanaryMainBidi ? 'Translate to' : 'Translate to English'}
-                        </span>
-                        <div className="flex w-34 items-center justify-end">
-                          {isCanaryMainBidi ? (
+                    {/* Per-recording toggles as two pill buttons on one
+                      centered row. The speaker-count stepper appears on its
+                      own centered row below, but only while diarization is
+                      on, so clicking the button always means toggle and the
+                      stepper never fights it for the click. Canary
+                      bidirectional models swap the Translate button for the
+                      target-language dropdown. */}
+                    <div className="border-t border-white/5 px-1 pt-3">
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        {isCanaryMainBidi ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-white/90">Translate to</span>
                             <CustomSelect
                               value={mainBidiTarget}
                               onChange={setMainBidiTarget}
                               options={['Off', ...CANARY_TRANSLATION_TARGETS]}
                               accentColor="magenta"
-                              className="focus:ring-accent-magenta w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                              className="focus:ring-accent-magenta w-28 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
                             />
-                          ) : (
-                            <AppleSwitch
-                              checked={mainTranslate && canTranslate}
-                              onChange={setMainTranslate}
-                              size="sm"
-                              disabled={!canTranslate}
-                              ariaLabel="Translate to English"
-                            />
-                          )}
-                        </div>
-                      </div>
-
-                      {/* GH-258: speaker diarization for this recording. Off by
-                        default so plain dictation is untouched; the count row
-                        only appears once it is on. */}
-                      <div
-                        className="flex items-center gap-6"
-                        title={
-                          diarizationUnavailable
-                            ? diarizationFeature?.reason === 'token_missing'
-                              ? 'Diarization needs a HuggingFace token. Add one in Settings and restart the server.'
-                              : 'Diarization is unavailable on this server.'
-                            : 'Label who said what in the finished transcript.'
-                        }
-                      >
-                        <span className="min-w-0 flex-1 text-sm font-medium text-white/90">
-                          Speaker Diarization
-                        </span>
-                        <div className="flex w-34 items-center justify-end">
-                          <AppleSwitch
-                            checked={effectiveDiarization}
-                            onChange={handleDiarizationToggle}
-                            disabled={diarizationUnavailable}
-                            ariaLabel="Speaker Diarization"
+                          </div>
+                        ) : (
+                          <ToggleButton
+                            checked={mainTranslate && canTranslate}
+                            onChange={setMainTranslate}
+                            disabled={!canTranslate}
+                            fullWidth
+                            label="Translate to English"
+                            icon={<Languages size={15} />}
+                            title={canTranslate ? '' : 'Current model does not support translation'}
                           />
-                        </div>
+                        )}
+                        {/* GH-258: speaker diarization for this recording.
+                          Off by default so plain dictation is untouched. */}
+                        <ToggleButton
+                          checked={effectiveDiarization}
+                          onChange={handleDiarizationToggle}
+                          disabled={diarizationUnavailable}
+                          fullWidth
+                          label="Speaker Diarization"
+                          icon={<Users size={15} />}
+                          title={
+                            diarizationUnavailable
+                              ? diarizationFeature?.reason === 'token_missing'
+                                ? 'Diarization needs a HuggingFace token. Add one in Settings and restart the server.'
+                                : 'Diarization is unavailable on this server.'
+                              : 'Label who said what in the finished transcript.'
+                          }
+                        />
                       </div>
                       {effectiveDiarization && (
-                        <div className="flex items-center gap-6">
-                          <span className="min-w-0 flex-1 text-xs text-slate-400">Speakers</span>
-                          <div className="flex w-34 items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              aria-label="Fewer speakers"
-                              onClick={() =>
-                                handleSpeakerCountChange(constrainSpeakers ? numSpeakers - 1 : 0)
-                              }
-                              className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition-colors hover:bg-white/10"
-                            >
-                              &minus;
-                            </button>
-                            <span className="w-14 text-center text-xs text-slate-300">
-                              {constrainSpeakers ? numSpeakers : 'Auto'}
-                            </span>
-                            <button
-                              type="button"
-                              aria-label="More speakers"
-                              onClick={() =>
-                                handleSpeakerCountChange(constrainSpeakers ? numSpeakers + 1 : 2)
-                              }
-                              className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition-colors hover:bg-white/10"
-                            >
-                              +
-                            </button>
-                          </div>
+                        <div className="mt-3 flex items-center justify-center gap-2">
+                          <span className="mr-1 text-xs text-slate-400">Speakers</span>
+                          <button
+                            type="button"
+                            aria-label="Fewer speakers"
+                            onClick={() =>
+                              handleSpeakerCountChange(constrainSpeakers ? numSpeakers - 1 : 0)
+                            }
+                            className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition-colors hover:bg-white/10"
+                          >
+                            &minus;
+                          </button>
+                          <span className="w-14 text-center text-xs text-slate-300">
+                            {constrainSpeakers ? numSpeakers : 'Auto'}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label="More speakers"
+                            onClick={() =>
+                              handleSpeakerCountChange(constrainSpeakers ? numSpeakers + 1 : 2)
+                            }
+                            className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition-colors hover:bg-white/10"
+                          >
+                            +
+                          </button>
                         </div>
                       )}
                     </div>
@@ -2703,25 +2689,28 @@ export const SessionView: React.FC<SessionViewProps> = ({
                               canTranslateLive ? '' : 'Current model does not support translation'
                             }
                           >
-                            <span
-                              className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslateLive ? 'text-slate-500' : 'text-slate-600 line-through'}`}
-                            >
-                              {isCanaryLiveBidi ? 'Translate to' : 'Translate to English'}
-                            </span>
                             {isCanaryLiveBidi ? (
-                              <CustomSelect
-                                value={liveBidiTarget}
-                                onChange={setLiveBidiTarget}
-                                options={['Off', ...CANARY_TRANSLATION_TARGETS]}
-                                accentColor="magenta"
-                                className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
-                              />
+                              <>
+                                <span className="text-[9px] font-bold tracking-widest whitespace-nowrap text-slate-500 uppercase">
+                                  Translate to
+                                </span>
+                                <CustomSelect
+                                  value={liveBidiTarget}
+                                  onChange={setLiveBidiTarget}
+                                  options={['Off', ...CANARY_TRANSLATION_TARGETS]}
+                                  accentColor="magenta"
+                                  className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                                />
+                              </>
                             ) : (
-                              <AppleSwitch
+                              <ToggleButton
+                                size="sm"
                                 checked={liveTranslate && canTranslateLive}
                                 onChange={setLiveTranslate}
-                                size="sm"
                                 disabled={!canTranslateLive}
+                                label="Translate to English"
+                                ariaLabel="Translate to English (Live Mode)"
+                                icon={<Languages size={13} />}
                               />
                             )}
                           </div>
@@ -2826,25 +2815,28 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         className="flex h-8 shrink-0 items-center gap-2"
                         title={canTranslateLive ? '' : 'Current model does not support translation'}
                       >
-                        <span
-                          className={`text-[9px] font-bold tracking-widest whitespace-nowrap uppercase ${canTranslateLive ? 'text-slate-500' : 'text-slate-600 line-through'}`}
-                        >
-                          {isCanaryLiveBidi ? 'Translate to' : 'Translate to English'}
-                        </span>
                         {isCanaryLiveBidi ? (
-                          <CustomSelect
-                            value={liveBidiTarget}
-                            onChange={setLiveBidiTarget}
-                            options={['Off', ...CANARY_TRANSLATION_TARGETS]}
-                            accentColor="magenta"
-                            className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
-                          />
+                          <>
+                            <span className="text-[9px] font-bold tracking-widest whitespace-nowrap text-slate-500 uppercase">
+                              Translate to
+                            </span>
+                            <CustomSelect
+                              value={liveBidiTarget}
+                              onChange={setLiveBidiTarget}
+                              options={['Off', ...CANARY_TRANSLATION_TARGETS]}
+                              accentColor="magenta"
+                              className="focus:ring-accent-magenta h-full min-w-25 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300 outline-none focus:ring-1"
+                            />
+                          </>
                         ) : (
-                          <AppleSwitch
+                          <ToggleButton
+                            size="sm"
                             checked={liveTranslate && canTranslateLive}
                             onChange={setLiveTranslate}
-                            size="sm"
                             disabled={!canTranslateLive}
+                            label="Translate to English"
+                            ariaLabel="Translate to English (Live Mode)"
+                            icon={<Languages size={13} />}
                           />
                         )}
                       </div>

@@ -269,10 +269,10 @@ describe('SessionView - speaker diarization for recordings (GH-258)', () => {
     expect(toggle).toBeTruthy();
   });
 
-  it('stacks Translate and Speaker Diarization as two named toggle rows', async () => {
-    // The two switches share one row style and one control column. Both must
-    // carry an accessible name: they are icon-only switches, so without one a
-    // screen reader announces two anonymous toggles on the same card.
+  it('renders Translate and Speaker Diarization as named toggle buttons on one row', async () => {
+    // The two controls are pill buttons sharing one centered row. Both keep
+    // role switch plus an accessible name, so screen readers announce two
+    // named on/off controls instead of two anonymous buttons on the card.
     render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
 
     const diarization = await screen.findByRole('switch', { name: 'Speaker Diarization' });
