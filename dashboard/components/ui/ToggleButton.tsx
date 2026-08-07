@@ -12,6 +12,8 @@ interface ToggleButtonProps {
   title?: string;
   /** Accessible name override when the visible label is not enough. */
   ariaLabel?: string;
+  /** Stretch to fill the available width of the parent flex row. */
+  fullWidth?: boolean;
   className?: string;
 }
 
@@ -35,6 +37,7 @@ export const ToggleButton: React.FC<ToggleButtonProps> = ({
   disabled = false,
   title,
   ariaLabel,
+  fullWidth = false,
   className = '',
 }) => {
   const sizeClasses = size === 'sm' ? 'h-8 gap-1.5 px-3 text-xs' : 'gap-2 px-4 py-2 text-sm';
@@ -46,7 +49,10 @@ export const ToggleButton: React.FC<ToggleButtonProps> = ({
       : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white active:scale-95';
 
   return (
-    <span title={title} className={`inline-flex ${disabled ? 'cursor-not-allowed' : ''}`}>
+    <span
+      title={title}
+      className={`inline-flex ${fullWidth ? 'min-w-0 flex-1' : ''} ${disabled ? 'cursor-not-allowed' : ''}`}
+    >
       <button
         type="button"
         role="switch"
@@ -56,7 +62,7 @@ export const ToggleButton: React.FC<ToggleButtonProps> = ({
         onClick={() => {
           if (!disabled) onChange(!checked);
         }}
-        className={`focus:ring-accent-cyan inline-flex items-center justify-center rounded-xl border font-medium transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:outline-none ${sizeClasses} ${stateClasses} ${className}`}
+        className={`focus:ring-accent-cyan inline-flex items-center justify-center rounded-xl border font-medium transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:outline-none ${fullWidth ? 'w-full' : ''} ${sizeClasses} ${stateClasses} ${className}`}
       >
         {icon}
         <span className="whitespace-nowrap">{label}</span>

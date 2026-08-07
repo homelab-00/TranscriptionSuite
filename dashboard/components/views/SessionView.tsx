@@ -1942,6 +1942,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                             checked={mainTranslate && canTranslate}
                             onChange={setMainTranslate}
                             disabled={!canTranslate}
+                            fullWidth
                             label="Translate to English"
                             icon={<Languages size={15} />}
                             title={canTranslate ? '' : 'Current model does not support translation'}
@@ -1953,6 +1954,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           checked={effectiveDiarization}
                           onChange={handleDiarizationToggle}
                           disabled={diarizationUnavailable}
+                          fullWidth
                           label="Speaker Diarization"
                           icon={<Users size={15} />}
                           title={
