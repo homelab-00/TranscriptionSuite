@@ -24,6 +24,8 @@ import {
   AlertTriangle,
   Zap,
   Users,
+  FileAudio,
+  ChevronDown,
 } from 'lucide-react';
 import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
@@ -64,7 +66,6 @@ import {
   CANARY_TRANSLATION_TARGETS,
 } from '../../src/services/modelCapabilities';
 import { isModelDisabled } from '../../src/services/modelSelection';
-import { SessionTab } from '../../types';
 import { SessionImportTab } from './SessionImportTab';
 import { useImportQueueStore } from '../../src/stores/importQueueStore';
 import { useNotificationsStore } from '../../src/stores/notificationsStore';
@@ -131,8 +132,6 @@ interface SessionViewProps {
   startupFlowPending: boolean;
   isUploading?: boolean;
   live: LiveModeState;
-  sessionTab: SessionTab;
-  onChangeSessionTab: (tab: SessionTab) => void;
 }
 
 export const SessionView: React.FC<SessionViewProps> = ({
@@ -143,8 +142,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
   startupFlowPending,
   isUploading,
   live,
-  sessionTab,
-  onChangeSessionTab,
 }) => {
   // Global State
   const [isFullscreenVisualizerOpen, setIsFullscreenVisualizerOpen] = useState(false);
@@ -476,6 +473,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Output formatting
   const [hideTimestamps, setHideTimestamps] = useState(false);
+
+  // Transcribe File expander: the former Session Import tab now lives at the
+  // bottom of the Main Transcription card, collapsed by default because the
+  // import surface carries many controls.
+  const [transcribeFileOpen, setTranscribeFileOpen] = useState(false);
 
   // Live Mode State (`isLive` hoisted above for use by recordingDisabledReason)
   const [liveLanguage, setLiveLanguage] = useState('English');
@@ -1506,19 +1508,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
     backgroundAttachment: 'fixed',
   };
 
-  if (sessionTab === SessionTab.IMPORT) {
-    return (
-      <div className="custom-scrollbar h-full w-full overflow-y-auto">
-        <div className="mx-auto max-w-7xl py-6 pr-3 pl-6">
-          <div className="mb-6 flex flex-col space-y-2">
-            <h1 className="text-3xl font-bold tracking-tight text-white">Session</h1>
-          </div>
-          <SessionImportTab ffmpegAvailable={serverConnection.details?.ffmpeg_available} />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="mx-auto flex h-full w-full max-w-7xl flex-col py-6 pr-3 pl-6">
       {/* 1. Header (Fixed) */}
@@ -2287,6 +2276,37 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         )}
                       </div>
                     )}
+
+                    {/* Transcribe File: the former Session Import tab, folded
+                      into this card behind a disclosure button. The divider
+                      mirrors the one above the per-recording toggles. */}
+                    <div className="border-t border-white/5 px-1 pt-3">
+                      <button
+                        type="button"
+                        aria-expanded={transcribeFileOpen}
+                        onClick={() => setTranscribeFileOpen((open) => !open)}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white"
+                      >
+                        <FileAudio size={15} />
+                        <span>Transcribe File</span>
+                        <ChevronDown
+                          size={14}
+                          className={`transition-transform duration-200 ${transcribeFileOpen ? 'rotate-180' : ''}`}
+                        />
+                      </button>
+                      {/* Collapse hides via the hidden attribute instead of
+                        unmounting: SessionImportTab owns the folder-watch
+                        lifecycle (useSessionWatcher stops the watcher in its
+                        effect cleanup), so unmounting on collapse would
+                        silently stop an active watch. Always mounting also
+                        re-arms a persisted watch at app start instead of on
+                        first visit. */}
+                      <div hidden={!transcribeFileOpen} className="mt-4">
+                        <SessionImportTab
+                          ffmpegAvailable={serverConnection.details?.ffmpeg_available}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </GlassCard>
 

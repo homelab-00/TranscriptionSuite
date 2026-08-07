@@ -241,6 +241,8 @@ export function describePlannedFormat(
   switch (cfg.outputFormat ?? 'subtitles') {
     case 'txt':
       return '.txt';
+    case 'md':
+      return '.md';
     case 'both':
       return `.txt + ${sub}`;
     default:

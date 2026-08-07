@@ -163,7 +163,6 @@ vi.mock('../../src/types/runtime', () => ({
 }));
 
 import { SessionView } from '../views/SessionView';
-import { SessionTab } from '../../types';
 import type { LiveModeState } from '../../src/hooks/useLiveMode';
 
 function createWrapper() {
@@ -207,8 +206,6 @@ const baseProps = {
   startupFlowPending: false,
   isUploading: false,
   live: baseLiveState,
-  sessionTab: SessionTab.MAIN,
-  onChangeSessionTab: vi.fn(),
 };
 
 const ORIGINAL_NAVIGATOR_PLATFORM = navigator.platform;
