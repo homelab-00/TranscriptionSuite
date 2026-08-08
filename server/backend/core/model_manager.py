@@ -68,6 +68,10 @@ class TranscriptionJobTracker:
         self._progress: dict[str, Any] | None = None
         self._started_at: float | None = None
         self._result: dict[str, Any] | None = None
+        # GH-239 follow-up: set while the active job is a salvage of a dropped
+        # recording, so /api/status and session_busy can tell the dashboard
+        # this busy slot is recoverable, not a live user.
+        self._salvage_info: dict[str, Any] | None = None
         self._lock = threading.Lock()
 
     def try_start_job(self, user: str) -> tuple[bool, str | None, str | None]:
@@ -92,6 +96,7 @@ class TranscriptionJobTracker:
             self._cancelled = False
             self._started_at = time.time()
             self._result = None  # Clear previous job result
+            self._salvage_info = None
             logger.info(f"Started transcription job {job_id[:8]} for user '{user}'")
             return (True, job_id, None)
 
@@ -117,6 +122,7 @@ class TranscriptionJobTracker:
                 self._progress = None
                 self._started_at = None
                 self._result = result
+                self._salvage_info = None
                 return True
             return False
 
@@ -138,6 +144,27 @@ class TranscriptionJobTracker:
                 )
                 return (True, user)
             return (False, None)
+
+    def mark_salvage(self, job_id: str | None) -> bool:
+        """Flag the active job as a GH-239 salvage of a dropped recording.
+
+        Returns False (and records nothing) when job_id is None or does not
+        match the active job - callers treat this as best-effort.
+        """
+        with self._lock:
+            if job_id is None or self._active_job_id != job_id:
+                return False
+            self._salvage_info = {
+                "job_id": job_id,
+                "client_name": self._active_user,
+                "started_at": time.time(),
+            }
+            return True
+
+    def get_salvage_info(self) -> dict[str, Any] | None:
+        """Salvage metadata for the active job, or None. Returns a copy."""
+        with self._lock:
+            return dict(self._salvage_info) if self._salvage_info else None
 
     def is_cancelled(self) -> bool:
         """
@@ -202,6 +229,7 @@ class TranscriptionJobTracker:
                 "progress": self._progress,
                 "started_at": self._started_at,
                 "result": self._result,
+                "salvage": dict(self._salvage_info) if self._salvage_info else None,
             }
 
 
