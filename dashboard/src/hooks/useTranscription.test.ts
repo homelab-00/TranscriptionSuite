@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vite
 
 import { useTranscription } from './useTranscription';
 import { apiClient } from '../api/client';
+import { useSalvageStore } from '../stores/salvageStore';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 
@@ -316,6 +317,101 @@ describe('[P1] useTranscription', () => {
 
       expect(result.current.status).toBe('error');
       expect(result.current.error).toContain('other-client');
+    });
+
+    it('salvage-busy sets busyInfo and returns to idle instead of error', () => {
+      const { result } = renderHook(() => useTranscription());
+
+      act(() => {
+        result.current.start();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      const nonceBefore = useSalvageStore.getState().checkNonce;
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'session_busy',
+          data: { active_user: 'laptop', is_salvage: true, salvage_job_id: 'salv-1' },
+        });
+      });
+
+      expect(result.current.status).toBe('idle');
+      expect(result.current.error).toBeNull();
+      expect(result.current.busyInfo).toEqual({
+        activeUser: 'laptop',
+        isSalvage: true,
+        salvageJobId: 'salv-1',
+      });
+      expect(lastSocket.disconnect).toHaveBeenCalled();
+      // The salvage progress monitor (Task 7) wakes up on this nudge.
+      expect(useSalvageStore.getState().checkNonce).toBe(nonceBefore + 1);
+    });
+
+    it('session_busy without is_salvage keeps the generic error and no busyInfo', () => {
+      const { result } = renderHook(() => useTranscription());
+
+      act(() => {
+        result.current.start();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'session_busy',
+          data: { active_user: 'other-client' },
+        });
+      });
+
+      expect(result.current.status).toBe('error');
+      expect(result.current.busyInfo).toBeNull();
+    });
+
+    it('clearBusyInfo and reset both clear busyInfo', () => {
+      const { result } = renderHook(() => useTranscription());
+
+      act(() => {
+        result.current.start();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'session_busy',
+          data: { active_user: 'laptop', is_salvage: true, salvage_job_id: null },
+        });
+      });
+      expect(result.current.busyInfo).not.toBeNull();
+
+      act(() => {
+        result.current.clearBusyInfo();
+      });
+      expect(result.current.busyInfo).toBeNull();
+
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'session_busy',
+          data: { active_user: 'laptop', is_salvage: true, salvage_job_id: null },
+        });
+      });
+      act(() => {
+        result.current.reset();
+      });
+      expect(result.current.busyInfo).toBeNull();
+    });
+
+    it('unexpected close while recording nudges the salvage monitor', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      const nonceBefore = useSalvageStore.getState().checkNonce;
+      act(() => {
+        lastSocketCbs.onClose!(1006, 'abnormal');
+      });
+
+      expect(useSalvageStore.getState().checkNonce).toBe(nonceBefore + 1);
     });
   });
 
