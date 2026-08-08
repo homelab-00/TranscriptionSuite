@@ -1044,8 +1044,20 @@ async def handle_client_message(session: TranscriptionSession, message: dict[str
         success, job_id, active_user = model_manager.job_tracker.try_start_job(session.client_name)
 
         if not success:
-            # Another transcription is running - send session_busy but keep connection open
-            await session.send_message("session_busy", {"active_user": active_user})
+            # Another transcription is running - send session_busy but keep the
+            # connection open. is_salvage lets the dashboard offer dropping a
+            # GH-239 salvage instead of dead-ending; a live user's job stays a
+            # generic busy. salvage_job_id is the FULL id (the client matches
+            # it against /recent and /result/{job_id}).
+            salvage = model_manager.job_tracker.get_salvage_info()
+            await session.send_message(
+                "session_busy",
+                {
+                    "active_user": active_user,
+                    "is_salvage": salvage is not None,
+                    "salvage_job_id": salvage["job_id"] if salvage else None,
+                },
+            )
             logger.info(
                 f"Recording rejected for {session.client_name} - "
                 f"job already running for {active_user}"
