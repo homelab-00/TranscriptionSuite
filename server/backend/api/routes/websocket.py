@@ -969,6 +969,16 @@ class TranscriptionSession:
             "Client disconnected mid-recording - this transcript covers only "
             "the audio received before the connection dropped"
         )
+        # Flag the tracker so /api/status and session_busy can tell the
+        # dashboard this busy slot is a salvage rather than a live user
+        # (drop-popup + progress notification). Best-effort: a tracker whose
+        # job does not match (create_job failed earlier) just declines.
+        try:
+            from server.core.model_manager import get_model_manager
+
+            get_model_manager().job_tracker.mark_salvage(self._current_job_id)
+        except Exception as _ms_err:
+            logger.warning("Failed to flag salvage on the job tracker: %s", _ms_err)
         try:
             await self.process_transcription()
         except Exception:

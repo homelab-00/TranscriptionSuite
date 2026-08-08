@@ -482,3 +482,28 @@ def test_salvage_releases_the_buffer(monkeypatch, tmp_path, audio_seconds):
     asyncio.run(session.finalize_interrupted_recording())
 
     assert session.audio_chunks == []
+
+
+# ── 8. Job tracker salvage flag ─────────────────────────────────────────────
+
+
+def test_salvage_marks_the_job_tracker(monkeypatch, tmp_path):
+    """The dashboard popup and progress notification hinge on this flag."""
+    _patch_transcription(monkeypatch, tmp_path)
+    session = _make_session(audio_seconds=5.0)
+
+    asyncio.run(session.finalize_interrupted_recording())
+
+    tracker = mm_mod.get_model_manager().job_tracker
+    tracker.mark_salvage.assert_called_once_with("job-001")
+
+
+def test_junk_guard_does_not_mark_salvage(monkeypatch, tmp_path):
+    """Below the salvage minimum nothing runs, so nothing must be flagged."""
+    _patch_transcription(monkeypatch, tmp_path)
+    session = _make_session(audio_seconds=1.0)
+
+    asyncio.run(session.finalize_interrupted_recording())
+
+    tracker = mm_mod.get_model_manager().job_tracker
+    tracker.mark_salvage.assert_not_called()
