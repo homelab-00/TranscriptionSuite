@@ -232,6 +232,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const transcription = useTranscription();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [droppingSalvage, setDroppingSalvage] = useState(false);
+  const salvageFlowActiveRef = useRef(false);
 
   // Active analyser: live mode takes priority when active, then one-shot
   const activeAnalyser = live.analyser ?? transcription.analyser;
@@ -829,7 +830,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
     modelsLoaded: isAsrModelsLoaded,
     isLocalConnection: !isRemoteMode,
     isUploading,
-    onStartRecording: () => handleStartRecording(),
+    onStartRecording: () => {
+      // Blocks the tray while the confirm dialog or wait window is active -
+      // the DOM backdrop cannot cover a tray-triggered start (GH-239).
+      if (salvageFlowActiveRef.current) return;
+      handleStartRecording();
+    },
     onStopRecording: () => {
       if (isLive) live.stop();
       else handleStopRecording();
@@ -963,37 +969,45 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // then restart the recording automatically.
   const handleSalvageBusy = useCallback(
     async (info: BusyInfo) => {
-      const ok = await confirm(
-        `The server is still transcribing an interrupted recording (from ${info.activeUser}). ` +
-          'Stop it and start your new recording? The interrupted audio is saved and can be retried later.',
-        { title: 'Recovery in progress', confirmLabel: 'Stop and record', danger: true },
-      );
-      if (!ok) return;
-      if (info.salvageJobId) {
-        useSalvageStore.getState().markDropRequested(info.salvageJobId);
-      }
-      setDroppingSalvage(true);
+      // Guard covers the whole flow, including the confirm dialog itself, so
+      // a decline resets it too - otherwise a second busy event would stay
+      // ignored forever after the first dialog was dismissed.
+      salvageFlowActiveRef.current = true;
       try {
+        const ok = await confirm(
+          `The server is still transcribing an interrupted recording (from ${info.activeUser}). ` +
+            'Stop it and start your new recording? The interrupted audio is saved and can be retried later.',
+          { title: 'Recovery in progress', confirmLabel: 'Stop and record', danger: true },
+        );
+        if (!ok) return;
+        if (info.salvageJobId) {
+          useSalvageStore.getState().markDropRequested(info.salvageJobId);
+        }
+        setDroppingSalvage(true);
         try {
-          // success:false just means the salvage finished on its own - the
-          // slot is free (or about to be), so proceed either way.
-          await apiClient.cancelTranscription();
-        } catch {
-          toast.error('Could not stop the recovery job', {
-            description: 'The server did not accept the cancel request. Try again.',
-          });
-          return;
+          try {
+            // success:false just means the salvage finished on its own - the
+            // slot is free (or about to be), so proceed either way.
+            await apiClient.cancelTranscription();
+          } catch {
+            toast.error('Could not stop the recovery job', {
+              description: 'The server did not accept the cancel request. Try again.',
+            });
+            return;
+          }
+          const freed = await waitForJobSlotFree();
+          if (!freed) {
+            toast.error('Could not free the server', {
+              description: 'The recovery job did not stop in time. Try again in a moment.',
+            });
+            return;
+          }
+          handleStartRecording();
+        } finally {
+          setDroppingSalvage(false);
         }
-        const freed = await waitForJobSlotFree();
-        if (!freed) {
-          toast.error('Could not free the server', {
-            description: 'The recovery job did not stop in time. Try again in a moment.',
-          });
-          return;
-        }
-        handleStartRecording();
       } finally {
-        setDroppingSalvage(false);
+        salvageFlowActiveRef.current = false;
       }
     },
     [confirm, handleStartRecording],
@@ -1012,6 +1026,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
   useEffect(() => {
     const info = transcription.busyInfo;
     if (!info?.isSalvage) return;
+    // One salvage flow at a time - a second busy event while the dialog or
+    // wait is active would clobber the pending confirm (GH-239).
+    if (salvageFlowActiveRef.current) return;
     transcription.clearBusyInfo();
     void handleSalvageBusyRef.current(info);
   }, [transcription.busyInfo, transcription.clearBusyInfo]);
@@ -2165,7 +2182,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
                               isLive ||
                               !clientRunning ||
                               !serverConnection.ready ||
-                              mainModelDisabled
+                              mainModelDisabled ||
+                              droppingSalvage
                             }
                           >
                             {isConnecting ? 'Connecting...' : 'Start Recording'}

@@ -141,6 +141,7 @@ const {
   mockToast,
   mockGetStatus,
   mockCancelTranscription,
+  mockWaitForJobSlotFree,
 } = vi.hoisted(() => {
   class HoistedAPIError extends Error {
     constructor(
@@ -160,8 +161,13 @@ const {
     mockToast: { success: vi.fn(), error: vi.fn() },
     mockGetStatus: vi.fn(),
     mockCancelTranscription: vi.fn(),
+    mockWaitForJobSlotFree: vi.fn(),
   };
 });
+
+vi.mock('../../src/hooks/useSalvageProgress', () => ({
+  waitForJobSlotFree: (...a: unknown[]) => mockWaitForJobSlotFree(...a),
+}));
 
 vi.mock('../../src/api/client', () => ({
   APIError: MockAPIError,
@@ -303,6 +309,7 @@ describe('SessionView - recovery banner refresh', () => {
       cancelled_user: 'laptop',
       message: '',
     });
+    mockWaitForJobSlotFree.mockResolvedValue(true);
     useSalvageStore.setState({ checkNonce: 0, dropRequestedJobId: null, lastCompletedAt: null });
   });
 
@@ -399,6 +406,7 @@ describe('SessionView - salvage drop popup (GH-239 follow-up)', () => {
       message: '',
     });
     mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
+    mockWaitForJobSlotFree.mockResolvedValue(true);
     useSalvageStore.setState({ checkNonce: 0, dropRequestedJobId: null, lastCompletedAt: null });
   });
 
@@ -443,5 +451,27 @@ describe('SessionView - salvage drop popup (GH-239 follow-up)', () => {
     });
 
     await waitFor(() => expect(mockFetchRecentUndelivered).toHaveBeenCalled());
+  });
+
+  it('cancel failure aborts the drop flow with an error toast', async () => {
+    mockTranscription.busyInfo = { ...BUSY };
+    mockCancelTranscription.mockRejectedValueOnce(new Error('boom'));
+    renderSessionView();
+
+    fireEvent.click(await screen.findByText('Stop and record'));
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled());
+    expect(mockTranscription.start).not.toHaveBeenCalled();
+  });
+
+  it('slot-free timeout aborts the drop flow with an error toast', async () => {
+    mockTranscription.busyInfo = { ...BUSY };
+    mockWaitForJobSlotFree.mockResolvedValueOnce(false);
+    renderSessionView();
+
+    fireEvent.click(await screen.findByText('Stop and record'));
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled());
+    expect(mockTranscription.start).not.toHaveBeenCalled();
   });
 });
