@@ -65,6 +65,7 @@ export function useSalvageProgress(): void {
   useEffect(() => {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let inFlight = false;
 
     const resolveOutcome = async (ended: SalvageInfo): Promise<void> => {
       const store = useNotificationsStore.getState();
@@ -128,6 +129,8 @@ export function useSalvageProgress(): void {
     };
 
     const tick = async (): Promise<void> => {
+      if (inFlight) return;
+      inFlight = true;
       let delay = activeSalvageRef.current ? ACTIVE_POLL_MS : IDLE_POLL_MS;
       try {
         const tracker = jobTrackerFromServerStatus(await apiClient.getStatus());
@@ -158,7 +161,10 @@ export function useSalvageProgress(): void {
         }
       } catch {
         // Server unreachable - app-level indicators cover it; retry next tick.
+      } finally {
+        inFlight = false;
       }
+      if (timer) clearTimeout(timer);
       if (!disposed) {
         timer = setTimeout(() => void tick(), delay);
       }

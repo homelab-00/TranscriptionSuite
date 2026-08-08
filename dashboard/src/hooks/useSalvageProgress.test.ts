@@ -170,6 +170,36 @@ describe('useSalvageProgress', () => {
 
     expect(mockedApi.getStatus.mock.calls.length).toBeGreaterThan(calls);
   });
+
+  it('overlapping focus checks do not spawn parallel polling chains', async () => {
+    let resolveStatus: ((v: unknown) => void) | null = null;
+    mockedApi.getStatus.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve;
+        }),
+    );
+    // This file never resets shared mock call history between tests (see the
+    // 'requestCheck' test's relative-delta assertion above); clear it here so
+    // the absolute call count below reflects only this test's invocations.
+    mockedApi.getStatus.mockClear();
+    renderHook(() => useSalvageProgress());
+
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    await act(async () => {
+      resolveStatus!(statusWith(null));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(mockedApi.getStatus).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1);
+  });
 });
 
 describe('waitForJobSlotFree', () => {
@@ -183,5 +213,10 @@ describe('waitForJobSlotFree', () => {
     const pending = waitForJobSlotFree(3_000, 1_000);
     await vi.advanceTimersByTimeAsync(4_000);
     await expect(pending).resolves.toBe(false);
+  });
+
+  it('treats a missing tracker as free (old servers)', async () => {
+    mockedApi.getStatus.mockResolvedValue({ models: {} } as never);
+    await expect(waitForJobSlotFree(5_000, 1_000)).resolves.toBe(true);
   });
 });
