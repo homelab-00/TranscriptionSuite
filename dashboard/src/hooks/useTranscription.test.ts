@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vite
 
 import { useTranscription } from './useTranscription';
 import { apiClient } from '../api/client';
+import { useSalvageStore } from '../stores/salvageStore';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 
@@ -327,6 +328,7 @@ describe('[P1] useTranscription', () => {
       act(() => {
         lastSocketCbs.onMessage!({ type: 'auth_ok' });
       });
+      const nonceBefore = useSalvageStore.getState().checkNonce;
       act(() => {
         lastSocketCbs.onMessage!({
           type: 'session_busy',
@@ -342,6 +344,8 @@ describe('[P1] useTranscription', () => {
         salvageJobId: 'salv-1',
       });
       expect(lastSocket.disconnect).toHaveBeenCalled();
+      // The salvage progress monitor (Task 7) wakes up on this nudge.
+      expect(useSalvageStore.getState().checkNonce).toBe(nonceBefore + 1);
     });
 
     it('session_busy without is_salvage keeps the generic error and no busyInfo', () => {
@@ -396,6 +400,18 @@ describe('[P1] useTranscription', () => {
         result.current.reset();
       });
       expect(result.current.busyInfo).toBeNull();
+    });
+
+    it('unexpected close while recording nudges the salvage monitor', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      const nonceBefore = useSalvageStore.getState().checkNonce;
+      act(() => {
+        lastSocketCbs.onClose!(1006, 'abnormal');
+      });
+
+      expect(useSalvageStore.getState().checkNonce).toBe(nonceBefore + 1);
     });
   });
 
