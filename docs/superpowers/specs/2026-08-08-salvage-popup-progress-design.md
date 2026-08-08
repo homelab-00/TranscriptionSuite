@@ -73,8 +73,9 @@ main transcription while recording or processing), the server transcribes it any
   `await self.process_transcription()` (`websocket.py:~968`).
 - Cleared in `end_job()` (which every teardown path reaches via `cleanup()` ->
   `_release_job()`), and defensively in `try_start_job()` on successful acquisition.
-- `get_status()` gains `"salvage": {"active": bool, "job_id": str, "client_name": str}
-  | None`. Automatically exposed via `GET /api/status` and `GET /api/admin/status`.
+- `get_status()` gains `"salvage": {"job_id", "client_name", "started_at"} | None`
+  (presence of the object means active). Automatically exposed via `GET /api/status`
+  and `GET /api/admin/status`.
 - The junk-job guard (buffered audio below `durability.min_salvage_seconds`) never
   sets the flag - no salvage runs in that path.
 
@@ -110,11 +111,17 @@ main transcription while recording or processing), the server transcribes it any
   recording? The interrupted audio is saved and can be retried later."; confirm label
   "Stop and record".
 - On confirm:
-  1. `POST /api/transcribe/cancel` via a new `apiClient.cancelTranscription()` method
-     (add if absent).
-  2. Show an inline "Stopping salvage..." indicator (not the red error box).
-  3. Poll `GET /api/status` every 1s until `is_busy === false`, timeout 120s.
-  4. Re-run the full `handleStartRecording()` path - it re-validates and
+  1. Re-read `GET /api/status` and compare its `job_tracker.salvage` against the
+     `busyInfo` captured when the popup opened. The popup can outlive the salvage
+     (it waits on a user click), so the untargeted `POST /api/transcribe/cancel`
+     must never be fired unless the same salvage is still the one holding the slot
+     - otherwise it could cancel a different client's live job that took the slot
+     in the meantime.
+  2. Only if still active: `POST /api/transcribe/cancel` via
+     `apiClient.cancelTranscription()`.
+  3. Show an inline "Stopping salvage..." indicator (not the red error box).
+  4. Poll `GET /api/status` every 1s until `is_busy === false`, timeout 120s.
+  5. Re-run the full `handleStartRecording()` path - it re-validates and
      rebuilds the start options from current component state, so the restart
      behaves exactly like a fresh Record press.
 - On decline: stay `'idle'`, no error shown; the progress notification (section 5)
@@ -122,6 +129,16 @@ main transcription while recording or processing), the server transcribes it any
 - Race handled: if the salvage finishes on its own before the cancel lands, the cancel
   returns `success: false` ("No transcription job is currently running") - treat as
   "already free" and go straight to the start step.
+- The confirm dialog is portaled to `document.body`: SessionView stays mounted with
+  `display: none` when another view is active, and a dialog rendered in place would be
+  invisible along with it.
+- The Start button is disabled for the cancel+wait portion of the flow
+  (`droppingSalvage`); the tray, global-hotkey, and CLI/signal start entry points (all
+  funneled through the same `useTraySync` `onStartRecording` callback) are gated for
+  the entire flow including the confirm dialog (`salvageFlowActiveRef`) - the DOM
+  backdrop cannot cover a tray- or hotkey-triggered start. The busy-event trigger
+  effect also ignores new `session_busy` events while a flow is already in flight, so
+  only one popup/drop sequence runs at a time.
 
 ### 5. Dashboard: salvage progress notification
 
@@ -136,22 +153,34 @@ main transcription while recording or processing), the server transcribes it any
   title: 'Recovering interrupted recording', detail: '<owner> - <phase>', status:
   'active', progress: Math.round(current / total * 100)})`. `current`/`total` are
   audio-seconds from the job tracker progress.
-- Terminal transitions when the salvage ends (flag gone / `is_busy` false):
-  - Dropped by the user: the SessionView drop flow calls
-    `salvageStore.markDropRequested(jobId)` before sending the cancel; the monitor
-    then renders `status: 'complete'`, detail "Stopped - recording saved, retry
-    available" without querying job outcome.
-  - Completed and job is ours: presence in `GET /api/transcribe/recent` confirms
-    completion -> `status: 'complete'`, detail "Transcript recovered - available in
-    Main Transcription". The monitor must NOT call `GET /api/transcribe/result/{id}`
-    for this check: a 200 response marks the job delivered as a side effect, which
-    would remove it from the recovery banner.
-  - Absent from `/recent` and no drop was requested: call
-    `GET /api/transcribe/result/{job_id}`; a 410 means failed and carries
-    `error_message` (no delivered side effect on 410) -> `status: 'error'` with that
-    message.
-  - Another client's salvage (`/recent` is client-scoped and the result endpoint
-    403s for us): generic `status: 'complete'`, detail "Recovery finished".
+- Terminal transitions when the salvage ends (flag gone / `is_busy` false), resolved
+  in this order (shipped order - a completed salvage must always win over a stale
+  drop marker, and a failed `/recent` probe must never fall through to `/result`):
+  1. Listed by `GET /api/transcribe/recent`: the job completed and is ours ->
+     `status: 'complete'`, title "Recording recovered", detail "Transcript available
+     in Main Transcription". Checked FIRST, ahead of the drop marker: the monitor
+     must never tell the user a recovered transcript was discarded. The monitor must
+     NOT call `GET /api/transcribe/result/{id}` for this check: a 200 response marks
+     the job delivered as a side effect, which would remove it from the recovery
+     banner.
+  2. Not listed, but `salvageStore.dropRequestedJobId` matches: the user dropped it
+     -> `status: 'complete'`, title "Recovery stopped", detail "Recording saved -
+     retry available".
+  3. Not listed, no drop requested, and the `/recent` probe itself failed (network
+     error or non-ok response): generic finish -> `status: 'complete'`, title
+     "Recovery finished", detail `''`. The probe failure must not fall through to
+     `/result` - see point 1.
+  4. `/recent` succeeded but came back empty/without the job, and no drop was
+     requested: call `GET /api/transcribe/result/{job_id}`; a 410 means failed and
+     carries `error_message` (no delivered side effect on 410) -> `status: 'error'`,
+     title "Recovery failed", detail `''`.
+  5. Anything else (another client's salvage - `/recent` is client-scoped and the
+     result endpoint 403/404s for us): generic finish -> `status: 'complete'`, title
+     "Recovery finished", detail `''`.
+  - The drop marker (`salvageStore.dropRequestedJobId`) is consumed in a `finally`
+    block whenever ITS salvage ends, regardless of which branch above fired - so a
+    marker that lost to a recovered-transcript hit (point 1) does not linger and
+    mislabel a later, unrelated salvage.
 - `salvageStore.lastCompletedAt` is watched by `SessionView` to call
   `refreshRecoveryJobs()` immediately, so the recovery banner appears without waiting
   for the next window-focus refresh.
