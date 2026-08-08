@@ -317,6 +317,86 @@ describe('[P1] useTranscription', () => {
       expect(result.current.status).toBe('error');
       expect(result.current.error).toContain('other-client');
     });
+
+    it('salvage-busy sets busyInfo and returns to idle instead of error', () => {
+      const { result } = renderHook(() => useTranscription());
+
+      act(() => {
+        result.current.start();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'session_busy',
+          data: { active_user: 'laptop', is_salvage: true, salvage_job_id: 'salv-1' },
+        });
+      });
+
+      expect(result.current.status).toBe('idle');
+      expect(result.current.error).toBeNull();
+      expect(result.current.busyInfo).toEqual({
+        activeUser: 'laptop',
+        isSalvage: true,
+        salvageJobId: 'salv-1',
+      });
+      expect(lastSocket.disconnect).toHaveBeenCalled();
+    });
+
+    it('session_busy without is_salvage keeps the generic error and no busyInfo', () => {
+      const { result } = renderHook(() => useTranscription());
+
+      act(() => {
+        result.current.start();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'session_busy',
+          data: { active_user: 'other-client' },
+        });
+      });
+
+      expect(result.current.status).toBe('error');
+      expect(result.current.busyInfo).toBeNull();
+    });
+
+    it('clearBusyInfo and reset both clear busyInfo', () => {
+      const { result } = renderHook(() => useTranscription());
+
+      act(() => {
+        result.current.start();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'session_busy',
+          data: { active_user: 'laptop', is_salvage: true, salvage_job_id: null },
+        });
+      });
+      expect(result.current.busyInfo).not.toBeNull();
+
+      act(() => {
+        result.current.clearBusyInfo();
+      });
+      expect(result.current.busyInfo).toBeNull();
+
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'session_busy',
+          data: { active_user: 'laptop', is_salvage: true, salvage_job_id: null },
+        });
+      });
+      act(() => {
+        result.current.reset();
+      });
+      expect(result.current.busyInfo).toBeNull();
+    });
   });
 
   // ── P1-HOOK-002: Unmount cleanup ────────────────────────────────────

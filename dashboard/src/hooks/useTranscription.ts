@@ -10,6 +10,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { TranscriptionSocket, ServerMessage } from '../services/websocket';
 import { AudioCapture } from '../services/audioCapture';
 import { apiClient } from '../api/client';
+import { useSalvageStore } from '../stores/salvageStore';
 
 export type TranscriptionStatus =
   | 'idle'
@@ -18,6 +19,13 @@ export type TranscriptionStatus =
   | 'processing'
   | 'complete'
   | 'error';
+
+/** Structured payload of a salvage-caused session_busy rejection (GH-239). */
+export interface BusyInfo {
+  activeUser: string;
+  isSalvage: boolean;
+  salvageJobId: string | null;
+}
 
 /** Gap between attempts when polling for a result the socket cannot deliver. */
 const POLL_INTERVAL_MS = 3000;
@@ -63,6 +71,10 @@ export interface TranscriptionState {
   status: TranscriptionStatus;
   result: TranscriptionResult | null;
   error: string | null;
+  /** Set when `start` was rejected because a salvage holds the job slot. */
+  busyInfo: BusyInfo | null;
+  /** Consume the busy event once the popup flow has taken over. */
+  clearBusyInfo: () => void;
   /** AnalyserNode for visualizer (available while recording) */
   analyser: AnalyserNode | null;
   /** Begin a transcription session */
@@ -125,6 +137,7 @@ export function useTranscription(): TranscriptionState {
   const [status, setStatus] = useState<TranscriptionStatus>('idle');
   const [result, setResult] = useState<TranscriptionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busyInfo, setBusyInfo] = useState<BusyInfo | null>(null);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [vadActive, setVadActive] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -361,13 +374,25 @@ export function useTranscription(): TranscriptionState {
           }
           break;
 
-        case 'session_busy':
-          setError(
-            `Server busy — ${(msg.data?.active_user as string) ?? 'another session'} is active`,
-          );
-          setStatusTracked('error');
+        case 'session_busy': {
+          const activeUser = (msg.data?.active_user as string) ?? 'another session';
+          if (msg.data?.is_salvage === true) {
+            // GH-239 follow-up: a salvage holds the slot - hand the decision
+            // to the SessionView popup instead of dead-ending in the error box.
+            setBusyInfo({
+              activeUser,
+              isSalvage: true,
+              salvageJobId: (msg.data?.salvage_job_id as string | null | undefined) ?? null,
+            });
+            useSalvageStore.getState().requestCheck();
+            setStatusTracked('idle');
+          } else {
+            setError(`Server busy — ${activeUser} is active`);
+            setStatusTracked('error');
+          }
           socketRef.current?.disconnect();
           break;
+        }
 
         case 'session_stopped':
           setStatusTracked('processing');
@@ -520,6 +545,7 @@ export function useTranscription(): TranscriptionState {
       // Reset previous state
       setResult(null);
       setError(null);
+      setBusyInfo(null);
       setVadActive(false);
       setMuted(false);
       jobIdRef.current = null;
@@ -564,6 +590,11 @@ export function useTranscription(): TranscriptionState {
           // silently truncating. (Data-loss invariant.)
           const currentJobId = jobIdRef.current;
           const wasRecording = statusRef.current === 'recording';
+          if (wasRecording || statusRef.current === 'processing') {
+            // GH-239: the server may be about to salvage this - wake the
+            // monitor so the progress notification appears promptly.
+            useSalvageStore.getState().requestCheck();
+          }
           if (wasRecording) {
             setError('Connection to the server was lost. The recording was interrupted.');
             socketRef.current?.disconnect();
@@ -679,6 +710,7 @@ export function useTranscription(): TranscriptionState {
     setStatusTracked('idle');
     setResult(null);
     setError(null);
+    setBusyInfo(null);
     setAnalyser(null);
     setVadActive(false);
     setMuted(false);
@@ -691,6 +723,8 @@ export function useTranscription(): TranscriptionState {
     // reset() disconnects the socket — the in-flight response (if any) is lost.
     previewLoadingRef.current = false;
   }, [setStatusTracked, stopPreview]);
+
+  const clearBusyInfo = useCallback(() => setBusyInfo(null), []);
 
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
@@ -724,6 +758,8 @@ export function useTranscription(): TranscriptionState {
     status,
     result,
     error,
+    busyInfo,
+    clearBusyInfo,
     analyser,
     start,
     stop,
