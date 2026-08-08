@@ -419,6 +419,14 @@ describe('SessionView - salvage drop popup (GH-239 follow-up)', () => {
   });
 
   it('drop flow: cancels the salvage, marks the drop, and restarts recording', async () => {
+    mockGetStatus.mockResolvedValueOnce({
+      models: {
+        job_tracker: {
+          is_busy: true,
+          salvage: { job_id: 'salv-1', client_name: 'laptop', started_at: 1 },
+        },
+      },
+    });
     mockTranscription.busyInfo = { ...BUSY };
     renderSessionView();
 
@@ -427,6 +435,17 @@ describe('SessionView - salvage drop popup (GH-239 follow-up)', () => {
     await waitFor(() => expect(mockCancelTranscription).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockTranscription.start).toHaveBeenCalledTimes(1));
     expect(useSalvageStore.getState().dropRequestedJobId).toBe('salv-1');
+  });
+
+  it('skips the cancel when the salvage already ended', async () => {
+    mockTranscription.busyInfo = { ...BUSY };
+    renderSessionView();
+
+    fireEvent.click(await screen.findByText('Stop and record'));
+
+    await waitFor(() => expect(mockTranscription.start).toHaveBeenCalledTimes(1));
+    expect(mockCancelTranscription).not.toHaveBeenCalled();
+    expect(useSalvageStore.getState().dropRequestedJobId).toBeNull();
   });
 
   it('declining leaves the salvage alone', async () => {
@@ -454,6 +473,14 @@ describe('SessionView - salvage drop popup (GH-239 follow-up)', () => {
   });
 
   it('cancel failure aborts the drop flow with an error toast', async () => {
+    mockGetStatus.mockResolvedValueOnce({
+      models: {
+        job_tracker: {
+          is_busy: true,
+          salvage: { job_id: 'salv-1', client_name: 'laptop', started_at: 1 },
+        },
+      },
+    });
     mockTranscription.busyInfo = { ...BUSY };
     mockCancelTranscription.mockRejectedValueOnce(new Error('boom'));
     renderSessionView();
@@ -462,6 +489,7 @@ describe('SessionView - salvage drop popup (GH-239 follow-up)', () => {
 
     await waitFor(() => expect(mockToast.error).toHaveBeenCalled());
     expect(mockTranscription.start).not.toHaveBeenCalled();
+    expect(useSalvageStore.getState().dropRequestedJobId).toBeNull();
   });
 
   it('slot-free timeout aborts the drop flow with an error toast', async () => {

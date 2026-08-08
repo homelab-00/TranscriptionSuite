@@ -8,12 +8,16 @@
  * Mounted exactly once at the app root (App.tsx), like useNotificationBridge.
  *
  * Outcome resolution when a salvage ends, in order:
- *   1. dropRequestedJobId matches -> "Recovery stopped" (no server probes).
- *   2. Listed by GET /recent      -> "Recording recovered". NEVER confirm via
- *      GET /result/{id}: a 200 marks the job delivered and would remove it
- *      from the recovery banner while nobody has seen it.
- *   3. GET /result/{id} 410       -> failed, with the server reason.
- *   4. Anything else (403/404: another client's job) -> generic finish.
+ *   1. Listed by GET /recent      -> "Recording recovered". This wins over
+ *      everything else, including a stale drop marker: a completed salvage
+ *      must never be reported as discarded (GH-239).
+ *   2. dropRequestedJobId matches -> "Recovery stopped" (no further probes).
+ *   3. GET /recent itself failed  -> generic finish. NEVER fall through to
+ *      GET /result/{id} on a failed /recent probe: a 200 there marks the job
+ *      delivered and would remove a recovered transcript from the recovery
+ *      banner before anyone has seen it.
+ *   4. GET /result/{id} 410       -> failed, with the server reason.
+ *   5. Anything else (403/404: another client's job) -> generic finish.
  */
 
 import { useEffect, useRef } from 'react';
@@ -71,9 +75,33 @@ export function useSalvageProgress(): void {
       const store = useNotificationsStore.getState();
       const salvageStore = useSalvageStore.getState();
       const id = notifId(ended.job_id);
+      // Probe /recent first: it is a side-effect-free read, and a completed
+      // salvage must win over a stale drop marker - the user must never be
+      // told a recovered transcript was discarded (GH-239).
+      let recentProbeOk = false;
+      let recoveredInRecent = false;
       try {
+        const recentResp = await apiClient.fetchRecentUndelivered();
+        recentProbeOk = recentResp.ok;
+        const recent: unknown = recentProbeOk ? await recentResp.json() : [];
+        recoveredInRecent =
+          Array.isArray(recent) &&
+          recent.some((j) => (j as { job_id?: string })?.job_id === ended.job_id);
+      } catch {
+        recentProbeOk = false;
+      }
+      try {
+        if (recoveredInRecent) {
+          store.notify({
+            id,
+            category: 'transcription',
+            title: 'Recording recovered',
+            detail: 'Transcript available in Main Transcription',
+            status: 'complete',
+          });
+          return;
+        }
         if (salvageStore.dropRequestedJobId === ended.job_id) {
-          salvageStore.clearDropRequested();
           store.notify({
             id,
             category: 'transcription',
@@ -83,17 +111,15 @@ export function useSalvageProgress(): void {
           });
           return;
         }
-        const recentResp = await apiClient.fetchRecentUndelivered();
-        const recent: unknown = recentResp.ok ? await recentResp.json() : [];
-        if (
-          Array.isArray(recent) &&
-          recent.some((j) => (j as { job_id?: string })?.job_id === ended.job_id)
-        ) {
+        // Only probe /result when the /recent probe actually succeeded: a
+        // 200 from /result marks the job delivered and would remove a
+        // recovered transcript from the recovery banner.
+        if (!recentProbeOk) {
           store.notify({
             id,
             category: 'transcription',
-            title: 'Recording recovered',
-            detail: 'Transcript available in Main Transcription',
+            title: 'Recovery finished',
+            detail: '',
             status: 'complete',
           });
           return;
@@ -105,6 +131,7 @@ export function useSalvageProgress(): void {
             id,
             category: 'transcription',
             title: 'Recovery failed',
+            detail: '',
             status: 'error',
             error: body?.detail ?? 'The salvage transcription failed',
           });
@@ -114,6 +141,7 @@ export function useSalvageProgress(): void {
           id,
           category: 'transcription',
           title: 'Recovery finished',
+          detail: '',
           status: 'complete',
         });
       } catch {
@@ -121,9 +149,13 @@ export function useSalvageProgress(): void {
           id,
           category: 'transcription',
           title: 'Recovery finished',
+          detail: '',
           status: 'complete',
         });
       } finally {
+        if (salvageStore.dropRequestedJobId === ended.job_id) {
+          salvageStore.clearDropRequested();
+        }
         salvageStore.markSalvageEnded();
       }
     };

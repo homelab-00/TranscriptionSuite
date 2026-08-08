@@ -98,7 +98,7 @@ describe('useSalvageProgress', () => {
     expect(n?.detail).toContain('laptop');
   });
 
-  it('renders a dropped salvage as stopped without probing the result endpoints', async () => {
+  it('renders a dropped salvage as stopped without touching the result endpoint', async () => {
     mockedApi.getStatus
       .mockResolvedValueOnce(statusWith(SALVAGE))
       .mockResolvedValue(statusWith(null));
@@ -112,10 +112,51 @@ describe('useSalvageProgress', () => {
     const n = salvageNotification();
     expect(n?.status).toBe('complete');
     expect(n?.title).toBe('Recovery stopped');
-    expect(mockedApi.fetchRecentUndelivered).not.toHaveBeenCalled();
     expect(mockedApi.fetchTranscriptionResult).not.toHaveBeenCalled();
     expect(useSalvageStore.getState().dropRequestedJobId).toBeNull();
     expect(useSalvageStore.getState().lastCompletedAt).not.toBeNull();
+  });
+
+  it('a recovered transcript wins over a stale drop marker', async () => {
+    mockedApi.getStatus
+      .mockResolvedValueOnce(statusWith(SALVAGE))
+      .mockResolvedValue(statusWith(null));
+    mockedApi.fetchRecentUndelivered.mockResolvedValue({
+      ok: true,
+      json: async () => [{ job_id: 'salv-full', completed_at: 'x', text_preview: 'hi' }],
+    } as never);
+    useSalvageStore.getState().markDropRequested('salv-full');
+    renderHook(() => useSalvageProgress());
+    await flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS);
+    });
+
+    const n = salvageNotification();
+    expect(n?.status).toBe('complete');
+    expect(n?.title).toBe('Recording recovered');
+    expect(mockedApi.fetchTranscriptionResult).not.toHaveBeenCalled();
+    expect(useSalvageStore.getState().dropRequestedJobId).toBeNull();
+  });
+
+  it('a failed /recent probe never falls through to /result', async () => {
+    mockedApi.getStatus
+      .mockResolvedValueOnce(statusWith(SALVAGE))
+      .mockResolvedValue(statusWith(null));
+    mockedApi.fetchRecentUndelivered.mockResolvedValue({
+      ok: false,
+      json: async () => [],
+    } as never);
+    renderHook(() => useSalvageProgress());
+    await flush();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS);
+    });
+
+    const n = salvageNotification();
+    expect(n?.status).toBe('complete');
+    expect(n?.title).toBe('Recovery finished');
+    expect(mockedApi.fetchTranscriptionResult).not.toHaveBeenCalled();
   });
 
   it('confirms completion via /recent and never touches /result (mark_delivered trap)', async () => {

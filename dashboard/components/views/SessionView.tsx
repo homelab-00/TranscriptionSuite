@@ -54,6 +54,7 @@ import type { ServerConnectionInfo } from '../../src/hooks/useServerStatus';
 import { useAdminStatus } from '../../src/hooks/useAdminStatus';
 import { useScrollFade } from '../../src/hooks/useScrollFade';
 import { apiClient, APIError } from '../../src/api/client';
+import { jobTrackerFromServerStatus } from '../../src/api/types';
 import { getAuthToken, getConfig, setConfig } from '../../src/config/store';
 import { logClientEvent } from '../../src/services/clientDebugLog';
 import { loopbackOwner } from '../../src/services/loopbackOwner';
@@ -980,20 +981,38 @@ export const SessionView: React.FC<SessionViewProps> = ({
           { title: 'Recovery in progress', confirmLabel: 'Stop and record', danger: true },
         );
         if (!ok) return;
-        if (info.salvageJobId) {
-          useSalvageStore.getState().markDropRequested(info.salvageJobId);
-        }
         setDroppingSalvage(true);
         try {
+          // Re-read the tracker before firing the global cancel: the popup may
+          // have outlived the salvage, and the untargeted POST /cancel must
+          // never kill a DIFFERENT job that took the slot in the meantime
+          // (GH-239 popup scope decision).
+          let salvageStillActive = true;
           try {
-            // success:false just means the salvage finished on its own - the
-            // slot is free (or about to be), so proceed either way.
-            await apiClient.cancelTranscription();
+            const tracker = jobTrackerFromServerStatus(await apiClient.getStatus());
+            const current = tracker?.salvage ?? null;
+            salvageStillActive =
+              current !== null &&
+              (info.salvageJobId === null || current.job_id === info.salvageJobId);
           } catch {
-            toast.error('Could not stop the recovery job', {
-              description: 'The server did not accept the cancel request. Try again.',
-            });
-            return;
+            // Status unreadable - proceed with the cancel; worst case it
+            // returns success false against an empty slot.
+          }
+          if (salvageStillActive) {
+            if (info.salvageJobId) {
+              useSalvageStore.getState().markDropRequested(info.salvageJobId);
+            }
+            try {
+              // success:false just means the salvage finished on its own - the
+              // slot is free (or about to be), so proceed either way.
+              await apiClient.cancelTranscription();
+            } catch {
+              useSalvageStore.getState().clearDropRequested();
+              toast.error('Could not stop the recovery job', {
+                description: 'The server did not accept the cancel request. Try again.',
+              });
+              return;
+            }
           }
           const freed = await waitForJobSlotFree();
           if (!freed) {
