@@ -507,3 +507,30 @@ def test_junk_guard_does_not_mark_salvage(monkeypatch, tmp_path):
 
     tracker = mm_mod.get_model_manager().job_tracker
     tracker.mark_salvage.assert_not_called()
+
+
+# ── 9. Honest cancellation reason ───────────────────────────────────────────
+
+
+def test_cancelled_salvage_persists_honest_reason(monkeypatch, tmp_path):
+    """POST /cancel is the only thing that can stop a salvage - the job row
+    must say so (and point at retry), not blame a client disconnect."""
+    engine = _patch_transcription(monkeypatch, tmp_path)
+    engine.transcribe_file.side_effect = mm_mod.TranscriptionCancelledError("cancelled")
+    session = _make_session(audio_seconds=5.0)
+
+    asyncio.run(session.finalize_interrupted_recording())
+
+    ws_mod._mark_failed.assert_called_once_with(
+        "job-001", "Salvage cancelled by user - audio saved for retry"
+    )
+
+
+def test_cancelled_normal_run_keeps_disconnect_reason(monkeypatch, tmp_path):
+    engine = _patch_transcription(monkeypatch, tmp_path)
+    engine.transcribe_file.side_effect = mm_mod.TranscriptionCancelledError("cancelled")
+    session = _make_session(audio_seconds=5.0, is_recording=False)
+
+    asyncio.run(session.process_transcription())
+
+    ws_mod._mark_failed.assert_called_once_with("job-001", "Cancelled: client disconnected")

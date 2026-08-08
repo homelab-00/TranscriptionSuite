@@ -692,10 +692,18 @@ class TranscriptionSession:
             )
 
             if isinstance(e, TranscriptionCancelledError):
-                logger.info(f"Transcription cancelled (client disconnected) for {self.client_name}")
+                # An explicit POST /cancel is the only signal that can stop a
+                # salvage (the disconnect term is muted for it) - record that,
+                # and point at the retry the persisted WAV makes possible.
+                reason = (
+                    "Salvage cancelled by user - audio saved for retry"
+                    if self._salvage_reason
+                    else "Cancelled: client disconnected"
+                )
+                logger.info(f"Transcription cancelled for {self.client_name}: {reason}")
                 if self._current_job_id:
                     try:
-                        _mark_failed(self._current_job_id, "Cancelled: client disconnected")
+                        _mark_failed(self._current_job_id, reason)
                     except Exception as _mf_err:
                         logger.warning(
                             "Failed to mark job %s as failed: %s", self._current_job_id, _mf_err
