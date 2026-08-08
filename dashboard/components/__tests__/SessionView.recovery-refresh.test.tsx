@@ -13,7 +13,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -33,6 +33,8 @@ const mockTranscription = {
   toggleMute: vi.fn(),
   setGain: vi.fn(),
   jobId: null as string | null,
+  busyInfo: null as null | { activeUser: string; isSalvage: boolean; salvageJobId: string | null },
+  clearBusyInfo: vi.fn(),
   loadResult: vi.fn(),
   previewText: null,
   previewLanguage: undefined,
@@ -137,6 +139,8 @@ const {
   mockFetchTranscriptionResult,
   mockFetchRecentUndelivered,
   mockToast,
+  mockGetStatus,
+  mockCancelTranscription,
 } = vi.hoisted(() => {
   class HoistedAPIError extends Error {
     constructor(
@@ -154,6 +158,8 @@ const {
     mockFetchTranscriptionResult: vi.fn(),
     mockFetchRecentUndelivered: vi.fn(),
     mockToast: { success: vi.fn(), error: vi.fn() },
+    mockGetStatus: vi.fn(),
+    mockCancelTranscription: vi.fn(),
   };
 });
 
@@ -162,7 +168,8 @@ vi.mock('../../src/api/client', () => ({
   apiClient: {
     checkConnection: vi.fn().mockResolvedValue({ reachable: true, ready: true }),
     getAdminStatus: vi.fn().mockResolvedValue({}),
-    cancelTranscription: vi.fn(),
+    cancelTranscription: (...a: unknown[]) => mockCancelTranscription(...a),
+    getStatus: (...a: unknown[]) => mockGetStatus(...a),
     getAuthToken: vi.fn().mockReturnValue(null),
     setAuthToken: vi.fn(),
     getBaseUrl: vi.fn().mockReturnValue('http://localhost:7239'),
@@ -215,6 +222,7 @@ vi.mock('../../src/types/runtime', () => ({
 }));
 
 import { SessionView } from '../views/SessionView';
+import { useSalvageStore } from '../../src/stores/salvageStore';
 import { SessionTab } from '../../types';
 
 function createWrapper() {
@@ -284,8 +292,18 @@ describe('SessionView - recovery banner refresh', () => {
     mockTranscription.result = null;
     mockTranscription.error = null;
     mockTranscription.jobId = null;
+    mockTranscription.busyInfo = null;
     mockGetConfig.mockResolvedValue(undefined);
     mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
+    mockGetStatus.mockResolvedValue({
+      models: { job_tracker: { is_busy: false, salvage: null } },
+    });
+    mockCancelTranscription.mockResolvedValue({
+      success: true,
+      cancelled_user: 'laptop',
+      message: '',
+    });
+    useSalvageStore.setState({ checkNonce: 0, dropRequestedJobId: null, lastCompletedAt: null });
   });
 
   it('lists an undelivered result found at mount', async () => {
@@ -360,5 +378,70 @@ describe('SessionView - recovery banner refresh', () => {
     const banners = screen.getAllByText(/is available\./);
     expect(banners).toHaveLength(1);
     expect(banners[0].closest('div')?.textContent).toContain('the half that made it');
+  });
+});
+
+describe('SessionView - salvage drop popup (GH-239 follow-up)', () => {
+  const BUSY = { activeUser: 'laptop', isSalvage: true, salvageJobId: 'salv-1' };
+
+  // This describe has no shared setup with the one above, so mock call
+  // history from one test (e.g. the cancel call in the drop-flow test) would
+  // otherwise leak into the next (e.g. the decline test asserting no cancel).
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTranscription.busyInfo = null;
+    mockGetStatus.mockResolvedValue({
+      models: { job_tracker: { is_busy: false, salvage: null } },
+    });
+    mockCancelTranscription.mockResolvedValue({
+      success: true,
+      cancelled_user: 'laptop',
+      message: '',
+    });
+    mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
+    useSalvageStore.setState({ checkNonce: 0, dropRequestedJobId: null, lastCompletedAt: null });
+  });
+
+  it('opens the confirm dialog when start bounced off an active salvage', async () => {
+    mockTranscription.busyInfo = { ...BUSY };
+    renderSessionView();
+
+    expect(await screen.findByText(/interrupted recording/)).toBeInTheDocument();
+    expect(mockTranscription.clearBusyInfo).toHaveBeenCalled();
+  });
+
+  it('drop flow: cancels the salvage, marks the drop, and restarts recording', async () => {
+    mockTranscription.busyInfo = { ...BUSY };
+    renderSessionView();
+
+    fireEvent.click(await screen.findByText('Stop and record'));
+
+    await waitFor(() => expect(mockCancelTranscription).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockTranscription.start).toHaveBeenCalledTimes(1));
+    expect(useSalvageStore.getState().dropRequestedJobId).toBe('salv-1');
+  });
+
+  it('declining leaves the salvage alone', async () => {
+    mockTranscription.busyInfo = { ...BUSY };
+    renderSessionView();
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByText('Cancel'));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(mockCancelTranscription).not.toHaveBeenCalled();
+    expect(mockTranscription.start).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the recovery banner when a salvage ends', async () => {
+    renderSessionView();
+    await waitFor(() => expect(mockFetchRecentUndelivered).toHaveBeenCalled());
+    mockFetchRecentUndelivered.mockClear();
+
+    act(() => {
+      useSalvageStore.getState().markSalvageEnded();
+    });
+
+    await waitFor(() => expect(mockFetchRecentUndelivered).toHaveBeenCalled());
   });
 });

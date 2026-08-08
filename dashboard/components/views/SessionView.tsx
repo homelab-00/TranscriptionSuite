@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Mic,
   Radio,
@@ -43,6 +44,10 @@ import { formatClock } from '../../src/services/jobProgress';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { useTranscription } from '../../src/hooks/useTranscription';
 import type { LiveModeState } from '../../src/hooks/useLiveMode';
+import { useConfirm } from '../../src/hooks/useConfirm';
+import { useSalvageStore } from '../../src/stores/salvageStore';
+import { waitForJobSlotFree } from '../../src/hooks/useSalvageProgress';
+import type { BusyInfo } from '../../src/hooks/useTranscription';
 import { useDockerContext } from '../../src/hooks/DockerContext';
 import { useTraySync } from '../../src/hooks/useTraySync';
 import type { ServerConnectionInfo } from '../../src/hooks/useServerStatus';
@@ -225,6 +230,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
 
   // Transcription hooks
   const transcription = useTranscription();
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const [droppingSalvage, setDroppingSalvage] = useState(false);
 
   // Active analyser: live mode takes priority when active, then one-shot
   const activeAnalyser = live.analyser ?? transcription.analyser;
@@ -950,6 +957,65 @@ export const SessionView: React.FC<SessionViewProps> = ({
     languagesLoading,
   ]);
 
+  // GH-239 follow-up: a start attempt bounced off an in-progress salvage.
+  // Ask instead of dead-ending; on confirm, cancel it, wait out the slot
+  // (non-whisper.cpp backends only observe the cancel after compute ends),
+  // then restart the recording automatically.
+  const handleSalvageBusy = useCallback(
+    async (info: BusyInfo) => {
+      const ok = await confirm(
+        `The server is still transcribing an interrupted recording (from ${info.activeUser}). ` +
+          'Stop it and start your new recording? The interrupted audio is saved and can be retried later.',
+        { title: 'Recovery in progress', confirmLabel: 'Stop and record', danger: true },
+      );
+      if (!ok) return;
+      if (info.salvageJobId) {
+        useSalvageStore.getState().markDropRequested(info.salvageJobId);
+      }
+      setDroppingSalvage(true);
+      try {
+        try {
+          // success:false just means the salvage finished on its own - the
+          // slot is free (or about to be), so proceed either way.
+          await apiClient.cancelTranscription();
+        } catch {
+          toast.error('Could not stop the recovery job', {
+            description: 'The server did not accept the cancel request. Try again.',
+          });
+          return;
+        }
+        const freed = await waitForJobSlotFree();
+        if (!freed) {
+          toast.error('Could not free the server', {
+            description: 'The recovery job did not stop in time. Try again in a moment.',
+          });
+          return;
+        }
+        handleStartRecording();
+      } finally {
+        setDroppingSalvage(false);
+      }
+    },
+    [confirm, handleStartRecording],
+  );
+
+  // handleSalvageBusy is rebuilt whenever handleStartRecording is (itself tied
+  // to a long, mostly-primitive dependency list), so it is not a safe effect
+  // dependency - a ref keeps the effect below subscribed only to the value
+  // that actually needs to retrigger it (busyInfo), while still always
+  // calling the latest closure.
+  const handleSalvageBusyRef = useRef(handleSalvageBusy);
+  useEffect(() => {
+    handleSalvageBusyRef.current = handleSalvageBusy;
+  });
+
+  useEffect(() => {
+    const info = transcription.busyInfo;
+    if (!info?.isSalvage) return;
+    transcription.clearBusyInfo();
+    void handleSalvageBusyRef.current(info);
+  }, [transcription.busyInfo, transcription.clearBusyInfo]);
+
   const handleStopRecording = useCallback(() => {
     // Linux loopback-module cleanup is owned by AudioCapture/loopbackOwner
     // (GH-230) — no manual removeMonitorLoopback here.
@@ -1366,6 +1432,13 @@ export const SessionView: React.FC<SessionViewProps> = ({
     window.addEventListener('focus', refreshRecoveryJobs);
     return () => window.removeEventListener('focus', refreshRecoveryJobs);
   }, [refreshRecoveryJobs]);
+
+  // GH-239: a salvage that ends while this view is open should surface its
+  // result immediately, not on the next window focus.
+  const lastSalvageEndedAt = useSalvageStore((s) => s.lastCompletedAt);
+  useEffect(() => {
+    if (lastSalvageEndedAt !== null) refreshRecoveryJobs();
+  }, [lastSalvageEndedAt, refreshRecoveryJobs]);
 
   // mark_delivered is best-effort, so the job whose transcript is already on
   // screen can still come back from /recent. Offering to recover it there reads
@@ -2269,6 +2342,19 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       </div>
                     )}
 
+                    {droppingSalvage && (
+                      <div
+                        data-testid="salvage-stopping"
+                        role="status"
+                        className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300"
+                      >
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>
+                          Stopping the recovery job... Your recording will start automatically.
+                        </span>
+                      </div>
+                    )}
+
                     {/* Errors. A job id means the recording reached the server and its
                       audio was persisted before transcription was attempted, so the
                       failure is recoverable — offer Retry. Without one (e.g. the socket
@@ -2909,6 +2995,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
         onClose={() => setIsFullscreenVisualizerOpen(false)}
         analyserNode={activeAnalyser}
       />
+
+      {confirmDialog && createPortal(confirmDialog, document.body)}
     </div>
   );
 };
