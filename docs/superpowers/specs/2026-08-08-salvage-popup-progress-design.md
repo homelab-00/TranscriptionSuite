@@ -114,8 +114,9 @@ main transcription while recording or processing), the server transcribes it any
      (add if absent).
   2. Show an inline "Stopping salvage..." indicator (not the red error box).
   3. Poll `GET /api/status` every 1s until `is_busy === false`, timeout 120s.
-  4. Re-run the start with the same options. Extract the options-building from
-     `handleStartRecording` into a helper so the drop flow reuses it verbatim.
+  4. Re-run the full `handleStartRecording()` path - it re-validates and
+     rebuilds the start options from current component state, so the restart
+     behaves exactly like a fresh Record press.
 - On decline: stay `'idle'`, no error shown; the progress notification (section 5)
   keeps informing about the salvage.
 - Race handled: if the salvage finishes on its own before the cancel lands, the cancel
