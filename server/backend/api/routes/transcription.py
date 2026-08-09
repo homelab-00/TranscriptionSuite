@@ -671,14 +671,13 @@ class DedupMatch(BaseModel):
 class ImportAcceptedResponse(BaseModel):
     """Response model for accepted file import job (202).
 
-    ``dedup_matches`` (Issue #104, Story 2.4) carries any prior jobs whose
-    ``audio_hash`` matches this upload. Empty list when no prior match
-    (J1 happy-path silently proceeds — AC2.4.AC3). Default-empty keeps the
-    response shape backwards compatible for clients that ignore the field.
+    ``job_id`` is the FULL job id — the client polls
+    GET /api/transcribe/result/{job_id} with it (202 processing / 410 failed /
+    200 completed). Session ephemeral retention (2026-08-09 spec) removed the
+    dedup_matches field: session imports no longer hash or dedup-check.
     """
 
     job_id: str
-    dedup_matches: list[DedupMatch] = []
 
 
 def _run_file_import(
@@ -892,13 +891,15 @@ async def import_and_transcribe(
     """
     Import an audio file and transcribe it in the background.
 
-    Unlike the notebook upload, this does NOT save to the database or convert
-    to MP3. The full transcription result is stored in job_tracker for the
-    client to retrieve, format (SRT/TXT), and save to disk.
+    Unlike the notebook upload, this does NOT save a notebook entry or convert
+    to MP3. The result is persisted to the transcription_jobs durability row
+    (persist-before-deliver) and the client retrieves it via
+    GET /api/transcribe/result/{job_id}: 202 while processing, 410 + error on
+    failure, 200 with the result on success. Fetching the result purges the
+    row — session imports are ephemeral (2026-08-09 spec). job_tracker keeps
+    the in-memory copy for progress reporting via /api/admin/status only.
 
-    Returns 202 Accepted immediately with a job_id. Clients should poll
-    GET /api/admin/status to check job_tracker.result for completion.
-
+    Returns 202 Accepted immediately with the full job_id.
     Returns 409 Conflict if another transcription job is already running.
     """
     _assert_main_model_selected(request)
@@ -933,30 +934,11 @@ async def import_and_transcribe(
         tmp.write(content)
         tmp_path = Path(tmp.name)
 
-    # Issue #104, Story 2.2 — durability row for the /import flow exists
-    # purely so the dedup-check endpoint can find re-imports of the same
-    # audio. The /import worker still uses model_manager.job_tracker for
-    # results (in-memory), so result_text/result_json on this row stay NULL.
-    # See sprint-2-design.md §1 for the override rationale.
-    # Sprint 2 Item 3 — also compute the normalized PCM hash for
-    # format-agnostic dedup. Either value can be NULL on its own.
-    audio_hash: str | None = None
-    normalized_audio_hash: str | None = None
-    try:
-        from server.core.audio_utils import (
-            compute_normalized_pcm_hash as _norm_sha,
-        )
-        from server.core.audio_utils import sha256_streaming as _sha
-
-        audio_hash = _sha(tmp_path)
-        normalized_audio_hash = _norm_sha(tmp_path)
-    except Exception as _hash_err:
-        logger.warning(
-            "Failed to compute audio_hash for import job %s: %s",
-            job_id[:8],
-            _hash_err,
-        )
-    dedup_matches: list[DedupMatch] = []
+    # Session ephemeral retention: the durability row is the delivery channel
+    # for the import result (the client polls GET /result/{job_id}). Without
+    # the row the outcome would be unreachable, so a failed insert aborts the
+    # request instead of running a transcription nobody can fetch. No hashes
+    # are computed any more — session imports never dedup (2026-08-09 spec).
     try:
         create_job(
             job_id=job_id,
@@ -965,33 +947,17 @@ async def import_and_transcribe(
             language=language,
             task="translate" if translation_enabled else "transcribe",
             translation_target=(translation_target_language if translation_enabled else None),
-            audio_hash=audio_hash,
-            normalized_audio_hash=normalized_audio_hash,
         )
-        # Story 2.4 + Sprint 2 Item 2 + Item 3 — surface prior matches across
-        # BOTH transcription_jobs AND recordings on EITHER hash. Exclude the
-        # just-created jobs row by id.
-        if audio_hash or normalized_audio_hash:
-            dedup_matches = [
-                DedupMatch(
-                    recording_id=m["id"],
-                    name=m["name"],
-                    created_at=m["created_at"],
-                    source=m["source"],
-                )
-                for m in find_duplicates_anywhere(
-                    audio_hash or "",
-                    limit=10,
-                    normalized_audio_hash=normalized_audio_hash,
-                )
-                if not (m["source"] == "transcription_job" and m["id"] == job_id)
-            ]
     except Exception as _e:
-        logger.warning(
-            "Failed to create durability row for import job %s: %s",
-            job_id[:8],
-            _e,
-        )
+        logger.error("Failed to create durability row for import job %s: %s", job_id[:8], _e)
+        model_manager.job_tracker.end_job(job_id)
+        try:
+            tmp_path.unlink()
+        except Exception:
+            logger.warning("Failed to remove temp upload %s after aborted import", tmp_path)
+        raise HTTPException(
+            status_code=500, detail="Could not create job record — import aborted"
+        ) from _e
 
     # Resolve parallel diarization default from config before entering background thread
     config = request.app.state.config
@@ -1025,11 +991,9 @@ async def import_and_transcribe(
         )
     )
 
-    # Return immediately — client polls /api/admin/status for result.
-    # dedup_matches carries any prior jobs with the same audio_hash so the
-    # dashboard can show the dedup prompt (Story 2.4) without a follow-up
-    # round-trip. Empty list = J1 happy path (no duplicate found).
-    return {"job_id": job_id[:8], "dedup_matches": dedup_matches}
+    # Return immediately — the client polls GET /result/{job_id} with the
+    # FULL id (the durability row's primary key).
+    return {"job_id": job_id}
 
 
 class DedupCheckRequest(BaseModel):
