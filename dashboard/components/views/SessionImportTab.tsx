@@ -21,6 +21,7 @@ import { GlassCard } from '../ui/GlassCard';
 import { Button } from '../ui/Button';
 import { AppleSwitch } from '../ui/AppleSwitch';
 import { CustomSelect } from '../ui/CustomSelect';
+import { JobProgressBlock } from '../ui/JobProgressBlock';
 import { useShallow } from 'zustand/react/shallow';
 import {
   useImportQueueStore,
@@ -685,65 +686,27 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
             <div className="max-h-60 space-y-2 overflow-y-auto">
               {jobs.map((job) =>
                 job.status === 'processing' ? (
-                  /* Expanded rendering for the one job being transcribed:
-                     progress bar + big percent so progress is obvious at a
-                     glance, instead of the tiny one-line label. */
-                  <div
+                  /* Expanded rendering for the one job being transcribed —
+                     shared JobProgressBlock instead of the tiny one-line
+                     label. */
+                  <JobProgressBlock
                     key={job.id}
-                    className="border-accent-cyan/20 bg-accent-cyan/5 rounded-lg border px-3 py-2.5"
-                  >
-                    <div className="flex items-center gap-3">
-                      {statusIcon(job)}
-                      {(job.type === 'session-auto' || job.type === 'notebook-auto') && (
-                        <span title="Auto-watch">
-                          <Eye size={14} className="shrink-0 text-slate-500" />
-                        </span>
-                      )}
-                      <span className="flex-1 truncate text-sm font-medium text-white">
-                        {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
-                      </span>
-                      {progressDetails.percent !== null ? (
-                        <span className="text-accent-cyan text-lg leading-none font-semibold tabular-nums">
-                          {progressDetails.percent}%
-                        </span>
-                      ) : (
-                        <span className="text-accent-cyan text-sm font-medium">
-                          {progressDetails.phaseLabel}...
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-                      {progressDetails.percent !== null ? (
-                        <div
-                          className="bg-accent-cyan h-full rounded-full transition-all duration-300"
-                          style={{ width: `${progressDetails.percent}%` }}
-                        />
-                      ) : (
-                        <div className="bg-accent-cyan h-full w-1/3 animate-pulse rounded-full" />
-                      )}
-                    </div>
-                    <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-slate-400">
-                      <span className="truncate">
-                        {progressDetails.percent !== null
-                          ? progressDetails.phaseLabel
-                          : progressDetails.phaseLabel + '...'}
-                        {progressDetails.positionText && (
-                          <span className="text-slate-300"> {progressDetails.positionText}</span>
+                    details={progressDetails}
+                    stalled={stalled}
+                    leading={
+                      <>
+                        {statusIcon(job)}
+                        {(job.type === 'session-auto' || job.type === 'notebook-auto') && (
+                          <span title="Auto-watch">
+                            <Eye size={14} className="shrink-0 text-slate-500" />
+                          </span>
                         )}
-                      </span>
-                      <span className="whitespace-nowrap">
-                        {progressDetails.elapsedText && `elapsed ${progressDetails.elapsedText}`}
-                        {progressDetails.etaText && (
-                          <span className="text-slate-300"> · ETA {progressDetails.etaText}</span>
-                        )}
-                      </span>
-                    </div>
-                    {stalled && (
-                      <p className="mt-1.5 text-xs text-amber-400">
-                        No recent progress, the job may be stalled
-                      </p>
-                    )}
-                  </div>
+                        <span className="flex-1 truncate text-sm font-medium text-white">
+                          {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
+                        </span>
+                      </>
+                    }
+                  />
                 ) : (
                   <div
                     key={job.id}

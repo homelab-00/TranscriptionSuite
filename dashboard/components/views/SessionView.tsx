@@ -42,7 +42,8 @@ import { FindReplaceTextEditor } from '../editor/FindReplaceTextEditor';
 import { LiveTranscriptView } from './LiveTranscriptView';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLanguages } from '../../src/hooks/useLanguages';
-import { formatClock } from '../../src/services/jobProgress';
+import { summarizeJobProgress } from '../../src/services/jobProgress';
+import { JobProgressBlock } from '../ui/JobProgressBlock';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
 import { useTranscription } from '../../src/hooks/useTranscription';
 import type { LiveModeState } from '../../src/hooks/useLiveMode';
@@ -895,6 +896,36 @@ export const SessionView: React.FC<SessionViewProps> = ({
     transcription.status === 'idle' ||
     transcription.status === 'complete' ||
     transcription.status === 'error';
+
+  // Processing progress block (shared JobProgressBlock): the WS progress
+  // messages carry current/total/phase but no start time, so the start is
+  // stamped locally when the status enters 'processing'. A 1s tick keeps
+  // elapsed/ETA moving between progress messages.
+  const processingStartedAtRef = useRef<number | null>(null);
+  const [, setProcessingTick] = useState(0);
+  useEffect(() => {
+    if (!isProcessing) {
+      processingStartedAtRef.current = null;
+      return;
+    }
+    if (processingStartedAtRef.current === null) {
+      processingStartedAtRef.current = Date.now() / 1000;
+    }
+    const t = setInterval(() => setProcessingTick((n) => n + 1), 1_000);
+    return () => clearInterval(t);
+  }, [isProcessing]);
+  const processingDetails = summarizeJobProgress(
+    transcription.processingProgress
+      ? {
+          current: transcription.processingProgress.current,
+          total: transcription.processingProgress.total,
+          message: '',
+          phase: transcription.processingProgress.phase ?? 'transcribing',
+        }
+      : null,
+    processingStartedAtRef.current,
+    Date.now() / 1000,
+  );
 
   // GH-209 gate, same contract the Import tab uses: the server computes this
   // ONCE at container startup, so adding a token in Settings needs a restart.
@@ -2035,7 +2066,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       stepper never fights it for the click. Canary
                       bidirectional models swap the Translate button for the
                       target-language dropdown. */}
-                    <div className="border-t border-white/5 px-1 pt-3">
+                    <div className="px-1">
                       <div className="flex flex-wrap items-center justify-center gap-2">
                         {isCanaryMainBidi ? (
                           <div className="flex items-center gap-2">
@@ -2211,25 +2242,36 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           </Button>
                         ) : (
                           <>
-                            <Button
-                              variant="danger"
-                              className="w-full"
-                              icon={
-                                isProcessing ? (
-                                  <Loader2 size={16} className="animate-spin" />
-                                ) : (
-                                  <Square size={16} />
-                                )
-                              }
-                              onClick={handleStopRecording}
-                              disabled={isProcessing}
-                            >
-                              {isProcessing
-                                ? transcription.processingProgress?.total
-                                  ? `Processing... ${formatClock(transcription.processingProgress.current)} / ${formatClock(transcription.processingProgress.total)}`
-                                  : 'Processing...'
-                                : 'Stop Recording'}
-                            </Button>
+                            {isProcessing ? (
+                              /* Shared import-queue progress block replaces the
+                                 disabled "Processing..." button while the server
+                                 transcribes; recording keeps the plain button. */
+                              <div className="min-w-0 flex-1">
+                                <JobProgressBlock
+                                  details={processingDetails}
+                                  leading={
+                                    <>
+                                      <Loader2
+                                        size={14}
+                                        className="text-accent-cyan animate-spin"
+                                      />
+                                      <span className="flex-1 truncate text-sm font-medium text-white">
+                                        Processing recording
+                                      </span>
+                                    </>
+                                  }
+                                />
+                              </div>
+                            ) : (
+                              <Button
+                                variant="danger"
+                                className="w-full"
+                                icon={<Square size={16} />}
+                                onClick={handleStopRecording}
+                              >
+                                Stop Recording
+                              </Button>
+                            )}
                             {isRecording && (
                               <Button
                                 variant="secondary"

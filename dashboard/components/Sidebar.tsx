@@ -75,6 +75,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const isMetal = runtimeProfile === 'metal';
   const [collapsed, setCollapsed] = useState(false);
+  // Notebook sub-tabs (Search / Import) are collapsed by default; each click
+  // on the Notebook nav item toggles them, and leaving Notebook closes them.
+  const [notebookSubTabsOpen, setNotebookSubTabsOpen] = useState(false);
   const [expandedWidthPx, setExpandedWidthPx] = useState(SIDEBAR_EXPANDED_BASE_WIDTH_PX);
   const logoContentRef = useRef<HTMLDivElement | null>(null);
   const hasElectronApi = typeof window !== 'undefined' && Boolean((window as any).electronAPI);
@@ -200,10 +203,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const buttonRefs = useRef<Map<View, HTMLButtonElement>>(new Map());
   const [pillTop, setPillTop] = useState<number | null>(null);
 
+  // notebookSubTabsOpen shifts the buttons below the Notebook item, so the
+  // pill must re-measure whenever the sub-tabs expand or collapse.
   const measurePillPosition = useCallback(() => {
     const btn = buttonRefs.current.get(currentView);
     if (btn) setPillTop(btn.offsetTop);
-  }, [currentView]);
+  }, [currentView, notebookSubTabsOpen]);
 
   useLayoutEffect(() => {
     measurePillPosition();
@@ -291,7 +296,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 }}
                 onClick={() => {
                   onChangeView(item.id);
-                  if (item.id === View.NOTEBOOK) onChangeNotebookTab(NotebookTab.CALENDAR);
+                  if (item.id === View.NOTEBOOK) {
+                    setNotebookSubTabsOpen((open) => !open);
+                    onChangeNotebookTab(NotebookTab.CALENDAR);
+                  } else {
+                    setNotebookSubTabsOpen(false);
+                  }
                 }}
                 className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'px-4'} h-12 rounded-xl transition-colors duration-200 ${
                   isActive ? 'text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
@@ -324,9 +334,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </button>
 
-              {/* Session sub-tabs: always visible */}
-              {/* Notebook sub-tabs: always visible */}
-              {item.id === View.NOTEBOOK && (
+              {/* Notebook sub-tabs: rendered only while toggled open via the Notebook nav item */}
+              {item.id === View.NOTEBOOK && notebookSubTabsOpen && (
                 <div className="flex flex-col gap-2">
                   {notebookSubItems.map((subItem) => {
                     const isSubActive = currentView === View.NOTEBOOK && notebookTab === subItem.id;
