@@ -274,8 +274,17 @@ describe('SessionImportTab — explicit output-format selector (GH-212)', () => 
     await pickOutputFormat('Plain text (.txt)');
     expect(querySubtitleFormatButton()).toBeNull();
 
-    await pickOutputFormat('Both');
+    await pickOutputFormat('Text + subtitles');
     expect(querySubtitleFormatButton()).not.toBeNull();
+  });
+
+  it('hides the Subtitle format select for Markdown and persists the md format', async () => {
+    await renderTab();
+
+    await pickOutputFormat('Markdown (.md)');
+
+    expect(querySubtitleFormatButton()).toBeNull();
+    expect(mockSetConfig).toHaveBeenCalledWith('sessionImport.outputFormat', 'md');
   });
 
   it('persists the selection under sessionImport.outputFormat', async () => {

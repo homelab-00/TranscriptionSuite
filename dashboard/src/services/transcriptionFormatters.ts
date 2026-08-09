@@ -142,6 +142,72 @@ export function renderTxt(response: TranscriptionResponse): string {
 }
 
 /**
+ * Format seconds as a zero-padded MM:SS Markdown turn timestamp (minutes roll
+ * past 59 for recordings over an hour).
+ * Matches format_markdown_timestamp() in server/backend/core/markdown_export.py.
+ */
+function formatMarkdownTimestamp(seconds: number): string {
+  const total = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+/**
+ * Render transcription as a Markdown conversation document.
+ *
+ * Mirrors stream_markdown() in server/backend/core/markdown_export.py (GH-279)
+ * so a Session import and a Notebook export produce the same shape: a title
+ * header, a horizontal rule, then one line per speaker turn (consecutive
+ * segments with the same speaker coalesce) prefixed with the normalized
+ * speaker label and the turn start time, terminated with a Markdown hard
+ * break. Segments without a speaker label degrade to plain paragraphs; a
+ * response with no usable segments degrades to the plain transcript text
+ * under the same header.
+ */
+export function renderMarkdown(response: TranscriptionResponse, title = 'Transcription'): string {
+  const safeTitle = title.replace(/\n/g, ' ').trim() || 'Transcription';
+  const chunks: string[] = [`# ${safeTitle}\n\n`, '---\n\n'];
+
+  const segments = (response.segments ?? []).filter((s) => s.text.trim().length > 0);
+  if (segments.length === 0) {
+    const text = response.text.trim();
+    return chunks.join('') + (text ? `${text}\n` : '');
+  }
+
+  const speakerMap = buildSpeakerMap(response);
+
+  let currentSpeaker: string | null | undefined;
+  let turnStart = 0;
+  let turnParts: string[] = [];
+
+  const flush = () => {
+    if (turnParts.length === 0) return;
+    const text = turnParts.join(' ');
+    if (currentSpeaker == null) {
+      chunks.push(`${text}\n\n`);
+    } else {
+      const label = speakerMap.get(currentSpeaker) ?? currentSpeaker;
+      chunks.push(`**${label}** *[${formatMarkdownTimestamp(turnStart)}]*: ${text}  \n`);
+    }
+  };
+
+  for (const seg of segments) {
+    const speaker = seg.speaker && seg.speaker.trim() ? seg.speaker : null;
+    if (speaker !== currentSpeaker || currentSpeaker === undefined) {
+      flush();
+      turnParts = [];
+      currentSpeaker = speaker;
+      turnStart = seg.start ?? 0;
+    }
+    turnParts.push(seg.text.trim());
+  }
+  flush();
+
+  return chunks.join('');
+}
+
+/**
  * Determine the output filename and rendered content for a transcription result.
  *
  * Centralizes the hideTimestamps / diarization / format branching that was
@@ -174,7 +240,7 @@ export function resolveTranscriptionOutput(
   return { outputFilename: `${stem}.txt`, content: renderTxt(transcription) };
 }
 
-export type SessionOutputFormat = 'txt' | 'subtitles' | 'both';
+export type SessionOutputFormat = 'txt' | 'subtitles' | 'md' | 'both';
 
 export interface ResolvedOutput {
   outputFilename: string;
@@ -194,6 +260,12 @@ export function resolveTranscriptionOutputs(
 ): ResolvedOutput[] {
   const stem = filename.replace(/\.[^.]+$/, '');
   const txt: ResolvedOutput = { outputFilename: `${stem}.txt`, content: renderTxt(transcription) };
+
+  // Markdown never falls back to .txt: renderMarkdown degrades internally to
+  // the plain transcript under the same header when segments are unusable.
+  if (options.outputFormat === 'md') {
+    return [{ outputFilename: `${stem}.md`, content: renderMarkdown(transcription, stem) }];
+  }
 
   const hasSegments =
     transcription.segments && transcription.segments.some((s) => s.text.trim().length > 0);
