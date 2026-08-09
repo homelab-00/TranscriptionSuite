@@ -1,0 +1,39 @@
+name: Soak Test
+
+# Simulates a 5-hour recording session at real data volume (576 MB PCM,
+# ~1.2 GB WAV, >1 MB result through the GH #202 result_ready path).
+# Runs on tag builds and on demand — deliberately NOT per-PR: the test is
+# gated behind RUN_SOAK=1 so the regular backend suite skips it.
+# Kept separate from release.yml so it never delays artifact builds.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  soak-5h-recording:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies (whisper extra + dev group)
+        run: uv sync --extra whisper --group dev
+
+      - name: Run 5-hour recording soak test
+        run: RUN_SOAK=1 uv run pytest tests/test_soak_5h_recording.py -v --tb=short
