@@ -19,7 +19,17 @@ repo = importlib.import_module("server.database.job_repository")
 
 @pytest.fixture()
 def db(tmp_path, monkeypatch):
-    """Real SQLite DB with the transcription_jobs columns this feature touches."""
+    """Real SQLite DB with the transcription_jobs columns this feature touches.
+
+    Re-resolves the repo module on every use: test_job_repository_imports pops
+    server.database.job_repository from sys.modules and re-imports it, so a
+    handle captured at collection time can diverge from the object that
+    audio_cleanup's function-local imports resolve. Patching the CURRENT
+    module (and rebinding the test-module global) keeps both call paths on
+    the same patched get_connection.
+    """
+    global repo
+    repo = importlib.import_module("server.database.job_repository")
     db_path = tmp_path / "jobs.db"
     # check_same_thread=False: cleanup_old_recordings runs repo queries via
     # asyncio.to_thread; production get_connection opens per-call connections.
