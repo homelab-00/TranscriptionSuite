@@ -680,6 +680,49 @@ class ImportAcceptedResponse(BaseModel):
     job_id: str
 
 
+def _persist_import_result(
+    job_id: str, payload: dict[str, Any], result_dict: dict[str, Any]
+) -> None:
+    """Persist an import result to its durability row BEFORE the in-memory
+    job_tracker hand-off (persist-before-deliver, CLAUDE.md invariant).
+
+    The row is the import path's ONLY delivery channel — the dashboard polls
+    GET /result/{job_id} — so a failed write escalates to mark_failed: the
+    client then receives an actionable 410 instead of polling 202 forever
+    until the orphan sweep mislabels the job.
+    """
+    from server.core.json_utils import sanitize_for_json
+
+    try:
+        sanitized = sanitize_for_json(payload)
+        save_result(
+            job_id=job_id,
+            result_text=result_dict.get("text", "") or "",
+            result_json=_json.dumps(sanitized, ensure_ascii=False),
+            result_language=result_dict.get("language"),
+            duration_seconds=result_dict.get("duration"),
+        )
+    except Exception:
+        logger.critical(
+            "Failed to persist import result for job %s — the transcription exists "
+            "only in the in-memory job tracker and is lost on restart",
+            sanitize_log_value(job_id),
+            exc_info=True,
+        )
+        try:
+            mark_failed(
+                job_id,
+                "Persistence failed — the transcription completed but could not be "
+                "saved. Check the server logs.",
+            )
+        except Exception:
+            logger.warning(
+                "Failed to mark import job %s as failed after persistence failure",
+                sanitize_log_value(job_id),
+                exc_info=True,
+            )
+
+
 def _run_file_import(
     *,
     model_manager: Any,
@@ -707,8 +750,10 @@ def _run_file_import(
     - Convert to MP3
     - Save to database
 
-    It stores the full transcription result in job_tracker so the client
-    can format and save the output file locally.
+    It persists the result to the transcription_jobs durability row
+    (persist-before-deliver) and mirrors it into job_tracker for progress
+    reporting. The client fetches the result via GET /result/{job_id},
+    formats it (SRT/TXT), and saves the output file locally.
     """
     try:
         # Progress callback to update job tracker with chunk progress
@@ -739,18 +784,20 @@ def _run_file_import(
             )
 
             result_dict = result.to_dict()
-            model_manager.job_tracker.end_job(
-                job_id,
-                result={
-                    "job_id": job_id[:8],
-                    "transcription": result_dict,
-                    "diarization": {
-                        "requested": False,
-                        "performed": False,
-                        "reason": "multitrack",
-                    },
+            payload = {
+                "job_id": job_id[:8],
+                "transcription": result_dict,
+                "diarization": {
+                    "requested": False,
+                    "performed": False,
+                    "reason": "multitrack",
                 },
-            )
+                # Top-level text mirror so /recent previews and the recovery
+                # banner render this row without knowing the import shape.
+                "text": result_dict.get("text", ""),
+            }
+            _persist_import_result(job_id, payload, result_dict)
+            model_manager.job_tracker.end_job(job_id, result=payload)
             logger.info("File import job %s completed (multitrack): %s", job_id[:8], filename)
 
             if event_loop is not None:
@@ -800,16 +847,18 @@ def _run_file_import(
         result = dispatched.result
         diarization_outcome = dispatched.outcome.to_dict()
 
-        # Store successful result for client polling
+        # Persist for the /result poll, then mirror into job_tracker.
         result_dict = result.to_dict()
-        model_manager.job_tracker.end_job(
-            job_id,
-            result={
-                "job_id": job_id[:8],
-                "transcription": result_dict,
-                "diarization": diarization_outcome,
-            },
-        )
+        payload = {
+            "job_id": job_id[:8],
+            "transcription": result_dict,
+            "diarization": diarization_outcome,
+            # Top-level text mirror so /recent previews and the recovery
+            # banner render this row without knowing the import shape.
+            "text": result_dict.get("text", ""),
+        }
+        _persist_import_result(job_id, payload, result_dict)
+        model_manager.job_tracker.end_job(job_id, result=payload)
         logger.info("File import job %s completed: %s", job_id[:8], filename)
 
         # Fire outgoing webhook (background thread — use fire-and-forget)
@@ -831,6 +880,14 @@ def _run_file_import(
 
     except TranscriptionCancelledError:
         logger.info("File import job %s cancelled by user", job_id[:8])
+        try:
+            mark_failed(job_id, "Transcription cancelled by user")
+        except Exception:
+            logger.warning(
+                "Failed to mark cancelled import job %s",
+                sanitize_log_value(job_id),
+                exc_info=True,
+            )
         model_manager.job_tracker.end_job(
             job_id,
             result={
@@ -856,6 +913,17 @@ def _run_file_import(
         if dep_error is not None:
             error_payload["remedy"] = dep_error.remedy
             error_payload["backend_type"] = dep_error.backend_type
+        # Persist the failure so the /result poll gets an actionable 410
+        # (remedy included when one exists).
+        _row_error = str(e) if dep_error is None else f"{e}. {dep_error.remedy}"
+        try:
+            mark_failed(job_id, _row_error)
+        except Exception:
+            logger.warning(
+                "Failed to mark import job %s as failed",
+                sanitize_log_value(job_id),
+                exc_info=True,
+            )
         model_manager.job_tracker.end_job(
             job_id,
             result=error_payload,
