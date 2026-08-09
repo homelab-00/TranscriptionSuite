@@ -1095,7 +1095,7 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
         404: Job not found.
         410: Job failed (includes error_message).
     """
-    from ...database.job_repository import get_job, mark_delivered
+    from ...database.job_repository import SESSION_SOURCES, delete_job, get_job, mark_delivered
 
     job = get_job(job_id)
     if job is None:
@@ -1106,9 +1106,14 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
     if job["status"] == "processing":
         return JSONResponse(status_code=202, content={"status": "processing", "job_id": job_id})
     if job["status"] == "failed":
-        raise HTTPException(
-            status_code=410, detail=job.get("error_message") or "Transcription failed"
-        )
+        detail = job.get("error_message") or "Transcription failed"
+        # Session ephemeral retention: a failed import keeps no audio, so
+        # nothing is retryable — the row's only purpose was delivering this
+        # error message, which just happened. Failed 'websocket' jobs keep
+        # their row + WAV so /retry stays possible.
+        if job.get("source") == "file_import" and not job.get("audio_path"):
+            delete_job(job_id)
+        raise HTTPException(status_code=410, detail=detail)
     # completed
     if job.get("result_json"):
         try:
@@ -1122,6 +1127,11 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
         mark_delivered(job_id)
     except Exception as e:
         logger.warning("Failed to mark job %s as delivered: %s", sanitize_log_value(job_id), e)
+    # Session ephemeral retention: a delivered session job leaves no
+    # server-side trace. delete_job never raises (warning-only contract);
+    # the response payload is already in memory at this point.
+    if job.get("source") in SESSION_SOURCES:
+        delete_job(job_id)
     return JSONResponse(
         status_code=200,
         content={"job_id": job_id, "status": "completed", "result": result_data},
@@ -1526,7 +1536,7 @@ async def dismiss_transcription_result(job_id: str, request: Request) -> JSONRes
         403: Job belongs to a different client.
         404: Job not found.
     """
-    from ...database.job_repository import get_job, mark_delivered
+    from ...database.job_repository import SESSION_SOURCES, delete_job, get_job, mark_delivered
 
     job = get_job(job_id)
     if job is None:
@@ -1535,6 +1545,12 @@ async def dismiss_transcription_result(job_id: str, request: Request) -> JSONRes
     if job.get("client_name") is not None and job["client_name"] != client_name:
         raise HTTPException(status_code=403, detail="Access denied")
     mark_delivered(job_id)
+    # Session ephemeral retention: dismiss means "I don't want it" — purge
+    # session jobs like a delivery. Only completed rows can be dismissed from
+    # the recovery banner; the status guard keeps a hypothetical failed-row
+    # dismiss from deleting a retryable WAV.
+    if job.get("status") == "completed" and job.get("source") in SESSION_SOURCES:
+        delete_job(job_id)
     return JSONResponse(status_code=200, content={"job_id": job_id})
 
 
