@@ -267,6 +267,15 @@ export interface JobTrackerProgress {
   phase?: 'loading_model' | 'transcribing' | 'diarizing' | 'transcribing_diarizing' | string | null;
 }
 
+/** GH-239 follow-up: present while the server salvages a dropped recording. */
+export interface SalvageInfo {
+  /** FULL job id (active_job_id is truncated for display; this one is not) -
+   *  matched against /recent rows and /result/{job_id}. */
+  job_id: string;
+  client_name: string | null;
+  started_at: number | null;
+}
+
 /** Typed status from job_tracker exposed via /api/admin/status */
 export interface JobTrackerStatus {
   is_busy: boolean;
@@ -276,11 +285,20 @@ export interface JobTrackerStatus {
   progress: JobTrackerProgress | null;
   started_at?: number | null; // epoch seconds
   result: JobTrackerResult | null;
+  /** Set while the active job is a GH-239 salvage of a dropped recording. */
+  salvage?: SalvageInfo | null;
 }
 
 /** Narrow accessor for the loosely-typed AdminStatus.models blob (GH-211). */
 export function jobTrackerFromAdminStatus(
   status: AdminStatus | null,
+): JobTrackerStatus | undefined {
+  return (status?.models as { job_tracker?: JobTrackerStatus } | undefined)?.job_tracker;
+}
+
+/** Narrow accessor for the loosely-typed /api/status models blob (GH-239). */
+export function jobTrackerFromServerStatus(
+  status: { models?: unknown } | null | undefined,
 ): JobTrackerStatus | undefined {
   return (status?.models as { job_tracker?: JobTrackerStatus } | undefined)?.job_tracker;
 }

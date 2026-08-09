@@ -9,6 +9,7 @@ Covers:
 - ``get_status`` dict structure
 - Result storage and clearing across jobs
 - Thread safety under concurrent access
+- mark_salvage / get_salvage_info lifecycle
 """
 
 from __future__ import annotations
@@ -295,6 +296,7 @@ class TestGetStatus:
             "progress": None,
             "started_at": None,
             "result": None,
+            "salvage": None,
         }
 
     def test_active_status_truncates_job_id(self):
@@ -408,3 +410,69 @@ class TestThreadSafety:
             r.join()
 
         assert errors == []
+
+
+# ── Salvage tracking ─────────────────────────────────────────────────────
+
+
+class TestSalvageTracking:
+    """GH-239 follow-up: the tracker flags when the active job is a salvage."""
+
+    def test_mark_salvage_records_info_for_active_job(self):
+        tracker = TranscriptionJobTracker()
+        _, job_id, _ = tracker.try_start_job("alice")
+
+        assert tracker.mark_salvage(job_id) is True
+
+        info = tracker.get_salvage_info()
+        assert info is not None
+        assert info["job_id"] == job_id
+        assert info["client_name"] == "alice"
+        assert info["started_at"] is not None
+
+    def test_mark_salvage_rejects_mismatch_none_and_no_job(self):
+        tracker = TranscriptionJobTracker()
+        assert tracker.mark_salvage("anything") is False  # no active job
+        tracker.try_start_job("alice")
+        assert tracker.mark_salvage("wrong-id") is False  # mismatched id
+        assert tracker.mark_salvage(None) is False  # create_job failed upstream
+        assert tracker.get_salvage_info() is None
+
+    def test_end_job_clears_salvage_info(self):
+        tracker = TranscriptionJobTracker()
+        _, job_id, _ = tracker.try_start_job("alice")
+        tracker.mark_salvage(job_id)
+
+        tracker.end_job(job_id)
+
+        assert tracker.get_salvage_info() is None
+        assert tracker.get_status()["salvage"] is None
+
+    def test_new_job_clears_stale_salvage_info(self):
+        tracker = TranscriptionJobTracker()
+        tracker._salvage_info = {"job_id": "stale", "client_name": "x", "started_at": 0.0}
+
+        tracker.try_start_job("bob")
+
+        assert tracker.get_salvage_info() is None
+
+    def test_get_status_exposes_full_salvage_job_id(self):
+        tracker = TranscriptionJobTracker()
+        _, job_id, _ = tracker.try_start_job("alice")
+        tracker.mark_salvage(job_id)
+
+        status = tracker.get_status()
+
+        # FULL id on purpose (active_job_id is truncated for display): the
+        # dashboard matches it against /recent rows and /result/{job_id}.
+        assert status["salvage"]["job_id"] == job_id
+        assert status["salvage"]["client_name"] == "alice"
+
+    def test_get_salvage_info_returns_a_copy(self):
+        tracker = TranscriptionJobTracker()
+        _, job_id, _ = tracker.try_start_job("alice")
+        tracker.mark_salvage(job_id)
+
+        tracker.get_salvage_info()["job_id"] = "mutated"
+
+        assert tracker.get_salvage_info()["job_id"] == job_id

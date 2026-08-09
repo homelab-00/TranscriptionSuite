@@ -33,6 +33,7 @@ import { NotificationToasts } from './components/ui/NotificationToasts';
 import { HfTokenExplainer } from './components/ui/HfTokenExplainer';
 import { useStarPopup } from './src/hooks/useStarPopup';
 import { useNotificationBridge } from './src/hooks/useNotificationBridge';
+import { useSalvageProgress } from './src/hooks/useSalvageProgress';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
 import { useNotificationsStore } from './src/stores/notificationsStore';
 import { SERVER_START_ID } from './src/utils/startupEventMapping';
@@ -122,6 +123,8 @@ const AppInner: React.FC = () => {
   useAuthTokenSync(serverConnection.reachable, useRemote);
   // Bridge bootstrap log events → notifications store (runs regardless of active tab)
   useNotificationBridge();
+  // GH-239 follow-up: mirror server-side salvage progress into notifications.
+  useSalvageProgress();
   // Singleton subscriber for the watcher:filesDetected IPC channel — must be
   // mounted at app root so it does not double-register when a per-tab hook
   // (e.g. useSessionWatcher) survives a tab switch (Issue #94).

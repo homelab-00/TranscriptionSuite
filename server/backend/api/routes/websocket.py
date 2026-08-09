@@ -692,10 +692,18 @@ class TranscriptionSession:
             )
 
             if isinstance(e, TranscriptionCancelledError):
-                logger.info(f"Transcription cancelled (client disconnected) for {self.client_name}")
+                # An explicit POST /cancel is the only signal that can stop a
+                # salvage (the disconnect term is muted for it) - record that,
+                # and point at the retry the persisted WAV makes possible.
+                reason = (
+                    "Salvage cancelled by user - audio saved for retry"
+                    if self._salvage_reason
+                    else "Cancelled: client disconnected"
+                )
+                logger.info(f"Transcription cancelled for {self.client_name}: {reason}")
                 if self._current_job_id:
                     try:
-                        _mark_failed(self._current_job_id, "Cancelled: client disconnected")
+                        _mark_failed(self._current_job_id, reason)
                     except Exception as _mf_err:
                         logger.warning(
                             "Failed to mark job %s as failed: %s", self._current_job_id, _mf_err
@@ -969,6 +977,16 @@ class TranscriptionSession:
             "Client disconnected mid-recording - this transcript covers only "
             "the audio received before the connection dropped"
         )
+        # Flag the tracker so /api/status and session_busy can tell the
+        # dashboard this busy slot is a salvage rather than a live user
+        # (drop-popup + progress notification). Best-effort: a tracker whose
+        # job does not match (create_job failed earlier) just declines.
+        try:
+            from server.core.model_manager import get_model_manager
+
+            get_model_manager().job_tracker.mark_salvage(self._current_job_id)
+        except Exception as _ms_err:
+            logger.warning("Failed to flag salvage on the job tracker: %s", _ms_err)
         try:
             await self.process_transcription()
         except Exception:
@@ -1034,8 +1052,20 @@ async def handle_client_message(session: TranscriptionSession, message: dict[str
         success, job_id, active_user = model_manager.job_tracker.try_start_job(session.client_name)
 
         if not success:
-            # Another transcription is running - send session_busy but keep connection open
-            await session.send_message("session_busy", {"active_user": active_user})
+            # Another transcription is running - send session_busy but keep the
+            # connection open. is_salvage lets the dashboard offer dropping a
+            # GH-239 salvage instead of dead-ending; a live user's job stays a
+            # generic busy. salvage_job_id is the FULL id (the client matches
+            # it against /recent and /result/{job_id}).
+            salvage = model_manager.job_tracker.get_salvage_info()
+            await session.send_message(
+                "session_busy",
+                {
+                    "active_user": active_user,
+                    "is_salvage": salvage is not None,
+                    "salvage_job_id": salvage["job_id"] if salvage else None,
+                },
+            )
             logger.info(
                 f"Recording rejected for {session.client_name} - "
                 f"job already running for {active_user}"
