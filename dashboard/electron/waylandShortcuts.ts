@@ -5,14 +5,27 @@
  * to the XDG Desktop Portal, which lets us:
  *   - Set human-readable descriptions ("Start Recording", "Stop & Transcribe")
  *   - Set preferred_trigger from config values
- *   - Listen for Activated / ShortcutsChanged signals
+ *   - Listen for Activated / Deactivated / ShortcutsChanged signals
  *   - Read back actual portal-assigned triggers via ListShortcuts
+ *
+ * Press-and-hold (push-to-talk): the portal emits Activated on press and
+ * Deactivated on release. Holding the start-recording shortcut past
+ * PUSH_TO_TALK_HOLD_MS makes the release stop the recording; a short tap
+ * keeps the original toggle behavior. Decision logic lives in pushToTalk.ts.
  *
  * Uses `@particle/dbus-next` (CJS-only) imported via createRequire since the project is ESM.
  */
 
 import { createRequire } from 'module';
 import type { BrowserWindow } from 'electron';
+import {
+  extractActivationToken,
+  isPushToTalkHold,
+  mergePress,
+  toMillis,
+  type PendingPress,
+  type ShortcutPress,
+} from './pushToTalk.js';
 
 const require = createRequire(import.meta.url);
 
@@ -150,13 +163,20 @@ const SHORTCUT_DEFS: Array<{ id: string; description: string; action: string }> 
  */
 export const PORTAL_APP_ID = 'com.transcriptionsuite.dashboard';
 
+/** The shortcut whose press/release pair drives push-to-talk. */
+const PTT_SHORTCUT_ID = SHORTCUT_DEFS[0].id;
+
 let bus: any = null;
 let portalProxy: any = null;
 let sessionPath: string | null = null;
 let connected = false;
 let activatedUnsubscribe: (() => void) | null = null;
+let deactivatedUnsubscribe: (() => void) | null = null;
 let shortcutsChangedUnsubscribe: (() => void) | null = null;
 let currentGetWindow: (() => BrowserWindow | null) | null = null;
+
+/** Pending press of the start shortcut, awaiting its Deactivated edge. */
+let pendingStartPress: PendingPress | null = null;
 
 // Unique token counter for portal request paths
 let requestCounter = 0;
@@ -533,17 +553,53 @@ async function bindShortcutsFromStore(store: ReadableStore): Promise<boolean> {
 }
 
 /**
- * Subscribe to Activated and ShortcutsChanged signals on the portal.
+ * Stash a portal-supplied activation token into the process environment.
+ * Chromium's Wayland backend consumes XDG_ACTIVATION_TOKEN on its next
+ * window-activation request, so a focus() shortly after a shortcut press can
+ * be honored by the compositor despite focus-stealing prevention. KDE
+ * currently sends an empty options dict, so this is dormant on Plasma.
  */
-function subscribeToSignals(): void {
-  if (!portalProxy) return;
+function stashActivationToken(options: unknown): void {
+  const token = extractActivationToken(options);
+  if (token) {
+    process.env.XDG_ACTIVATION_TOKEN = token;
+  }
+}
+
+/** The subset of the dbus-next interface proxy the signal handlers rely on. */
+export interface PortalSignalSource {
+  on(signalName: string, handler: (...args: any[]) => void): void;
+  removeListener(signalName: string, handler: (...args: any[]) => void): void;
+}
+
+/** Send a payload to the current BrowserWindow, if any. */
+function sendToWindow(channel: string, payload: unknown): void {
+  const win = currentGetWindow?.();
+  if (win) {
+    win.webContents.send(channel, payload);
+  }
+}
+
+/**
+ * Subscribe to Activated, Deactivated, and ShortcutsChanged signals.
+ *
+ * Exported for tests: pass a fake proxy (on/removeListener) and a send spy to
+ * drive Activated/Deactivated pairs without a live session bus, mirroring the
+ * fake-portal-object pattern used by the registerHostAppId tests. Production
+ * callers use the defaults (module portalProxy + BrowserWindow send).
+ */
+export function subscribeToSignals(
+  proxy: PortalSignalSource | null = portalProxy,
+  send: (channel: string, payload: unknown) => void = sendToWindow,
+): void {
+  if (!proxy) return;
 
   // Activated signal: (session_handle, shortcut_id, timestamp, options)
   const onActivated = (
     _sessionHandle: string,
     shortcutId: string,
-    _timestamp: any,
-    _options: any,
+    timestamp: any,
+    options: any,
   ) => {
     const def = SHORTCUT_DEFS.find((d) => d.id === shortcutId);
     if (!def) {
@@ -551,29 +607,63 @@ function subscribeToSignals(): void {
       return;
     }
 
-    console.log(`[WaylandShortcuts] Shortcut activated: ${shortcutId} → ${def.action}`);
-    const win = currentGetWindow?.();
-    if (win) {
-      win.webContents.send('tray:action', def.action);
+    stashActivationToken(options);
+
+    if (shortcutId === PTT_SHORTCUT_ID) {
+      // First-press-wins across key auto-repeat: some Plasma versions stream
+      // Activated signals while a shortcut is held (KDE bug 484525), and each
+      // repeat must NOT reset the held-duration clock. A press arriving after
+      // the repeat window starts over (covers a missed Deactivated).
+      pendingStartPress = mergePress(pendingStartPress, {
+        portalTimestamp: toMillis(timestamp),
+        wallClock: Date.now(),
+      });
     }
+
+    console.log(`[WaylandShortcuts] Shortcut activated: ${shortcutId} → ${def.action}`);
+    send('tray:action', def.action);
+  };
+
+  // Deactivated signal: (session_handle, shortcut_id, timestamp, options).
+  // Same shape as Activated - fired when the shortcut keys are released.
+  const onDeactivated = (
+    _sessionHandle: string,
+    shortcutId: string,
+    timestamp: any,
+    options: any,
+  ) => {
+    if (shortcutId !== PTT_SHORTCUT_ID) return;
+
+    stashActivationToken(options);
+
+    const pending = pendingStartPress;
+    pendingStartPress = null;
+    if (!pending) return;
+
+    const release: ShortcutPress = { portalTimestamp: toMillis(timestamp), wallClock: Date.now() };
+    if (!isPushToTalkHold(pending.press, release)) {
+      // Short tap - keep the original toggle behavior (release does nothing).
+      return;
+    }
+
+    console.log('[WaylandShortcuts] Push-to-talk release → stop recording');
+    send('tray:action', 'ptt-stop-recording');
   };
 
   // ShortcutsChanged signal: (session_handle, shortcuts)
   const onShortcutsChanged = (_sessionHandle: string, shortcuts: any) => {
     console.log('[WaylandShortcuts] Shortcuts changed by portal');
     const bindings = parsePortalShortcuts(shortcuts);
-    const win = currentGetWindow?.();
-    if (win) {
-      win.webContents.send('shortcuts:portalChanged', bindings);
-    }
+    send('shortcuts:portalChanged', bindings);
   };
 
-  portalProxy.on('Activated', onActivated);
-  portalProxy.on('ShortcutsChanged', onShortcutsChanged);
+  proxy.on('Activated', onActivated);
+  proxy.on('Deactivated', onDeactivated);
+  proxy.on('ShortcutsChanged', onShortcutsChanged);
 
-  activatedUnsubscribe = () => portalProxy?.removeListener('Activated', onActivated);
-  shortcutsChangedUnsubscribe = () =>
-    portalProxy?.removeListener('ShortcutsChanged', onShortcutsChanged);
+  activatedUnsubscribe = () => proxy.removeListener('Activated', onActivated);
+  deactivatedUnsubscribe = () => proxy.removeListener('Deactivated', onDeactivated);
+  shortcutsChangedUnsubscribe = () => proxy.removeListener('ShortcutsChanged', onShortcutsChanged);
 }
 
 /**
@@ -654,9 +744,20 @@ export function isPortalConnected(): boolean {
  */
 function cleanup(closeBus = false): void {
   activatedUnsubscribe?.();
+  deactivatedUnsubscribe?.();
   shortcutsChangedUnsubscribe?.();
   activatedUnsubscribe = null;
+  deactivatedUnsubscribe = null;
   shortcutsChangedUnsubscribe = null;
+  if (pendingStartPress) {
+    // Teardown mid-hold (re-registration or bus error): the release edge can
+    // no longer be observed, so a hold-started recording keeps running until
+    // stopped manually. That is the safe failure mode - no audio is lost.
+    console.warn(
+      '[WaylandShortcuts] Portal teardown mid-hold - pending push-to-talk press dropped',
+    );
+  }
+  pendingStartPress = null;
   portalProxy = null;
   sessionPath = null;
   connected = false;
