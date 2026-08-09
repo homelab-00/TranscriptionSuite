@@ -6,6 +6,7 @@ Provides CRUD operations for the transcription_jobs table.
 
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 
 from server.logging import sanitize_log_value
 
@@ -390,3 +391,133 @@ def get_jobs_for_cleanup(max_age_days: int, limit: int = 100) -> list[dict]:
         )
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
+
+
+# ─── Session ephemeral retention (2026-08-09 spec) ───────────────────────────
+
+# Sources whose rows are purged after confirmed delivery. Rows from any other
+# source (e.g. 'audio_upload', notebook uploads) are NEVER purged — only these
+# two values may ever reach delete_job via the session lifecycle.
+SESSION_SOURCES = ("websocket", "file_import")
+
+
+def delete_job(job_id: str) -> None:
+    """Delete a job row and its audio file (session ephemeral retention).
+
+    Best-effort by contract: every failure is logged as a warning and
+    swallowed — a purge must never break delivery or session teardown.
+    The backstop sweep in audio_cleanup catches stragglers.
+    """
+    try:
+        row = get_job(job_id)
+        if row is None:
+            return
+        audio_path = row.get("audio_path")
+        if audio_path:
+            try:
+                Path(audio_path).unlink(missing_ok=True)
+            except Exception:
+                logger.warning(
+                    "delete_job: failed to unlink audio for %s",
+                    sanitize_log_value(job_id),
+                    exc_info=True,
+                )
+        with get_connection() as conn:
+            conn.execute("DELETE FROM transcription_jobs WHERE id = ?", (job_id,))
+            conn.commit()
+    except Exception:
+        logger.warning(
+            "delete_job: failed to purge job %s", sanitize_log_value(job_id), exc_info=True
+        )
+
+
+def get_purgeable_session_jobs(max_age_days: int, limit: int = 100) -> list[dict]:
+    """Return completed+delivered session-source jobs older than max_age_days.
+
+    Backstop for rows that missed their immediate post-delivery purge (e.g. a
+    crash between mark_delivered and delete_job). completed_at is isoformat —
+    see get_jobs_for_cleanup for the cutoff-format note.
+    """
+    from datetime import timedelta
+
+    cutoff = (datetime.now(UTC) - timedelta(days=max_age_days)).isoformat()
+    placeholders = ",".join("?" for _ in SESSION_SOURCES)
+    with get_connection() as conn:
+        cursor = conn.execute(
+            f"""
+            SELECT * FROM transcription_jobs
+            WHERE status = 'completed'
+              AND delivered = 1
+              AND source IN ({placeholders})
+              AND completed_at < ?
+            ORDER BY completed_at ASC
+            LIMIT ?
+            """,
+            (*SESSION_SOURCES, cutoff, limit),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_stale_failed_imports(max_age_days: int, limit: int = 100) -> list[dict]:
+    """Return aged failed file_import rows with no preserved audio.
+
+    A failed import keeps no audio (the /import temp file is always deleted),
+    so nothing is retryable — the row exists only to deliver its error message
+    via GET /result/{job_id} (410). When the client never polls (e.g. the
+    dashboard crashed), this query lets the backstop sweep purge the row.
+
+    created_at is written by SQLite CURRENT_TIMESTAMP (space separator), so
+    the cutoff must use strftime — see get_orphaned_jobs for the format note.
+    """
+    from datetime import timedelta
+
+    cutoff = (datetime.now(UTC) - timedelta(days=max_age_days)).strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            SELECT * FROM transcription_jobs
+            WHERE status = 'failed'
+              AND source = 'file_import'
+              AND audio_path IS NULL
+              AND created_at < ?
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (cutoff, limit),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_legacy_session_rows(limit: int = 1000) -> list[dict]:
+    """One-time startup cleanup query (session-ephemeral-retention migration).
+
+    Returns rows that predate the ephemeral lifecycle:
+    - bare /import dedup anchors — source='file_import' with neither result
+      text nor audio, ANY status. These rows were written purely so the old
+      dedup check could find re-imports; they are what triggered the duplicate
+      dialog and hold nothing recoverable.
+    - already-delivered session rows — completed + delivered=1 for any session
+      source. The result reached the client; under the new lifecycle these
+      would have been purged at delivery time.
+
+    Failed or undelivered rows WITH content are never returned. Runs at
+    startup before any request is served, so no live 'processing' row can be
+    caught by the anchor arm.
+    """
+    placeholders = ",".join("?" for _ in SESSION_SOURCES)
+    with get_connection() as conn:
+        cursor = conn.execute(
+            f"""
+            SELECT * FROM transcription_jobs
+            WHERE (source = 'file_import'
+                   AND result_text IS NULL
+                   AND audio_path IS NULL)
+               OR (source IN ({placeholders})
+                   AND status = 'completed'
+                   AND delivered = 1)
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (*SESSION_SOURCES, limit),
+        )
+        return [dict(row) for row in cursor.fetchall()]
