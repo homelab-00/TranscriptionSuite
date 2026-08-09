@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
-import { View, NotebookTab, SessionTab } from './types';
+import { View, NotebookTab } from './types';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/views/SessionView';
 import { NotebookView } from './components/views/NotebookView';
@@ -75,7 +75,6 @@ function isComposeEnvFlagEnabled(value: string | null | undefined): boolean {
 const AppInner: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>(View.SESSION);
   const [notebookTab, setNotebookTab] = useState<NotebookTab>(NotebookTab.CALENDAR);
-  const [sessionTab, setSessionTab] = useState<SessionTab>(SessionTab.MAIN);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
@@ -783,8 +782,6 @@ const AppInner: React.FC = () => {
         onChangeView={setCurrentView}
         notebookTab={notebookTab}
         onChangeNotebookTab={setNotebookTab}
-        sessionTab={sessionTab}
-        onChangeSessionTab={setSessionTab}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenAbout={() => setIsAboutOpen(true)}
         onOpenBugReport={() => setIsBugReportOpen(true)}
@@ -844,8 +841,6 @@ const AppInner: React.FC = () => {
                 startupFlowPending={startupFlowPending}
                 isUploading={isUploading}
                 live={live}
-                sessionTab={sessionTab}
-                onChangeSessionTab={setSessionTab}
               />
             </ErrorBoundary>
           </div>

@@ -569,7 +569,7 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
     typeof window !== 'undefined' && Boolean((window as any).electronAPI?.fileIO);
 
   return (
-    <div className="mx-auto mt-10 max-w-2xl space-y-8">
+    <div className="space-y-4">
       <input
         ref={fileInputRef}
         type="file"
@@ -881,9 +881,11 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
         <p className="text-xs leading-relaxed text-slate-500">
           {outputFormat === 'txt'
             ? 'Transcriptions are saved as .txt (plain text) to the output folder.'
-            : outputFormat === 'both'
-              ? `Transcriptions are saved as .txt plus .${diarizedFormat} to the output folder.`
-              : `Transcriptions are saved as .${diarizedFormat} subtitles to the output folder.`}
+            : outputFormat === 'md'
+              ? 'Transcriptions are saved as .md (Markdown) to the output folder.'
+              : outputFormat === 'both'
+                ? `Transcriptions are saved as .txt plus .${diarizedFormat} to the output folder.`
+                : `Transcriptions are saved as .${diarizedFormat} subtitles to the output folder.`}
         </p>
       </div>
 
@@ -903,16 +905,17 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
                 setOutputFormat(format);
                 void setConfig('sessionImport.outputFormat', format);
               }}
-              options={['txt', 'subtitles', 'both']}
+              options={['txt', 'subtitles', 'md', 'both']}
               optionLabel={{
                 txt: 'Plain text (.txt)',
                 subtitles: 'Subtitles (.srt/.ass)',
-                both: 'Both',
+                md: 'Markdown (.md)',
+                both: 'Text + subtitles',
               }}
               className="focus:ring-accent-cyan w-52 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm text-white transition-all outline-none hover:border-white/20 focus:ring-1"
             />
           </div>
-          {outputFormat !== 'txt' && (
+          {(outputFormat === 'subtitles' || outputFormat === 'both') && (
             <div className="flex items-center justify-between gap-4 pl-1">
               <div className="min-w-0">
                 <p className="text-sm font-medium text-white">Subtitle format</p>
@@ -939,7 +942,7 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
                 ? diarizationFeature?.reason === 'token_missing'
                   ? 'Unavailable: no HuggingFace token configured. Add one in Settings, then restart the server.'
                   : 'Unavailable on this server.'
-                : 'Identify distinct speakers. Speaker labels appear in subtitle output; plain text output is unaffected.'
+                : 'Identify distinct speakers. Speaker labels appear in subtitle and Markdown output; plain text output is unaffected.'
             }
           />
           {effectiveDiarization && (
