@@ -139,7 +139,7 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
   // the fast (3s) poll while a job runs; the useAdminStatus call above stays
   // on the default interval (TanStack Query dedupes by queryKey, shortest
   // refetchInterval wins).
-  const { label: progressLabel, stalled } = useJobProgress(isProcessing);
+  const { label: progressLabel, details: progressDetails, stalled } = useJobProgress(isProcessing);
 
   // GH-209: gate the diarization toggle on the server-side feature flag.
   // Computed ONCE at container startup (ModelManager._initialize_diarization_
@@ -330,7 +330,9 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
     if (hasNew) {
       // rAF: the queue card may be mounting in this very commit on the first drop
       requestAnimationFrame(() => {
-        queueRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // Optional call: jsdom has no scrollIntoView, and the rAF can fire
+        // after a test unmounts, so a bare call flakes the suite.
+        queueRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
       });
     }
   }, [jobs]);
@@ -681,55 +683,117 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
             }
           >
             <div className="max-h-60 space-y-2 overflow-y-auto">
-              {jobs.map((job) => (
-                <div
-                  key={job.id}
-                  className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 transition-colors hover:bg-white/8"
-                >
-                  {statusIcon(job)}
-                  {(job.type === 'session-auto' || job.type === 'notebook-auto') && (
-                    <span title="Auto-watch">
-                      <Eye size={14} className="shrink-0 text-slate-500" />
-                    </span>
-                  )}
-                  <span className="flex-1 truncate text-sm text-white">
-                    {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
-                  </span>
-                  <span
-                    className={`text-xs whitespace-nowrap ${
-                      job.status === 'success' && job.outputPath
-                        ? 'cursor-pointer text-green-400 hover:text-green-300'
-                        : 'text-slate-400'
-                    }`}
-                    onClick={
-                      job.status === 'success' && job.outputPath
-                        ? () => handleOpenOutputPath(job.outputPath!)
-                        : undefined
-                    }
-                    title={job.status === 'success' && job.outputPath ? 'Open folder' : undefined}
+              {jobs.map((job) =>
+                job.status === 'processing' ? (
+                  /* Expanded rendering for the one job being transcribed:
+                     progress bar + big percent so progress is obvious at a
+                     glance, instead of the tiny one-line label. */
+                  <div
+                    key={job.id}
+                    className="border-accent-cyan/20 bg-accent-cyan/5 rounded-lg border px-3 py-2.5"
                   >
-                    {statusLabel(job)}
-                  </span>
-                  {job.status === 'error' && (
-                    <button
-                      onClick={() => retryJob(job.id)}
-                      className="hover:text-accent-cyan p-1 text-slate-400 transition-colors"
-                      title="Retry"
+                    <div className="flex items-center gap-3">
+                      {statusIcon(job)}
+                      {(job.type === 'session-auto' || job.type === 'notebook-auto') && (
+                        <span title="Auto-watch">
+                          <Eye size={14} className="shrink-0 text-slate-500" />
+                        </span>
+                      )}
+                      <span className="flex-1 truncate text-sm font-medium text-white">
+                        {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
+                      </span>
+                      {progressDetails.percent !== null ? (
+                        <span className="text-accent-cyan text-lg leading-none font-semibold tabular-nums">
+                          {progressDetails.percent}%
+                        </span>
+                      ) : (
+                        <span className="text-accent-cyan text-sm font-medium">
+                          {progressDetails.phaseLabel}...
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                      {progressDetails.percent !== null ? (
+                        <div
+                          className="bg-accent-cyan h-full rounded-full transition-all duration-300"
+                          style={{ width: `${progressDetails.percent}%` }}
+                        />
+                      ) : (
+                        <div className="bg-accent-cyan h-full w-1/3 animate-pulse rounded-full" />
+                      )}
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-slate-400">
+                      <span className="truncate">
+                        {progressDetails.percent !== null
+                          ? progressDetails.phaseLabel
+                          : progressDetails.phaseLabel + '...'}
+                        {progressDetails.positionText && (
+                          <span className="text-slate-300"> {progressDetails.positionText}</span>
+                        )}
+                      </span>
+                      <span className="whitespace-nowrap">
+                        {progressDetails.elapsedText && `elapsed ${progressDetails.elapsedText}`}
+                        {progressDetails.etaText && (
+                          <span className="text-slate-300"> · ETA {progressDetails.etaText}</span>
+                        )}
+                      </span>
+                    </div>
+                    {stalled && (
+                      <p className="mt-1.5 text-xs text-amber-400">
+                        No recent progress, the job may be stalled
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div
+                    key={job.id}
+                    className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 transition-colors hover:bg-white/8"
+                  >
+                    {statusIcon(job)}
+                    {(job.type === 'session-auto' || job.type === 'notebook-auto') && (
+                      <span title="Auto-watch">
+                        <Eye size={14} className="shrink-0 text-slate-500" />
+                      </span>
+                    )}
+                    <span className="flex-1 truncate text-sm text-white">
+                      {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
+                    </span>
+                    <span
+                      className={`text-xs whitespace-nowrap ${
+                        job.status === 'success' && job.outputPath
+                          ? 'cursor-pointer text-green-400 hover:text-green-300'
+                          : 'text-slate-400'
+                      }`}
+                      onClick={
+                        job.status === 'success' && job.outputPath
+                          ? () => handleOpenOutputPath(job.outputPath!)
+                          : undefined
+                      }
+                      title={job.status === 'success' && job.outputPath ? 'Open folder' : undefined}
                     >
-                      <RotateCcw size={18} />
-                    </button>
-                  )}
-                  {job.status !== 'processing' && job.status !== 'writing' && (
-                    <button
-                      onClick={() => removeJob(job.id)}
-                      className="p-1 text-slate-500 transition-colors hover:text-red-400"
-                      title="Remove"
-                    >
-                      <XCircle size={18} />
-                    </button>
-                  )}
-                </div>
-              ))}
+                      {statusLabel(job)}
+                    </span>
+                    {job.status === 'error' && (
+                      <button
+                        onClick={() => retryJob(job.id)}
+                        className="hover:text-accent-cyan p-1 text-slate-400 transition-colors"
+                        title="Retry"
+                      >
+                        <RotateCcw size={18} />
+                      </button>
+                    )}
+                    {job.status !== 'writing' && (
+                      <button
+                        onClick={() => removeJob(job.id)}
+                        className="p-1 text-slate-500 transition-colors hover:text-red-400"
+                        title="Remove"
+                      >
+                        <XCircle size={18} />
+                      </button>
+                    )}
+                  </div>
+                ),
+              )}
             </div>
           </GlassCard>
         </div>
