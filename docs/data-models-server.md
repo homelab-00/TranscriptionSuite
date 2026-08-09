@@ -256,6 +256,18 @@ Located in `server/backend/database/migrations/versions/`. Run automatically on 
 3. **Wave 3 — Orphan recovery:** on startup, `recover_orphaned_jobs()` marks stale `processing` jobs as
    `failed`; periodic orphan sweep re-checks (guarded by `job_tracker.is_busy()`).
 
+### Session Ephemeral Retention (2026-08-09 spec)
+
+Session-source rows (`source` = `websocket` or `file_import`) are deleted — together with
+their audio file — immediately after the result is confirmed delivered (inline WS final,
+`GET /result` fetch, or dismiss), via `job_repository.delete_job()`. Failed mic
+(`websocket`) jobs keep row + WAV indefinitely for `/retry`; failed imports (which never
+retain audio) are purged once the client has received the 410 error, or by the cleanup
+sweep. A one-time startup purge (`purge_legacy_session_rows()`) removes pre-existing bare
+/import dedup anchors and already-delivered session rows. Rows from other sources (e.g.
+`audio_upload`) keep the pre-existing behavior: row kept forever, audio garbage-collected
+after `audio_retention_days`.
+
 ### Job Lifecycle
 
 ```

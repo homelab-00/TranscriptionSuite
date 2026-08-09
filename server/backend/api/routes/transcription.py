@@ -671,14 +671,56 @@ class DedupMatch(BaseModel):
 class ImportAcceptedResponse(BaseModel):
     """Response model for accepted file import job (202).
 
-    ``dedup_matches`` (Issue #104, Story 2.4) carries any prior jobs whose
-    ``audio_hash`` matches this upload. Empty list when no prior match
-    (J1 happy-path silently proceeds — AC2.4.AC3). Default-empty keeps the
-    response shape backwards compatible for clients that ignore the field.
+    ``job_id`` is the FULL job id — the client polls
+    GET /api/transcribe/result/{job_id} with it (202 processing / 410 failed /
+    200 completed). Session ephemeral retention (2026-08-09 spec) removed the
+    dedup_matches field: session imports no longer hash or dedup-check.
     """
 
     job_id: str
-    dedup_matches: list[DedupMatch] = []
+
+
+def _persist_import_result(
+    job_id: str, payload: dict[str, Any], result_dict: dict[str, Any]
+) -> None:
+    """Persist an import result to its durability row BEFORE the in-memory
+    job_tracker hand-off (persist-before-deliver, CLAUDE.md invariant).
+
+    The row is the import path's ONLY delivery channel — the dashboard polls
+    GET /result/{job_id} — so a failed write escalates to mark_failed: the
+    client then receives an actionable 410 instead of polling 202 forever
+    until the orphan sweep mislabels the job.
+    """
+    from server.core.json_utils import sanitize_for_json
+
+    try:
+        sanitized = sanitize_for_json(payload)
+        save_result(
+            job_id=job_id,
+            result_text=result_dict.get("text", "") or "",
+            result_json=_json.dumps(sanitized, ensure_ascii=False),
+            result_language=result_dict.get("language"),
+            duration_seconds=result_dict.get("duration"),
+        )
+    except Exception:
+        logger.critical(
+            "Failed to persist import result for job %s — the transcription exists "
+            "only in the in-memory job tracker and is lost on restart",
+            sanitize_log_value(job_id),
+            exc_info=True,
+        )
+        try:
+            mark_failed(
+                job_id,
+                "Persistence failed — the transcription completed but could not be "
+                "saved. Check the server logs.",
+            )
+        except Exception:
+            logger.warning(
+                "Failed to mark import job %s as failed after persistence failure",
+                sanitize_log_value(job_id),
+                exc_info=True,
+            )
 
 
 def _run_file_import(
@@ -708,8 +750,10 @@ def _run_file_import(
     - Convert to MP3
     - Save to database
 
-    It stores the full transcription result in job_tracker so the client
-    can format and save the output file locally.
+    It persists the result to the transcription_jobs durability row
+    (persist-before-deliver) and mirrors it into job_tracker for progress
+    reporting. The client fetches the result via GET /result/{job_id},
+    formats it (SRT/TXT), and saves the output file locally.
     """
     try:
         # Progress callback to update job tracker with chunk progress
@@ -740,18 +784,20 @@ def _run_file_import(
             )
 
             result_dict = result.to_dict()
-            model_manager.job_tracker.end_job(
-                job_id,
-                result={
-                    "job_id": job_id[:8],
-                    "transcription": result_dict,
-                    "diarization": {
-                        "requested": False,
-                        "performed": False,
-                        "reason": "multitrack",
-                    },
+            payload = {
+                "job_id": job_id[:8],
+                "transcription": result_dict,
+                "diarization": {
+                    "requested": False,
+                    "performed": False,
+                    "reason": "multitrack",
                 },
-            )
+                # Top-level text mirror so /recent previews and the recovery
+                # banner render this row without knowing the import shape.
+                "text": result_dict.get("text", ""),
+            }
+            _persist_import_result(job_id, payload, result_dict)
+            model_manager.job_tracker.end_job(job_id, result=payload)
             logger.info("File import job %s completed (multitrack): %s", job_id[:8], filename)
 
             if event_loop is not None:
@@ -801,16 +847,18 @@ def _run_file_import(
         result = dispatched.result
         diarization_outcome = dispatched.outcome.to_dict()
 
-        # Store successful result for client polling
+        # Persist for the /result poll, then mirror into job_tracker.
         result_dict = result.to_dict()
-        model_manager.job_tracker.end_job(
-            job_id,
-            result={
-                "job_id": job_id[:8],
-                "transcription": result_dict,
-                "diarization": diarization_outcome,
-            },
-        )
+        payload = {
+            "job_id": job_id[:8],
+            "transcription": result_dict,
+            "diarization": diarization_outcome,
+            # Top-level text mirror so /recent previews and the recovery
+            # banner render this row without knowing the import shape.
+            "text": result_dict.get("text", ""),
+        }
+        _persist_import_result(job_id, payload, result_dict)
+        model_manager.job_tracker.end_job(job_id, result=payload)
         logger.info("File import job %s completed: %s", job_id[:8], filename)
 
         # Fire outgoing webhook (background thread — use fire-and-forget)
@@ -832,6 +880,14 @@ def _run_file_import(
 
     except TranscriptionCancelledError:
         logger.info("File import job %s cancelled by user", job_id[:8])
+        try:
+            mark_failed(job_id, "Transcription cancelled by user")
+        except Exception:
+            logger.warning(
+                "Failed to mark cancelled import job %s",
+                sanitize_log_value(job_id),
+                exc_info=True,
+            )
         model_manager.job_tracker.end_job(
             job_id,
             result={
@@ -857,6 +913,17 @@ def _run_file_import(
         if dep_error is not None:
             error_payload["remedy"] = dep_error.remedy
             error_payload["backend_type"] = dep_error.backend_type
+        # Persist the failure so the /result poll gets an actionable 410
+        # (remedy included when one exists).
+        _row_error = str(e) if dep_error is None else f"{e}. {dep_error.remedy}"
+        try:
+            mark_failed(job_id, _row_error)
+        except Exception:
+            logger.warning(
+                "Failed to mark import job %s as failed",
+                sanitize_log_value(job_id),
+                exc_info=True,
+            )
         model_manager.job_tracker.end_job(
             job_id,
             result=error_payload,
@@ -892,13 +959,15 @@ async def import_and_transcribe(
     """
     Import an audio file and transcribe it in the background.
 
-    Unlike the notebook upload, this does NOT save to the database or convert
-    to MP3. The full transcription result is stored in job_tracker for the
-    client to retrieve, format (SRT/TXT), and save to disk.
+    Unlike the notebook upload, this does NOT save a notebook entry or convert
+    to MP3. The result is persisted to the transcription_jobs durability row
+    (persist-before-deliver) and the client retrieves it via
+    GET /api/transcribe/result/{job_id}: 202 while processing, 410 + error on
+    failure, 200 with the result on success. Fetching the result purges the
+    row — session imports are ephemeral (2026-08-09 spec). job_tracker keeps
+    the in-memory copy for progress reporting via /api/admin/status only.
 
-    Returns 202 Accepted immediately with a job_id. Clients should poll
-    GET /api/admin/status to check job_tracker.result for completion.
-
+    Returns 202 Accepted immediately with the full job_id.
     Returns 409 Conflict if another transcription job is already running.
     """
     _assert_main_model_selected(request)
@@ -933,30 +1002,11 @@ async def import_and_transcribe(
         tmp.write(content)
         tmp_path = Path(tmp.name)
 
-    # Issue #104, Story 2.2 — durability row for the /import flow exists
-    # purely so the dedup-check endpoint can find re-imports of the same
-    # audio. The /import worker still uses model_manager.job_tracker for
-    # results (in-memory), so result_text/result_json on this row stay NULL.
-    # See sprint-2-design.md §1 for the override rationale.
-    # Sprint 2 Item 3 — also compute the normalized PCM hash for
-    # format-agnostic dedup. Either value can be NULL on its own.
-    audio_hash: str | None = None
-    normalized_audio_hash: str | None = None
-    try:
-        from server.core.audio_utils import (
-            compute_normalized_pcm_hash as _norm_sha,
-        )
-        from server.core.audio_utils import sha256_streaming as _sha
-
-        audio_hash = _sha(tmp_path)
-        normalized_audio_hash = _norm_sha(tmp_path)
-    except Exception as _hash_err:
-        logger.warning(
-            "Failed to compute audio_hash for import job %s: %s",
-            job_id[:8],
-            _hash_err,
-        )
-    dedup_matches: list[DedupMatch] = []
+    # Session ephemeral retention: the durability row is the delivery channel
+    # for the import result (the client polls GET /result/{job_id}). Without
+    # the row the outcome would be unreachable, so a failed insert aborts the
+    # request instead of running a transcription nobody can fetch. No hashes
+    # are computed any more — session imports never dedup (2026-08-09 spec).
     try:
         create_job(
             job_id=job_id,
@@ -965,33 +1015,17 @@ async def import_and_transcribe(
             language=language,
             task="translate" if translation_enabled else "transcribe",
             translation_target=(translation_target_language if translation_enabled else None),
-            audio_hash=audio_hash,
-            normalized_audio_hash=normalized_audio_hash,
         )
-        # Story 2.4 + Sprint 2 Item 2 + Item 3 — surface prior matches across
-        # BOTH transcription_jobs AND recordings on EITHER hash. Exclude the
-        # just-created jobs row by id.
-        if audio_hash or normalized_audio_hash:
-            dedup_matches = [
-                DedupMatch(
-                    recording_id=m["id"],
-                    name=m["name"],
-                    created_at=m["created_at"],
-                    source=m["source"],
-                )
-                for m in find_duplicates_anywhere(
-                    audio_hash or "",
-                    limit=10,
-                    normalized_audio_hash=normalized_audio_hash,
-                )
-                if not (m["source"] == "transcription_job" and m["id"] == job_id)
-            ]
     except Exception as _e:
-        logger.warning(
-            "Failed to create durability row for import job %s: %s",
-            job_id[:8],
-            _e,
-        )
+        logger.error("Failed to create durability row for import job %s: %s", job_id[:8], _e)
+        model_manager.job_tracker.end_job(job_id)
+        try:
+            tmp_path.unlink()
+        except Exception:
+            logger.warning("Failed to remove temp upload %s after aborted import", tmp_path)
+        raise HTTPException(
+            status_code=500, detail="Could not create job record — import aborted"
+        ) from _e
 
     # Resolve parallel diarization default from config before entering background thread
     config = request.app.state.config
@@ -1025,11 +1059,9 @@ async def import_and_transcribe(
         )
     )
 
-    # Return immediately — client polls /api/admin/status for result.
-    # dedup_matches carries any prior jobs with the same audio_hash so the
-    # dashboard can show the dedup prompt (Story 2.4) without a follow-up
-    # round-trip. Empty list = J1 happy path (no duplicate found).
-    return {"job_id": job_id[:8], "dedup_matches": dedup_matches}
+    # Return immediately — the client polls GET /result/{job_id} with the
+    # FULL id (the durability row's primary key).
+    return {"job_id": job_id}
 
 
 class DedupCheckRequest(BaseModel):
@@ -1095,7 +1127,7 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
         404: Job not found.
         410: Job failed (includes error_message).
     """
-    from ...database.job_repository import get_job, mark_delivered
+    from ...database.job_repository import SESSION_SOURCES, delete_job, get_job, mark_delivered
 
     job = get_job(job_id)
     if job is None:
@@ -1106,9 +1138,14 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
     if job["status"] == "processing":
         return JSONResponse(status_code=202, content={"status": "processing", "job_id": job_id})
     if job["status"] == "failed":
-        raise HTTPException(
-            status_code=410, detail=job.get("error_message") or "Transcription failed"
-        )
+        detail = job.get("error_message") or "Transcription failed"
+        # Session ephemeral retention: a failed import keeps no audio, so
+        # nothing is retryable — the row's only purpose was delivering this
+        # error message, which just happened. Failed 'websocket' jobs keep
+        # their row + WAV so /retry stays possible.
+        if job.get("source") == "file_import" and not job.get("audio_path"):
+            delete_job(job_id)
+        raise HTTPException(status_code=410, detail=detail)
     # completed
     if job.get("result_json"):
         try:
@@ -1122,6 +1159,11 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
         mark_delivered(job_id)
     except Exception as e:
         logger.warning("Failed to mark job %s as delivered: %s", sanitize_log_value(job_id), e)
+    # Session ephemeral retention: a delivered session job leaves no
+    # server-side trace. delete_job never raises (warning-only contract);
+    # the response payload is already in memory at this point.
+    if job.get("source") in SESSION_SOURCES:
+        delete_job(job_id)
     return JSONResponse(
         status_code=200,
         content={"job_id": job_id, "status": "completed", "result": result_data},
@@ -1526,7 +1568,7 @@ async def dismiss_transcription_result(job_id: str, request: Request) -> JSONRes
         403: Job belongs to a different client.
         404: Job not found.
     """
-    from ...database.job_repository import get_job, mark_delivered
+    from ...database.job_repository import SESSION_SOURCES, delete_job, get_job, mark_delivered
 
     job = get_job(job_id)
     if job is None:
@@ -1535,6 +1577,12 @@ async def dismiss_transcription_result(job_id: str, request: Request) -> JSONRes
     if job.get("client_name") is not None and job["client_name"] != client_name:
         raise HTTPException(status_code=403, detail="Access denied")
     mark_delivered(job_id)
+    # Session ephemeral retention: dismiss means "I don't want it" — purge
+    # session jobs like a delivery. Only completed rows can be dismissed from
+    # the recovery banner; the status guard keeps a hypothetical failed-row
+    # dismiss from deleting a retryable WAV.
+    if job.get("status") == "completed" and job.get("source") in SESSION_SOURCES:
+        delete_job(job_id)
     return JSONResponse(status_code=200, content={"job_id": job_id})
 
 

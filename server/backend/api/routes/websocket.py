@@ -39,6 +39,9 @@ from server.database.job_repository import (
     create_job as _create_job,
 )
 from server.database.job_repository import (
+    delete_job as _delete_job,
+)
+from server.database.job_repository import (
     mark_delivered as _mark_delivered,
 )
 from server.database.job_repository import (
@@ -641,8 +644,12 @@ class TranscriptionSession:
             # Auto-add to the Audio Notebook (GH #199). Runs AFTER the result is
             # persisted and delivered: the notebook entry is a derived artifact,
             # so a failure here must never cost the user their transcript. Runs
-            # in a thread, since the MP3 encode would otherwise block the event loop.
+            # in a thread, since the MP3 encode would otherwise block the event
+            # loop. _autoadd_ok gates the ephemeral purge below — a failed
+            # notebook save keeps row + WAV so nothing is lost.
+            _autoadd_ok = True
             if self.auto_add_to_notebook:
+                _autoadd_ok = False
                 try:
                     recording_id = await asyncio.to_thread(
                         _save_session_to_notebook,
@@ -653,6 +660,7 @@ class TranscriptionSession:
                         diarization_segments=dispatched.speaker_segments,
                     )
                     if recording_id:
+                        _autoadd_ok = True
                         logger.info("Saved session recording to notebook: id=%s", recording_id)
                     else:
                         _warn_notebook_autoadd_failed(
@@ -662,6 +670,29 @@ class TranscriptionSession:
                     logger.error("Failed to add recording to notebook: %s", nb_err, exc_info=True)
                     _warn_notebook_autoadd_failed(
                         f"Could not save the recording to the Audio Notebook: {nb_err}"
+                    )
+
+            # Session ephemeral retention (2026-08-09 spec): a session job whose
+            # result reached the client keeps no server-side trace — purge the
+            # row and its WAV. Fires only on confirmed inline delivery; the
+            # result_ready reference path purges inside GET /result/{job_id}
+            # instead, and a failed notebook auto-add cancels the purge (row +
+            # WAV stay as the recovery copy). Guarded so a purge error can
+            # never surface as a post-delivery "transcription failed" banner.
+            if (
+                self._current_job_id
+                and _result_persisted
+                and not _sent_as_reference
+                and _final_delivered
+                and _autoadd_ok
+            ):
+                try:
+                    _delete_job(self._current_job_id)
+                except Exception as _purge_err:
+                    logger.warning(
+                        "Post-delivery purge failed for job %s: %s",
+                        self._current_job_id,
+                        _purge_err,
                     )
 
             # Fire outgoing webhook (separate guard so failures don't

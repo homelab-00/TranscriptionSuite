@@ -6,6 +6,7 @@ vi.mock('../api/client', () => ({
     importAndTranscribe: vi.fn(),
     uploadAndTranscribe: vi.fn(),
     getAdminStatus: vi.fn(),
+    fetchTranscriptionResult: vi.fn(),
     cancelTranscription: vi.fn().mockResolvedValue(undefined),
   },
 }));
@@ -52,7 +53,6 @@ import { toast } from 'sonner';
 import { apiClient } from '../api/client';
 import {
   useImportQueueStore,
-  resolveDuplicateChoice,
   selectPendingCount,
   selectCompletedCount,
   selectErrorCount,
@@ -64,8 +64,6 @@ import {
 import type { UnifiedImportJob } from './importQueueStore';
 import { useDedupChoiceStore } from './dedupChoiceStore';
 import { getConfig } from '../config/store';
-import type { DedupMatch } from '../api/types';
-import type { DedupChoice } from '../../components/import/DedupPromptModal';
 
 function resetStore() {
   useImportQueueStore.setState({
@@ -111,6 +109,11 @@ function resetStore() {
 
 function getState() {
   return useImportQueueStore.getState();
+}
+
+/** Minimal Response stand-in for the /result poll (session ephemeral retention). */
+function httpResult(status: number, body?: unknown): Response {
+  return { status, json: async () => body } as unknown as Response;
 }
 
 function makeJob(overrides: Partial<UnifiedImportJob> = {}): UnifiedImportJob {
@@ -565,9 +568,13 @@ describe('importQueueStore', () => {
     }
 
     function mockPollResult(result: Record<string, unknown>) {
-      vi.mocked(apiClient.getAdminStatus).mockResolvedValue({
-        models: { job_tracker: { is_busy: false, result: { job_id: 'server-job-1', ...result } } },
-      } as never);
+      vi.mocked(apiClient.fetchTranscriptionResult).mockResolvedValue(
+        httpResult(200, {
+          job_id: 'server-job-1',
+          status: 'completed',
+          result: { job_id: 'server-job-1', ...result },
+        }),
+      );
     }
 
     async function runQueue() {
@@ -826,78 +833,141 @@ describe('importQueueStore', () => {
     });
   });
 
-  // ── resolveDuplicateChoice (GH-120 — Folder Watch duplicate policy) ────
+  // ── Session ephemeral retention (2026-08-09 spec) ──────────────────────
   //
-  // The dedup gate must NOT block unattended Folder Watch (session-auto) jobs
-  // on the interactive modal. session-auto jobs resolve duplicates per the
-  // configured folderWatch.duplicatePolicy; manual (session-normal) jobs always
-  // prompt. Default policy is 'create_new' so batch runs unattended out of the
-  // box without ever silently dropping a file (data-loss invariant).
+  // The server no longer sends dedup_matches and the client must never
+  // prompt. Session results are fetched from GET /result/{job_id} instead of
+  // the in-memory job tracker: 202 keep polling, 200 done, 410 failed with
+  // the error detail, 404 job lost.
 
-  describe('resolveDuplicateChoice (GH-120 — Folder Watch duplicate policy)', () => {
-    const MATCHES: DedupMatch[] = [
-      {
-        recording_id: 'c3b4c22a',
-        name: 'prior.mp3',
-        created_at: '2026-05-07T00:00:00Z',
-        source: 'transcription_job',
-      },
-    ];
-    let requestChoiceSpy: Mock<(matches: DedupMatch[]) => Promise<DedupChoice>>;
+  describe('session imports never prompt for duplicates', () => {
+    const sessionTranscription = {
+      text: 'Hello world.',
+      segments: [{ text: 'Hello world.', start: 0, end: 1.5 }],
+      words: [],
+      language_probability: 0.99,
+      duration: 1.5,
+      num_speakers: 0,
+    };
+
+    let writeText: Mock;
 
     beforeEach(() => {
-      // Override the dedup-choice store's interactive resolver so we can assert
-      // whether the modal would have been raised.
-      requestChoiceSpy = vi.fn(
-        (_m: DedupMatch[]): Promise<DedupChoice> => Promise.resolve('create_new'),
-      );
-      useDedupChoiceStore.setState({ requestChoice: requestChoiceSpy });
+      writeText = vi.fn().mockResolvedValue(undefined);
+      (window as any).electronAPI = { fileIO: { writeText } };
       vi.mocked(getConfig).mockReset();
+      vi.mocked(getConfig).mockImplementation(
+        (key: string) =>
+          Promise.resolve(key === 'sessionImport.outputFormat' ? 'txt' : undefined) as never,
+      );
     });
 
-    it('session-auto with no policy set defaults to create_new WITHOUT prompting (the GH-120 fix)', async () => {
-      vi.mocked(getConfig).mockResolvedValue(undefined);
-      const choice = await resolveDuplicateChoice('session-auto', MATCHES);
-      expect(choice).toBe('create_new');
+    afterEach(() => {
+      delete (window as any).electronAPI;
+    });
+
+    it('ignores a legacy dedup_matches field and completes the job without a prompt', async () => {
+      const requestChoiceSpy = vi.fn();
+      useDedupChoiceStore.setState({ requestChoice: requestChoiceSpy as never });
+      // A LEGACY server may still include dedup_matches — the client must
+      // silently ignore it and proceed as a normal new entry.
+      vi.mocked(apiClient.importAndTranscribe).mockResolvedValue({
+        job_id: 'server-job-1',
+        dedup_matches: [{ recording_id: 'old', name: 'old.wav', created_at: '2026-01-01' }],
+      } as never);
+      vi.mocked(apiClient.fetchTranscriptionResult).mockResolvedValue(
+        httpResult(200, {
+          job_id: 'server-job-1',
+          status: 'completed',
+          result: {
+            job_id: 'server-job-1',
+            transcription: sessionTranscription,
+            diarization: { requested: false, performed: false, reason: null },
+          },
+        }),
+      );
+
+      getState().updateSessionConfig({ outputDir: '/out' });
+      getState().addFiles([new File(['x'], 'dup.wav')], 'session-normal');
+      await vi.advanceTimersByTimeAsync(10_000);
+
       expect(requestChoiceSpy).not.toHaveBeenCalled();
+      expect(getState().jobs[0].status).toBe('success');
+    });
+  });
+
+  describe('pollForSessionResult HTTP outcomes', () => {
+    const sessionTranscription = {
+      text: 'Hello world.',
+      segments: [{ text: 'Hello world.', start: 0, end: 1.5 }],
+      words: [],
+      language_probability: 0.99,
+      duration: 1.5,
+      num_speakers: 0,
+    };
+
+    let writeText: Mock;
+
+    beforeEach(() => {
+      writeText = vi.fn().mockResolvedValue(undefined);
+      (window as any).electronAPI = { fileIO: { writeText } };
+      vi.mocked(getConfig).mockReset();
+      vi.mocked(getConfig).mockImplementation(
+        (key: string) =>
+          Promise.resolve(key === 'sessionImport.outputFormat' ? 'txt' : undefined) as never,
+      );
+      vi.mocked(apiClient.importAndTranscribe).mockResolvedValue({
+        job_id: 'server-job-1',
+      } as never);
     });
 
-    it("session-auto with policy 'create_new' resolves create_new without prompting", async () => {
-      vi.mocked(getConfig).mockResolvedValue('create_new');
-      const choice = await resolveDuplicateChoice('session-auto', MATCHES);
-      expect(choice).toBe('create_new');
-      expect(requestChoiceSpy).not.toHaveBeenCalled();
+    afterEach(() => {
+      delete (window as any).electronAPI;
     });
 
-    it("session-auto with policy 'ask' prompts the user via the interactive modal", async () => {
-      vi.mocked(getConfig).mockResolvedValue('ask');
-      const choice = await resolveDuplicateChoice('session-auto', MATCHES);
-      expect(requestChoiceSpy).toHaveBeenCalledWith(MATCHES);
-      expect(choice).toBe('create_new'); // whatever the modal returned
+    it('surfaces the 410 error detail as the job error', async () => {
+      vi.mocked(apiClient.fetchTranscriptionResult).mockResolvedValue(
+        httpResult(410, { detail: 'CUDA out of memory' }),
+      );
+
+      getState().addFiles([new File(['x'], 'oom.wav')], 'session-normal');
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(getState().jobs[0].status).toBe('error');
+      expect(getState().jobs[0].error).toContain('CUDA out of memory');
     });
 
-    it('session-auto with an unknown/legacy policy value falls back to create_new (never re-blocks, never skips)', async () => {
-      // e.g. a 'skip' value persisted by an earlier build, or a corrupt manual edit.
-      // Must NOT fall through to the modal (that would re-introduce GH-120) and must
-      // NOT skip transcription (that would risk data loss).
-      vi.mocked(getConfig).mockResolvedValue('skip' as never);
-      const choice = await resolveDuplicateChoice('session-auto', MATCHES);
-      expect(choice).toBe('create_new');
-      expect(requestChoiceSpy).not.toHaveBeenCalled();
+    it('treats 404 as a lost job', async () => {
+      vi.mocked(apiClient.fetchTranscriptionResult).mockResolvedValue(httpResult(404));
+
+      getState().addFiles([new File(['x'], 'lost.wav')], 'session-normal');
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(getState().jobs[0].status).toBe('error');
+      expect(getState().jobs[0].error).toContain('lost');
     });
 
-    it('session-auto defaults to create_new when the config read throws (no error cascade)', async () => {
-      vi.mocked(getConfig).mockRejectedValue(new Error('IPC unavailable'));
-      const choice = await resolveDuplicateChoice('session-auto', MATCHES);
-      expect(choice).toBe('create_new');
-      expect(requestChoiceSpy).not.toHaveBeenCalled();
-    });
+    it('keeps polling on 202 then resolves on 200', async () => {
+      vi.mocked(apiClient.fetchTranscriptionResult)
+        .mockResolvedValueOnce(httpResult(202, { status: 'processing', job_id: 'server-job-1' }))
+        .mockResolvedValue(
+          httpResult(200, {
+            job_id: 'server-job-1',
+            status: 'completed',
+            result: {
+              job_id: 'server-job-1',
+              transcription: sessionTranscription,
+              diarization: { requested: false, performed: false, reason: null },
+            },
+          }),
+        );
 
-    it('session-normal (manual import) always prompts, ignoring the folder-watch policy', async () => {
-      vi.mocked(getConfig).mockResolvedValue('create_new');
-      const choice = await resolveDuplicateChoice('session-normal', MATCHES);
-      expect(requestChoiceSpy).toHaveBeenCalledWith(MATCHES);
-      expect(choice).toBe('create_new');
+      getState().updateSessionConfig({ outputDir: '/out' });
+      getState().addFiles([new File(['x'], 'slow.wav')], 'session-normal');
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      expect(getState().jobs[0].status).toBe('success');
+      expect(writeText).toHaveBeenCalled();
     });
   });
 

@@ -36,12 +36,12 @@
 | POST | `/api/transcribe/audio` | user | Full transcription (text + segments + words + optional diarization); supports `multitrack`, `profile_id`; persists before delivery |
 | POST | `/api/transcribe/quick` | user | Fast text-only transcription (Record view) |
 | POST | `/api/transcribe/cancel` | user | Cancel the active job |
-| POST | `/api/transcribe/import` | user | Background transcribe (no DB/notebook); 202 + `job_id` + inline `dedup_matches`; supports `multitrack` |
+| POST | `/api/transcribe/import` | user | Background transcribe (no notebook entry); 202 + full `job_id`; result persisted to the durability row — poll `GET /api/transcribe/result/{job_id}` (202/410/200; a 200 purges the row — session ephemeral retention); supports `multitrack` |
 | POST | `/api/transcribe/import/dedup-check` | user | **NEW** — look up prior jobs/recordings sharing an audio hash (no side effects) |
-| GET | `/api/transcribe/result/{job_id}` | user | **NEW** — fetch saved result (200 done / 202 processing / 404 / 410 failed); marks delivered; ownership check |
+| GET | `/api/transcribe/result/{job_id}` | user | **NEW** — fetch saved result (200 done / 202 processing / 404 / 410 failed); marks delivered; ownership check. Session sources (`websocket`, `file_import`): 200 also purges row + audio (repeat fetches 404); 410 on a failed `file_import` purges the row |
 | POST | `/api/transcribe/retry/{job_id}` | user | **NEW** — re-transcribe a failed job from preserved audio |
 | GET | `/api/transcribe/recent` | user | **NEW** — up to 5 recently completed-but-undelivered jobs (post-restart recovery banner) |
-| POST | `/api/transcribe/result/{job_id}/dismiss` | user | **NEW** — mark a result delivered without transferring payload |
+| POST | `/api/transcribe/result/{job_id}/dismiss` | user | **NEW** — mark a result delivered without transferring payload; purges completed session-source rows |
 | GET | `/api/transcribe/languages` | user | Supported languages for active backend, `auto_detect`, `supports_translation` |
 
 ### Audio Notebook (`/api/notebook`)

@@ -213,16 +213,10 @@ export interface UploadResponse {
 
 /** Returned by POST /api/notebook/transcribe/upload (202 Accepted) */
 export interface TranscriptionAccepted {
+  /** FULL job id — session imports poll GET /api/transcribe/result/{job_id}
+   *  with it (session ephemeral retention, 2026-08-09 spec). The old
+   *  dedup_matches field is gone: session imports never dedup any more. */
   job_id: string;
-  /**
-   * Issue #104 / Story 2.4 — populated by /api/transcribe/import when a
-   * prior job's audio_hash matches this upload. Empty list = J1 happy path
-   * (no duplicate). Notebook upload (`/api/notebook/transcribe/upload`)
-   * doesn't currently populate this field; it's reserved for future cross-
-   * flow dedup. Default-empty keeps the response shape backwards-compatible
-   * for callers that ignore it.
-   */
-  dedup_matches?: DedupMatch[];
 }
 
 /** A prior item that shares this upload's audio_hash or normalized_audio_hash.

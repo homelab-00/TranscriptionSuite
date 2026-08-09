@@ -119,6 +119,7 @@ def _patch_transcription(monkeypatch, tmp_path, *, result: _FakeResult | None = 
 
     monkeypatch.setattr(ws_mod, "_save_result", MagicMock())
     monkeypatch.setattr(ws_mod, "_mark_delivered", MagicMock())
+    monkeypatch.setattr(ws_mod, "_delete_job", MagicMock())
     monkeypatch.setattr(ws_mod, "_mark_failed", MagicMock())
     monkeypatch.setattr(ws_mod, "_set_audio_path", MagicMock())
 

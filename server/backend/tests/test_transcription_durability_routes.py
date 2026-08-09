@@ -206,6 +206,87 @@ class TestGetTranscriptionResult:
             asyncio.run(transcription.get_transcription_result("job-corrupt", _request()))
         assert exc.value.status_code == 500
 
+    # ── Session ephemeral retention (2026-08-09 spec) ────────────────────────
+
+    def test_200_purges_session_source_job(self, repo, monkeypatch):
+        purged: list[str] = []
+        monkeypatch.setattr(
+            repo,
+            "get_job",
+            lambda _: {
+                "status": "completed",
+                "client_name": None,
+                "source": "file_import",
+                "result_json": '{"text": "hi"}',
+            },
+        )
+        monkeypatch.setattr(repo, "delete_job", lambda jid: purged.append(jid))
+
+        resp = asyncio.run(transcription.get_transcription_result("job-imp", _request()))
+
+        assert resp.status_code == 200
+        assert purged == ["job-imp"]
+
+    def test_200_keeps_non_session_job(self, repo, monkeypatch):
+        purged: list[str] = []
+        monkeypatch.setattr(
+            repo,
+            "get_job",
+            lambda _: {
+                "status": "completed",
+                "client_name": None,
+                "source": "audio_upload",
+                "result_json": '{"text": "hi"}',
+            },
+        )
+        monkeypatch.setattr(repo, "delete_job", lambda jid: purged.append(jid))
+
+        resp = asyncio.run(transcription.get_transcription_result("job-up", _request()))
+
+        assert resp.status_code == 200
+        assert purged == []
+
+    def test_410_purges_failed_import_without_audio(self, repo, monkeypatch):
+        purged: list[str] = []
+        monkeypatch.setattr(
+            repo,
+            "get_job",
+            lambda _: {
+                "status": "failed",
+                "client_name": None,
+                "source": "file_import",
+                "audio_path": None,
+                "error_message": "boom",
+            },
+        )
+        monkeypatch.setattr(repo, "delete_job", lambda jid: purged.append(jid))
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(transcription.get_transcription_result("job-if", _request()))
+
+        assert exc.value.status_code == 410
+        assert purged == ["job-if"]
+
+    def test_410_keeps_failed_websocket_job(self, repo, monkeypatch):
+        purged: list[str] = []
+        monkeypatch.setattr(
+            repo,
+            "get_job",
+            lambda _: {
+                "status": "failed",
+                "client_name": None,
+                "source": "websocket",
+                "audio_path": "/data/recordings/x.wav",
+                "error_message": "boom",
+            },
+        )
+        monkeypatch.setattr(repo, "delete_job", lambda jid: purged.append(jid))
+
+        with pytest.raises(HTTPException):
+            asyncio.run(transcription.get_transcription_result("job-ws", _request()))
+
+        assert purged == []
+
 
 # ── POST /api/transcribe/retry/{job_id} ──────────────────────────────────────
 
@@ -457,6 +538,36 @@ class TestDismissTranscriptionResult:
         resp = asyncio.run(transcription.dismiss_transcription_result("job-null", _request()))
 
         assert resp.status_code == 200
+
+    # ── Session ephemeral retention (2026-08-09 spec) ────────────────────────
+
+    def test_dismiss_purges_completed_session_job(self, repo, monkeypatch):
+        purged: list[str] = []
+        monkeypatch.setattr(
+            repo,
+            "get_job",
+            lambda _: {"status": "completed", "client_name": None, "source": "websocket"},
+        )
+        monkeypatch.setattr(repo, "delete_job", lambda jid: purged.append(jid))
+
+        resp = asyncio.run(transcription.dismiss_transcription_result("job-d", _request()))
+
+        assert resp.status_code == 200
+        assert purged == ["job-d"]
+
+    def test_dismiss_keeps_non_session_job(self, repo, monkeypatch):
+        purged: list[str] = []
+        monkeypatch.setattr(
+            repo,
+            "get_job",
+            lambda _: {"status": "completed", "client_name": None, "source": "audio_upload"},
+        )
+        monkeypatch.setattr(repo, "delete_job", lambda jid: purged.append(jid))
+
+        resp = asyncio.run(transcription.dismiss_transcription_result("job-d2", _request()))
+
+        assert resp.status_code == 200
+        assert purged == []
 
 
 class TestTranscribeDecodeErrorRouting:
