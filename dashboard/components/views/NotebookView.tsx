@@ -52,7 +52,8 @@ import { useNotebookWatcher } from '../../src/hooks/useNotebookWatcher';
 import { apiClient } from '../../src/api/client';
 import type { AdminStatus, Recording } from '../../src/api/types';
 import { jobTrackerFromAdminStatus } from '../../src/api/types';
-import { describeJobProgress } from '../../src/services/jobProgress';
+import { describeJobProgress, summarizeJobProgress } from '../../src/services/jobProgress';
+import { JobProgressBlock } from '../ui/JobProgressBlock';
 import { diarizeRecordingAndWait } from '../../src/services/retroDiarize';
 import { supportsExplicitWordTimestampToggle as supportsExplicitWordTimestampToggleForModel } from '../../src/utils/transcriptionBackend';
 import {
@@ -1911,21 +1912,26 @@ const ImportTab = ({
     }
   };
 
+  // GH-211: progress derived from the parent's polled prop. Do NOT call
+  // useJobProgress here — it would open a second admin poll that bypasses
+  // the parent's 403 circuit breaker.
+  const activeTracker = jobTrackerFromAdminStatus(adminStatus);
+  const progressDetails = summarizeJobProgress(
+    activeTracker?.progress ?? null,
+    activeTracker?.started_at ?? null,
+    Date.now() / 1000,
+  );
+
   const statusLabel = (job: UnifiedImportJob) => {
     switch (job.status) {
       case 'pending':
         return 'Queued';
-      case 'processing': {
-        // GH-211: phase/position label computed from the parent's polled prop.
-        // Do NOT call useJobProgress here — it would open a second admin poll
-        // that bypasses the parent's 403 circuit breaker.
-        const tracker = jobTrackerFromAdminStatus(adminStatus);
+      case 'processing':
         return describeJobProgress(
-          tracker?.progress ?? null,
-          tracker?.started_at ?? null,
+          activeTracker?.progress ?? null,
+          activeTracker?.started_at ?? null,
           Date.now() / 1000,
         );
-      }
       case 'writing':
         return 'Saving file...';
       case 'success': {
@@ -2160,41 +2166,65 @@ const ImportTab = ({
           }
         >
           <div className="max-h-60 space-y-2 overflow-y-auto">
-            {jobs.map((job) => (
-              <div
-                key={job.id}
-                className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 transition-colors hover:bg-white/8"
-              >
-                {statusIcon(job)}
-                {(job.type === 'notebook-auto' || job.type === 'session-auto') && (
-                  <span title="Auto-watch">
-                    <Eye size={14} className="shrink-0 text-slate-500" />
+            {jobs.map((job) =>
+              job.status === 'processing' ? (
+                /* Expanded rendering for the one job being transcribed —
+                   same JobProgressBlock as the Session import queue. */
+                <JobProgressBlock
+                  key={job.id}
+                  details={progressDetails}
+                  leading={
+                    <>
+                      {statusIcon(job)}
+                      {(job.type === 'notebook-auto' || job.type === 'session-auto') && (
+                        <span title="Auto-watch">
+                          <Eye size={14} className="shrink-0 text-slate-500" />
+                        </span>
+                      )}
+                      <span className="flex-1 truncate text-sm font-medium text-white">
+                        {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
+                      </span>
+                    </>
+                  }
+                />
+              ) : (
+                <div
+                  key={job.id}
+                  className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2 transition-colors hover:bg-white/8"
+                >
+                  {statusIcon(job)}
+                  {(job.type === 'notebook-auto' || job.type === 'session-auto') && (
+                    <span title="Auto-watch">
+                      <Eye size={14} className="shrink-0 text-slate-500" />
+                    </span>
+                  )}
+                  <span className="flex-1 truncate text-sm text-white">
+                    {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
                   </span>
-                )}
-                <span className="flex-1 truncate text-sm text-white">
-                  {typeof job.file === 'string' ? job.file.split('/').pop() : job.file.name}
-                </span>
-                <span className="text-xs whitespace-nowrap text-slate-400">{statusLabel(job)}</span>
-                {job.status === 'error' && (
-                  <button
-                    onClick={() => retryJob(job.id)}
-                    className="hover:text-accent-cyan p-1 text-slate-400 transition-colors"
-                    title="Retry"
-                  >
-                    <RotateCcw size={18} />
-                  </button>
-                )}
-                {job.status !== 'processing' && job.status !== 'writing' && (
-                  <button
-                    onClick={() => removeJob(job.id)}
-                    className="p-1 text-slate-500 transition-colors hover:text-red-400"
-                    title="Remove"
-                  >
-                    <XCircle size={18} />
-                  </button>
-                )}
-              </div>
-            ))}
+                  <span className="text-xs whitespace-nowrap text-slate-400">
+                    {statusLabel(job)}
+                  </span>
+                  {job.status === 'error' && (
+                    <button
+                      onClick={() => retryJob(job.id)}
+                      className="hover:text-accent-cyan p-1 text-slate-400 transition-colors"
+                      title="Retry"
+                    >
+                      <RotateCcw size={18} />
+                    </button>
+                  )}
+                  {job.status !== 'writing' && (
+                    <button
+                      onClick={() => removeJob(job.id)}
+                      className="p-1 text-slate-500 transition-colors hover:text-red-400"
+                      title="Remove"
+                    >
+                      <XCircle size={18} />
+                    </button>
+                  )}
+                </div>
+              ),
+            )}
           </div>
         </GlassCard>
       )}

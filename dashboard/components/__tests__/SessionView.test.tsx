@@ -292,7 +292,10 @@ describe('[P2] SessionView', () => {
     mockTranscription.status = 'processing';
     render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
 
-    expect(screen.getByText('Processing...')).toBeDefined();
+    // JobProgressBlock renders the phase in both the header row and the
+    // meta row, so match on all occurrences.
+    expect(screen.getByText('Processing recording')).toBeDefined();
+    expect(screen.getAllByText('Processing...').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders transcription result when complete', () => {
