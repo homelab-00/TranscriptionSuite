@@ -1,11 +1,18 @@
 """
-Audio cleanup module for transcription durability (Wave 2).
+Audio cleanup module for transcription durability (Wave 2) and session
+ephemeral retention (2026-08-09 spec).
 
-Deletes raw audio files for completed+delivered transcription jobs that are
-older than the configured retention window. The job DB row is always kept —
-it records that a transcription happened. Only the audio file is removed.
+For non-session jobs (e.g. source='audio_upload'): deletes only the raw audio
+file of completed+delivered jobs older than the retention window — the DB row
+is kept as a record that a transcription happened.
 
-Never deletes audio for failed or undelivered jobs.
+For session-source jobs ('websocket', 'file_import'): the backstop passes also
+delete the DB ROW — the Session tab is ephemeral, and rows here only survive
+their immediate post-delivery purge after a crash. Aged failed file_import
+rows (which never have audio, so nothing is retryable) are purged too.
+
+Never deletes audio for failed or undelivered jobs, and never touches failed
+mic ('websocket') rows — their WAV is what makes /retry possible.
 """
 
 import asyncio
@@ -69,22 +76,26 @@ async def cleanup_old_recordings(recordings_dir: str, max_age_days: int) -> None
         )
         return
 
-    from .job_repository import get_jobs_for_cleanup
+    from .job_repository import (
+        delete_job,
+        get_jobs_for_cleanup,
+        get_purgeable_session_jobs,
+        get_stale_failed_imports,
+    )
 
+    deleted = 0
+    skipped = 0
     try:
         jobs = await asyncio.to_thread(get_jobs_for_cleanup, max_age_days)
     except Exception as exc:
         logger.error("Audio cleanup: failed to query expired jobs: %s", exc)
-        return
+        jobs = []
 
     if not jobs:
         logger.debug(
             "Audio cleanup: no expired recordings found (older than %d days)", max_age_days
         )
-        return
 
-    deleted = 0
-    skipped = 0
     for job in jobs:
         audio_path = job.get("audio_path")
         if not audio_path:
@@ -97,10 +108,53 @@ async def cleanup_old_recordings(recordings_dir: str, max_age_days: int) -> None
             logger.warning("Failed to delete audio file %s: %s", audio_path, exc)
             skipped += 1
 
+    # Session ephemeral retention backstops. Immediate purge normally removes
+    # session rows at delivery time; these passes only catch crash-window
+    # stragglers and failed imports whose client never polled the error.
+    purged_rows = 0
+    try:
+        stragglers = await asyncio.to_thread(get_purgeable_session_jobs, max_age_days)
+        stale_imports = await asyncio.to_thread(get_stale_failed_imports, max_age_days)
+        for job in [*stragglers, *stale_imports]:
+            await asyncio.to_thread(delete_job, job["id"])
+            purged_rows += 1
+    except Exception:
+        logger.exception("Audio cleanup: session-row backstop purge failed")
+
     logger.info(
-        "Audio cleanup complete: %d file(s) deleted, %d skipped (retention=%d days, dir=%s)",
+        "Audio cleanup complete: %d file(s) deleted, %d skipped, %d session row(s) purged "
+        "(retention=%d days, dir=%s)",
         deleted,
         skipped,
+        purged_rows,
         max_age_days,
         recordings_dir,
     )
+
+
+async def purge_legacy_session_rows() -> None:
+    """One-time startup migration for session ephemeral retention.
+
+    Purges rows accumulated under the old lifecycle: bare /import dedup
+    anchors (the rows behind the duplicate dialog) and already-delivered
+    session rows. Anything failed or undelivered with content is untouched.
+    Safe to run every startup — once drained it finds nothing.
+    """
+    from .job_repository import delete_job, get_legacy_session_rows
+
+    total = 0
+    while True:
+        try:
+            rows = await asyncio.to_thread(get_legacy_session_rows)
+        except Exception:
+            logger.exception("Legacy session-row purge: query failed")
+            return
+        if not rows:
+            break
+        for row in rows:
+            await asyncio.to_thread(delete_job, row["id"])
+        total += len(rows)
+        if len(rows) < 1000:  # last page
+            break
+    if total:
+        logger.info("Legacy session-row purge: %d row(s) removed", total)

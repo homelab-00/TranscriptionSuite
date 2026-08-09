@@ -436,6 +436,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await recover_orphaned_jobs(_orphan_timeout)
     _log_time("orphan job recovery complete")
 
+    # One-time legacy purge for session ephemeral retention (2026-08-09 spec).
+    # Runs before any request is served, so no live job can be caught.
+    from server.database.audio_cleanup import purge_legacy_session_rows
+
+    await purge_legacy_session_rows()
+    _log_time("legacy session-row purge complete")
+
     # Schedule backup check in background (non-blocking)
     backup_config = config.config.get("backup", {})
     backup_enabled = backup_config.get("enabled", True)

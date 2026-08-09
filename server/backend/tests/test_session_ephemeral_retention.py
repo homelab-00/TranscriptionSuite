@@ -21,7 +21,9 @@ repo = importlib.import_module("server.database.job_repository")
 def db(tmp_path, monkeypatch):
     """Real SQLite DB with the transcription_jobs columns this feature touches."""
     db_path = tmp_path / "jobs.db"
-    conn = sqlite3.connect(db_path)
+    # check_same_thread=False: cleanup_old_recordings runs repo queries via
+    # asyncio.to_thread; production get_connection opens per-call connections.
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute(
         """
@@ -273,3 +275,128 @@ class TestGetLegacySessionRows:
         ids = {j["id"] for j in repo.get_legacy_session_rows()}
 
         assert ids == {"anchor-proc", "anchor-failed", "ws-done", "imp-done"}
+
+
+class TestCleanupOldRecordingsPurgesRows:
+    @staticmethod
+    def _run(max_age_days: int = 7) -> None:
+        import asyncio
+
+        from server.database import audio_cleanup
+
+        asyncio.run(audio_cleanup.cleanup_old_recordings("/data/recordings", max_age_days))
+
+    def test_purges_aged_delivered_session_rows(self, db, tmp_path):
+        wav = tmp_path / "ws.wav"
+        wav.write_bytes(b"RIFF")
+        _insert(
+            db,
+            "ws-old",
+            source="websocket",
+            status="completed",
+            delivered=1,
+            audio_path=str(wav),
+            completed_at="2020-01-01T00:00:00+00:00",
+        )
+
+        self._run()
+
+        assert _row(db, "ws-old") is None
+        assert not wav.exists()
+
+    def test_purges_aged_failed_imports(self, db):
+        _insert(
+            db,
+            "imp-fail-old",
+            source="file_import",
+            status="failed",
+            created_at="2020-01-01 00:00:00",
+        )
+
+        self._run()
+
+        assert _row(db, "imp-fail-old") is None
+
+    def test_keeps_non_session_rows_deletes_only_their_audio(self, db, tmp_path):
+        wav = tmp_path / "up.wav"
+        wav.write_bytes(b"RIFF")
+        _insert(
+            db,
+            "upload-old",
+            source="audio_upload",
+            status="completed",
+            delivered=1,
+            audio_path=str(wav),
+            completed_at="2020-01-01T00:00:00+00:00",
+        )
+
+        self._run()
+
+        assert _row(db, "upload-old") is not None  # row kept (status quo)
+        assert not wav.exists()  # WAV still garbage-collected
+
+    def test_keeps_failed_websocket_rows(self, db, tmp_path):
+        wav = tmp_path / "retryable.wav"
+        wav.write_bytes(b"RIFF")
+        _insert(
+            db,
+            "ws-failed",
+            source="websocket",
+            status="failed",
+            audio_path=str(wav),
+            created_at="2020-01-01 00:00:00",
+        )
+
+        self._run()
+
+        assert _row(db, "ws-failed") is not None
+        assert wav.exists()
+
+    def test_retention_zero_skips_everything(self, db):
+        _insert(
+            db,
+            "ws-old",
+            source="websocket",
+            status="completed",
+            delivered=1,
+            completed_at="2020-01-01T00:00:00+00:00",
+        )
+
+        self._run(max_age_days=0)
+
+        assert _row(db, "ws-old") is not None
+
+
+class TestPurgeLegacySessionRows:
+    def test_purges_anchors_and_delivered_rows_keeps_the_rest(self, db, tmp_path):
+        import asyncio
+
+        from server.database import audio_cleanup
+
+        wav = tmp_path / "done.wav"
+        wav.write_bytes(b"RIFF")
+        _insert(db, "anchor", source="file_import", status="failed")
+        _insert(
+            db,
+            "ws-done",
+            source="websocket",
+            status="completed",
+            delivered=1,
+            result_text="x",
+            audio_path=str(wav),
+        )
+        _insert(
+            db,
+            "ws-undelivered",
+            source="websocket",
+            status="completed",
+            delivered=0,
+            result_text="precious",
+        )
+
+        asyncio.run(audio_cleanup.purge_legacy_session_rows())
+
+        assert _row(db, "anchor") is None
+        assert _row(db, "ws-done") is None
+        assert not wav.exists()
+        assert _row(db, "ws-undelivered") is not None
