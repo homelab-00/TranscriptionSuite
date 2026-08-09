@@ -14,7 +14,6 @@ import type {
   FileImportJobResult,
   JobTrackerResult,
   UploadResponse,
-  DedupMatch,
 } from '../api/types';
 import {
   resolveTranscriptionOutputs,
@@ -22,9 +21,6 @@ import {
 } from '../services/transcriptionFormatters';
 import { supportsAutoDetect } from '../services/modelCapabilities';
 import { getConfig } from '../config/store';
-import { useDedupChoiceStore } from './dedupChoiceStore';
-import { useAriaAnnouncerStore } from './ariaAnnouncerStore';
-import type { DedupChoice } from '../../components/import/DedupPromptModal';
 import {
   notifyJobProcessing,
   notifyJobSuccess,
@@ -250,77 +246,49 @@ export function describePlannedFormat(
   }
 }
 
-// ─── Duplicate resolution (GH-120) ───────────────────────────────────────────
-
-/** How Folder Watch (session-auto) jobs resolve a server-detected duplicate
- *  without blocking the import queue on the interactive modal.
- *
- *  Only two values are offered. A 'skip'/use-existing policy is deliberately
- *  NOT supported: a session-import dedup match is a bare audio-hash anchor with
- *  no retrievable transcript in the DB (the /import worker writes results to the
- *  in-memory job tracker, never to the durability row — see _run_file_import in
- *  server/backend/api/routes/transcription.py), so auto-skipping could leave a
- *  file with no transcript and violate the data-loss invariant. Unattended jobs
- *  therefore only ever create a new entry or ask. */
-export type DuplicatePolicy = 'ask' | 'create_new';
-
-/** Default when `folderWatch.duplicatePolicy` is unset, unknown, or unreadable:
- *  create a new entry so an unattended batch never stalls AND never silently
- *  drops a file (the data-loss invariant). */
-const DEFAULT_DUPLICATE_POLICY: DuplicatePolicy = 'create_new';
-
-/**
- * Decide how to resolve a server-detected duplicate for a session import.
- *
- * Manual imports (`session-normal`) always prompt the user via the interactive
- * DedupPromptModal. Folder Watch imports (`session-auto`) follow the configured
- * `folderWatch.duplicatePolicy` so a batch runs unattended (GH-120). Only the
- * explicit `'ask'` policy falls back to the modal; every other case — the
- * `'create_new'` default, an unknown/legacy stored value (e.g. a removed
- * `'skip'`), or an IPC read failure — creates a new entry, so a corrupt config
- * can never re-block the queue or skip a file.
- */
-export async function resolveDuplicateChoice(
-  jobType: ImportJobType,
-  matches: DedupMatch[],
-): Promise<DedupChoice> {
-  if (jobType === 'session-auto') {
-    const policy =
-      (await getConfig<DuplicatePolicy>('folderWatch.duplicatePolicy').catch(() => undefined)) ??
-      DEFAULT_DUPLICATE_POLICY;
-    if (policy !== 'ask') return 'create_new';
-    // policy === 'ask' → fall through to the interactive prompt below.
-  }
-  return useDedupChoiceStore.getState().requestChoice(matches);
-}
-
 const POLL_INTERVAL_MS = 5_000;
 const MAX_POLLS = (24 * 60 * 60 * 1000) / POLL_INTERVAL_MS; // 24 hours
 
 // ─── Polling ─────────────────────────────────────────────────────────────────
 
+// Session imports poll the durability row directly (GET /api/transcribe/result/
+// {job_id}): 202 processing, 200 completed (the server purges the row after
+// this response — session ephemeral retention), 410 failed with the error
+// detail, 404 job lost. Must go through apiClient's absolute base URL — a
+// relative fetch resolves against the packaged file:// origin and never
+// reaches the backend (GH #202).
 async function pollForSessionResult(serverJobId: string): Promise<FileImportJobResult> {
   for (let i = 0; i < MAX_POLLS; i++) {
     if (_abort) throw new Error('Import queue aborted');
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
 
+    let resp: Response;
     try {
-      const status = await apiClient.getAdminStatus();
-      const jobTracker = (status?.models as any)?.job_tracker;
-
-      if (jobTracker?.is_busy && jobTracker?.active_job_id === serverJobId) continue;
-
-      const result = jobTracker?.result as FileImportJobResult | undefined;
-      if (result && result.job_id === serverJobId) return result;
-
-      if (!jobTracker?.is_busy && (!result || result.job_id !== serverJobId)) {
-        throw new Error('Transcription job lost — server may have restarted');
-      }
+      resp = await apiClient.fetchTranscriptionResult(serverJobId);
     } catch (err) {
-      if (err instanceof Error && err.message.includes('job lost')) throw err;
-      if (err instanceof Error && err.message.includes('aborted')) throw err;
       console.warn('Poll error (will retry):', err);
+      continue;
     }
+
+    if (resp.status === 202) continue;
+    if (resp.status === 200) {
+      const body = (await resp.json()) as { result?: FileImportJobResult };
+      return body.result ?? ({ job_id: serverJobId } as FileImportJobResult);
+    }
+    if (resp.status === 410) {
+      let detail = 'Transcription failed';
+      try {
+        detail = ((await resp.json()) as { detail?: string }).detail ?? detail;
+      } catch {
+        // keep the generic message when the body is not JSON
+      }
+      throw new Error(detail);
+    }
+    if (resp.status === 404) {
+      throw new Error('Transcription job lost — server may have restarted');
+    }
+    if (resp.status === 403) throw new Error('Access denied for this transcription job');
+    console.warn(`Poll got HTTP ${resp.status} (will retry)`);
   }
   throw new Error('Transcription timed out after 24 hours');
 }
@@ -374,41 +342,11 @@ async function processSessionJob(
     fileObj = file;
   }
 
+  // Session ephemeral retention (2026-08-09 spec): the server no longer
+  // hashes or dedup-checks session imports, so there is nothing to resolve
+  // here — a legacy server's dedup_matches field is deliberately ignored.
   const importResponse = await apiClient.importAndTranscribe(fileObj, job.options);
   const { job_id: serverJobId } = importResponse;
-
-  // Issue #104, Story 2.4 + Sprint 2 Item 4 — full DedupPromptModal flow.
-  // When the server reports prior matches, resolve the duplicate. Manual
-  // imports await the user's choice via the interactive modal; Folder Watch
-  // (session-auto) jobs follow folderWatch.duplicatePolicy so a batch runs
-  // unattended instead of blocking the queue on the modal (GH-120).
-  if (importResponse.dedup_matches?.length) {
-    const first = importResponse.dedup_matches[0];
-    const choice = await resolveDuplicateChoice(job.type, importResponse.dedup_matches);
-
-    if (choice === 'use_existing' || choice === 'cancel') {
-      // User picked "Use existing" (or pressed Esc / closed): cancel the
-      // server-side job and skip this queue entry. The cancel API is
-      // best-effort — if the job already completed it's a harmless no-op.
-      try {
-        await apiClient.cancelTranscription();
-      } catch {
-        // Swallow: skip-the-local-entry is the user-visible contract.
-      }
-      useAriaAnnouncerStore.getState().announce(`Duplicate skipped: ${first.name}`, 'polite');
-      // Mark this queue entry as success-with-no-output so the user sees
-      // the queue advance rather than freeze on a "processing" state.
-      // We deliberately do NOT mark as 'error' — the user chose this.
-      store.setState((s) => ({
-        jobs: s.jobs.map((j) =>
-          j.id === job.id ? { ...j, status: 'success' as const, outputFilename: undefined } : j,
-        ),
-      }));
-      return;
-    }
-    // 'create_new': continue with the existing happy path.
-    toast.warning(`Duplicate of '${first.name}' detected — creating a new entry.`);
-  }
 
   const result = await pollForSessionResult(serverJobId);
 
