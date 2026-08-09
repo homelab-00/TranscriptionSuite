@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeJobProgress, formatClock } from './jobProgress';
+import { describeJobProgress, formatClock, summarizeJobProgress } from './jobProgress';
 
 describe('formatClock', () => {
   it('formats mm:ss under an hour', () => {
@@ -80,5 +80,94 @@ describe('describeJobProgress (GH-211)', () => {
 
   it('null progress and null startedAt -> plain Processing...', () => {
     expect(describeJobProgress(null, null, now)).toBe('Processing...');
+  });
+});
+
+describe('summarizeJobProgress', () => {
+  const now = 1_000_000;
+
+  it('duration phase exposes percent, position, elapsed and ETA', () => {
+    const d = summarizeJobProgress(
+      { current: 760, total: 2295, message: '', phase: 'transcribing' },
+      now - 120,
+      now,
+    );
+    expect(d).toEqual({
+      kind: 'duration',
+      phaseLabel: 'Transcribing',
+      percent: 33,
+      positionText: '12:40 / 38:15',
+      elapsedText: '2:00',
+      etaText: '4:02',
+    });
+  });
+
+  it('transcribing_diarizing uses the combined verb', () => {
+    const d = summarizeJobProgress(
+      { current: 760, total: 2295, message: '', phase: 'transcribing_diarizing' },
+      now - 120,
+      now,
+    );
+    expect(d.kind).toBe('duration');
+    expect(d.phaseLabel).toBe('Transcribing + identifying speakers');
+  });
+
+  it('loading_model is indeterminate with its own label', () => {
+    const d = summarizeJobProgress(
+      { current: 0, total: 0, message: '', phase: 'loading_model' },
+      now - 5,
+      now,
+    );
+    expect(d.kind).toBe('loading');
+    expect(d.phaseLabel).toBe('Loading model');
+    expect(d.percent).toBeNull();
+    expect(d.positionText).toBeNull();
+    expect(d.etaText).toBeNull();
+  });
+
+  it('diarizing is indeterminate but keeps elapsed', () => {
+    const d = summarizeJobProgress(
+      { current: 2295, total: 2295, message: '', phase: 'diarizing' },
+      now - 300,
+      now,
+    );
+    expect(d.kind).toBe('phase');
+    expect(d.phaseLabel).toBe('Identifying speakers');
+    expect(d.percent).toBeNull();
+    expect(d.elapsedText).toBe('5:00');
+  });
+
+  it('omits the ETA during the first seconds of a phase', () => {
+    const d = summarizeJobProgress(
+      { current: 10, total: 100, message: '', phase: 'transcribing' },
+      now - 3,
+      now,
+    );
+    expect(d.percent).toBe(10);
+    expect(d.etaText).toBeNull();
+  });
+
+  it('progress without a phase but with totals renders a generic position', () => {
+    const d = summarizeJobProgress(
+      { current: 30, total: 300, message: '', phase: null },
+      now - 60,
+      now,
+    );
+    expect(d.kind).toBe('position');
+    expect(d.phaseLabel).toBe('Processing');
+    expect(d.positionText).toBe('0:30 / 5:00');
+    expect(d.percent).toBeNull();
+  });
+
+  it('null progress and null startedAt -> generic with null fields', () => {
+    const d = summarizeJobProgress(null, null, now);
+    expect(d).toEqual({
+      kind: 'generic',
+      phaseLabel: 'Processing',
+      percent: null,
+      positionText: null,
+      elapsedText: null,
+      etaText: null,
+    });
   });
 });
