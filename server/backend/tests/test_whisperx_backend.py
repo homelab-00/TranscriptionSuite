@@ -566,6 +566,65 @@ def test_whisperx_diarization_progress_callback_failure_does_not_discard_result(
     assert calls == [(0, 1), (0, 1), (1, 1)]
 
 
+@pytest.mark.parametrize(
+    ("app_config", "expected_model_name"),
+    [
+        (
+            {"diarization": {"model": "pyannote/speaker-diarization-3.1"}},
+            "pyannote/speaker-diarization-3.1",
+        ),
+        ({}, None),
+        ({"diarization": {"model": ""}}, None),
+    ],
+    ids=["configured", "unconfigured", "empty-string"],
+)
+def test_whisperx_diarization_passes_configured_model(
+    monkeypatch, app_config, expected_model_name
+) -> None:
+    """GH #288: the configured diarization.model must reach DiarizationPipeline.
+
+    whisperx falls back to its own bundled default model when ``model_name`` is
+    omitted, silently ignoring config.yaml / the DIARIZATION_MODEL override and
+    re-downloading a model the user did not ask for. When no model is configured
+    (or it is an empty string), model_name must be None so whisperx keeps its
+    own default.
+    """
+    module = _import_whisperx_backend()
+    backend = module.WhisperXBackend()
+    backend._model = _ModernFakeModel()
+    backend._device = "cpu"
+    backend._align = lambda wx_result, audio, language: wx_result
+
+    whisperx_mod = types.ModuleType("whisperx")
+    whisperx_mod.assign_word_speakers = lambda diarize_segments, wx_result: wx_result
+
+    captured: dict[str, object] = {}
+
+    diarize_mod = types.ModuleType("whisperx.diarize")
+
+    class FakeDiarizationPipeline:
+        # Mirror the real whisperx>=3.8 signature (see GH #152 contract test below).
+        def __init__(self, model_name=None, token=None, device="cpu", cache_dir=None) -> None:
+            captured["model_name"] = model_name
+
+        def __call__(self, audio, **kwargs):
+            return [{"speaker": "SPEAKER_00"}]
+
+    diarize_mod.DiarizationPipeline = FakeDiarizationPipeline
+
+    monkeypatch.setitem(sys.modules, "whisperx", whisperx_mod)
+    monkeypatch.setitem(sys.modules, "whisperx.diarize", diarize_mod)
+    monkeypatch.setattr(
+        module,
+        "get_config",
+        lambda: types.SimpleNamespace(config=app_config),
+    )
+
+    backend.transcribe_with_diarization(np.zeros(16000, dtype=np.float32), hf_token="hf_test")
+
+    assert captured["model_name"] == expected_model_name
+
+
 def test_configure_decode_options_creates_instance_copy() -> None:
     """configure_decode_options() must store an instance copy, not mutate class default."""
     module = _import_whisperx_backend()
@@ -598,12 +657,16 @@ def test_real_diarization_pipeline_accepts_token_kwarg() -> None:
     sig = inspect.signature(diarize.DiarizationPipeline.__init__)
 
     # The exact kwargs the production code passes must bind without error.
+    # model_name carries the configured diarization.model (GH #288).
     try:
-        sig.bind_partial(token="hf_test", device="cpu")
+        sig.bind_partial(
+            model_name="pyannote/speaker-diarization-3.1", token="hf_test", device="cpu"
+        )
     except TypeError as exc:  # pragma: no cover - only hit on a real upstream rename
         pytest.fail(
-            "whisperx.diarize.DiarizationPipeline no longer accepts (token=, device=); "
-            f"update whisperx_backend.py to the new signature (GH #152): {exc}"
+            "whisperx.diarize.DiarizationPipeline no longer accepts "
+            "(model_name=, token=, device=); update whisperx_backend.py to the new "
+            f"signature (GH #152 / GH #288): {exc}"
         )
 
     # And the old name must not silently come back without us noticing.
