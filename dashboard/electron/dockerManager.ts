@@ -27,6 +27,7 @@ import {
   ensureServerConfigSeed,
   getServerConfigDir,
   getServerConfigPath,
+  resolveDiarizationModelForLaunch,
 } from './serverConfigPaths.js';
 import {
   type ContainerRuntimeKind,
@@ -2620,8 +2621,11 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     envUpdates['LIVE_TRANSCRIBER_MODEL'] = liveTranscriberModel;
   }
   if (diarizationModel !== undefined) {
-    composeEnv['DIARIZATION_MODEL'] = diarizationModel;
-    envUpdates['DIARIZATION_MODEL'] = diarizationModel;
+    // GH-288: the PyAnnote pill sends the default model name; substitute the
+    // Settings-modal overlay value so config.yaml's diarization.model is honoured.
+    const effectiveDiarizationModel = resolveDiarizationModelForLaunch(diarizationModel);
+    composeEnv['DIARIZATION_MODEL'] = effectiveDiarizationModel;
+    envUpdates['DIARIZATION_MODEL'] = effectiveDiarizationModel;
   }
   if (sensevoiceDiarizationEngine !== undefined) {
     composeEnv['SENSEVOICE_DIARIZATION_ENGINE'] = sensevoiceDiarizationEngine;
