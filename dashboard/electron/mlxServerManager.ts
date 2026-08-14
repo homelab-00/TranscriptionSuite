@@ -16,7 +16,11 @@ import { promisify } from 'util';
 import { app, BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ensureServerConfigSeed, getServerConfigDir } from './serverConfigPaths.js';
+import {
+  ensureServerConfigSeed,
+  getServerConfigDir,
+  resolveDiarizationModelForLaunch,
+} from './serverConfigPaths.js';
 import { hfCacheDirName } from './hfRepoAliases.js';
 import { resolveMacDmgAssetName } from './appVariant.js';
 import type { MlxLogSink } from './mlxLogSink.js';
@@ -132,7 +136,10 @@ export class MLXServerManager {
     if (opts.hfToken) env.HF_TOKEN = opts.hfToken;
     if (opts.mainTranscriberModel) env.MAIN_TRANSCRIBER_MODEL = opts.mainTranscriberModel;
     if (opts.liveTranscriberModel) env.LIVE_TRANSCRIBER_MODEL = opts.liveTranscriberModel;
-    if (opts.diarizationModel) env.DIARIZATION_MODEL = opts.diarizationModel;
+    // GH-288: substitute the Settings-modal overlay model when the PyAnnote
+    // pill's default sentinel is requested (same funnel as the Docker path).
+    if (opts.diarizationModel)
+      env.DIARIZATION_MODEL = resolveDiarizationModelForLaunch(opts.diarizationModel);
 
     // Ensure required directories exist.
     for (const dir of [

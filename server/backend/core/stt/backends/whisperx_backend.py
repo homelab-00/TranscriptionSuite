@@ -21,6 +21,7 @@ from typing import Any
 
 import numpy as np
 import soundfile as sf
+from server.config import get_config
 from server.core.audio_utils import clear_gpu_cache
 from server.core.stt.backends.base import (
     BackendSegment,
@@ -346,11 +347,23 @@ class WhisperXBackend(STTBackend):
         _report(80)  # alignment done
 
         # 3. Diarize
-        logger.info("WhisperX: running diarization")
+        # Honour the configured diarization model (config.yaml `diarization.model`,
+        # or the DIARIZATION_MODEL env override). Omitting model_name makes whisperx
+        # fall back to its own bundled default, silently ignoring the user's choice
+        # and re-downloading a model they did not ask for (GH #288).
+        diarization_model = get_config().config.get("diarization", {}).get("model") or None
+        logger.info(
+            "WhisperX: running diarization (model=%s)",
+            diarization_model or "whisperx default",
+        )
         # whisperx >= 3.8 renamed the HuggingFace-token kwarg from ``use_auth_token``
         # to ``token`` (GH #152). Passing the old name raises TypeError, which the
         # route silently swallows and degrades to the fragile sequential pyannote path.
-        diarize_model = DiarizationPipeline(token=token, device=self._device)
+        diarize_model = DiarizationPipeline(
+            model_name=diarization_model,
+            token=token,
+            device=self._device,
+        )
 
         diarize_kwargs: dict[str, Any] = {}
         if num_speakers is not None:
