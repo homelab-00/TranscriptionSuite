@@ -60,6 +60,7 @@ const __dirname = path.dirname(__filename);
 // stays self-contained (same reason as the inline semverDescending() below).
 export const IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server';
 export const LEGACY_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-legacy';
+export const DGX_SPARK_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-dgx-spark';
 export const VULKAN_WSL2_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2';
 export const VULKAN_LINUX_IMAGE_REPO = 'ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux';
 
@@ -80,6 +81,10 @@ export const IMAGE_VARIANT_REPOS: Record<ImageVariant, string> = {
   'vulkan-linux': VULKAN_LINUX_IMAGE_REPO,
 };
 
+function isLinuxArm64Host(): boolean {
+  return process.platform === 'linux' && process.arch === 'arm64';
+}
+
 /**
  * Select the GHCR image repo for this session based on the persisted
  * `server.useLegacyGpu` setting (Issue #83 — Pascal/Maxwell support) and
@@ -94,6 +99,7 @@ export function resolveImageRepo(
 ): string {
   if (runtimeProfile === 'vulkan-wsl2') return VULKAN_WSL2_IMAGE_REPO;
   if (runtimeProfile === 'vulkan') return VULKAN_LINUX_IMAGE_REPO;
+  if (runtimeProfile === 'gpu' && isLinuxArm64Host()) return DGX_SPARK_IMAGE_REPO;
   return useLegacyGpu ? LEGACY_IMAGE_REPO : IMAGE_REPO;
 }
 
@@ -1455,6 +1461,13 @@ export function composeFileArgs(
       files.push('docker-compose.gpu-cdi.yml');
     } else {
       files.push('docker-compose.gpu.yml'); // legacy nvidia runtime
+    }
+
+    // DGX Spark (Linux ARM64 + NVIDIA Blackwell): add a small override that
+    // switches the build base image/interpreter while keeping the same runtime
+    // profile and GPU overlay semantics.
+    if (isLinuxArm64Host()) {
+      files.push('docker-compose.dgx-spark.yml');
     }
   }
 
@@ -4561,7 +4574,10 @@ export async function listRemoteTags(): Promise<RemoteTagsResult> {
       // (the realistic failure mode post-v1.3.3). Route to the same UI
       // affordance as a 404-on-tags-list so users see the actionable banner.
       // Same treatment for vulkan-wsl2 — a new package starts private on GHCR.
-      if (tokenResp.status === 401 && (useLegacyGpu || runtimeProfile === 'vulkan-wsl2')) {
+      if (
+        tokenResp.status === 401 &&
+        (useLegacyGpu || runtimeProfile === 'vulkan-wsl2' || resolveImageRepo(false, runtimeProfile) === DGX_SPARK_IMAGE_REPO)
+      ) {
         return { status: 'not-published', tags: [] };
       }
       return { status: 'error', tags: [] };

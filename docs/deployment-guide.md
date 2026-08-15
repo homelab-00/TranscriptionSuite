@@ -266,6 +266,43 @@ When TLS is enabled:
   Maxwell (GTX 9-series, Tesla M40) are **not** supported by the default image —
   see [Legacy-GPU image variant](#legacy-gpu-image-variant-issue-83) below.
 
+### DGX Spark (Linux ARM64 + Blackwell GB10 / sm_121)
+
+DGX Spark uses an ARM64 CUDA stack and should run with the DGX overlay, which
+switches the server build to NVIDIA's NGC PyTorch base image.
+
+Manual start:
+
+```bash
+cd server/docker
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.linux-host.yml \
+  -f docker-compose.gpu.yml \
+  -f docker-compose.dgx-spark.yml up -d
+```
+
+Notes:
+- The DGX overlay is additive and does not change existing Windows/macOS/Linux x86_64 stacks.
+- It sets `BASE_IMAGE=nvcr.io/nvidia/pytorch:25.09-py3` and enables
+  `BOOTSTRAP_USE_SYSTEM_TORCH=true` to reuse the CUDA-enabled torch stack from
+  the base image.
+- Dashboard GPU mode on Linux ARM64 resolves to the DGX-specific image repo:
+  `ghcr.io/homelab-00/transcriptionsuite-server-dgx-spark`.
+
+Build/publish guidance for DGX Spark:
+- Use local-only builds by default (recommended due to large NGC base image):
+
+```bash
+./build/docker-build-push.sh --variant dgx-spark --build local-dgx --local-only
+```
+
+- Push to GHCR only when explicitly required:
+
+```bash
+./build/docker-build-push.sh --variant dgx-spark --build --push v1.3.9-dgx
+```
+
 ### Legacy-GPU image variant (Issue #83)
 
 Users with Pascal (`sm_6x`) or Maxwell (`sm_5x`) cards — e.g. **GTX 1070, GTX

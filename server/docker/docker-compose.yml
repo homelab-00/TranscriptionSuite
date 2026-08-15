@@ -8,10 +8,14 @@
 #   docker-compose.linux-host.yml   — Linux: host networking
 #   docker-compose.desktop-vm.yml   — macOS/Windows: bridge networking + port mapping
 #   docker-compose.gpu.yml          — NVIDIA GPU reservation
+#   docker-compose.dgx-spark.yml    — DGX Spark (Linux ARM64 + Blackwell GB10)
 #   docker-compose.vulkan.yml       — Vulkan sidecar (AMD/Intel GPU via whisper.cpp)
 #
 # Manual usage (Linux + GPU, the default):
 #   docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml up -d
+#
+# Manual usage (DGX Spark Linux ARM64 + GPU):
+#   docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.gpu.yml -f docker-compose.dgx-spark.yml up -d
 #
 # Manual usage (macOS/Windows, CPU mode):
 #   docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml up -d
@@ -62,6 +66,8 @@ services:
       # matters for CLI/dev builds only; see Issue #83.)
       args:
         PYTORCH_VARIANT: ${PYTORCH_VARIANT:-cu129}
+        BASE_IMAGE: ${BASE_IMAGE:-ubuntu:24.04}
+        UV_PYTHON_BIN: ${UV_PYTHON_BIN:-/usr/bin/python3.13}
     # Image repo is templated so the dashboard can switch between the default
     # `transcriptionsuite-server` and the legacy-GPU `transcriptionsuite-server-legacy`
     # repo (Issue #83). The default keeps the existing behaviour for unchanged callers.
@@ -88,6 +94,12 @@ services:
       # (legacy GPU, Issue #83), or cpu (no CUDA). The dashboard's CPU profile
       # sets cpu so CPU-only hosts skip the multi-GB CUDA wheels (GH #125).
       - PYTORCH_VARIANT=${PYTORCH_VARIANT:-cu129}
+      # For DGX Spark/NGC base images, this can be pointed at the preloaded
+      # Python/Torch environment (for example /opt/conda/bin/python).
+      - UV_PYTHON_BIN=${UV_PYTHON_BIN:-/usr/bin/python3.13}
+      # Optional DGX mode: keep torch/torchaudio from the base image and skip
+      # reinstalling them into the runtime venv.
+      - BOOTSTRAP_USE_SYSTEM_TORCH=${BOOTSTRAP_USE_SYSTEM_TORCH:-false}
       # GH #125: opt-in for TLS-intercepting networks (corporate proxy / antivirus
       # HTTPS scanning). true makes uv trust the system/container CA store instead
       # of its bundled roots. Since GH #200 you rarely need this: put your root CA
