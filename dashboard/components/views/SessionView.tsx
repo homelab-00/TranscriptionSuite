@@ -1035,7 +1035,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
               title: 'Recovery in progress',
               confirmLabel: 'Stop and record',
               danger: true,
-              hint: 'Always answer this the same way? Turn on Settings → Client → Recovery to skip this prompt.',
+              hint: 'Tip: You can auto-skip this prompt by toggling Settings → Client → Recovery.',
             },
           ));
         if (!ok) return;
