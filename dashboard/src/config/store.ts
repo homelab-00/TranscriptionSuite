@@ -86,6 +86,16 @@ export interface ClientConfig {
   output: {
     hideTimestamps: boolean;
   };
+  /** Interrupted-recording recovery (GH-239 salvage popup) */
+  recovery: {
+    /**
+     * When true, a start attempt that bounces off an in-progress salvage skips
+     * the "Recovery in progress" confirm dialog and takes the "Stop and record"
+     * branch automatically. Default false - the dialog is the safe default
+     * because the drop cancels a transcription that is still running.
+     */
+    autoStopAndRecord: boolean;
+  };
   /** UI preferences */
   ui: {
     sidebarCollapsed: boolean;
@@ -163,6 +173,9 @@ const DEFAULT_CONFIG: ClientConfig = {
   },
   output: {
     hideTimestamps: false,
+  },
+  recovery: {
+    autoStopAndRecord: false,
   },
   ui: {
     sidebarCollapsed: false,

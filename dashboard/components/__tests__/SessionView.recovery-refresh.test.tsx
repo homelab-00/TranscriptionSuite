@@ -404,6 +404,9 @@ describe('SessionView - salvage drop popup (GH-239 follow-up)', () => {
     });
     mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
     mockWaitForJobSlotFree.mockResolvedValue(true);
+    // vi.clearAllMocks() keeps implementations, so the auto-stop test below
+    // would otherwise leak its config answer into every later test.
+    mockGetConfig.mockResolvedValue(undefined);
     useSalvageStore.setState({ checkNonce: 0, dropRequestedJobId: null, lastCompletedAt: null });
   });
 
@@ -413,6 +416,27 @@ describe('SessionView - salvage drop popup (GH-239 follow-up)', () => {
 
     expect(await screen.findByText(/interrupted recording/)).toBeInTheDocument();
     expect(mockTranscription.clearBusyInfo).toHaveBeenCalled();
+  });
+
+  it('auto-stop setting drops the salvage without showing the confirm', async () => {
+    mockGetConfig.mockImplementation(async (key: unknown) =>
+      key === 'recovery.autoStopAndRecord' ? true : undefined,
+    );
+    mockGetStatus.mockResolvedValueOnce({
+      models: {
+        job_tracker: {
+          is_busy: true,
+          salvage: { job_id: 'salv-1', client_name: 'laptop', started_at: 1 },
+        },
+      },
+    });
+    mockTranscription.busyInfo = { ...BUSY };
+    renderSessionView();
+
+    await waitFor(() => expect(mockTranscription.start).toHaveBeenCalledTimes(1));
+    expect(mockCancelTranscription).toHaveBeenCalledTimes(1);
+    expect(useSalvageStore.getState().dropRequestedJobId).toBe('salv-1');
+    expect(screen.queryByText('Stop and record')).not.toBeInTheDocument();
   });
 
   it('drop flow: cancels the salvage, marks the drop, and restarts recording', async () => {

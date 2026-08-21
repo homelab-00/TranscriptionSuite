@@ -1021,11 +1021,18 @@ export const SessionView: React.FC<SessionViewProps> = ({
       // ignored forever after the first dialog was dismissed.
       salvageFlowActiveRef.current = true;
       try {
-        const ok = await confirm(
-          `The server is still transcribing an interrupted recording (from ${info.activeUser}). ` +
-            'Stop it and start your new recording? The interrupted audio is saved and can be retried later.',
-          { title: 'Recovery in progress', confirmLabel: 'Stop and record', danger: true },
-        );
+        // Settings -> Client -> Recovery: when the user has opted in, take the
+        // "Stop and record" branch without prompting. Read fresh from config
+        // (not from mount-time state) so a change made in the Settings modal
+        // applies to the very next collision.
+        const autoStop = (await getConfig<boolean>('recovery.autoStopAndRecord')) ?? false;
+        const ok =
+          autoStop ||
+          (await confirm(
+            `The server is still transcribing an interrupted recording (from ${info.activeUser}). ` +
+              'Stop it and start your new recording? The interrupted audio is saved and can be retried later.',
+            { title: 'Recovery in progress', confirmLabel: 'Stop and record', danger: true },
+          ));
         if (!ok) return;
         setDroppingSalvage(true);
         try {
