@@ -844,8 +844,15 @@ const AppInner: React.FC = () => {
               />
             </ErrorBoundary>
           </div>
+          {/* Keyed so the enter animation replays on every navigation instead of
+              only on the first mount out of the Session view. The Notebook
+              sub-tab is folded into the key so Calendar, Search and Import
+              animate exactly like a primary view switch. */}
           {currentView !== View.SESSION && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 h-full w-full duration-500 ease-out">
+            <div
+              key={currentView === View.NOTEBOOK ? `${currentView}:${notebookTab}` : currentView}
+              className="animate-in fade-in slide-in-from-bottom-4 h-full w-full duration-500 ease-out"
+            >
               {renderOtherView()}
             </div>
           )}

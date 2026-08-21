@@ -75,8 +75,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const isMetal = runtimeProfile === 'metal';
   const [collapsed, setCollapsed] = useState(false);
-  // Notebook sub-tabs (Search / Import) are collapsed by default; each click
-  // on the Notebook nav item toggles them, and leaving Notebook closes them.
+  // Notebook sub-tabs (Search / Import) are collapsed by default. Entering the
+  // Notebook view from anywhere else reveals them; only a click on the Notebook
+  // row while already parked on that row collapses them again.
   const [notebookSubTabsOpen, setNotebookSubTabsOpen] = useState(false);
   const [expandedWidthPx, setExpandedWidthPx] = useState(SIDEBAR_EXPANDED_BASE_WIDTH_PX);
   const logoContentRef = useRef<HTMLDivElement | null>(null);
@@ -197,18 +198,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const activeIndex = navItems.findIndex((item) => item.id === currentView);
 
-  // Ref-based pill positioning — measures actual button positions
-  // so the sliding pill works correctly with always-visible sub-tabs.
+  // A Notebook sub-tab owns the active indicator whenever the strip is open and
+  // the selected sub-tab is not the calendar, because the calendar IS the
+  // Notebook row. Everything else keeps the indicator on a primary nav row.
+  const activeNotebookSubTab =
+    currentView === View.NOTEBOOK && notebookSubTabsOpen && notebookTab !== NotebookTab.CALENDAR
+      ? notebookTab
+      : null;
+
+  // Ref-based pill positioning - measures actual button positions so the
+  // sliding pill works for primary nav rows and Notebook sub-tab rows alike.
+  // Sub-tab rows are shorter than nav rows, so the pill tracks height as well
+  // as offset. Keys are plain View ids for nav rows and "VIEW:SUBTAB" for the
+  // Notebook sub-tab rows.
   const navRef = useRef<HTMLElement>(null);
-  const buttonRefs = useRef<Map<View, HTMLButtonElement>>(new Map());
+  const buttonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const [pillTop, setPillTop] = useState<number | null>(null);
+  const [pillHeight, setPillHeight] = useState<number | null>(null);
+
+  const activePillKey =
+    activeNotebookSubTab !== null ? `${View.NOTEBOOK}:${activeNotebookSubTab}` : currentView;
 
   // notebookSubTabsOpen shifts the buttons below the Notebook item, so the
   // pill must re-measure whenever the sub-tabs expand or collapse.
   const measurePillPosition = useCallback(() => {
-    const btn = buttonRefs.current.get(currentView);
-    if (btn) setPillTop(btn.offsetTop);
-  }, [currentView, notebookSubTabsOpen]);
+    const btn = buttonRefs.current.get(activePillKey);
+    if (!btn) return;
+    setPillTop(btn.offsetTop);
+    setPillHeight(btn.offsetHeight);
+  }, [activePillKey, notebookSubTabsOpen]);
 
   useLayoutEffect(() => {
     measurePillPosition();
@@ -276,13 +294,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Animated Background Pill for Active State */}
         {activeIndex !== -1 && pillTop !== null && (
           <div
+            data-testid="sidebar-active-indicator"
             className="pointer-events-none absolute top-0 right-3 left-3 z-0 h-12 rounded-xl border border-white/5 bg-linear-to-r from-white/10 to-transparent shadow-inner transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)]"
             style={{
               transform: `translateY(${pillTop}px)`,
+              ...(pillHeight !== null ? { height: pillHeight } : {}),
             }}
           >
-            {/* Active Indicator Bar (Cyan) */}
-            <div className="bg-accent-cyan absolute top-1/2 left-0 h-6 w-1 -translate-y-1/2 rounded-r-full shadow-[0_0_10px_#22d3ee]"></div>
+            {/* Active Indicator Bar (Cyan). Half the measured row height so it
+                scales down on the shorter Notebook sub-tab rows. */}
+            <div
+              className="bg-accent-cyan absolute top-1/2 left-0 h-6 w-1 -translate-y-1/2 rounded-r-full shadow-[0_0_10px_#22d3ee]"
+              style={pillHeight !== null ? { height: Math.round(pillHeight / 2) } : undefined}
+            ></div>
           </div>
         )}
 
@@ -293,15 +317,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 ref={(el) => {
                   if (el) buttonRefs.current.set(item.id, el);
+                  else buttonRefs.current.delete(item.id);
                 }}
                 onClick={() => {
-                  onChangeView(item.id);
-                  if (item.id === View.NOTEBOOK) {
-                    setNotebookSubTabsOpen((open) => !open);
-                    onChangeNotebookTab(NotebookTab.CALENDAR);
-                  } else {
+                  if (item.id !== View.NOTEBOOK) {
+                    onChangeView(item.id);
                     setNotebookSubTabsOpen(false);
+                    return;
                   }
+
+                  // A click on the Notebook row only counts as a collapse
+                  // toggle when the user is already parked on that row.
+                  // Arriving from another view reveals the strip, and arriving
+                  // from Search or Import walks back to the calendar with the
+                  // strip left open.
+                  const alreadyOnNotebookRow =
+                    currentView === View.NOTEBOOK && notebookTab === NotebookTab.CALENDAR;
+                  onChangeView(View.NOTEBOOK);
+                  onChangeNotebookTab(NotebookTab.CALENDAR);
+                  setNotebookSubTabsOpen((open) => (alreadyOnNotebookRow ? !open : true));
                 }}
                 className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'px-4'} h-12 rounded-xl transition-colors duration-200 ${
                   isActive ? 'text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
@@ -342,13 +376,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     return (
                       <button
                         key={subItem.id}
+                        ref={(el) => {
+                          const refKey = `${View.NOTEBOOK}:${subItem.id}`;
+                          if (el) buttonRefs.current.set(refKey, el);
+                          else buttonRefs.current.delete(refKey);
+                        }}
                         onClick={() => {
                           onChangeView(View.NOTEBOOK);
                           onChangeNotebookTab(subItem.id);
                         }}
                         className={`relative z-10 flex w-full items-center focus:ring-0 focus:outline-none ${collapsed ? 'justify-center px-0' : 'pr-4 pl-9'} h-9 rounded-xl transition-colors duration-200 ${
                           isSubActive
-                            ? 'bg-white/6 text-slate-200'
+                            ? 'text-slate-200'
                             : 'text-slate-500 hover:bg-white/5 hover:text-slate-400'
                         }`}
                       >
