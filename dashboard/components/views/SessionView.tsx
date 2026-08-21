@@ -1031,7 +1031,12 @@ export const SessionView: React.FC<SessionViewProps> = ({
           (await confirm(
             `The server is still transcribing an interrupted recording (from ${info.activeUser}). ` +
               'Stop it and start your new recording? The interrupted audio is saved and can be retried later.',
-            { title: 'Recovery in progress', confirmLabel: 'Stop and record', danger: true },
+            {
+              title: 'Recovery in progress',
+              confirmLabel: 'Stop and record',
+              danger: true,
+              hint: 'Always answer this the same way? Turn on Settings → Client → Recovery to skip this prompt.',
+            },
           ));
         if (!ok) return;
         setDroppingSalvage(true);

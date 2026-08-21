@@ -6,6 +6,12 @@ interface ConfirmOptions {
   title?: string;
   confirmLabel?: string;
   danger?: boolean;
+  /**
+   * Secondary line rendered under the message in a muted, smaller style. For
+   * asides that must not compete with the question itself - e.g. pointing at
+   * the Settings toggle that suppresses this particular prompt.
+   */
+  hint?: string;
 }
 
 interface ConfirmState {
@@ -50,6 +56,9 @@ export function useConfirm() {
           </div>
           <div className="bg-black/20 px-6 py-5">
             <p className="text-sm text-slate-300">{state.message}</p>
+            {state.options.hint && (
+              <p className="mt-3 text-xs text-slate-500">{state.options.hint}</p>
+            )}
           </div>
           <div className="flex justify-end gap-3 border-t border-white/10 bg-white/5 px-6 py-4 select-none">
             <Button variant="ghost" onClick={() => handleClose(false)}>

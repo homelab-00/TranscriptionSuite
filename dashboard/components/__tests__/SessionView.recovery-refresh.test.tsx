@@ -418,6 +418,14 @@ describe('SessionView - salvage drop popup (GH-239 follow-up)', () => {
     expect(mockTranscription.clearBusyInfo).toHaveBeenCalled();
   });
 
+  it('points at the Settings toggle that suppresses the dialog', async () => {
+    mockTranscription.busyInfo = { ...BUSY };
+    renderSessionView();
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/Settings . Client . Recovery/)).toBeInTheDocument();
+  });
+
   it('auto-stop setting drops the salvage without showing the confirm', async () => {
     mockGetConfig.mockImplementation(async (key: unknown) =>
       key === 'recovery.autoStopAndRecord' ? true : undefined,
