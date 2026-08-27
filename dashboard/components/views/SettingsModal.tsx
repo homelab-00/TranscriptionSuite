@@ -245,6 +245,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     useHttps: false,
     hfToken: '',
     hideTimestamps: false,
+    autoStopRecovery: false,
   });
 
   // Display-only mirror of connection.useRemote, loaded when the modal opens.
@@ -415,6 +416,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 autoAddNotebook: (cfg['notebook.autoAdd'] as boolean) ?? prev.autoAddNotebook,
                 hfToken: (cfg['server.hfToken'] as string) ?? prev.hfToken,
                 hideTimestamps: (cfg['output.hideTimestamps'] as boolean) ?? prev.hideTimestamps,
+                autoStopRecovery:
+                  (cfg['recovery.autoStopAndRecord'] as boolean) ?? prev.autoStopRecovery,
               }));
               const loadedBlurEffectsEnabled = (cfg['ui.blurEffectsEnabled'] as boolean) ?? true;
               savedBlurEffectsRef.current = loadedBlurEffectsEnabled;
@@ -548,6 +551,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ['notebook.autoAdd', clientSettings.autoAddNotebook],
         ['server.hfToken', clientSettings.hfToken],
         ['output.hideTimestamps', clientSettings.hideTimestamps],
+        ['recovery.autoStopAndRecord', clientSettings.autoStopRecovery],
         ['app.autoCopy', appSettings.autoCopy],
         ['app.showNotifications', appSettings.showNotifications],
         ['app.stopServerOnQuit', appSettings.stopServerOnQuit],
@@ -1364,6 +1368,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </button>
           </div>
         </div>
+      </Section>
+
+      <Section title="Recovery">
+        <AppleSwitch
+          checked={clientSettings.autoStopRecovery}
+          onChange={(v) => {
+            setClientSettings((prev) => ({ ...prev, autoStopRecovery: v }));
+            setIsDirty(true);
+          }}
+          label="Always stop an interrupted recovery and record"
+          description="Skip the 'Recovery in progress' prompt when a new recording collides with the server still transcribing an interrupted one. The interrupted audio stays saved and can be retried later."
+        />
       </Section>
 
       <Section title="Output">

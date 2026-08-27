@@ -500,6 +500,10 @@ const store = new Store({
     'app.updateCheckCustomHours': 24,
     'app.modelSelectionOnboardingCompleted': false,
     'output.hideTimestamps': false,
+    /* GH-239 follow-up - when true, a start attempt that bounces off an
+       in-progress salvage skips the "Recovery in progress" confirm and takes
+       the "Stop and record" branch automatically. Default false. */
+    'recovery.autoStopAndRecord': false,
     'ui.sidebarCollapsed': false,
     // Issue #87 — user-facing escape valve for backdrop-blur CPU/GPU cost.
     // Default true preserves the iOS-glass design; users can opt out per
