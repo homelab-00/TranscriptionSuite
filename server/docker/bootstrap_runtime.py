@@ -134,6 +134,11 @@ def parse_int_env(name: str, default: int) -> int:
         return default
 
 
+def bootstrap_python_bin() -> str:
+    """Python interpreter used for uv sync and runtime venv creation."""
+    return os.environ.get("UV_PYTHON_BIN", "/usr/bin/python3.13").strip() or "/usr/bin/python3.13"
+
+
 def is_vibevoice_asr_model_name(model_name: str | None) -> bool:
     """Return True when *model_name* selects a VibeVoice-ASR family variant."""
     name = normalize_selected_model_name(model_name)
@@ -429,7 +434,7 @@ def build_uv_sync_env(venv_dir: Path, cache_dir: Path) -> dict[str, str]:
     env = os.environ.copy()
     env["UV_PROJECT_ENVIRONMENT"] = str(venv_dir)
     env["UV_CACHE_DIR"] = str(cache_dir)
-    env["UV_PYTHON"] = "/usr/bin/python3.13"
+    env["UV_PYTHON"] = bootstrap_python_bin()
     # UV_HTTP_TIMEOUT is uv's *read* timeout: how long a transfer may stall
     # between reads before uv abandons the request (connection establishment is
     # governed separately by UV_HTTP_CONNECT_TIMEOUT). The 30s default is fine
@@ -498,6 +503,8 @@ def run_dependency_sync(
         "--project",
         str(PROJECT_DIR),
     ]
+    use_system_torch = parse_bool_env("BOOTSTRAP_USE_SYSTEM_TORCH", False)
+    is_linux_arm64 = sys.platform == "linux" and platform.machine().lower() in {"arm64", "aarch64"}
     # Non-default variants swap the URL of the *named* index `pytorch-cu129`
     # (which [tool.uv.sources] pins torch/torchaudio to): cu126 for legacy GPUs
     # (Pascal/Maxwell, sm_50..sm_90) and cpu for CPU-only hosts (GH #125 — no
@@ -527,8 +534,40 @@ def run_dependency_sync(
             ]
         )
     else:
-        # Default cu129 path — preserve byte-identical behaviour with --frozen.
-        cmd.insert(2, "--frozen")
+        # Default cu129 path — preserve byte-identical behaviour with --frozen,
+        # except in two DGX-related cases where a fresh resolve is required to
+        # avoid x86-only lock pins on Linux arm64 (e.g. triton/torchcodec):
+        # system-torch mode and native arm64 wheel installs.
+        if not use_system_torch and not is_linux_arm64:
+            cmd.insert(2, "--frozen")
+    if use_system_torch:
+        # DGX Spark / NGC mode: torch+torchaudio come from the base image.
+        # torchcodec has no manylinux aarch64 wheels at the locked version and
+        # is optional for pyannote (runtime warning already suppressed).
+        cmd.extend(
+            [
+                "--no-install-package",
+                "torch",
+                "--no-install-package",
+                "torchaudio",
+                "--no-install-package",
+                "torchcodec",
+                "--no-install-package",
+                "triton",
+            ]
+        )
+    elif is_linux_arm64:
+        # Native Linux ARM64 runtime path: these are frequently x86-only pins
+        # in universal locks; skipping them allows the rest of the stack to
+        # resolve to aarch64-compatible wheels.
+        cmd.extend(
+            [
+                "--no-install-package",
+                "torchcodec",
+                "--no-install-package",
+                "triton",
+            ]
+        )
     for extra in extras:
         cmd.extend(["--extra", extra])
     run_command(
@@ -831,17 +870,20 @@ def ensure_runtime_dependencies(
     gpu_driver = detect_gpu_driver_version()
     if gpu_driver:
         log(f"Detected host GPU driver: {gpu_driver}")
+    use_system_torch = parse_bool_env("BOOTSTRAP_USE_SYSTEM_TORCH", False)
+    fingerprint_extras = extras + (("__system_torch__",) if use_system_torch else ())
+
     fingerprint = compute_dependency_fingerprint(
         python_abi=python_abi,
         arch=arch,
-        extras=extras,
+        extras=fingerprint_extras,
         gpu_driver=gpu_driver,
         pytorch_variant=pytorch_variant,
     )
     structural_fp = compute_structural_fingerprint(
         python_abi=python_abi,
         arch=arch,
-        extras=extras,
+        extras=fingerprint_extras,
         gpu_driver=gpu_driver,
         pytorch_variant=pytorch_variant,
     )
@@ -857,7 +899,25 @@ def ensure_runtime_dependencies(
     }
     diagnostics: dict[str, Any] = {
         "selection_reason": "unknown",
+        "use_system_torch": use_system_torch,
     }
+
+    def ensure_runtime_venv_for_mode() -> None:
+        if not use_system_torch:
+            return
+        python_bin = bootstrap_python_bin()
+        venv_python_path = venv_dir / "bin/python"
+        if venv_python_path.exists():
+            return
+        log(
+            "Creating runtime venv with --system-site-packages "
+            f"(BOOTSTRAP_USE_SYSTEM_TORCH=true, python={python_bin})"
+        )
+        run_command(
+            [python_bin, "-m", "venv", "--system-site-packages", str(venv_dir)],
+            timeout_seconds=300,
+            env=os.environ.copy(),
+        )
 
     with lock_file.open("w", encoding="utf-8") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
@@ -898,7 +958,7 @@ def ensure_runtime_dependencies(
             legacy_fingerprint = compute_dependency_fingerprint(
                 python_abi=python_abi,
                 arch=arch,
-                extras=extras,
+                extras=fingerprint_extras,
                 gpu_driver=gpu_driver,
                 pytorch_variant=pytorch_variant,
                 include_variant=False,
@@ -906,7 +966,7 @@ def ensure_runtime_dependencies(
             legacy_structural_fp = compute_structural_fingerprint(
                 python_abi=python_abi,
                 arch=arch,
-                extras=extras,
+                extras=fingerprint_extras,
                 gpu_driver=gpu_driver,
                 pytorch_variant=pytorch_variant,
                 include_variant=False,
@@ -1007,6 +1067,8 @@ def ensure_runtime_dependencies(
                 if venv_dir.exists():
                     shutil.rmtree(venv_dir, ignore_errors=True)
 
+                ensure_runtime_venv_for_mode()
+
                 log(f"Installing Python runtime dependencies (mode={final_sync_mode})...")
                 sync_start = time.perf_counter()
                 try:
@@ -1046,6 +1108,8 @@ def ensure_runtime_dependencies(
             if venv_dir.exists():
                 log(f"Rebuilding runtime virtual environment ({diagnostics['selection_reason']})")
                 shutil.rmtree(venv_dir, ignore_errors=True)
+
+            ensure_runtime_venv_for_mode()
 
             log(f"Installing Python runtime dependencies (mode={final_sync_mode})...")
             sync_start = time.perf_counter()

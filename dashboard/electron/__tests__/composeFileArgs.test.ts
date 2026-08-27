@@ -42,13 +42,19 @@ function extractFiles(args: string[]): string[] {
 }
 
 const originalPlatform = process.platform;
+const originalArch = process.arch;
 
 function setPlatform(platform: string): void {
   Object.defineProperty(process, 'platform', { value: platform, writable: true });
 }
 
+function setArch(arch: string): void {
+  Object.defineProperty(process, 'arch', { value: arch, writable: true });
+}
+
 afterEach(() => {
   Object.defineProperty(process, 'platform', { value: originalPlatform, writable: true });
+  Object.defineProperty(process, 'arch', { value: originalArch, writable: true });
 });
 
 // ─── P1-DOCK-001: Compose File Selection ────────────────────────────────────
@@ -64,6 +70,7 @@ describe('[P1] composeFileArgs', () => {
 
   it('Linux + GPU (Docker legacy): base + linux-host + gpu', () => {
     setPlatform('linux');
+    setArch('x64');
     const args = composeFileArgs('gpu', 'docker', 'legacy');
     const files = extractFiles(args);
 
@@ -76,6 +83,7 @@ describe('[P1] composeFileArgs', () => {
 
   it('Linux + GPU (Docker CDI): base + linux-host + gpu-cdi', () => {
     setPlatform('linux');
+    setArch('x64');
     const args = composeFileArgs('gpu', 'docker', 'cdi');
     const files = extractFiles(args);
 
@@ -88,6 +96,7 @@ describe('[P1] composeFileArgs', () => {
 
   it('Linux + GPU (Podman): base + linux-host + podman gpu', () => {
     setPlatform('linux');
+    setArch('x64');
     const args = composeFileArgs('gpu', 'podman', null);
     const files = extractFiles(args);
 
@@ -122,6 +131,20 @@ describe('[P1] composeFileArgs', () => {
       'docker-compose.yml',
       'docker-compose.linux-host.yml',
       'docker-compose.vulkan.yml',
+    ]);
+  });
+
+  it('Linux ARM64 + GPU: adds DGX Spark overlay on top of the GPU stack', () => {
+    setPlatform('linux');
+    setArch('arm64');
+    const args = composeFileArgs('gpu', 'docker', 'legacy');
+    const files = extractFiles(args);
+
+    expect(files).toEqual([
+      'docker-compose.yml',
+      'docker-compose.linux-host.yml',
+      'docker-compose.gpu.yml',
+      'docker-compose.dgx-spark.yml',
     ]);
   });
 

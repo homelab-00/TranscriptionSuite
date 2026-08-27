@@ -14,6 +14,8 @@ log() {
     echo "[entrypoint.sh] $1"
 }
 
+PY_BOOTSTRAP_BIN="${UV_PYTHON_BIN:-/usr/bin/python3.13}"
+
 # Handle TLS certificates if TLS is enabled
 if [ "${TLS_ENABLED:-false}" = "true" ]; then
     log "TLS enabled - preparing certificates..."
@@ -59,7 +61,7 @@ fi
 # only root context in the container, and it must precede bootstrap_runtime.py, which
 # makes the first HTTPS request. On a TLS-intercepting network (corporate proxy or
 # antivirus HTTPS scanning) nothing downstream can succeed without this.
-/usr/bin/python3.13 docker/install_ca_certs.py || true
+"$PY_BOOTSTRAP_BIN" docker/install_ca_certs.py || true
 
 # Point every HTTPS client at the combined bundle whenever the container carries any
 # locally trusted CA — whether bind-mounted just now, or baked into a derived image at
@@ -89,7 +91,7 @@ chown -R appuser:appuser /data /models /runtime
 # Bootstrap runtime dependencies and feature status.
 log "Bootstrapping runtime environment..."
 BOOTSTRAP_START_NS="$(date +%s%N)"
-gosu appuser /usr/bin/python3.13 docker/bootstrap_runtime.py
+gosu appuser "$PY_BOOTSTRAP_BIN" docker/bootstrap_runtime.py
 BOOTSTRAP_END_NS="$(date +%s%N)"
 BOOTSTRAP_ELAPSED_MS="$(( (BOOTSTRAP_END_NS - BOOTSTRAP_START_NS) / 1000000 ))"
 BOOTSTRAP_ELAPSED_S="$(( BOOTSTRAP_ELAPSED_MS / 1000 ))"

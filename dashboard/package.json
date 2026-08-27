@@ -134,6 +134,10 @@
         "to": "docker/docker-compose.gpu-cdi.yml"
       },
       {
+        "from": "../server/docker/docker-compose.dgx-spark.yml",
+        "to": "docker/docker-compose.dgx-spark.yml"
+      },
+      {
         "from": "../server/docker/podman-compose.gpu.yml",
         "to": "docker/podman-compose.gpu.yml"
       },

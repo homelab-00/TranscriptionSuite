@@ -39,6 +39,7 @@ vi.mock('electron-store', () => ({
 import {
   IMAGE_REPO,
   LEGACY_IMAGE_REPO,
+  DGX_SPARK_IMAGE_REPO,
   VULKAN_WSL2_IMAGE_REPO,
   VULKAN_LINUX_IMAGE_REPO,
   resolveImageRepo,
@@ -48,6 +49,11 @@ import {
 } from '../dockerManager.js';
 
 const STORE_FILE = path.join(userDataRoot, 'dashboard-config.json');
+const originalArch = process.arch;
+
+function setArch(arch: string): void {
+  Object.defineProperty(process, 'arch', { value: arch, writable: true });
+}
 
 function writeStore(contents: Record<string, unknown>): void {
   fs.writeFileSync(STORE_FILE, JSON.stringify(contents), 'utf8');
@@ -63,6 +69,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  Object.defineProperty(process, 'arch', { value: originalArch, writable: true });
   try {
     fs.unlinkSync(STORE_FILE);
   } catch {
@@ -92,15 +99,24 @@ describe('[P1] Issue #83 — IMAGE_REPO constants', () => {
 
 describe('[P1] Issue #83 — resolveImageRepo', () => {
   it('returns the default repo when useLegacyGpu is false', () => {
+    setArch('x64');
     expect(resolveImageRepo(false)).toBe(IMAGE_REPO);
   });
 
   it('returns the legacy repo when useLegacyGpu is true', () => {
+    setArch('x64');
     expect(resolveImageRepo(true)).toBe(LEGACY_IMAGE_REPO);
   });
 
   it('never mixes repos — the two outputs are distinct', () => {
+    setArch('x64');
     expect(new Set([resolveImageRepo(false), resolveImageRepo(true)]).size).toBe(2);
+  });
+
+  it('routes Linux ARM64 CUDA runtime to the DGX Spark image repo', () => {
+    setArch('arm64');
+    expect(resolveImageRepo(false, 'gpu')).toBe(DGX_SPARK_IMAGE_REPO);
+    expect(resolveImageRepo(true, 'gpu')).toBe(DGX_SPARK_IMAGE_REPO);
   });
 
   it('returns the vulkan-linux repo when the runtime profile is vulkan', () => {
@@ -205,6 +221,7 @@ describe('[P1] Issue #99 — listRemoteTags token-401 mapping', () => {
   });
 
   it('legacy ON + token 401 → not-published (GH-99 defense)', async () => {
+    setArch('x64');
     writeStore({ 'server.useLegacyGpu': true });
     fetchSpy = mockFetch(
       async () => new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' }),
@@ -218,6 +235,7 @@ describe('[P1] Issue #99 — listRemoteTags token-401 mapping', () => {
   });
 
   it('legacy OFF + token 401 → error (default repo 401 is a genuine fault)', async () => {
+    setArch('x64');
     writeStore({ 'server.useLegacyGpu': false });
     fetchSpy = mockFetch(
       async () => new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' }),
@@ -228,6 +246,7 @@ describe('[P1] Issue #99 — listRemoteTags token-401 mapping', () => {
   });
 
   it('legacy ON + token 200 + tags 404 → not-published (regression guard for GH-83)', async () => {
+    setArch('x64');
     writeStore({ 'server.useLegacyGpu': true });
     fetchSpy = mockFetch(async (url) => {
       const s = String(url);
@@ -236,6 +255,17 @@ describe('[P1] Issue #99 — listRemoteTags token-401 mapping', () => {
       }
       return new Response('Not Found', { status: 404, statusText: 'Not Found' });
     });
+    const result = await listRemoteTags();
+    expect(result.status).toBe('not-published');
+    expect(result.tags).toEqual([]);
+  });
+
+  it('DGX Spark runtime + token 401 → not-published (first-push private package)', async () => {
+    setArch('arm64');
+    writeStore({ 'server.useLegacyGpu': false, 'server.runtimeProfile': 'gpu' });
+    fetchSpy = mockFetch(
+      async () => new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' }),
+    );
     const result = await listRemoteTags();
     expect(result.status).toBe('not-published');
     expect(result.tags).toEqual([]);

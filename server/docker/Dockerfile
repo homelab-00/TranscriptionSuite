@@ -3,7 +3,8 @@
 # This image keeps application source and runtime bootstrap tooling.
 # Python dependencies are installed at first container startup into /runtime/.venv.
 
-FROM ubuntu:24.04 AS runtime
+ARG BASE_IMAGE=ubuntu:24.04
+FROM ${BASE_IMAGE} AS runtime
 
 # PyTorch wheel-index variant (Issue #83):
 #   cu129 (default) — modern GPUs, sm_70..sm_120 (Volta and newer)
@@ -12,6 +13,10 @@ FROM ubuntu:24.04 AS runtime
 # bootstrap_runtime.py to switch the `uv sync` index. Default = cu129 keeps existing
 # behaviour byte-identical for unchanged builds.
 ARG PYTORCH_VARIANT=cu129
+
+# Python interpreter used by bootstrap/install scripts. Kept configurable so
+# architecture-specific base images can expose Python in a different location.
+ARG UV_PYTHON_BIN=/usr/bin/python3.13
 
 # OCI standard labels for container metadata
 LABEL org.opencontainers.image.title="TranscriptionSuite Server"
@@ -28,6 +33,7 @@ ENV DEBIAN_FRONTEND="noninteractive"
 ENV PYTHONUNBUFFERED="1"
 ENV PYTHONDONTWRITEBYTECODE="1"
 ENV UV_PYTHON="3.13"
+ENV UV_PYTHON_BIN="${UV_PYTHON_BIN}"
 # Propagate the build-time PyTorch variant into runtime so bootstrap_runtime.py
 # can branch its `uv sync` between the cu129 (default) and cu126 (legacy) index.
 ENV PYTORCH_VARIANT="${PYTORCH_VARIANT}"

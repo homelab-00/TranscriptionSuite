@@ -72,6 +72,9 @@ codeql-agent-results/
 benchmark_*.json
 benchmark_*.csv
 
+## Local-only private workspace data
+local-private/
+
 ## Runtime data: SQLite + audio caches under server/data
 server/data/
 *.db

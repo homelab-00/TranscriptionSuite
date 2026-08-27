@@ -1,0 +1,26 @@
+# DGX Spark overlay (Linux ARM64 + NVIDIA Blackwell GB10)
+#
+# Uses NVIDIA's PyTorch container as the base image for ARM64 CUDA support.
+# This is additive: it is only active when explicitly included in the compose
+# stack and does not affect existing Linux/Windows/macOS flows.
+#
+# Usage:
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.linux-host.yml \
+#     -f docker-compose.gpu.yml \
+#     -f docker-compose.dgx-spark.yml up -d
+
+services:
+  transcriptionsuite:
+    build:
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-nvcr.io/nvidia/pytorch:25.09-py3}
+        # Keep runtime bootstrap on Python 3.13 (project default).
+        UV_PYTHON_BIN: ${UV_PYTHON_BIN:-/usr/bin/python3.13}
+    environment:
+      - UV_PYTHON_BIN=${UV_PYTHON_BIN:-/usr/bin/python3.13}
+      # Optional: set true to reuse torch from the base image's Python env.
+      - BOOTSTRAP_USE_SYSTEM_TORCH=${BOOTSTRAP_USE_SYSTEM_TORCH:-false}
+      # DGX default: enable NeMo so Parakeet models are ready out of the box.
+      - INSTALL_NEMO=${INSTALL_NEMO:-true}

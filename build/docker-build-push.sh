@@ -12,7 +12,7 @@
 #   2. Logged into GHCR: docker login ghcr.io -u <username>
 #
 # Usage:
-#   ./docker-build-push.sh [--variant default|legacy|vulkan-wsl2] [TAG]
+#   ./docker-build-push.sh [--variant default|legacy|vulkan-wsl2|dgx-spark] [--build] [--push|--local-only] [TAG]
 #   TAG=v0.3.0 ./docker-build-push.sh
 #   VARIANT=legacy ./docker-build-push.sh v0.3.0
 #
@@ -25,6 +25,15 @@
 #   ./docker-build-push.sh --variant vulkan-wsl2 v0.3.0
 #                                                # Pushes local vulkan-wsl2 image 'v0.3.0' to
 #                                                # ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2
+#   ./docker-build-push.sh --variant dgx-spark v0.3.0
+#                                                # Uses local DGX Spark image 'v0.3.0' by default (no push)
+#   ./docker-build-push.sh --variant dgx-spark --build local-dgx
+#                                                # Builds DGX image locally only (default for dgx-spark)
+#   ./docker-build-push.sh --variant dgx-spark --build --push v0.3.0
+#                                                # Builds then pushes DGX image when explicitly requested
+#   ./docker-build-push.sh --variant dgx-spark --push v0.3.0
+#                                                # Pushes local DGX Spark image 'v0.3.0' to
+#                                                # ghcr.io/homelab-00/transcriptionsuite-server-dgx-spark
 #   TAG=dev ./docker-build-push.sh               # Pushes local image 'dev'
 #
 # Variants (Issue #83, GH-101):
@@ -32,6 +41,7 @@
 #   legacy      — Pascal/Maxwell support (cu126 wheels, sm_50..sm_90)
 #   vulkan-wsl2 — Windows + WSL2 GPU paravirtualization (AMD/Intel); same cu129
 #                 server image, GGML transcription via native whisper-server.exe
+#   dgx-spark   — Linux ARM64 + Blackwell GB10 (sm_121), NGC PyTorch base
 #
 # Each non-default variant pushes to a SEPARATE GHCR repo (suffix `-legacy` /
 # `-vulkan-wsl2`) so the dashboard's tag selector and version-sort logic stay
@@ -50,6 +60,7 @@ readonly NC='\033[0m' # No Color
 readonly DEFAULT_IMAGE_NAME="ghcr.io/homelab-00/transcriptionsuite-server"
 readonly LEGACY_IMAGE_NAME="ghcr.io/homelab-00/transcriptionsuite-server-legacy"
 readonly VULKAN_WSL2_IMAGE_NAME="ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2"
+readonly DGX_SPARK_IMAGE_NAME="ghcr.io/homelab-00/transcriptionsuite-server-dgx-spark"
 
 # Functions
 log_info() {
@@ -142,6 +153,8 @@ build_image() {
     local image_name=$1
     local tag=$2
     local pytorch_variant=$3
+    local base_image=$4
+    local uv_python_bin=$5
 
     # Resolve repo root from this script's location so the build context is correct
     # regardless of the caller's CWD.
@@ -152,6 +165,8 @@ build_image() {
     log_info "Building image: ${image_name}:${tag} (PYTORCH_VARIANT=${pytorch_variant})"
     if docker build \
         --build-arg "PYTORCH_VARIANT=${pytorch_variant}" \
+        --build-arg "BASE_IMAGE=${base_image}" \
+        --build-arg "UV_PYTHON_BIN=${uv_python_bin}" \
         -t "${image_name}:${tag}" \
         -f "${repo_root}/server/docker/Dockerfile" \
         "${repo_root}"; then
@@ -166,19 +181,27 @@ build_image() {
 print_usage() {
     cat <<'EOF'
 Usage:
-  ./docker-build-push.sh [--variant default|legacy|vulkan-wsl2] [--build] [TAG]
+    ./docker-build-push.sh [--variant default|legacy|vulkan-wsl2|dgx-spark] [--build] [--push|--local-only] [TAG]
 
 Flags:
-  --variant {default|legacy|vulkan-wsl2}
+    --variant {default|legacy|vulkan-wsl2|dgx-spark}
                               Image variant (default: default; or set VARIANT env)
                               default     — modern GPUs (cu129)
                               legacy      — Pascal/Maxwell support (cu126), pushes
                                             to ghcr.io/homelab-00/transcriptionsuite-server-legacy
                               vulkan-wsl2 — Windows + WSL2 GPU (AMD/Intel, cu129),
                                             pushes to ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2
+                              dgx-spark   — Linux ARM64 + Blackwell GB10 (sm_121),
+                                            NGC base image; pushes to
+                                            ghcr.io/homelab-00/transcriptionsuite-server-dgx-spark
   --build                     Build the image locally before pushing (passes
                               --build-arg PYTORCH_VARIANT=<variant>). Without
                               this flag the image is expected to already exist.
+    --push                      Push to GHCR after resolving/building the local image.
+                                                            Default for default/legacy/vulkan-wsl2 variants.
+                                                            Optional (opt-in) for dgx-spark.
+    --local-only                Build/resolve local image only; skip GHCR push.
+                                                            Default for dgx-spark.
   -h, --help                  Show this help
 
 Tag may also be provided via the TAG env var.
@@ -189,13 +212,14 @@ main() {
     local variant="${VARIANT:-default}"
     local do_build=false
     local custom_tag="${TAG:-}"
+    local push_mode="auto"
 
     # Argument parsing — accept flags in any order, with the bare positional TAG last.
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --variant)
                 if [[ $# -lt 2 ]]; then
-                    log_error "--variant requires a value (default|legacy|vulkan-wsl2)"
+                    log_error "--variant requires a value (default|legacy|vulkan-wsl2|dgx-spark)"
                     exit 1
                 fi
                 variant="$2"
@@ -207,6 +231,14 @@ main() {
                 ;;
             --build)
                 do_build=true
+                shift
+                ;;
+            --push)
+                push_mode="push"
+                shift
+                ;;
+            --local-only)
+                push_mode="local"
                 shift
                 ;;
             -h|--help)
@@ -232,17 +264,21 @@ main() {
     done
 
     # Resolve variant -> repo + build-arg.
-    local image_name pytorch_variant variant_label
+    local image_name pytorch_variant variant_label base_image uv_python_bin
     case "$variant" in
         default)
             image_name="$DEFAULT_IMAGE_NAME"
             pytorch_variant="cu129"
             variant_label="default (cu129)"
+            base_image="ubuntu:24.04"
+            uv_python_bin="/usr/bin/python3.13"
             ;;
         legacy)
             image_name="$LEGACY_IMAGE_NAME"
             pytorch_variant="cu126"
             variant_label="legacy (cu126, sm_50..sm_90 — Pascal/Maxwell)"
+            base_image="ubuntu:24.04"
+            uv_python_bin="/usr/bin/python3.13"
             ;;
         vulkan-wsl2)
             image_name="$VULKAN_WSL2_IMAGE_NAME"
@@ -252,9 +288,22 @@ main() {
             # never sets PYTORCH_VARIANT for this profile, so it matches `default`.
             pytorch_variant="cu129"
             variant_label="vulkan-wsl2 (cu129, Windows + WSL2 GPU paravirtualization — AMD/Intel)"
+            base_image="ubuntu:24.04"
+            uv_python_bin="/usr/bin/python3.13"
+            ;;
+        dgx-spark)
+            image_name="$DGX_SPARK_IMAGE_NAME"
+            pytorch_variant="cu129"
+            variant_label="dgx-spark (Linux ARM64 + Blackwell GB10, NGC PyTorch base)"
+            base_image="nvcr.io/nvidia/pytorch:25.09-py3"
+            uv_python_bin="/opt/conda/bin/python"
+            # DGX images are large; keep local-only by default.
+            if [[ "$push_mode" == "auto" ]]; then
+                push_mode="local"
+            fi
             ;;
         *)
-            log_error "Unknown variant: '$variant'. Expected 'default', 'legacy', or 'vulkan-wsl2'."
+            log_error "Unknown variant: '$variant'. Expected 'default', 'legacy', 'vulkan-wsl2', or 'dgx-spark'."
             exit 1
             ;;
     esac
@@ -262,17 +311,24 @@ main() {
     # Make IMAGE_NAME visible to push_image / tag_image (they use ${IMAGE_NAME}).
     IMAGE_NAME="$image_name"
 
+    if [[ "$push_mode" == "auto" ]]; then
+        push_mode="push"
+    fi
+
     echo "=========================================="
     echo "  TranscriptionSuite Docker Build & Push"
     echo "=========================================="
     echo ""
     log_info "Variant: ${variant_label}"
     log_info "Target repo: ${image_name}"
+    log_info "Publish mode: $([[ "$push_mode" == "push" ]] && echo "push to GHCR" || echo "local-only (no push)")"
     echo ""
 
     # Run checks
     check_prerequisites
-    check_docker_login
+    if [[ "$push_mode" == "push" ]]; then
+        check_docker_login
+    fi
 
     # Optional local build — needed for the legacy variant the first time it is published.
     if [[ "$do_build" == true ]]; then
@@ -280,7 +336,7 @@ main() {
             log_error "--build requires a TAG (positional or via TAG env)"
             exit 1
         fi
-        if ! build_image "$image_name" "$custom_tag" "$pytorch_variant"; then
+        if ! build_image "$image_name" "$custom_tag" "$pytorch_variant" "$base_image" "$uv_python_bin"; then
             exit 1
         fi
     fi
@@ -298,7 +354,7 @@ main() {
                 log_info "For the ${variant} variant, build it first with:"
                 log_info "  ./docker-build-push.sh --variant ${variant} --build vX.Y.Z"
                 log_info "or manually:"
-                log_info "  docker build --build-arg PYTORCH_VARIANT=${pytorch_variant} -t ${IMAGE_NAME}:vX.Y.Z -f server/docker/Dockerfile ."
+                log_info "  docker build --build-arg PYTORCH_VARIANT=${pytorch_variant} --build-arg BASE_IMAGE=${base_image} --build-arg UV_PYTHON_BIN=${uv_python_bin} -t ${IMAGE_NAME}:vX.Y.Z -f server/docker/Dockerfile ."
             fi
             exit 1
         fi
@@ -317,6 +373,21 @@ main() {
             exit 1
         fi
         log_success "Image found: ${IMAGE_NAME}:$custom_tag"
+    fi
+
+    if [[ "$push_mode" != "push" ]]; then
+        echo ""
+        echo "=========================================="
+        log_success "Local image ready (push skipped)"
+        echo "=========================================="
+        echo ""
+        echo "Variant: ${variant_label}"
+        echo "Local image: ${IMAGE_NAME}:$custom_tag"
+        echo ""
+        echo "Run with compose (DGX overlay):"
+        echo "   IMAGE_REPO=${IMAGE_NAME} TAG=$custom_tag docker compose -f server/docker/docker-compose.yml -f server/docker/docker-compose.linux-host.yml -f server/docker/docker-compose.gpu.yml -f server/docker/docker-compose.dgx-spark.yml up -d"
+        echo ""
+        return
     fi
 
     # Push the requested tag
