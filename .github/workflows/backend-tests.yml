@@ -33,6 +33,9 @@ jobs:
         with:
           packages: ffmpeg
 
+      # setup-uv stopped publishing floating major/minor tags at v9.0.0 as a
+      # supply-chain measure, so `@v10` does not resolve. Pin the exact release
+      # and bump it deliberately.
       - name: Install uv
         uses: astral-sh/setup-uv@v10.0.1
         with:
