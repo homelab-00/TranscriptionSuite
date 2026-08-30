@@ -37,14 +37,26 @@ let getUserMediaMock: Mock;
 let enumerateDevicesMock: Mock;
 let addModuleMock: Mock;
 
+// Captures the most recently constructed FakeAudioContext so tests can
+// inspect per-instance node mocks (e.g. distinguishing gainNode from
+// micGainNode) without threading a reference through AudioCapture's private
+// fields.
+let lastCtx: FakeAudioContext | undefined;
+
 class FakeAudioContext {
   sampleRate = 48000;
   state = 'running';
   audioWorklet = { addModule: (...args: unknown[]) => addModuleMock(...args) };
-  createMediaStreamSource = vi.fn().mockReturnValue({ connect: vi.fn(), disconnect: vi.fn() });
+  // mockImplementation (not mockReturnValue) so each call gets its own node —
+  // mixMicWithSystem calls both createMediaStreamSource and createGain twice
+  // (primary + secondary), and a single cached return value would make the
+  // mic and system-audio nodes indistinguishable.
+  createMediaStreamSource = vi
+    .fn()
+    .mockImplementation(() => ({ connect: vi.fn(), disconnect: vi.fn() }));
   createGain = vi
     .fn()
-    .mockReturnValue({ connect: vi.fn(), disconnect: vi.fn(), gain: { value: 1 } });
+    .mockImplementation(() => ({ connect: vi.fn(), disconnect: vi.fn(), gain: { value: 1 } }));
   createAnalyser = vi.fn().mockReturnValue({
     connect: vi.fn(),
     disconnect: vi.fn(),
@@ -52,6 +64,10 @@ class FakeAudioContext {
     smoothingTimeConstant: 0,
   });
   close = vi.fn().mockResolvedValue(undefined);
+
+  constructor() {
+    lastCtx = this;
+  }
 }
 
 class FakeAudioWorkletNode {
@@ -234,5 +250,125 @@ describe('[P1] AudioCapture loopback ownership (GH-230)', () => {
     // double-release the hold.
     expect(audioTrack.stop).toHaveBeenCalled();
     expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  // ── mixMicWithSystem: a second MediaStream mixed alongside system audio ─
+  //
+  // Introduces a second getUserMedia acquisition and MediaStream, which is
+  // exactly the class of resource this suite exists to protect — covered
+  // here for the same teardown/leak guarantees as the primary stream above.
+
+  it('mixMicWithSystem: stop() stops BOTH streams tracks', async () => {
+    const { stream: primaryStream, audioTrack: primaryTrack } = makeStream();
+    const { stream: micStream, audioTrack: micTrack } = makeStream();
+    getUserMediaMock.mockResolvedValueOnce(primaryStream).mockResolvedValueOnce(micStream);
+
+    const capture = new AudioCapture(() => {});
+    await capture.start({
+      systemAudio: true,
+      monitorSinkName: 'sink-a',
+      mixMicWithSystem: true,
+    });
+
+    capture.stop();
+
+    expect(primaryTrack.stop).toHaveBeenCalled();
+    expect(micTrack.stop).toHaveBeenCalled();
+  });
+
+  it('mixMicWithSystem: acquires the mic BEFORE the AudioContext/worklet exist', async () => {
+    const { stream: primaryStream } = makeStream();
+    const { stream: micStream } = makeStream();
+    getUserMediaMock.mockResolvedValueOnce(primaryStream).mockResolvedValueOnce(micStream);
+
+    const capture = new AudioCapture(() => {});
+    await capture.start({
+      systemAudio: true,
+      monitorSinkName: 'sink-a',
+      mixMicWithSystem: true,
+    });
+
+    // Both getUserMedia calls (primary + mic) must land before the worklet
+    // module loads — a mic failure must fail start() cleanly instead of
+    // tearing down an already-wired, already-streaming session.
+    expect(getUserMediaMock.mock.invocationCallOrder[1]).toBeLessThan(
+      addModuleMock.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('mixMicWithSystem: external stop() during the secondary getUserMedia → secondary tracks stopped, loopback released exactly once', async () => {
+    const { stream: primaryStream } = makeStream();
+    const { stream: micStream, audioTrack: micTrack } = makeStream();
+    let resolveMicGum!: (v: MediaStream) => void;
+    getUserMediaMock.mockResolvedValueOnce(primaryStream).mockImplementationOnce(
+      () =>
+        new Promise<MediaStream>((res) => {
+          resolveMicGum = res;
+        }),
+    );
+
+    const capture = new AudioCapture(() => {});
+    const starting = capture.start({
+      systemAudio: true,
+      monitorSinkName: 'sink-a',
+      mixMicWithSystem: true,
+    });
+    const assertion = expect(starting).rejects.toMatchObject({ name: 'AbortError' });
+    // Let the primary acquire settle so start() is inside the SECOND
+    // (mic) getUserMedia call.
+    await vi.waitFor(() => expect(getUserMediaMock).toHaveBeenCalledTimes(2));
+
+    capture.stop();
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+
+    resolveMicGum(micStream);
+    await assertion;
+
+    expect(micTrack.stop).toHaveBeenCalled();
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('mixMicWithSystem: secondary getUserMedia rejection → primary stream tracks stopped AND loopback released', async () => {
+    const { stream: primaryStream, audioTrack: primaryTrack } = makeStream();
+    getUserMediaMock
+      .mockResolvedValueOnce(primaryStream)
+      .mockRejectedValueOnce(new Error('NotFoundError'));
+
+    const capture = new AudioCapture(() => {});
+    await expect(
+      capture.start({ systemAudio: true, monitorSinkName: 'sink-a', mixMicWithSystem: true }),
+    ).rejects.toThrow('NotFoundError');
+
+    expect(primaryTrack.stop).toHaveBeenCalled();
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('mixMicWithSystem: the Capture Gain slider does not touch the mic gain stage', async () => {
+    const { stream: primaryStream } = makeStream();
+    const { stream: micStream } = makeStream();
+    getUserMediaMock.mockResolvedValueOnce(primaryStream).mockResolvedValueOnce(micStream);
+
+    const capture = new AudioCapture(() => {});
+    await capture.start({
+      systemAudio: true,
+      monitorSinkName: 'sink-a',
+      mixMicWithSystem: true,
+    });
+
+    capture.setGain(3);
+
+    const gainNodes = lastCtx!.createGain.mock.results.map((r) => r.value);
+    expect(gainNodes).toHaveLength(2);
+    const [systemGain, micGain] = gainNodes;
+    expect(systemGain.gain.value).toBe(3);
+    expect(micGain.gain.value).toBe(1);
+
+    capture.mute();
+    expect(systemGain.gain.value).toBe(0);
+    expect(micGain.gain.value).toBe(0);
+
+    capture.unmute();
+    expect(systemGain.gain.value).toBe(3);
+    expect(micGain.gain.value).toBe(1);
   });
 });
