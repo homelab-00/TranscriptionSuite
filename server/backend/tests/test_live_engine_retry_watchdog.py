@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 import types
 from typing import Any
 
@@ -147,11 +148,21 @@ class TestCreateRecorderReseedsWatchdogBaseline:
         _install_recorder_stub(monkeypatch, lambda **kw: _ScriptedRecorder([], **kw))
         engine = LiveModeEngine()
 
+        # Mock the clock instead of anchoring to the real time.monotonic():
+        # its epoch is arbitrary (often boot time), so a fixed offset like
+        # "-10000" is only safe if the runner's uptime exceeds 10000s — false
+        # on a freshly booted CI VM (this is what broke CI: a hardcoded
+        # absolute value happened to work on a long-lived dev machine but not
+        # on a short-uptime runner).
+        fake_clock = {"t": 100.0}
+        monkeypatch.setattr(time, "monotonic", lambda: fake_clock["t"])
+
         # Simulate a long-stale watchdog baseline from before the rebuild.
-        engine._last_sentence_time = 0.0
-        engine._last_recording_start_time = 5_000.0  # "in flight" and ancient
+        engine._last_sentence_time = fake_clock["t"] - 10_000.0
+        engine._last_recording_start_time = fake_clock["t"] - 5.0  # "in flight" and recent
 
         before = engine._last_sentence_time
+        fake_clock["t"] += 1.0  # advance the clock to when the rebuild happens
         engine._create_recorder()
 
         assert engine._last_sentence_time is not None
