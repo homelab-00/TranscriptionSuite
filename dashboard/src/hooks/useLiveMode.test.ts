@@ -215,6 +215,65 @@ describe('[P1] useLiveMode', () => {
       expect(result.current.error).toBe('Failed to start Live Mode: CUDA out of memory');
     });
 
+    it('reflects a backend-initiated recovery via state STARTING instead of staying silent', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'state', data: { state: 'STARTING' } });
+      });
+
+      expect(result.current.status).toBe('starting');
+      expect(result.current.statusMessage).toContain('Recovering');
+    });
+
+    it('retries instead of giving up when rejected because another session is still shutting down', () => {
+      const { result } = renderHook(() => useLiveMode());
+
+      act(() => {
+        result.current.start();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({
+          type: 'error',
+          data: { message: 'Another Live Mode session is already active' },
+        });
+      });
+
+      // Retried through the reconnect budget, not treated as terminal —
+      // the message reflects a pending retry rather than the bare rejection.
+      expect(result.current.status).toBe('error');
+      expect(result.current.error).toContain('Reconnecting in');
+    });
+
+    it('falls back to a terminal error once the session-busy rejection exhausts the retry budget', () => {
+      // Fake timers: each retry schedules a real setTimeout via
+      // scheduleReconnect, and this test fires the rejection repeatedly
+      // without letting any of them run — real timers would otherwise leak
+      // past this test and fire during a later one.
+      vi.useFakeTimers();
+      try {
+        const { result } = renderHook(() => useLiveMode());
+
+        act(() => {
+          result.current.start();
+        });
+        for (let i = 0; i < 6; i++) {
+          act(() => {
+            lastSocketCbs.onMessage!({
+              type: 'error',
+              data: { message: 'Another Live Mode session is already active' },
+            });
+          });
+        }
+
+        expect(result.current.status).toBe('error');
+        expect(result.current.error).toBe('Another Live Mode session is already active');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('transitions to error on socket error callback', () => {
       const { result } = renderHook(() => useLiveMode());
 
