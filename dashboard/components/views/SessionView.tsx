@@ -272,6 +272,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // Audio Configuration State
   const [audioSource, setAudioSource] = useState<'mic' | 'system'>('mic');
   const [micDevice, setMicDevice] = useState('Default Microphone');
+  // Also capture the microphone alongside system audio (e.g. narrating over a call).
+  const [mixMicWithSystem, setMixMicWithSystem] = useState(false);
   const persistedSelectionsRef = useRef<{
     audioSource?: 'mic' | 'system';
     micDevice?: string;
@@ -529,6 +531,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         savedDiarizationEnabled,
         savedConstrainSpeakers,
         savedNumSpeakers,
+        savedMixMicWithSystem,
       ] = await Promise.all([
         getConfig<'mic' | 'system'>('session.audioSource'),
         getConfig<string>('session.micDevice'),
@@ -541,6 +544,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
         getConfig<boolean>('diarization.enabledForRecordings'),
         getConfig<boolean>('diarization.constrainSpeakers'),
         getConfig<number>('diarization.numSpeakers'),
+        getConfig<boolean>('session.mixMicWithSystem'),
       ]);
       if (!active) return;
 
@@ -580,6 +584,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       if (typeof savedNumSpeakers === 'number' && savedNumSpeakers >= 1 && savedNumSpeakers <= 10) {
         setNumSpeakers(savedNumSpeakers);
       }
+      if (typeof savedMixMicWithSystem === 'boolean') setMixMicWithSystem(savedMixMicWithSystem);
     })().catch(() => {});
 
     return () => {
@@ -591,6 +596,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
     setAudioSource(source);
     persistedSelectionsRef.current.audioSource = source;
     void setConfig('session.audioSource', source).catch(() => {});
+  }, []);
+
+  const handleMixMicToggle = useCallback((enabled: boolean) => {
+    setMixMicWithSystem(enabled);
+    void setConfig('session.mixMicWithSystem', enabled).catch(() => {});
   }, []);
 
   const handleDiarizationToggle = useCallback((enabled: boolean) => {
@@ -977,6 +987,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
         // acquires/releases the pactl loopback module via loopbackOwner, so
         // every teardown path releases it (GH-230).
         monitorSinkName: isSystemAudio && isLinux ? sinkNameMap[sysDevice] : undefined,
+        mixMicWithSystem: isSystemAudio && mixMicWithSystem,
+        mixMicDeviceId: isSystemAudio && mixMicWithSystem ? micDeviceIds[micDevice] : undefined,
         autoAddToNotebook,
         // GH-258: forced off when the server reports the feature unavailable.
         diarization: effectiveDiarization,
@@ -1008,6 +1020,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     captureGain,
     activeModel,
     languagesLoading,
+    mixMicWithSystem,
   ]);
 
   // GH-239 follow-up: a start attempt bounced off an in-progress salvage.
@@ -1298,6 +1311,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
             // Linux system audio: AudioCapture owns the loopback module
             // lifecycle via loopbackOwner (GH-230).
             monitorSinkName: isSystemAudio && isLinux ? sinkNameMap[sysDevice] : undefined,
+            mixMicWithSystem: isSystemAudio && mixMicWithSystem,
+            mixMicDeviceId: isSystemAudio && mixMicWithSystem ? micDeviceIds[micDevice] : undefined,
           });
           // Apply persisted capture gain after capture starts
           if (isSystemAudio) {
@@ -1330,6 +1345,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
       captureGain,
       activeLiveModel,
       languagesLoading,
+      mixMicWithSystem,
     ],
   );
 
@@ -2651,6 +2667,15 @@ export const SessionView: React.FC<SessionViewProps> = ({
                               onChange={(e) => handleCaptureGainChange(parseFloat(e.target.value))}
                               className="ts-gain-slider h-1 w-full cursor-pointer appearance-none rounded-full bg-white/10 accent-cyan-400"
                             />
+                          </div>
+                        )}
+                        {/* Mic mix toggle — capture the mic alongside system audio (e.g. narrating over a call) */}
+                        {audioSource === 'system' && (
+                          <div className="mt-2.5 flex items-center justify-between">
+                            <label className="text-[11px] font-medium text-slate-400">
+                              Also capture microphone
+                            </label>
+                            <AppleSwitch checked={mixMicWithSystem} onChange={handleMixMicToggle} />
                           </div>
                         )}
                       </div>

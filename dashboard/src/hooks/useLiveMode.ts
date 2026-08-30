@@ -59,6 +59,10 @@ export interface LiveStartOptions {
   model?: string;
   systemAudio?: boolean;
   monitorSinkName?: string;
+  /** Also capture the microphone alongside system audio and mix them. */
+  mixMicWithSystem?: boolean;
+  /** Device ID for the mixed-in microphone. Falls back to the default mic. */
+  mixMicDeviceId?: string;
   /**
    * GGML filename of the live model, used ONLY on the Windows `vulkan-wsl2`
    * profile to relaunch the native whisper-server.exe onto this model before
@@ -170,6 +174,8 @@ export function useLiveMode(): LiveModeState {
                   deviceId: startOptsRef.current.deviceId,
                   systemAudio: startOptsRef.current.systemAudio,
                   monitorSinkName: startOptsRef.current.monitorSinkName,
+                  mixMicWithSystem: startOptsRef.current.mixMicWithSystem,
+                  mixMicDeviceId: startOptsRef.current.mixMicDeviceId,
                 })
                 .then(() => {
                   setAnalyser(captureRef.current?.analyser ?? null);

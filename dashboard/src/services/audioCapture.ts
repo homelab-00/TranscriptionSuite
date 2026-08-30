@@ -47,6 +47,14 @@ export interface AudioCaptureOptions {
    * is used instead.
    */
   monitorSinkName?: string;
+  /**
+   * When systemAudio is also set, capture the microphone alongside the
+   * system audio and mix both into the same stream (e.g. narrating over a
+   * call). Ignored for plain microphone capture.
+   */
+  mixMicWithSystem?: boolean;
+  /** Device ID for the mixed-in microphone. Falls back to the default mic. */
+  mixMicDeviceId?: string;
   /** Target PCM sample rate emitted by the worklet (e.g. 16000 or 24000) */
   targetSampleRateHz?: number;
 }
@@ -55,6 +63,9 @@ export class AudioCapture {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
+  /** Secondary mic stream mixed in alongside system audio (mixMicWithSystem). */
+  private secondaryStream: MediaStream | null = null;
+  private secondarySourceNode: MediaStreamAudioSourceNode | null = null;
   private gainNode: GainNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private analyserNode: AnalyserNode | null = null;
@@ -182,6 +193,24 @@ export class AudioCapture {
       this.gainNode.connect(this.analyserNode);
       this.analyserNode.connect(this.workletNode);
       // Don't connect worklet to destination — we don't want to play back the mic
+
+      // 7. Optionally mix in the microphone alongside system audio (e.g.
+      //    narrating over a call). Both sources feed the same gainNode; the
+      //    Web Audio API sums them before the analyser and worklet.
+      if (options.systemAudio && options.mixMicWithSystem) {
+        this.secondaryStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            ...(options.mixMicDeviceId ? { deviceId: { exact: options.mixMicDeviceId } } : {}),
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 1,
+          },
+        });
+        this.assertNotStopped(epoch);
+        this.secondarySourceNode = this.ctx.createMediaStreamSource(this.secondaryStream);
+        this.secondarySourceNode.connect(this.gainNode);
+      }
     } catch (err) {
       // A partial start must not leak: stop() tears down whatever was already
       // grabbed — stream tracks, the AudioContext, and the loopback hold
@@ -205,6 +234,14 @@ export class AudioCapture {
     if (this.sourceNode) {
       this.sourceNode.disconnect();
       this.sourceNode = null;
+    }
+    if (this.secondarySourceNode) {
+      this.secondarySourceNode.disconnect();
+      this.secondarySourceNode = null;
+    }
+    if (this.secondaryStream) {
+      this.secondaryStream.getTracks().forEach((t) => t.stop());
+      this.secondaryStream = null;
     }
     if (this.gainNode) {
       this.gainNode.disconnect();
