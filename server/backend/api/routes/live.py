@@ -198,6 +198,26 @@ class LiveModeSession:
                         config_data["post_speech_silence_duration"]
                     )
 
+            # Seed reliability tunables from config.yaml's live_transcriber section
+            _max_errors = server_cfg.get("live_transcriber", "max_consecutive_errors", default=None)
+            if _max_errors is not None:
+                config.max_consecutive_errors = int(_max_errors)
+            _backoff_base = server_cfg.get(
+                "live_transcriber", "retry_backoff_base_seconds", default=None
+            )
+            if _backoff_base is not None:
+                config.retry_backoff_base_seconds = float(_backoff_base)
+            _backoff_max = server_cfg.get(
+                "live_transcriber", "retry_backoff_max_seconds", default=None
+            )
+            if _backoff_max is not None:
+                config.retry_backoff_max_seconds = float(_backoff_max)
+            _watchdog = server_cfg.get(
+                "live_transcriber", "watchdog_timeout_seconds", default=None
+            )
+            if _watchdog is not None:
+                config.watchdog_timeout_seconds = float(_watchdog)
+
             if not config.model.strip():
                 await self.send_message(
                     "error",
