@@ -198,6 +198,19 @@ class LiveModeSession:
                         config_data["post_speech_silence_duration"]
                     )
 
+            if not config.model.strip():
+                await self.send_message(
+                    "error",
+                    {
+                        "status_code": 409,
+                        "message": (
+                            "Live model not selected. Choose a Live Mode model in Server settings "
+                            "before starting Live Mode."
+                        ),
+                    },
+                )
+                return False
+
             # Seed reliability tunables from config.yaml's live_transcriber section
             _max_errors = server_cfg.get("live_transcriber", "max_consecutive_errors", default=None)
             if _max_errors is not None:
@@ -217,19 +230,6 @@ class LiveModeSession:
             )
             if _watchdog is not None:
                 config.watchdog_timeout_seconds = float(_watchdog)
-
-            if not config.model.strip():
-                await self.send_message(
-                    "error",
-                    {
-                        "status_code": 409,
-                        "message": (
-                            "Live model not selected. Choose a Live Mode model in Server settings "
-                            "before starting Live Mode."
-                        ),
-                    },
-                )
-                return False
 
             if not is_live_mode_model_supported(config.model):
                 backend_type = detect_backend_type(config.model)
