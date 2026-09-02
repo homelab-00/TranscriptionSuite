@@ -211,6 +211,24 @@ class LiveModeSession:
                 )
                 return False
 
+            # Seed reliability tunables from config.yaml's live_transcriber section
+            _max_errors = server_cfg.get("live_transcriber", "max_consecutive_errors", default=None)
+            if _max_errors is not None:
+                config.max_consecutive_errors = int(_max_errors)
+            _backoff_base = server_cfg.get(
+                "live_transcriber", "retry_backoff_base_seconds", default=None
+            )
+            if _backoff_base is not None:
+                config.retry_backoff_base_seconds = float(_backoff_base)
+            _backoff_max = server_cfg.get(
+                "live_transcriber", "retry_backoff_max_seconds", default=None
+            )
+            if _backoff_max is not None:
+                config.retry_backoff_max_seconds = float(_backoff_max)
+            _watchdog = server_cfg.get("live_transcriber", "watchdog_timeout_seconds", default=None)
+            if _watchdog is not None:
+                config.watchdog_timeout_seconds = float(_watchdog)
+
             if not is_live_mode_model_supported(config.model):
                 backend_type = detect_backend_type(config.model)
                 await self.send_message(
@@ -667,7 +685,7 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
                 # Handle binary audio data
                 if "bytes" in message:
                     audio_data = message["bytes"]
-                    if session and session._engine and session._engine.is_running:
+                    if session and session._engine and session._engine.is_accepting_audio:
                         # Parse audio format (same as /ws endpoint):
                         # [4 bytes metadata length][metadata JSON][PCM Int16 data]
                         if len(audio_data) > 4:

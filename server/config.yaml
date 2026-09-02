@@ -276,6 +276,16 @@ live_transcriber:
     # Trigger early transcription during silence (seconds, 0 = disabled)
     early_transcription_on_silence: 0.5
 
+    # Reliability: retry a failed transcription with exponential backoff
+    # before giving up (max_consecutive_errors) and reporting a terminal
+    # error to the client. The watchdog restarts the recorder if it stops
+    # producing sentences for watchdog_timeout_seconds despite incoming audio
+    # (a hung recognition call).
+    max_consecutive_errors: 5
+    retry_backoff_base_seconds: 2.0
+    retry_backoff_max_seconds: 30.0
+    watchdog_timeout_seconds: 90.0
+
     no_log_file: true
 
 # ----------------------------------------------------------------------------

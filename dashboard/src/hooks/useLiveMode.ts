@@ -73,6 +73,10 @@ export interface LiveStartOptions {
   whisperServerModel?: string;
 }
 
+// Cap on consecutive automatic reconnect attempts after the engine reports a
+// terminal ERROR (see the 'ERROR' branch in handleMessage below).
+const MAX_AUTO_RECONNECTS = 5;
+
 export function useLiveMode(): LiveModeState {
   const [status, setStatus] = useState<LiveStatus>('idle');
   const [sentences, setSentences] = useState<LiveSentence[]>([]);
@@ -104,14 +108,70 @@ export function useLiveMode(): LiveModeState {
   // true across a server STOPPED + reconnect so nothing resurrects; reopened
   // only by a user-initiated start()/stop().
   const sessionEstablishedRef = useRef(false);
+  // Auto-reconnect on engine ERROR: counts consecutive reconnect attempts
+  // (reset on a fresh manual start or a successful LISTENING) and holds the
+  // pending timer so a manual start()/stop() can cancel it.
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       captureRef.current?.stop();
       socketRef.current?.disconnect();
     };
   }, []);
+
+  // Schedules an auto-reconnect attempt (shared by the engine-ERROR path and
+  // the "another session is already active" rejection — see the 'error' case
+  // below). Returns false once the budget is exhausted so the caller can fall
+  // back to a terminal error instead. Keeps any more specific message an
+  // `error` frame already delivered (or is about to): the two frames can
+  // race, and the specific one always wins.
+  const scheduleReconnect = useCallback(
+    (fallbackMessage: string) => {
+      // A retry is already armed. The socket runs its own auto-reconnect, so
+      // several rejections can arrive here in quick succession; none of them
+      // may burn a fresh attempt or stack a second timer.
+      if (reconnectTimerRef.current !== null) return true;
+
+      const attempt = reconnectAttemptsRef.current + 1;
+      if (attempt > MAX_AUTO_RECONNECTS) return false;
+
+      reconnectAttemptsRef.current = attempt;
+      const delaySec = Math.min(attempt, 5);
+      setError((prev) => prev ?? fallbackMessage);
+      // The countdown lives in statusMessage, not error. TranscriptionSocket
+      // dispatches a server `error` frame to onError BEFORE forwarding it to
+      // onMessage, and onError sets a specific reason unconditionally - so
+      // folding the countdown into `error` would either be swallowed by the
+      // `prev ??` guard above or clobber that specific reason. Separate fields
+      // show both.
+      setStatusMessage(`Reconnecting in ${delaySec}s (attempt ${attempt}/${MAX_AUTO_RECONNECTS})…`);
+      setStatusTracked('error');
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null;
+        const retarget = retargetRef.current;
+        if (!retarget) return;
+        // Treat this like a retarget hop so accumulated sentences and mute
+        // state survive the reconnect.
+        isRetargetingRef.current = true;
+        try {
+          setError(null);
+          setStatusMessage(null);
+          retarget();
+        } finally {
+          isRetargetingRef.current = false;
+        }
+      }, delaySec * 1000);
+      return true;
+    },
+    [setStatusTracked],
+  );
 
   // Rearm / diagnostic dispatch for config-changed events. The socket class
   // owns the branching (error rearm, pending-backoff shortcut, active-session
@@ -161,6 +221,9 @@ export function useLiveMode(): LiveModeState {
           if (state === 'LISTENING') {
             setStatusTracked('listening');
             setStatusMessage(null);
+            // A confirmed-good session resets the auto-reconnect budget so a
+            // later, unrelated error gets the full retry allowance again.
+            reconnectAttemptsRef.current = 0;
             // Start audio capture once engine is ready. Stop any previous
             // instance first — GH-230: replacing a still-starting capture
             // without stopping it would orphan its loopback hold and stream.
@@ -191,18 +254,38 @@ export function useLiveMode(): LiveModeState {
             }
           } else if (state === 'PROCESSING') {
             setStatusTracked('processing');
+          } else if (state === 'STARTING') {
+            // The backend is retrying a transient transcription error
+            // (rebuilding the recorder) — reflect that instead of leaving
+            // the UI on a stale 'listening'/'processing' while audio is
+            // silently dropped underneath it until the rebuild completes.
+            setStatusTracked('starting');
+            setStatusMessage('Recovering from a transcription error…');
           } else if (state === 'ERROR') {
             // GH-271: the engine reports a terminal failure out of band. This
             // branch used to be missing, so an engine that died mid-session
             // left the UI sitting in listening forever with audio still
-            // streaming into a dead session. Keep any more specific message
-            // that an `error` frame already delivered (or is about to): the
-            // two frames race, and the specific one always wins.
+            // streaming into a dead session.
             captureRef.current?.stop();
             setAnalyser(null);
             setStatusMessage(null);
-            setError((prev) => prev ?? 'Live mode stopped because the engine reported an error.');
-            setStatusTracked('error');
+            // Retry the whole session with backoff — the backend already
+            // retries transient recorder errors on its own (with its own
+            // backoff/watchdog), so reaching ERROR here means it gave up;
+            // a fresh session is the next thing worth trying.
+            const scheduled = scheduleReconnect(
+              'Live mode stopped because the engine reported an error.',
+            );
+            if (!scheduled) {
+              // Out of attempts — keep any more specific message an `error`
+              // frame already delivered (or is about to): the two frames
+              // race, and the specific one always wins.
+              setError(
+                (prev) =>
+                  prev ?? 'Live Mode stopped after too many errors. Start again manually to retry.',
+              );
+              setStatusTracked('error');
+            }
           } else if (state === 'STOPPED') {
             // GH-230: a server-initiated stop must tear down capture too —
             // leaving it running kept streaming audio into a dead session and
@@ -246,16 +329,26 @@ export function useLiveMode(): LiveModeState {
           setSentences([]);
           break;
 
-        case 'error':
-          setError((msg.data?.message as string) ?? 'Live mode error');
+        case 'error': {
+          const message = (msg.data?.message as string) ?? 'Live mode error';
+          // The single-session slot is released only after the PREVIOUS
+          // connection's cleanup (including a main-model reload) finishes,
+          // so a reconnect racing that teardown is routinely rejected here
+          // — it is transient, not a reason to give up. Retry it through the
+          // same budget as an engine ERROR instead of stopping cold.
+          if (message.includes('Another Live Mode session is already active')) {
+            if (scheduleReconnect(message)) break;
+          }
+          setError(message);
           setStatusTracked('error');
           captureRef.current?.stop();
           setAnalyser(null);
           setStatusMessage(null);
           break;
+        }
       }
     },
-    [setStatusTracked],
+    [setStatusTracked, scheduleReconnect],
   );
 
   const start = useCallback(
@@ -268,6 +361,14 @@ export function useLiveMode(): LiveModeState {
       if (!isRetargetingRef.current) {
         setSentences([]);
         setMuted(false);
+        // A fresh manual start resets the auto-reconnect budget.
+        reconnectAttemptsRef.current = 0;
+      }
+      // Cancel any pending auto-reconnect timer — the user (or a retarget
+      // hop) is already starting a new session before the countdown expired.
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
       }
       setStatusMessage(null);
       startOptsRef.current = options ?? {};
@@ -292,6 +393,11 @@ export function useLiveMode(): LiveModeState {
           if (isRetargetingRef.current) return;
           captureRef.current?.stop();
           setAnalyser(null);
+          // A reconnect is already armed - an engine ERROR, or a session-busy
+          // rejection that the server follows with a close. Leave the status
+          // and the countdown alone so the UI keeps showing the pending retry
+          // instead of flipping to idle underneath it.
+          if (reconnectTimerRef.current !== null) return;
           setStatusMessage(null);
           // GH-237: if the drop happened while a session was actively running
           // (listening/processing), it is an unrecoverable interruption — the
@@ -376,6 +482,12 @@ export function useLiveMode(): LiveModeState {
   }, [start]);
 
   const stop = useCallback(() => {
+    // A manual stop supersedes any pending auto-reconnect.
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    reconnectAttemptsRef.current = 0;
     socketRef.current?.sendJSON({ type: 'stop' });
     socketRef.current?.disconnect(); // sets intentionalDisconnect=true, prevents reconnect loop
     captureRef.current?.stop();
