@@ -2065,12 +2065,24 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   title="Main Transcription"
                   className="flex-none"
                   action={
+                    // This card owns the one-shot recording - the Record/Stop
+                    // button, the result, the errors - so its mute button has
+                    // to mute the recording. It drove live.toggleMute() and
+                    // rendered live.muted instead, left behind by the layout
+                    // refactor that moved a Live Mode toolbar out of here
+                    // (a8155a5f), which made it the one control that could turn
+                    // itself red, flip the tray to 'recording-muted' through
+                    // the combined `transcription.muted || live.muted`
+                    // indicator, and leave the recording streaming to the
+                    // server. The tray menu item was the only mute a recording
+                    // actually had.
                     <button
-                      onClick={() => live.toggleMute()}
-                      className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${live.muted ? 'border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
-                      title={live.muted ? 'Unmute' : 'Mute'}
+                      onClick={() => transcription.toggleMute()}
+                      className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-colors ${transcription.muted ? 'border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                      title={transcription.muted ? 'Unmute' : 'Mute'}
+                      aria-label={transcription.muted ? 'Unmute recording' : 'Mute recording'}
                     >
-                      {live.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                      {transcription.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
                     </button>
                   }
                 >

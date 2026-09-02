@@ -176,6 +176,14 @@ export function useTranscription(): TranscriptionState {
   // next instance, so the recording opens at the gain the slider is showing
   // rather than always at 1.0.
   const gainRef = useRef(1);
+  // Mirror of `muted`, carried across the same gap but applied differently.
+  // Gain belongs to the device - it is persisted per sink and survives stop(),
+  // so it can be handed to a not-yet-started instance. Mute belongs to the
+  // session: stop() clears it and start() opens with a defensive stop(), so a
+  // mute seeded before start() is wiped before the graph is built. This ref is
+  // what the construction site re-applies once start() has resolved. Written
+  // only by setMutedTracked, which keeps it in lockstep with `muted`.
+  const mutedRef = useRef(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const jobIdRef = useRef<string | null>(null);
   const statusRef = useRef<TranscriptionStatus>('idle');
@@ -199,6 +207,14 @@ export function useTranscription(): TranscriptionState {
   const setStatusTracked = useCallback((s: TranscriptionStatus) => {
     statusRef.current = s;
     setStatus(s);
+  }, []);
+
+  // Single writer for the muted pair, mirroring setStatusTracked. Every place
+  // that changes `muted` goes through here, so the ref the WS message handler
+  // reads can never drift from what the UI is showing.
+  const setMutedTracked = useCallback((next: boolean) => {
+    mutedRef.current = next;
+    setMuted(next);
   }, []);
 
   const startOptsRef = useRef<{
@@ -391,6 +407,15 @@ export function useTranscription(): TranscriptionState {
               })
               .then(() => {
                 setAnalyser(captureRef.current?.analyser ?? null);
+                // Re-apply a mute the user pressed before this instance
+                // existed - the tray action is the only way to mute a one-shot
+                // recording, and SessionView routes it here while the status
+                // is still `connecting`. This has to run AFTER start(), unlike
+                // the gain seeded above: start() opens with a defensive stop()
+                // and stop() clears the muted flag. Nothing escapes in the
+                // meantime - the worklet posts chunks as tasks, and this is a
+                // microtask off start()'s promise, so it runs first.
+                if (mutedRef.current) captureRef.current?.mute();
               })
               .catch((err) => {
                 // A stop() that raced the start — the stop already put the
@@ -578,7 +603,7 @@ export function useTranscription(): TranscriptionState {
       setError(null);
       setBusyInfo(null);
       setVadActive(false);
-      setMuted(false);
+      setMutedTracked(false);
       jobIdRef.current = null;
       setJobId(null);
       // GH-237: a user-initiated session reopens the start-gate.
@@ -718,7 +743,7 @@ export function useTranscription(): TranscriptionState {
       });
       socketRef.current.connect();
     },
-    [handleMessage, setStatusTracked, stopPreview, haltPreviewLoop],
+    [handleMessage, setStatusTracked, setMutedTracked, stopPreview, haltPreviewLoop],
   );
 
   const stop = useCallback(() => {
@@ -731,9 +756,14 @@ export function useTranscription(): TranscriptionState {
       // Stop audio capture immediately
       captureRef.current?.stop();
       setAnalyser(null);
+      // The mute belonged to the capture that just died. Leaving it set kept
+      // the tray on 'recording-muted' through whatever came next, because
+      // SessionView feeds it `transcription.muted || live.muted` - so a mute
+      // left over here painted a muted icon over an unmuted Live Mode session.
+      setMutedTracked(false);
       setStatusTracked('processing');
     }
-  }, [status, setStatusTracked, haltPreviewLoop]);
+  }, [status, setStatusTracked, setMutedTracked, haltPreviewLoop]);
 
   const reset = useCallback(() => {
     captureRef.current?.stop();
@@ -744,7 +774,7 @@ export function useTranscription(): TranscriptionState {
     setBusyInfo(null);
     setAnalyser(null);
     setVadActive(false);
-    setMuted(false);
+    setMutedTracked(false);
     setProcessingProgress(null);
     jobIdRef.current = null;
     setJobId(null);
@@ -753,21 +783,23 @@ export function useTranscription(): TranscriptionState {
     stopPreview();
     // reset() disconnects the socket — the in-flight response (if any) is lost.
     previewLoadingRef.current = false;
-  }, [setStatusTracked, stopPreview]);
+  }, [setStatusTracked, setMutedTracked, stopPreview]);
 
   const clearBusyInfo = useCallback(() => setBusyInfo(null), []);
 
   const toggleMute = useCallback(() => {
-    setMuted((prev) => {
-      const next = !prev;
-      if (next) {
-        captureRef.current?.mute();
-      } else {
-        captureRef.current?.unmute();
-      }
-      return next;
-    });
-  }, []);
+    // Remember first, forward second - same shape as setGain. The ref is the
+    // only copy that survives until the next AudioCapture is constructed, and
+    // reading it here (rather than React's `prev`) also keeps the capture calls
+    // out of a state updater, which React may invoke more than once per press.
+    const next = !mutedRef.current;
+    setMutedTracked(next);
+    if (next) {
+      captureRef.current?.mute();
+    } else {
+      captureRef.current?.unmute();
+    }
+  }, [setMutedTracked]);
 
   const setGain = useCallback((value: number) => {
     // Remember first, forward second: the ref is the only copy that survives

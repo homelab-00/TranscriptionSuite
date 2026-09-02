@@ -93,6 +93,14 @@ export function useLiveMode(): LiveModeState {
   // setGain() before that reached `captureRef.current?.` with nothing behind it
   // and was silently dropped.
   const gainRef = useRef(1);
+  // Mirror of `muted`, carried across the same gap but applied differently.
+  // Gain belongs to the device - it is persisted per sink and survives stop(),
+  // so it can be handed to a not-yet-started instance. Mute belongs to the
+  // session: stop() clears it and start() opens with a defensive stop(), so a
+  // mute seeded before start() is wiped before the graph is built. This ref is
+  // what the construction site re-applies once start() has resolved. Written
+  // only by setMutedTracked, which keeps it in lockstep with `muted`.
+  const mutedRef = useRef(false);
   const startOptsRef = useRef<LiveStartOptions>({});
   // Retarget hook: holds the latest `start` closure so the socket's
   // onHostMismatch callback can reopen the session on the new URL without
@@ -105,6 +113,13 @@ export function useLiveMode(): LiveModeState {
   const setStatusTracked = useCallback((s: LiveStatus) => {
     statusRef.current = s;
     setStatus(s);
+  }, []);
+  // Single writer for the muted pair, mirroring setStatusTracked. Every place
+  // that changes `muted` goes through here, so the ref the WS message handler
+  // reads can never drift from what the UI is showing.
+  const setMutedTracked = useCallback((next: boolean) => {
+    mutedRef.current = next;
+    setMuted(next);
   }, []);
   // GH-237: gate the `start` re-send across auto-reconnects (same rationale as
   // useTranscription). The server cannot resume a dropped live session, so
@@ -258,6 +273,17 @@ export function useLiveMode(): LiveModeState {
                 })
                 .then(() => {
                   setAnalyser(captureRef.current?.analyser ?? null);
+                  // Re-apply a mute the user pressed before this instance
+                  // existed. Two ways in: the mute buttons stay live while the
+                  // engine is still coming up, and the retarget hop and the
+                  // auto-reconnect-on-ERROR both land here having deliberately
+                  // kept the mute state while destroying the capture that was
+                  // honouring it. This has to run AFTER start(), unlike the
+                  // gain seeded above: start() opens with a defensive stop()
+                  // and stop() clears the muted flag. Nothing escapes in the
+                  // meantime - the worklet posts chunks as tasks, and this is
+                  // a microtask off start()'s promise, so it runs first.
+                  if (mutedRef.current) captureRef.current?.mute();
                 })
                 .catch((err) => {
                   // A stop() that raced the start — the stop already put the
@@ -376,7 +402,7 @@ export function useLiveMode(): LiveModeState {
       // transcript doesn't visually reset on host change.
       if (!isRetargetingRef.current) {
         setSentences([]);
-        setMuted(false);
+        setMutedTracked(false);
         // A fresh manual start resets the auto-reconnect budget.
         reconnectAttemptsRef.current = 0;
       }
@@ -487,7 +513,7 @@ export function useLiveMode(): LiveModeState {
         sock.connect();
       }
     },
-    [handleMessage, setStatusTracked],
+    [handleMessage, setStatusTracked, setMutedTracked],
   );
 
   // Keep the retarget ref pointed at the latest `start` closure. Updated every
@@ -509,6 +535,13 @@ export function useLiveMode(): LiveModeState {
     captureRef.current?.stop();
     setAnalyser(null);
     setStatusMessage(null);
+    // The mute belonged to the capture that just died. Leaving it set kept the
+    // tray on 'live-muted' through whatever came next, because SessionView
+    // feeds it `transcription.muted || live.muted` - so a mute left over here
+    // painted a muted icon over an unmuted one-shot recording, and the tray's
+    // mute item then MUTED that recording to "unmute" it. Only start() cleared
+    // it, and starting Live Mode again is not what the user does next.
+    setMutedTracked(false);
     // GH-237: user stop reopens the start-gate for the next session.
     sessionEstablishedRef.current = false;
     setStatusTracked('idle');
@@ -520,19 +553,21 @@ export function useLiveMode(): LiveModeState {
     void window.electronAPI?.docker?.switchWhisperServerModel?.(null).catch((err) => {
       console.warn('[useLiveMode] whisper-server main-model restore failed:', err);
     });
-  }, [setStatusTracked]);
+  }, [setStatusTracked, setMutedTracked]);
 
   const toggleMute = useCallback(() => {
-    setMuted((prev) => {
-      const next = !prev;
-      if (next) {
-        captureRef.current?.mute();
-      } else {
-        captureRef.current?.unmute();
-      }
-      return next;
-    });
-  }, []);
+    // Remember first, forward second - same shape as setGain. The ref is the
+    // only copy that survives until the next AudioCapture is constructed, and
+    // reading it here (rather than React's `prev`) also keeps the capture calls
+    // out of a state updater, which React may invoke more than once per press.
+    const next = !mutedRef.current;
+    setMutedTracked(next);
+    if (next) {
+      captureRef.current?.mute();
+    } else {
+      captureRef.current?.unmute();
+    }
+  }, [setMutedTracked]);
 
   const setGain = useCallback((value: number) => {
     // Remember first, forward second - the ref is the only copy that survives

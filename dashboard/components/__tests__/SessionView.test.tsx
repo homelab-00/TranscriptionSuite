@@ -9,7 +9,7 @@
 
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const mockTranscription = {
@@ -719,5 +719,81 @@ describe('capture gain handed to the live hook at Live Mode start', () => {
     expect(live.setGain).toHaveBeenLastCalledWith(1);
     const orders = live.setGain.mock.invocationCallOrder;
     expect(orders[orders.length - 1]).toBeLessThan(live.start.mock.invocationCallOrder[0]);
+  });
+});
+
+// ── The Main Transcription card's mute button drove the wrong hook ─────────
+//
+// That card owns the one-shot recording - the Record/Stop button, the result,
+// the errors - but its header mute button called live.toggleMute() and
+// rendered live.muted, left behind by the layout refactor that moved a Live
+// Mode toolbar out of it (a8155a5f). Pressing it during a recording turned it
+// red and flipped the tray to 'recording-muted' - SessionView feeds
+// useTraySync the combined `transcription.muted || live.muted` - while the
+// recording went on streaming to the server and being transcribed. The tray
+// menu item was the only mute a recording actually had, and pressing THAT to
+// "unmute" muted it for real without changing the icon.
+
+describe('the Main Transcription card mutes the recording it owns', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTranscription.status = 'idle';
+    mockTranscription.result = null;
+    mockTranscription.error = null;
+    mockTranscription.vadActive = false;
+    mockTranscription.processingProgress = null;
+    mockTranscription.muted = false;
+
+    vi.mocked(isModelDisabled).mockReturnValue(false);
+
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockResolvedValue(undefined),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+      },
+      audio: { listSinks: vi.fn().mockResolvedValue([]) },
+      tray: { onAction: vi.fn().mockReturnValue(vi.fn()) },
+      notifications: { show: vi.fn() },
+    };
+  });
+
+  // mockTranscription is shared across every describe in this file, so a muted
+  // state left set here would leak into whatever runs next.
+  afterEach(() => {
+    mockTranscription.muted = false;
+  });
+
+  it('routes the card mute button to the transcription hook, not the live one', () => {
+    const live = { ...baseLiveState, toggleMute: vi.fn() };
+    mockTranscription.status = 'recording';
+    render(React.createElement(SessionView, { ...baseProps, live }), { wrapper: createWrapper() });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mute recording' }));
+
+    expect(mockTranscription.toggleMute).toHaveBeenCalledTimes(1);
+    expect(live.toggleMute).not.toHaveBeenCalled();
+  });
+
+  it('reads its muted state from the recording, not from Live Mode', () => {
+    // A muted Live Mode session must not paint this button red: the card is
+    // about the recording, and Live Mode has its own mute button.
+    mockTranscription.status = 'recording';
+    const live = { ...baseLiveState, muted: true, toggleMute: vi.fn() };
+    render(React.createElement(SessionView, { ...baseProps, live }), { wrapper: createWrapper() });
+
+    expect(screen.getByRole('button', { name: 'Mute recording' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Unmute recording' })).toBeNull();
+  });
+
+  it('offers to unmute once the recording is muted', () => {
+    mockTranscription.status = 'recording';
+    mockTranscription.muted = true;
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    expect(screen.getByRole('button', { name: 'Unmute recording' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Mute recording' })).toBeNull();
   });
 });

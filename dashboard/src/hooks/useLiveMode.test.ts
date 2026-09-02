@@ -886,6 +886,136 @@ describe('[P1] useLiveMode', () => {
     });
   });
 
+  // ── Mute must reach the AudioCapture built on LISTENING ──────────────
+  //
+  // Same lifetime gap as the capture gain: `muted` is React state here, while
+  // the object that gates chunk delivery is the AudioCapture the engine's
+  // LISTENING message builds. A mute landing before that existed reached
+  // `captureRef.current?.mute()` with nothing behind it, so the session came
+  // up unmuted - audio streaming and being transcribed while all three mute
+  // buttons and the tray icon showed muted.
+  //
+  // This hook makes it worse than the longform one: the retarget hop and the
+  // auto-reconnect-on-ERROR both destroy the capture and build a fresh,
+  // unmuted replacement, and both deliberately preserve the mute state across
+  // the hop - so the UI keeps promising a mute the new capture never got.
+  //
+  // The flag cannot be handed over before start() the way the gain is:
+  // start() opens with a defensive stop() and stop() clears it.
+
+  describe('mute reaches the AudioCapture built on LISTENING', () => {
+    it('mutes the capture built after a mute pressed before LISTENING', async () => {
+      const { result } = renderHook(() => useLiveMode());
+
+      act(() => {
+        result.current.start({});
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      // No AudioCapture yet - the engine has not reported LISTENING. The mute
+      // buttons are live throughout this window.
+      act(() => {
+        result.current.toggleMute();
+      });
+      expect(result.current.muted).toBe(true);
+
+      await act(async () => {
+        lastSocketCbs.onMessage!({ type: 'state', data: { state: 'LISTENING' } });
+      });
+
+      expect(lastCapture.mute).toHaveBeenCalled();
+      // AFTER start(), not before - the opposite of the gain. start()'s
+      // defensive stop() clears the muted flag, so a mute handed over first
+      // would be wiped before the graph was built.
+      expect(lastCapture.mute.mock.invocationCallOrder[0]).toBeGreaterThan(
+        lastCapture.start.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('keeps the capture muted across a retarget hop', async () => {
+      // EC-6: the user changed hosts mid-session. start() is re-entered from
+      // inside this hook with the retarget flag set, which deliberately keeps
+      // the accumulated sentences and the mute - so the remembered flag has to
+      // survive it too, and the capture the new host builds has to honour it.
+      // The auto-reconnect-on-ERROR takes the same path.
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+
+      act(() => {
+        result.current.toggleMute();
+      });
+      const firstCapture = lastCapture;
+      expect(firstCapture.mute).toHaveBeenCalled();
+
+      await act(async () => {
+        lastSocketCbs.onHostMismatch?.('ws://old-host:9786/ws/live', 'ws://new-host:9786/ws/live');
+        // Flush the retarget's queueMicrotask with a microtask of our own.
+        await Promise.resolve();
+      });
+      act(() => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+      await act(async () => {
+        lastSocketCbs.onMessage!({ type: 'state', data: { state: 'LISTENING' } });
+      });
+
+      expect(lastCapture).not.toBe(firstCapture);
+      expect(result.current.muted).toBe(true);
+      expect(lastCapture.mute).toHaveBeenCalled();
+    });
+
+    it('does not mute a capture the user never muted', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+
+      expect(lastCapture.mute).not.toHaveBeenCalled();
+      expect(result.current.muted).toBe(false);
+    });
+
+    it('a restart without an intervening stop still opens unmuted', async () => {
+      // start() clears `muted` for anything that is not a retarget hop, so the
+      // remembered flag has to be cleared with it - otherwise every session
+      // after a muted one would come up silently muted. Driven without stop()
+      // on purpose: stop() clears the flag too, and going through it would let
+      // a start() that stopped clearing pass.
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+
+      act(() => {
+        result.current.toggleMute();
+      });
+      expect(result.current.muted).toBe(true);
+
+      await driveToListening(result);
+
+      expect(result.current.muted).toBe(false);
+      expect(lastCapture.mute).not.toHaveBeenCalled();
+    });
+
+    it('stop() clears the mute along with the capture it belonged to', async () => {
+      // SessionView hands the tray `transcription.muted || live.muted`, so a
+      // mute left set after this capture died painted 'live-muted' over the
+      // next one-shot recording - and the tray's mute item, which routes to
+      // the recording while it is active, then MUTED that recording in an
+      // attempt to unmute this one. Only start() cleared the flag, and
+      // starting Live Mode again is not what the user does next.
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result);
+
+      act(() => {
+        result.current.toggleMute();
+      });
+      expect(result.current.muted).toBe(true);
+
+      act(() => {
+        result.current.stop();
+      });
+
+      expect(result.current.muted).toBe(false);
+    });
+  });
+
   // ── GH-237: WS reconnect must not resurrect a dead live session ───────
   //
   // Same root cause as the longform hook: the server cannot resume a dropped

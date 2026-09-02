@@ -1105,6 +1105,160 @@ describe('[P1] useTranscription', () => {
     });
   });
 
+  // ── Mute must reach the AudioCapture built on session_started ─────────
+  //
+  // The same lifetime gap as the capture gain, with a worse payload. `muted`
+  // is React state in this hook; the object that actually gates chunk delivery
+  // is the AudioCapture, and that is built a server round trip later. A mute
+  // pressed before it existed forwarded through `captureRef.current?.mute()`
+  // and hit nothing, so the session came up unmuted: audio kept streaming to
+  // the server and being transcribed while the tray icon showed muted.
+  //
+  // Both mute controls are live in exactly that window. The tray's mute item
+  // is enabled from `connecting` onwards (useTraySync counts connecting as
+  // recording) and SessionView routes it to this hook for that status, and the
+  // Main Transcription card's own mute button - rewired to this hook on this
+  // branch - is never disabled.
+  //
+  // Unlike the gain, the flag cannot be handed over before start(): start()
+  // opens with a defensive stop() and stop() clears it, so the mute has to be
+  // re-applied once start() has built the graph.
+
+  describe('mute reaches the AudioCapture built on session_started', () => {
+    /** Drive to an open socket with no AudioCapture built yet. */
+    async function driveToConnecting(result: {
+      current: ReturnType<typeof useTranscription>;
+    }): Promise<void> {
+      act(() => {
+        result.current.start({});
+      });
+      await act(async () => {
+        lastSocketCbs.onMessage!({ type: 'auth_ok' });
+      });
+    }
+
+    /** Deliver the message the AudioCapture is constructed on. */
+    async function deliverSessionStarted(): Promise<void> {
+      await act(async () => {
+        lastSocketCbs.onMessage!({
+          type: 'session_started',
+          data: { job_id: 'job-1', capture_sample_rate_hz: 16000 },
+        });
+      });
+    }
+
+    it('mutes the capture built after a mute pressed while connecting', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToConnecting(result);
+
+      act(() => {
+        result.current.toggleMute();
+      });
+      expect(result.current.muted).toBe(true);
+
+      await deliverSessionStarted();
+
+      expect(lastCapture.mute).toHaveBeenCalled();
+      // AFTER start(), not before - the opposite of the gain. start()'s
+      // defensive stop() clears the muted flag, so a mute handed over first
+      // would be wiped before the graph was built. Re-applying here still
+      // leaks nothing: the worklet delivers chunks as tasks and this runs as a
+      // microtask off start()'s promise, which drains first.
+      expect(lastCapture.mute.mock.invocationCallOrder[0]).toBeGreaterThan(
+        lastCapture.start.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('does not mute a capture the user never muted', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      expect(lastCapture.mute).not.toHaveBeenCalled();
+      expect(result.current.muted).toBe(false);
+    });
+
+    it('honours an unmute that lands before the capture is built', async () => {
+      // This one constrains the toggle, not the re-apply: the pre-fix code
+      // also left the new capture unmuted here, so the `mute` assertion alone
+      // would pass against the bug. What it pins is that the remembered flag
+      // toggles BOTH ways - stop writing it on the off-branch and the second
+      // press stops registering, leaving `muted` stuck true.
+      const { result } = renderHook(() => useTranscription());
+      await driveToConnecting(result);
+
+      act(() => {
+        result.current.toggleMute();
+      });
+      act(() => {
+        result.current.toggleMute();
+      });
+      expect(result.current.muted).toBe(false);
+
+      await deliverSessionStarted();
+
+      expect(lastCapture.mute).not.toHaveBeenCalled();
+    });
+
+    it('unmutes the capture it muted on construction', async () => {
+      // The round trip the two tests above only cover half of each: the mute
+      // crosses the gap, and the unmute afterwards reaches the instance the
+      // mute was applied to rather than being dropped on the floor.
+      const { result } = renderHook(() => useTranscription());
+      await driveToConnecting(result);
+
+      act(() => {
+        result.current.toggleMute();
+      });
+      await deliverSessionStarted();
+      expect(lastCapture.mute).toHaveBeenCalled();
+
+      act(() => {
+        result.current.toggleMute();
+      });
+
+      expect(result.current.muted).toBe(false);
+      expect(lastCapture.unmute).toHaveBeenCalled();
+    });
+
+    it('a restart without an intervening stop still opens unmuted', async () => {
+      // start() clears `muted`, so the remembered flag must be cleared with
+      // it. Driven without stop() on purpose - stop() clears the flag too, and
+      // going through it would let a start() that stopped clearing pass.
+      const { result } = renderHook(() => useTranscription());
+      await driveToConnecting(result);
+
+      act(() => {
+        result.current.toggleMute();
+      });
+      expect(result.current.muted).toBe(true);
+
+      await driveToRecording(result);
+
+      expect(result.current.muted).toBe(false);
+      expect(lastCapture.mute).not.toHaveBeenCalled();
+    });
+
+    it('stop() clears the mute along with the capture it belonged to', async () => {
+      // SessionView hands the tray `transcription.muted || live.muted`, so a
+      // mute left set after this capture died painted a muted icon over
+      // whatever ran next - and the tray's mute item then muted THAT session
+      // in an attempt to unmute this one.
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result);
+
+      act(() => {
+        result.current.toggleMute();
+      });
+      expect(result.current.muted).toBe(true);
+
+      act(() => {
+        result.current.stop();
+      });
+
+      expect(result.current.muted).toBe(false);
+    });
+  });
+
   // ── GH-237: WS reconnect must not spawn zombie server sessions ────────
   //
   // The server assigns a NEW session_id + job_id per WS connection and cannot
