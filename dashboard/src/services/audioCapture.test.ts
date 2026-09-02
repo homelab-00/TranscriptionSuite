@@ -393,6 +393,26 @@ describe('[P1] AudioCapture loopback ownership (GH-230)', () => {
     expect(systemGain.gain.value).toBe(3);
   });
 
+  // The asymmetry between gain and mute, which is why the hooks carry them
+  // differently. Gain belongs to the device - it is persisted per sink and
+  // survives stop(), so a hook can hand it to a not-yet-started instance (see
+  // the test above). Mute belongs to the session: stop() clears it, and
+  // start() opens with a defensive stop(), so a mute handed over first is
+  // wiped before the graph is built. That is why both hooks re-apply the mute
+  // once start() has resolved instead of seeding it the way they seed gain.
+  it('a mute set before start() does NOT survive into the built graph', async () => {
+    const capture = new AudioCapture(() => {});
+
+    capture.mute();
+    expect(capture.isMuted).toBe(true);
+
+    await capture.start({ systemAudio: true, monitorSinkName: 'sink-a' });
+
+    expect(capture.isMuted).toBe(false);
+    const [systemGain] = lastCtx!.createGain.mock.results.map((r) => r.value);
+    expect(systemGain.gain.value).toBe(1);
+  });
+
   // The load-bearing assertion for a MIXING feature: every other test here
   // passes with the mic acquired, held, gain-staged, muted and torn down
   // correctly while its audio goes nowhere. Deleting either connect() in
