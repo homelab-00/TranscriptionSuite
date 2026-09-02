@@ -2675,7 +2675,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
                             <label className="text-[11px] font-medium text-slate-400">
                               Also capture microphone
                             </label>
-                            <AppleSwitch checked={mixMicWithSystem} onChange={handleMixMicToggle} />
+                            <AppleSwitch
+                              checked={mixMicWithSystem}
+                              onChange={handleMixMicToggle}
+                              ariaLabel="Also capture microphone"
+                            />
                           </div>
                         )}
                       </div>

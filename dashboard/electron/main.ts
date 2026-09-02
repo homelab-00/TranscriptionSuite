@@ -483,6 +483,7 @@ const store = new Store({
     'session.audioSource': 'mic',
     'session.micDevice': 'Default Microphone',
     'session.systemDevice': 'Default Output',
+    'session.mixMicWithSystem': false,
     'session.mainLanguage': 'Auto Detect',
     'session.liveLanguage': 'Auto Detect',
     'audio.gracePeriod': 1.0,

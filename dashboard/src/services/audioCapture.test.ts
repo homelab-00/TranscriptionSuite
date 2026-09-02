@@ -79,6 +79,9 @@ class FakeAudioWorkletNode {
 describe('[P1] AudioCapture loopback ownership (GH-230)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Drop the previous test's context so a test that asserts on `lastCtx`
+    // without starting a capture fails loudly instead of inspecting stale nodes.
+    lastCtx = undefined;
     acquireMock.mockResolvedValue({ label: 'TranscriptionSuite_Loopback', volumePct: 100 });
 
     const { stream } = makeStream();
@@ -370,5 +373,51 @@ describe('[P1] AudioCapture loopback ownership (GH-230)', () => {
     capture.unmute();
     expect(systemGain.gain.value).toBe(3);
     expect(micGain.gain.value).toBe(1);
+  });
+
+  // The load-bearing assertion for a MIXING feature: every other test here
+  // passes with the mic acquired, held, gain-staged, muted and torn down
+  // correctly while its audio goes nowhere. Deleting either connect() in
+  // start() leaves the mic silently absent from the PCM sent to the server —
+  // the toggle becomes a no-op while the OS mic indicator stays lit — and
+  // without this test the suite stays green.
+  it('mixMicWithSystem: the mic is actually wired into the mixed PCM path', async () => {
+    const { stream: primaryStream } = makeStream();
+    const { stream: micStream } = makeStream();
+    getUserMediaMock.mockResolvedValueOnce(primaryStream).mockResolvedValueOnce(micStream);
+
+    const capture = new AudioCapture(() => {});
+    await capture.start({
+      systemAudio: true,
+      monitorSinkName: 'sink-a',
+      mixMicWithSystem: true,
+    });
+
+    const ctx = lastCtx!;
+    const [systemSource, micSource] = ctx.createMediaStreamSource.mock.results.map((r) => r.value);
+    const [systemGain, micGain] = ctx.createGain.mock.results.map((r) => r.value);
+    const analyser = ctx.createAnalyser.mock.results[0].value;
+
+    // Both chains must terminate at the SAME analyser — that node is where the
+    // two signals sum, and it is the only path into the worklet.
+    expect(systemSource.connect).toHaveBeenCalledWith(systemGain);
+    expect(systemGain.connect).toHaveBeenCalledWith(analyser);
+    expect(micSource.connect).toHaveBeenCalledWith(micGain);
+    expect(micGain.connect).toHaveBeenCalledWith(analyser);
+    expect(analyser.connect).toHaveBeenCalledWith(expect.any(FakeAudioWorkletNode));
+  });
+
+  it('mixMicWithSystem: disabled leaves the graph untouched (no mic node is built)', async () => {
+    const { stream: primaryStream } = makeStream();
+    getUserMediaMock.mockResolvedValue(primaryStream);
+
+    const capture = new AudioCapture(() => {});
+    await capture.start({ systemAudio: true, monitorSinkName: 'sink-a' });
+
+    // Exactly one source and one gain stage: the mic path must be a strict
+    // no-op when the toggle is off, not a silently-built dangling branch.
+    expect(lastCtx!.createMediaStreamSource).toHaveBeenCalledTimes(1);
+    expect(lastCtx!.createGain).toHaveBeenCalledTimes(1);
+    expect(getUserMediaMock).toHaveBeenCalledTimes(1);
   });
 });
