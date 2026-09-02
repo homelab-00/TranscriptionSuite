@@ -977,6 +977,17 @@ export const SessionView: React.FC<SessionViewProps> = ({
       // recording into the Audio Notebook when it finishes.
       const autoAddToNotebook = (await getConfig<boolean>('notebook.autoAdd')) ?? false;
 
+      // Hand the capture gain over BEFORE start(): start() only opens the
+      // socket, and the AudioCapture is built a server round trip later, so the
+      // hook has to remember this value and apply it to that instance (see
+      // gainRef in useTranscription). Calling setGain after start() - as this
+      // did - landed on a null ref on the first recording and on the previous,
+      // already-stopped capture on every one after it, so the slider showed the
+      // persisted gain while the audio was captured at 1.0.
+      // Mic capture always runs at unity: Capture Gain is a system-audio-only
+      // control (its slider is not even rendered for the mic), and leaving a
+      // previous system session's value in place would silently amplify it.
+      transcription.setGain(isSystemAudio ? captureGain : 1);
       transcription.start({
         language: resolvedLang,
         deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
@@ -994,10 +1005,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
         diarization: effectiveDiarization,
         expectedSpeakers: effectiveDiarization && constrainSpeakers ? numSpeakers : undefined,
       });
-      // Apply persisted capture gain after capture starts
-      if (isSystemAudio) {
-        transcription.setGain(captureGain);
-      }
     })();
   }, [
     canStartRecording,
@@ -1298,6 +1305,11 @@ export const SessionView: React.FC<SessionViewProps> = ({
             await window.electronAPI?.audio?.enableSystemAudioLoopback?.();
           }
 
+          // Before start(), for the same reason as the recording path above:
+          // the AudioCapture only exists once the engine reports LISTENING, so
+          // the hook remembers this and applies it to that instance. Mic
+          // capture runs at unity - Capture Gain is system-audio only.
+          live.setGain(isSystemAudio ? captureGain : 1);
           live.start({
             language: resolvedLiveLang,
             deviceId: isSystemAudio ? undefined : micDeviceIds[micDevice],
@@ -1314,10 +1326,6 @@ export const SessionView: React.FC<SessionViewProps> = ({
             mixMicWithSystem: isSystemAudio && mixMicWithSystem,
             mixMicDeviceId: isSystemAudio && mixMicWithSystem ? micDeviceIds[micDevice] : undefined,
           });
-          // Apply persisted capture gain after capture starts
-          if (isSystemAudio) {
-            live.setGain(captureGain);
-          }
         })();
       } else {
         // live.stop() → capture.stop() → loopbackOwner release (GH-230).
@@ -2897,6 +2905,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                               <AppleSwitch
                                 checked={isLive}
                                 onChange={handleLiveToggle}
+                                ariaLabel="Live Mode"
                                 size="sm"
                                 disabled={
                                   !isLive &&
@@ -3025,6 +3034,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
                           <AppleSwitch
                             checked={isLive}
                             onChange={handleLiveToggle}
+                            ariaLabel="Live Mode"
                             size="sm"
                             disabled={
                               !isLive &&

@@ -169,6 +169,13 @@ export function useTranscription(): TranscriptionState {
 
   const socketRef = useRef<TranscriptionSocket | null>(null);
   const captureRef = useRef<AudioCapture | null>(null);
+  // Capture gain last requested by the UI. AudioCapture instances are built one
+  // per session and only after the server answers, so for most of a session's
+  // life setGain() has no instance to talk to - and `captureRef.current?.` made
+  // that a silent drop. Remembering the value here is what carries it into the
+  // next instance, so the recording opens at the gain the slider is showing
+  // rather than always at 1.0.
+  const gainRef = useRef(1);
   const [jobId, setJobId] = useState<string | null>(null);
   const jobIdRef = useRef<string | null>(null);
   const statusRef = useRef<TranscriptionStatus>('idle');
@@ -361,6 +368,18 @@ export function useTranscription(): TranscriptionState {
             captureRef.current = new AudioCapture((chunk) => {
               socketRef.current?.sendAudio(chunk);
             });
+            // Hand over the remembered gain BEFORE start(): start() reads it
+            // when it builds the gain node, so the very first PCM chunk is
+            // already scaled. Applying it afterwards would open every
+            // recording at unity.
+            // Clamped to unity for a microphone session. Capture Gain is a
+            // system-audio control, but the slider writes through to both hooks
+            // unconditionally, so the remembered value can belong to a source
+            // this session is not using. Keeping the clamp next to the seed
+            // means the invariant holds for whatever builds the capture, not
+            // only for the SessionView path (see the same clamp in useLiveMode,
+            // where the retarget and reconnect paths need it).
+            captureRef.current.setGain(startOptsRef.current.systemAudio ? gainRef.current : 1);
             captureRef.current
               .start({
                 deviceId: startOptsRef.current.deviceId,
@@ -751,6 +770,9 @@ export function useTranscription(): TranscriptionState {
   }, []);
 
   const setGain = useCallback((value: number) => {
+    // Remember first, forward second: the ref is the only copy that survives
+    // until the next AudioCapture is constructed (see gainRef).
+    gainRef.current = value;
     captureRef.current?.setGain(value);
   }, []);
 
