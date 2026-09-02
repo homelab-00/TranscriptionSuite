@@ -191,7 +191,10 @@ describe('[P1] useLiveMode', () => {
 
       expect(result.current.status).toBe('error');
       expect(result.current.error).toContain('engine reported an error');
-      expect(result.current.statusMessage).toBeNull();
+      // An engine ERROR now arms an auto-reconnect, and the countdown is
+      // reported through statusMessage so it cannot clobber the specific
+      // reason held in `error`.
+      expect(result.current.statusMessage).toContain('Reconnecting in');
       expect(lastCapture.stop).toHaveBeenCalled();
     });
 
@@ -234,16 +237,47 @@ describe('[P1] useLiveMode', () => {
         result.current.start();
       });
       act(() => {
-        lastSocketCbs.onMessage!({
-          type: 'error',
-          data: { message: 'Another Live Mode session is already active' },
-        });
+        // Real dispatch order: TranscriptionSocket hands a server `error`
+        // frame to onError FIRST and then forwards the same frame to
+        // onMessage. Driving onMessage alone would hide the fact that
+        // onError has already set `error` by the time the retry is armed.
+        const message = 'Another Live Mode session is already active';
+        lastSocketCbs.onError!(message);
+        lastSocketCbs.onMessage!({ type: 'error', data: { message } });
       });
 
-      // Retried through the reconnect budget, not treated as terminal —
-      // the message reflects a pending retry rather than the bare rejection.
+      // Retried through the reconnect budget, not treated as terminal. The
+      // specific rejection stays in `error` (GH-271: the specific message
+      // always wins) and the countdown rides along in statusMessage.
       expect(result.current.status).toBe('error');
-      expect(result.current.error).toContain('Reconnecting in');
+      expect(result.current.error).toBe('Another Live Mode session is already active');
+      expect(result.current.statusMessage).toContain('Reconnecting in');
+    });
+
+    it('keeps the pending retry visible when the server closes the socket after rejecting', () => {
+      vi.useFakeTimers();
+      try {
+        const { result } = renderHook(() => useLiveMode());
+
+        act(() => {
+          result.current.start();
+        });
+        act(() => {
+          const message = 'Another Live Mode session is already active';
+          lastSocketCbs.onError!(message);
+          lastSocketCbs.onMessage!({ type: 'error', data: { message } });
+        });
+        // The server closes the connection right after the rejection. That
+        // close must not reset the UI to idle underneath the armed retry.
+        act(() => {
+          lastSocketCbs.onClose!(1000, 'session busy');
+        });
+
+        expect(result.current.status).toBe('error');
+        expect(result.current.statusMessage).toContain('Reconnecting in');
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('falls back to a terminal error once the session-busy rejection exhausts the retry budget', () => {
@@ -258,12 +292,18 @@ describe('[P1] useLiveMode', () => {
         act(() => {
           result.current.start();
         });
+        // Each rejection must be allowed to run its scheduled retry before
+        // the next one arrives: while a retry is still armed, further
+        // rejections are deliberately ignored rather than burning an attempt
+        // (the socket's own auto-reconnect can fire several in a row).
         for (let i = 0; i < 6; i++) {
           act(() => {
-            lastSocketCbs.onMessage!({
-              type: 'error',
-              data: { message: 'Another Live Mode session is already active' },
-            });
+            const message = 'Another Live Mode session is already active';
+            lastSocketCbs.onError!(message);
+            lastSocketCbs.onMessage!({ type: 'error', data: { message } });
+          });
+          act(() => {
+            vi.advanceTimersByTime(6000);
           });
         }
 

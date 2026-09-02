@@ -225,9 +225,7 @@ class LiveModeSession:
             )
             if _backoff_max is not None:
                 config.retry_backoff_max_seconds = float(_backoff_max)
-            _watchdog = server_cfg.get(
-                "live_transcriber", "watchdog_timeout_seconds", default=None
-            )
+            _watchdog = server_cfg.get("live_transcriber", "watchdog_timeout_seconds", default=None)
             if _watchdog is not None:
                 config.watchdog_timeout_seconds = float(_watchdog)
 
@@ -687,7 +685,7 @@ async def live_mode_endpoint(websocket: WebSocket) -> None:
                 # Handle binary audio data
                 if "bytes" in message:
                     audio_data = message["bytes"]
-                    if session and session._engine and session._engine.is_running:
+                    if session and session._engine and session._engine.is_accepting_audio:
                         # Parse audio format (same as /ws endpoint):
                         # [4 bytes metadata length][metadata JSON][PCM Int16 data]
                         if len(audio_data) > 4:

@@ -13,6 +13,7 @@ import logging
 import queue
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -32,6 +33,12 @@ SAMPLE_RATE = 16000
 # This ceiling exists only so ``start()`` always reaches a definite answer
 # instead of blocking a client forever; pass ``timeout=None`` to wait outright.
 INIT_TIMEOUT_SECONDS = 300.0
+
+# Cap on audio held back while the recorder is being rebuilt after a transient
+# error. 16-bit mono PCM at SAMPLE_RATE is 32000 bytes/s, so this is ~30s of
+# speech - enough to cover a backoff plus a model reload without letting a
+# pathological rebuild grow the backlog without limit.
+MAX_PENDING_AUDIO_BYTES = SAMPLE_RATE * 2 * 30
 
 
 class LiveModeState(Enum):
@@ -161,6 +168,22 @@ class LiveModeEngine:
         return self._state in (LiveModeState.LISTENING, LiveModeState.PROCESSING)
 
     @property
+    def is_accepting_audio(self) -> bool:
+        """Whether inbound audio should still be admitted to the engine.
+
+        Wider than :attr:`is_running`: it also covers STARTING, so audio that
+        arrives while a transient error is being retried (the recorder is torn
+        down and rebuilt) is buffered by the feeder instead of being dropped at
+        the WebSocket boundary. Dropping it there would silently lose speech
+        the user is still producing (CLAUDE.md save-first invariant).
+        """
+        return self._state in (
+            LiveModeState.LISTENING,
+            LiveModeState.PROCESSING,
+            LiveModeState.STARTING,
+        )
+
+    @property
     def sentence_history(self) -> list[str]:
         """Get history of transcribed sentences."""
         return self._sentence_history.copy()
@@ -217,18 +240,22 @@ class LiveModeEngine:
             except Exception as e:
                 logger.error(f"Sentence callback error: {e}")
 
+    def _shutdown_recorder(self) -> None:
+        """Shut down and drop the current recorder, if there is one."""
+        if self._recorder:
+            try:
+                self._recorder.shutdown()
+            except Exception as e:
+                logger.debug("Error shutting down recorder: %s", e)
+            self._recorder = None
+
     def _create_recorder(self) -> None:
         """Shut down the current recorder (if any) and create a fresh one.
 
         Used both for the initial build in ``_transcription_loop`` and to
         rebuild after a transient error or a watchdog-triggered restart.
         """
-        if self._recorder:
-            try:
-                self._recorder.shutdown()
-            except Exception as e:
-                logger.debug("Error shutting down recorder during rebuild: %s", e)
-            self._recorder = None
+        self._shutdown_recorder()
 
         # Import server's AudioToTextRecorder (not RealtimeSTT's)
         from server.core.stt.engine import AudioToTextRecorder
@@ -263,6 +290,14 @@ class LiveModeEngine:
         # brand-new recorder too, repeating until max_consecutive_errors
         # gives up.
         self._last_sentence_time = time.monotonic()
+        # Also drop any in-flight recording marker and any watchdog arm raised
+        # while this rebuild was running: _create_recorder() leaves _recorder
+        # None for the whole model load, so a watchdog tick landing in that
+        # window arms the flag against nothing, and the arm would otherwise
+        # survive into the fresh recorder and make its first empty text()
+        # raise a spurious restart.
+        self._last_recording_start_time = None
+        self._watchdog_restart_requested = False
 
     def _watchdog_tick(self, now: float) -> None:
         """Run one watchdog check. Split out from ``_watchdog_loop`` for testability.
@@ -287,18 +322,27 @@ class LiveModeEngine:
         # otherwise last_start refers to an utterance that already finished.
         recording_in_flight = last_start > last_sentence
         stale = (now - last_start) > self.config.watchdog_timeout_seconds
-        if recording_in_flight and stale and not self._watchdog_restart_requested:
-            logger.warning(
-                "Live Mode watchdog: recording started %.0fs ago with no "
-                "sentence produced since — triggering recorder restart",
-                now - last_start,
-            )
-            self._watchdog_restart_requested = True
-            if self._recorder:
-                try:
-                    self._recorder.shutdown()
-                except Exception as e:
-                    logger.debug("Watchdog recorder shutdown error: %s", e)
+        if not (recording_in_flight and stale) or self._watchdog_restart_requested:
+            return
+
+        recorder = self._recorder
+        if recorder is None:
+            # A rebuild is already in flight - _create_recorder() drops the
+            # recorder for the whole model load. Arming here would fire the
+            # flag against nothing and make the fresh recorder's first empty
+            # text() raise a spurious restart.
+            return
+
+        logger.warning(
+            "Live Mode watchdog: recording started %.0fs ago with no "
+            "sentence produced since — triggering recorder restart",
+            now - last_start,
+        )
+        self._watchdog_restart_requested = True
+        try:
+            recorder.shutdown()
+        except Exception as e:
+            logger.debug("Watchdog recorder shutdown error: %s", e)
 
     def _watchdog_loop(self) -> None:
         """Poll ``_watchdog_tick`` for a hung ``text()`` call and restart it."""
@@ -361,26 +405,48 @@ class LiveModeEngine:
                         # and gets backoff like any other error instead of
                         # ending the session on the spot.
                         self._create_recorder()
+                        if self._stop_event.is_set():
+                            # stop() raced the rebuild: it has already joined
+                            # (or timed out on) this thread and cleared its own
+                            # reference, so the recorder just built here would
+                            # be orphaned with its model pinned in VRAM.
+                            self._shutdown_recorder()
+                            break
                         need_rebuild = False
                         self._set_state(LiveModeState.LISTENING)
 
                     # text() blocks until a sentence is complete or the recorder
                     # is shut down (e.g. by the watchdog or stop()).
+                    started_before = self._last_recording_start_time
                     text = self._recorder.text()  # type: ignore[union-attr]
 
+                    # The utterance VAD started has resolved, even when it came
+                    # back empty (a VAD false positive on noise, or audio the
+                    # backend trimmed away). Clear the in-flight marker so an
+                    # empty result cannot latch the watchdog into reading the
+                    # next ordinary silence as a hang. Only clear the marker we
+                    # actually observed, so a recording that started while
+                    # text() was returning keeps its own watchdog coverage.
+                    if self._last_recording_start_time == started_before:
+                        self._last_recording_start_time = None
+
+                    watchdog_fired = self._watchdog_restart_requested
+                    self._watchdog_restart_requested = False
+
                     if text:
-                        # A real result beats a pending watchdog flag — whatever
-                        # the watchdog suspected was hung must have resolved on
-                        # its own. Discarding a completed transcription here
-                        # would violate the save-first invariant (CLAUDE.md).
+                        # Save first: a completed transcription is never
+                        # discarded, not even when the watchdog fired while it
+                        # was still in flight (CLAUDE.md save-first invariant).
                         self._process_sentence(text)
                         consecutive_errors = 0
-                        self._watchdog_restart_requested = False
-                    elif self._watchdog_restart_requested:
-                        # No result, and the watchdog's shutdown() is what
-                        # unblocked text() — treat as a transient error and
-                        # rebuild the recorder.
-                        self._watchdog_restart_requested = False
+
+                    if watchdog_fired:
+                        # The watchdog already called shutdown() on this
+                        # recorder, so it is dead whether or not a sentence was
+                        # salvaged from it: every later text() returns ""
+                        # immediately. The rebuild is mandatory - skipping it
+                        # left the loop spinning on a dead recorder with the
+                        # session wedged in LISTENING and no error ever raised.
                         raise RuntimeError("Watchdog triggered recorder restart")
 
                 except Exception as e:
@@ -406,9 +472,10 @@ class LiveModeEngine:
                         e,
                     )
                     # Let the client know a recovery is in progress instead of
-                    # leaving it in LISTENING while audio is silently dropped
-                    # underneath it (feed_audio() no-ops once is_running is
-                    # False, since the recorder is about to be replaced).
+                    # leaving it stuck on LISTENING. STARTING still admits
+                    # audio (see is_accepting_audio); the feeder holds it back
+                    # until the rebuilt recorder can take it, so speech during
+                    # the backoff is buffered rather than dropped.
                     self._set_state(LiveModeState.STARTING)
                     self._stop_event.wait(delay)
                     if self._stop_event.is_set():
@@ -437,17 +504,53 @@ class LiveModeEngine:
 
     def _audio_feeder_loop(self) -> None:
         """Feed audio from queue to recorder (runs in separate thread)."""
+        # Chunks that arrived while the recorder was torn down for a rebuild.
+        # Held rather than dropped so a transient retry does not silently
+        # swallow speech the user is still producing (CLAUDE.md), and bounded
+        # so a slow rebuild cannot grow the backlog without limit.
+        pending: deque[bytes] = deque()
+        pending_bytes = 0
+
         while not self._stop_event.is_set():
             try:
                 # Get audio chunk from queue with timeout
                 try:
                     chunk = self._audio_queue.get(timeout=0.1)
                 except queue.Empty:
+                    chunk = None
+
+                recorder = self._recorder
+                if recorder is None or not self.is_running:
+                    # Recorder is being rebuilt (or the session is not live yet).
+                    # Hold the audio back instead of discarding it.
+                    if chunk is not None:
+                        pending.append(chunk)
+                        pending_bytes += len(chunk)
+                        while pending_bytes > MAX_PENDING_AUDIO_BYTES and pending:
+                            dropped = pending.popleft()
+                            pending_bytes -= len(dropped)
+                            logger.warning(
+                                "Live Mode: recovery backlog above %d bytes, "
+                                "discarding %d bytes of buffered audio",
+                                MAX_PENDING_AUDIO_BYTES,
+                                len(dropped),
+                            )
                     continue
 
-                # Feed to recorder if available
-                if self._recorder and self.is_running:
-                    self._recorder.feed_audio(chunk, SAMPLE_RATE)
+                if pending:
+                    logger.info(
+                        "Live Mode: flushing %d buffered audio chunks (%d bytes) "
+                        "into the rebuilt recorder",
+                        len(pending),
+                        pending_bytes,
+                    )
+                    while pending:
+                        held = pending.popleft()
+                        pending_bytes -= len(held)
+                        recorder.feed_audio(held, SAMPLE_RATE)
+
+                if chunk is not None:
+                    recorder.feed_audio(chunk, SAMPLE_RATE)
 
             except Exception as e:
                 if not self._stop_event.is_set():
@@ -465,7 +568,7 @@ class LiveModeEngine:
             audio_data: Audio data (PCM Int16 bytes or numpy array)
             sample_rate: Sample rate of the audio
         """
-        if not self.is_running:
+        if not self.is_accepting_audio:
             return
 
         # Convert numpy array to bytes if needed

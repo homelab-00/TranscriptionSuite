@@ -130,16 +130,24 @@ export function useLiveMode(): LiveModeState {
   // race, and the specific one always wins.
   const scheduleReconnect = useCallback(
     (fallbackMessage: string) => {
+      // A retry is already armed. The socket runs its own auto-reconnect, so
+      // several rejections can arrive here in quick succession; none of them
+      // may burn a fresh attempt or stack a second timer.
+      if (reconnectTimerRef.current !== null) return true;
+
       const attempt = reconnectAttemptsRef.current + 1;
       if (attempt > MAX_AUTO_RECONNECTS) return false;
 
       reconnectAttemptsRef.current = attempt;
       const delaySec = Math.min(attempt, 5);
-      setError(
-        (prev) =>
-          prev ??
-          `${fallbackMessage} Reconnecting in ${delaySec}s (attempt ${attempt}/${MAX_AUTO_RECONNECTS})…`,
-      );
+      setError((prev) => prev ?? fallbackMessage);
+      // The countdown lives in statusMessage, not error. TranscriptionSocket
+      // dispatches a server `error` frame to onError BEFORE forwarding it to
+      // onMessage, and onError sets a specific reason unconditionally - so
+      // folding the countdown into `error` would either be swallowed by the
+      // `prev ??` guard above or clobber that specific reason. Separate fields
+      // show both.
+      setStatusMessage(`Reconnecting in ${delaySec}s (attempt ${attempt}/${MAX_AUTO_RECONNECTS})…`);
       setStatusTracked('error');
       reconnectTimerRef.current = setTimeout(() => {
         reconnectTimerRef.current = null;
@@ -150,6 +158,7 @@ export function useLiveMode(): LiveModeState {
         isRetargetingRef.current = true;
         try {
           setError(null);
+          setStatusMessage(null);
           retarget();
         } finally {
           isRetargetingRef.current = false;
@@ -378,6 +387,11 @@ export function useLiveMode(): LiveModeState {
           if (isRetargetingRef.current) return;
           captureRef.current?.stop();
           setAnalyser(null);
+          // A reconnect is already armed - an engine ERROR, or a session-busy
+          // rejection that the server follows with a close. Leave the status
+          // and the countdown alone so the UI keeps showing the pending retry
+          // instead of flipping to idle underneath it.
+          if (reconnectTimerRef.current !== null) return;
           setStatusMessage(null);
           // GH-237: if the drop happened while a session was actively running
           // (listening/processing), it is an unrecoverable interruption — the

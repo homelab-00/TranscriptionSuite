@@ -47,6 +47,17 @@ def _install_recorder_stub(monkeypatch: pytest.MonkeyPatch, factory: Any) -> Non
     monkeypatch.setitem(sys.modules, "server.core.stt.engine", module)
 
 
+class _CollectingRecorder:
+    def __init__(self, **kwargs: Any) -> None:
+        self.fed: list[bytes] = []
+
+    def feed_audio(self, chunk: bytes, sample_rate: int = 16000) -> None:
+        self.fed.append(chunk)
+
+    def shutdown(self) -> None:
+        return None
+
+
 class _ScriptedRecorder:
     """Stand-in for ``AudioToTextRecorder`` whose text() replays a script.
 
@@ -113,8 +124,15 @@ class TestWatchdogDoesNotMisfireOnSilence:
         assert engine._watchdog_restart_requested is False
 
     def test_restart_requested_when_recording_stuck_past_timeout(self):
-        """An in-flight recording stuck past the timeout IS a genuine hang."""
+        """An in-flight recording stuck past the timeout IS a genuine hang.
+
+        A live recorder has to be attached: the tick deliberately no-ops when
+        ``_recorder`` is None, because that means a rebuild is already running
+        and there is nothing to shut down.
+        """
         engine = LiveModeEngine(config=LiveModeConfig(watchdog_timeout_seconds=1.0))
+        recorder = _CollectingRecorder()
+        engine._recorder = recorder
         engine._last_recording_start_time = 10.0
         engine._last_sentence_time = 5.0  # last sentence predates this recording
 
@@ -337,3 +355,197 @@ class TestRebuildFailureConsumesRetryBudget:
             engine._loop_thread.join(timeout=_WAIT)
 
         assert engine.state is LiveModeState.ERROR
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 5. A watchdog restart must rebuild even when a sentence won the race
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestWatchdogRestartAlwaysRebuilds:
+    def test_rebuild_happens_even_when_a_sentence_won_the_race(self, monkeypatch):
+        """Salvaging the sentence must not cancel the rebuild.
+
+        The watchdog calls ``shutdown()`` before the loop ever looks at the
+        flag, so the recorder is dead whether or not a result was salvaged
+        from it: every later ``text()`` returns "" immediately. Clearing the
+        flag without rebuilding left the loop spinning on that dead recorder
+        forever, wedged in LISTENING, with no error and no sentences.
+        """
+        recorders: list[_RaceRecorder] = []
+
+        def _factory(**kwargs):
+            recorder = _RaceRecorder(**kwargs)
+            recorders.append(recorder)
+            return recorder
+
+        _install_recorder_stub(monkeypatch, _factory)
+        sentences: list[str] = []
+        engine = LiveModeEngine(
+            config=LiveModeConfig(
+                watchdog_timeout_seconds=90.0,
+                retry_backoff_base_seconds=0.05,
+                retry_backoff_max_seconds=0.05,
+            ),
+            on_sentence=sentences.append,
+        )
+
+        try:
+            assert engine.start() is True
+            recorder = recorders[0]
+            assert recorder.first_call_started.wait(timeout=_WAIT)
+
+            # Watchdog fires while inference is in flight, then inference
+            # completes on its own with a real sentence.
+            engine._watchdog_restart_requested = True
+            recorder.shutdown()
+            recorder._first_call_result.set()
+
+            deadline = time.monotonic() + _WAIT
+            while time.monotonic() < deadline and len(recorders) < 2:
+                threading.Event().wait(0.05)
+
+            assert sentences == ["Hello world."], "the salvaged sentence was lost"
+            assert len(recorders) >= 2, (
+                "the recorder the watchdog shut down was never rebuilt - the "
+                "loop is spinning on a dead recorder"
+            )
+        finally:
+            engine.stop()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 6. An empty transcription must not latch the watchdog
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class _EmptyResultRecorder:
+    """First ``text()`` reports a VAD start and then resolves to empty text.
+
+    Models an ordinary VAD false positive (a cough, a door, background
+    chatter): speech onset is detected, but the backend finds no segments and
+    the utterance transcribes to "".
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        self._on_recording_start = kwargs.get("on_recording_start")
+        self._call = 0
+        self._shutdown_event = threading.Event()
+        self.first_result_done = threading.Event()
+
+    def text(self) -> str:
+        self._call += 1
+        if self._call == 1:
+            if self._on_recording_start:
+                self._on_recording_start()
+            self.first_result_done.set()
+            return ""
+        self._shutdown_event.wait(timeout=_WAIT)
+        return ""
+
+    def feed_audio(self, chunk: bytes, sample_rate: int = 16000) -> None:
+        return None
+
+    def shutdown(self) -> None:
+        self._shutdown_event.set()
+
+
+class TestEmptyTranscriptionDoesNotLatchWatchdog:
+    def test_empty_result_clears_the_in_flight_marker(self, monkeypatch):
+        """A VAD trigger resolving to "" must not look like a hang forever.
+
+        ``_last_sentence_time`` only advances on a real sentence, so without
+        clearing the in-flight marker an empty result leaves
+        ``last_start > last_sentence`` true permanently, and the next ordinary
+        silence past the timeout tears down a healthy recorder.
+        """
+        _install_recorder_stub(monkeypatch, _EmptyResultRecorder)
+        engine = LiveModeEngine(config=LiveModeConfig(watchdog_timeout_seconds=1.0))
+
+        try:
+            assert engine.start() is True
+            recorder = engine._recorder
+            assert recorder.first_result_done.wait(timeout=_WAIT)
+
+            deadline = time.monotonic() + _WAIT
+            while time.monotonic() < deadline and engine._last_recording_start_time is not None:
+                threading.Event().wait(0.05)
+
+            assert engine._last_recording_start_time is None, (
+                "an empty transcription left the recording marker latched"
+            )
+
+            # With the marker cleared, a tick far past the timeout is a no-op.
+            engine._watchdog_tick(time.monotonic() + 10_000.0)
+            assert engine._watchdog_restart_requested is False
+        finally:
+            engine.stop()
+
+
+class TestWatchdogDoesNotArmDuringRebuild:
+    def test_tick_is_a_noop_while_the_recorder_is_being_rebuilt(self):
+        """``_create_recorder()`` leaves ``_recorder`` None for the whole model
+        load. Arming there would fire the flag against nothing and make the
+        fresh recorder's first empty ``text()`` raise a spurious restart."""
+        engine = LiveModeEngine(config=LiveModeConfig(watchdog_timeout_seconds=1.0))
+        engine._recorder = None
+        engine._last_sentence_time = 5.0
+        engine._last_recording_start_time = 10.0
+
+        engine._watchdog_tick(10_000.0)
+
+        assert engine._watchdog_restart_requested is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 7. Audio arriving during a rebuild is buffered, not dropped
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestAudioBufferedDuringRebuild:
+    def test_chunks_during_starting_are_held_and_flushed(self):
+        """Audio produced while the recorder is rebuilt must survive.
+
+        Dropping it silently is the data-loss failure CLAUDE.md forbids: the
+        user is still speaking, and nothing tells them the words are gone.
+        """
+        engine = LiveModeEngine(config=LiveModeConfig())
+        engine._state = LiveModeState.STARTING
+        engine._recorder = None
+
+        feeder = threading.Thread(target=engine._audio_feeder_loop, daemon=True)
+        feeder.start()
+        try:
+            engine._audio_queue.put(b"\x01\x02")
+            engine._audio_queue.put(b"\x03\x04")
+            threading.Event().wait(0.3)
+
+            recorder = _CollectingRecorder()
+            engine._recorder = recorder
+            engine._state = LiveModeState.LISTENING
+
+            deadline = time.monotonic() + _WAIT
+            while time.monotonic() < deadline and len(recorder.fed) < 2:
+                engine._audio_queue.put(b"\x05\x06")
+                threading.Event().wait(0.05)
+
+            assert recorder.fed[:2] == [b"\x01\x02", b"\x03\x04"], (
+                "audio buffered during the rebuild was dropped instead of "
+                f"being flushed in order (got {recorder.fed[:2]!r})"
+            )
+        finally:
+            engine._stop_event.set()
+            feeder.join(timeout=2.0)
+
+    def test_engine_admits_audio_while_starting(self):
+        """The WebSocket route gates on is_accepting_audio, which must stay
+        open during STARTING so the feeder can buffer instead of the route
+        discarding the frame before it is ever queued."""
+        engine = LiveModeEngine(config=LiveModeConfig())
+
+        engine._state = LiveModeState.STARTING
+        assert engine.is_accepting_audio is True
+        assert engine.is_running is False
+
+        engine._state = LiveModeState.STOPPED
+        assert engine.is_accepting_audio is False
