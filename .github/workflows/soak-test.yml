@@ -20,15 +20,18 @@ jobs:
         working-directory: server/backend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
+      # setup-uv stopped publishing floating major/minor tags at v9.0.0 as a
+      # supply-chain measure, so `@v10` does not resolve. Pin the exact release
+      # and bump it deliberately.
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
