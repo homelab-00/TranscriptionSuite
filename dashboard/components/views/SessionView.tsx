@@ -1519,14 +1519,26 @@ export const SessionView: React.FC<SessionViewProps> = ({
   const [recoveryJobs, setRecoveryJobs] = useState<
     Array<{ job_id: string; completed_at: string; text_preview: string }>
   >([]);
+  // Jobs whose Dismiss has been sent but not yet acknowledged. A re-check
+  // triggered by an earlier Dismiss can answer before the server has processed
+  // a later one and would otherwise bring that row straight back.
+  const pendingDismissRef = useRef<Set<string>>(new Set());
+  // Re-checks fire from several places (mount, focus, salvage end, Dismiss,
+  // View) and can overlap. Only the newest one may write state: an older
+  // response landing late would resurrect a row the newer one already dropped.
+  const refreshSeqRef = useRef(0);
   const refreshRecoveryJobs = useCallback(() => {
+    const seq = ++refreshSeqRef.current;
     // Absolute base URL via apiClient — a relative fetch resolves to the
     // packaged renderer file:// origin and never reaches the backend (GH-202).
     apiClient
       .fetchRecentUndelivered()
       .then((r) => r.json())
       .then((data) => {
-        if (Array.isArray(data)) setRecoveryJobs(data);
+        if (seq !== refreshSeqRef.current) return;
+        if (Array.isArray(data)) {
+          setRecoveryJobs(data.filter((job) => !pendingDismissRef.current.has(job.job_id)));
+        }
       })
       .catch(() => {});
   }, []);
@@ -1756,6 +1768,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
                               duration: r.duration,
                             });
                             setRecoveryJobs((prev) => prev.filter((j) => j.job_id !== job.job_id));
+                            // /recent is capped at 5 rows: pull the next queued
+                            // job into the freed slot now, not on the next focus.
+                            refreshRecoveryJobs();
                           }
                         })
                         .catch(() => {});
@@ -1766,8 +1781,18 @@ export const SessionView: React.FC<SessionViewProps> = ({
                   <button
                     className="rounded px-2 py-1 text-xs font-semibold text-amber-300/60 hover:bg-amber-500/20 hover:text-amber-300"
                     onClick={() => {
-                      apiClient.dismissTranscriptionResult(job.job_id).catch(() => {});
-                      setRecoveryJobs((prev) => prev.filter((j) => j.job_id !== job.job_id));
+                      const jobId = job.job_id;
+                      pendingDismissRef.current.add(jobId);
+                      setRecoveryJobs((prev) => prev.filter((j) => j.job_id !== jobId));
+                      // Re-check only once the server has acknowledged the
+                      // dismiss; a failed dismiss legitimately comes back.
+                      apiClient
+                        .dismissTranscriptionResult(jobId)
+                        .catch(() => {})
+                        .finally(() => {
+                          pendingDismissRef.current.delete(jobId);
+                          refreshRecoveryJobs();
+                        });
                     }}
                   >
                     Dismiss
