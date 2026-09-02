@@ -85,6 +85,10 @@ export interface TranscriptionState {
     translationTarget?: string;
     systemAudio?: boolean;
     monitorSinkName?: string;
+    /** Also capture the microphone alongside system audio and mix them. */
+    mixMicWithSystem?: boolean;
+    /** Device ID for the mixed-in microphone. Falls back to the default mic. */
+    mixMicDeviceId?: string;
     /** Save the finished recording to the Audio Notebook (GH-199). */
     autoAddToNotebook?: boolean;
     /** Attach speaker labels to the finished transcript (GH-258). */
@@ -197,6 +201,10 @@ export function useTranscription(): TranscriptionState {
     translationTarget?: string;
     systemAudio?: boolean;
     monitorSinkName?: string;
+    /** Also capture the microphone alongside system audio and mix them. */
+    mixMicWithSystem?: boolean;
+    /** Device ID for the mixed-in microphone. Falls back to the default mic. */
+    mixMicDeviceId?: string;
     /** Active recording-profile id (FR18). Snapshotted server-side at job start. */
     profileId?: number | null;
     /** Save the finished recording to the Audio Notebook (GH-199). */
@@ -358,6 +366,8 @@ export function useTranscription(): TranscriptionState {
                 deviceId: startOptsRef.current.deviceId,
                 systemAudio: startOptsRef.current.systemAudio,
                 monitorSinkName: startOptsRef.current.monitorSinkName,
+                mixMicWithSystem: startOptsRef.current.mixMicWithSystem,
+                mixMicDeviceId: startOptsRef.current.mixMicDeviceId,
                 targetSampleRateHz: captureSampleRateHz,
               })
               .then(() => {
@@ -535,6 +545,8 @@ export function useTranscription(): TranscriptionState {
       translationTarget?: string;
       systemAudio?: boolean;
       monitorSinkName?: string;
+      mixMicWithSystem?: boolean;
+      mixMicDeviceId?: string;
       profileId?: number | null;
       autoAddToNotebook?: boolean;
       /** Attach speaker labels to the finished transcript (GH-258). */

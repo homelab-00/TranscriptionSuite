@@ -47,6 +47,14 @@ export interface AudioCaptureOptions {
    * is used instead.
    */
   monitorSinkName?: string;
+  /**
+   * When systemAudio is also set, capture the microphone alongside the
+   * system audio and mix both into the same stream (e.g. narrating over a
+   * call). Ignored for plain microphone capture.
+   */
+  mixMicWithSystem?: boolean;
+  /** Device ID for the mixed-in microphone. Falls back to the default mic. */
+  mixMicDeviceId?: string;
   /** Target PCM sample rate emitted by the worklet (e.g. 16000 or 24000) */
   targetSampleRateHz?: number;
 }
@@ -55,7 +63,17 @@ export class AudioCapture {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private sourceNode: MediaStreamAudioSourceNode | null = null;
+  /** Secondary mic stream mixed in alongside system audio (mixMicWithSystem). */
+  private secondaryStream: MediaStream | null = null;
+  private secondarySourceNode: MediaStreamAudioSourceNode | null = null;
   private gainNode: GainNode | null = null;
+  /**
+   * Fixed-at-1.0 gain stage for the mixed-in mic (mixMicWithSystem). Kept
+   * separate from `gainNode` so the "Capture Gain" slider — which scales
+   * `gainNode` and is documented/intended as a system-audio-only control —
+   * does not also amplify (and clip) the user's own voice.
+   */
+  private micGainNode: GainNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private analyserNode: AnalyserNode | null = null;
   private onChunk: AudioChunkCallback;
@@ -142,6 +160,27 @@ export class AudioCapture {
       // can release its tracks when the start was aborted mid-getUserMedia.
       this.assertNotStopped(epoch);
 
+      // 1b. Also acquire the mixed-in microphone now, alongside the primary
+      //     stream and before anything downstream exists. This getUserMedia
+      //     call is an await of unbounded duration (OS permission prompt,
+      //     NotReadableError if the device is busy, NotFoundError on a
+      //     system-audio-only box with no mic) — acquiring it here means a
+      //     failure fails the whole start() cleanly, before the worklet is
+      //     wired up and streaming, instead of tearing down an otherwise-
+      //     healthy, already-live session for want of an optional extra.
+      if (options.systemAudio && options.mixMicWithSystem) {
+        this.secondaryStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            ...(options.mixMicDeviceId ? { deviceId: { exact: options.mixMicDeviceId } } : {}),
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: 1,
+          },
+        });
+        this.assertNotStopped(epoch);
+      }
+
       // 2. Create AudioContext
       this.ctx = new AudioContext({
         sampleRate: this.stream.getAudioTracks()[0].getSettings().sampleRate || 48000,
@@ -167,6 +206,14 @@ export class AudioCapture {
         },
       });
 
+      if (this.secondaryStream) {
+        this.secondarySourceNode = this.ctx.createMediaStreamSource(this.secondaryStream);
+        // Fixed at 1.0, independent of `gainNode` and the user's Capture
+        // Gain slider — see the micGainNode field comment.
+        this.micGainNode = this.ctx.createGain();
+        this.micGainNode.gain.value = 1;
+      }
+
       // 5. Handle PCM chunks from the worklet
       this.workletNode.port.onmessage = (ev: MessageEvent) => {
         if (ev.data?.type === 'audio' && !this._muted) {
@@ -176,10 +223,17 @@ export class AudioCapture {
       };
 
       // 6. Wire the graph:
-      //    source → gain → analyser → worklet → (silence — worklet has no output)
-      //    Gain is set to 0 when muted so the visualiser also flatlines.
+      //    source → gain ─────────┐
+      //                            ├→ analyser → worklet → (silence — worklet has no output)
+      //    secondarySource → micGain ┘
+      //    Both gain stages feed the analyser, which sums them — kept
+      //    separate so the Capture Gain slider (which scales `gainNode`,
+      //    see setGain) never touches the mixed-in mic. mute()/unmute()
+      //    zero and restore both stages together.
       this.sourceNode.connect(this.gainNode);
+      this.secondarySourceNode?.connect(this.micGainNode!);
       this.gainNode.connect(this.analyserNode);
+      this.micGainNode?.connect(this.analyserNode);
       this.analyserNode.connect(this.workletNode);
       // Don't connect worklet to destination — we don't want to play back the mic
     } catch (err) {
@@ -205,6 +259,18 @@ export class AudioCapture {
     if (this.sourceNode) {
       this.sourceNode.disconnect();
       this.sourceNode = null;
+    }
+    if (this.secondarySourceNode) {
+      this.secondarySourceNode.disconnect();
+      this.secondarySourceNode = null;
+    }
+    if (this.secondaryStream) {
+      this.secondaryStream.getTracks().forEach((t) => t.stop());
+      this.secondaryStream = null;
+    }
+    if (this.micGainNode) {
+      this.micGainNode.disconnect();
+      this.micGainNode = null;
     }
     if (this.gainNode) {
       this.gainNode.disconnect();
@@ -245,12 +311,17 @@ export class AudioCapture {
   mute(): void {
     this._muted = true;
     if (this.gainNode) this.gainNode.gain.value = 0;
+    // micGainNode feeds the analyser through a path independent of
+    // gainNode (see the field comment) — it must be zeroed too, or the
+    // mixed-in mic keeps animating the visualiser while "muted".
+    if (this.micGainNode) this.micGainNode.gain.value = 0;
   }
 
   /** Unmute — resumes sending audio chunks and restores the visualiser. */
   unmute(): void {
     this._muted = false;
     if (this.gainNode) this.gainNode.gain.value = this._gain;
+    if (this.micGainNode) this.micGainNode.gain.value = 1;
   }
 
   /**
