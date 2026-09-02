@@ -138,6 +138,7 @@ const {
   mockRetryTranscription,
   mockFetchTranscriptionResult,
   mockFetchRecentUndelivered,
+  mockDismissTranscriptionResult,
   mockToast,
   mockGetStatus,
   mockCancelTranscription,
@@ -158,6 +159,7 @@ const {
     mockRetryTranscription: vi.fn(),
     mockFetchTranscriptionResult: vi.fn(),
     mockFetchRecentUndelivered: vi.fn(),
+    mockDismissTranscriptionResult: vi.fn(),
     mockToast: { success: vi.fn(), error: vi.fn() },
     mockGetStatus: vi.fn(),
     mockCancelTranscription: vi.fn(),
@@ -185,7 +187,7 @@ vi.mock('../../src/api/client', () => ({
     loadModelsStream: vi.fn().mockReturnValue(vi.fn()),
     fetchRecentUndelivered: (...a: unknown[]) => mockFetchRecentUndelivered(...a),
     fetchTranscriptionResult: (...a: unknown[]) => mockFetchTranscriptionResult(...a),
-    dismissTranscriptionResult: vi.fn().mockResolvedValue({ status: 200 }),
+    dismissTranscriptionResult: (...a: unknown[]) => mockDismissTranscriptionResult(...a),
     retryTranscription: (...a: unknown[]) => mockRetryTranscription(...a),
   },
 }));
@@ -298,6 +300,7 @@ describe('SessionView - recovery banner refresh', () => {
     mockTranscription.busyInfo = null;
     mockGetConfig.mockResolvedValue(undefined);
     mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
+    mockDismissTranscriptionResult.mockResolvedValue({ status: 200 });
     mockGetStatus.mockResolvedValue({
       models: { job_tracker: { is_busy: false, salvage: null } },
     });
@@ -382,6 +385,123 @@ describe('SessionView - recovery banner refresh', () => {
     const banners = screen.getAllByText(/is available\./);
     expect(banners).toHaveLength(1);
     expect(banners[0].closest('div')?.textContent).toContain('the half that made it');
+  });
+
+  // /recent returns at most 5 rows. A user who has been cancelling recordings
+  // from the tray for days comes back to a full banner, and every Dismiss must
+  // pull the next queued (older) job into view at once, not on the next focus.
+  it('re-checks after a Dismiss so the next queued job surfaces immediately', async () => {
+    mockFetchRecentUndelivered.mockResolvedValueOnce({ json: async () => SALVAGED });
+    let settleDismiss: (v: { status: number }) => void = () => {};
+    mockDismissTranscriptionResult.mockReturnValueOnce(
+      new Promise<{ status: number }>((resolve) => {
+        settleDismiss = resolve;
+      }),
+    );
+    renderSessionView();
+    expect(await screen.findByText(/the half that made it/)).toBeInTheDocument();
+    expect(mockFetchRecentUndelivered).toHaveBeenCalledTimes(1);
+
+    mockFetchRecentUndelivered.mockResolvedValue({
+      json: async () => [
+        { job_id: 'older-job', completed_at: COMPLETED_AT, text_preview: 'from three days ago' },
+      ],
+    });
+    fireEvent.click(screen.getByText('Dismiss'));
+
+    // Optimistic removal is instant, but the re-check waits for the server to
+    // acknowledge the dismiss - otherwise the dismissed row would come back.
+    expect(screen.queryByText(/the half that made it/)).not.toBeInTheDocument();
+    expect(mockFetchRecentUndelivered).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      settleDismiss({ status: 200 });
+    });
+
+    expect(await screen.findByText(/from three days ago/)).toBeInTheDocument();
+    expect(mockFetchRecentUndelivered).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a row whose dismiss is still in flight out of a concurrent re-check', async () => {
+    const TWO = [
+      ...SALVAGED,
+      { job_id: 'second-job', completed_at: COMPLETED_AT, text_preview: 'the second one' },
+    ];
+    mockFetchRecentUndelivered.mockResolvedValueOnce({ json: async () => TWO });
+    let settleSecond: (v: { status: number }) => void = () => {};
+    mockDismissTranscriptionResult.mockResolvedValueOnce({ status: 200 }).mockReturnValueOnce(
+      new Promise<{ status: number }>((resolve) => {
+        settleSecond = resolve;
+      }),
+    );
+    renderSessionView();
+    expect(await screen.findByText(/the second one/)).toBeInTheDocument();
+
+    // The first dismiss's re-check answers before the server has processed
+    // the second dismiss, so it still lists the second job.
+    mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [TWO[1]] });
+    const [first, second] = screen.getAllByText('Dismiss');
+    fireEvent.click(first);
+    fireEvent.click(second);
+
+    await waitFor(() => expect(mockFetchRecentUndelivered).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/the second one/)).not.toBeInTheDocument();
+
+    mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
+    await act(async () => {
+      settleSecond({ status: 200 });
+    });
+    await waitFor(() => expect(mockFetchRecentUndelivered).toHaveBeenCalledTimes(3));
+    expect(screen.queryByText(/the second one/)).not.toBeInTheDocument();
+  });
+
+  it('drops a stale re-check that answers after a newer one', async () => {
+    // A focus-triggered re-check was sent before the Dismiss and is slow. Its
+    // payload still lists the job; it must not overwrite the newer, correct
+    // answer that arrived after the dismiss was acknowledged.
+    mockFetchRecentUndelivered.mockResolvedValueOnce({ json: async () => SALVAGED });
+    renderSessionView();
+    expect(await screen.findByText(/the half that made it/)).toBeInTheDocument();
+
+    let settleStale: (v: { json: () => Promise<unknown> }) => void = () => {};
+    mockFetchRecentUndelivered.mockReturnValueOnce(
+      new Promise<{ json: () => Promise<unknown> }>((resolve) => {
+        settleStale = resolve;
+      }),
+    );
+    fireEvent(window, new Event('focus'));
+    await waitFor(() => expect(mockFetchRecentUndelivered).toHaveBeenCalledTimes(2));
+
+    mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
+    fireEvent.click(screen.getByText('Dismiss'));
+    await waitFor(() => expect(mockFetchRecentUndelivered).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      settleStale({ json: async () => SALVAGED });
+    });
+
+    expect(screen.queryByText(/the half that made it/)).not.toBeInTheDocument();
+  });
+
+  it('re-checks after View loads a result so the next queued job surfaces', async () => {
+    mockFetchRecentUndelivered.mockResolvedValueOnce({ json: async () => SALVAGED });
+    mockFetchTranscriptionResult.mockResolvedValue({
+      status: 200,
+      json: async () => ({ result: { text: 'the half that made it', words: [] } }),
+    });
+    renderSessionView();
+    expect(await screen.findByText(/the half that made it/)).toBeInTheDocument();
+
+    mockFetchRecentUndelivered.mockResolvedValue({
+      json: async () => [
+        { job_id: 'older-job', completed_at: COMPLETED_AT, text_preview: 'from three days ago' },
+      ],
+    });
+    fireEvent.click(screen.getByText('View'));
+
+    await waitFor(() => expect(mockTranscription.loadResult).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/from three days ago/)).toBeInTheDocument();
+    expect(mockFetchRecentUndelivered).toHaveBeenCalledTimes(2);
   });
 });
 
