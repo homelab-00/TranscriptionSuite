@@ -375,6 +375,24 @@ describe('[P1] AudioCapture loopback ownership (GH-230)', () => {
     expect(micGain.gain.value).toBe(1);
   });
 
+  // The contract the hooks depend on to get the Capture Gain slider's value
+  // into a recording's first sample: an AudioCapture is only constructed after
+  // the server answers, so the value has to be handed to a not-yet-started
+  // instance and survive until start() builds the gain node. Simplifying
+  // start() to `gain.value = 1` would silently return every recording to unity
+  // while the slider went on displaying whatever the user picked.
+  it('a gain set before start() is the gain the graph is built with', async () => {
+    const capture = new AudioCapture(() => {});
+
+    capture.setGain(3);
+    expect(capture.gain).toBe(3);
+
+    await capture.start({ systemAudio: true, monitorSinkName: 'sink-a' });
+
+    const [systemGain] = lastCtx!.createGain.mock.results.map((r) => r.value);
+    expect(systemGain.gain.value).toBe(3);
+  });
+
   // The load-bearing assertion for a MIXING feature: every other test here
   // passes with the mic acquired, held, gain-staged, muted and torn down
   // correctly while its audio goes nowhere. Deleting either connect() in

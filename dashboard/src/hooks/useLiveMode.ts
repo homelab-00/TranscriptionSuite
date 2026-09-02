@@ -88,6 +88,11 @@ export function useLiveMode(): LiveModeState {
 
   const socketRef = useRef<TranscriptionSocket | null>(null);
   const captureRef = useRef<AudioCapture | null>(null);
+  // Capture gain last requested by the UI - same rationale as useTranscription:
+  // the AudioCapture is only built once the engine reports LISTENING, so a
+  // setGain() before that reached `captureRef.current?.` with nothing behind it
+  // and was silently dropped.
+  const gainRef = useRef(1);
   const startOptsRef = useRef<LiveStartOptions>({});
   // Retarget hook: holds the latest `start` closure so the socket's
   // onHostMismatch callback can reopen the session on the new URL without
@@ -232,6 +237,17 @@ export function useLiveMode(): LiveModeState {
               captureRef.current = new AudioCapture((chunk) => {
                 socketRef.current?.sendAudio(chunk);
               });
+              // Hand over the remembered gain BEFORE start(), which reads it
+              // when it builds the gain node (see gainRef).
+              // Clamped to unity for a microphone session, and clamped HERE
+              // rather than only at the SessionView call site: the retarget hop
+              // and the auto-reconnect-on-ERROR both re-enter start() from
+              // inside this hook with the same startOptsRef, so SessionView
+              // never gets to reset the gain for them. The Capture Gain slider
+              // writes through unconditionally and the Active Input Source
+              // buttons are not disabled mid-session, so a mic session really
+              // can end up with a system gain remembered against it.
+              captureRef.current.setGain(startOptsRef.current.systemAudio ? gainRef.current : 1);
               captureRef.current
                 .start({
                   deviceId: startOptsRef.current.deviceId,
@@ -519,6 +535,9 @@ export function useLiveMode(): LiveModeState {
   }, []);
 
   const setGain = useCallback((value: number) => {
+    // Remember first, forward second - the ref is the only copy that survives
+    // until the next AudioCapture is constructed (see gainRef).
+    gainRef.current = value;
     captureRef.current?.setGain(value);
   }, []);
 

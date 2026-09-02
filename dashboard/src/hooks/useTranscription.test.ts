@@ -109,9 +109,14 @@ vi.mock('../api/client', () => ({
 // ── Helpers ────────────────────────────────────────────────────────────
 
 /** Drive the hook through auth → session_started → recording. */
-async function driveToRecording(result: { current: ReturnType<typeof useTranscription> }) {
+async function driveToRecording(
+  result: { current: ReturnType<typeof useTranscription> },
+  // Capture gain is clamped to unity for a microphone session, so gain tests
+  // have to say which source they are starting.
+  options: Parameters<ReturnType<typeof useTranscription>['start']>[0] = {},
+) {
   act(() => {
-    result.current.start();
+    result.current.start(options);
   });
   await act(async () => {
     lastSocketCbs.onMessage!({ type: 'auth_ok' });
@@ -1030,6 +1035,73 @@ describe('[P1] useTranscription', () => {
       expect(result.current.error).toBeNull();
       // The socket was NOT torn down by the swallowed abort.
       expect(lastSocket.disconnect).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Capture gain must cross the gap between start() and the instance ──
+  //
+  // start() only opens the socket; the AudioCapture is constructed a server
+  // round trip later, in the session_started handler. setGain() therefore has
+  // no instance to talk to at the moment the UI calls it - and because it
+  // forwards through `captureRef.current?.setGain(...)`, the value used to
+  // vanish without a sound: the recording ran at 1.0 while the slider went on
+  // displaying the gain the user had chosen and persisted.
+
+  describe('capture gain reaches the AudioCapture built on session_started', () => {
+    it('applies a gain set before start() to the capture instance', async () => {
+      const { result } = renderHook(() => useTranscription());
+
+      act(() => {
+        result.current.setGain(3);
+      });
+      await driveToRecording(result, { systemAudio: true });
+
+      expect(lastCapture.setGain).toHaveBeenCalledWith(3);
+      // Before start(), not after: start() reads the remembered gain when it
+      // builds the gain node, so anything applied afterwards would leave the
+      // opening audio of every recording at unity.
+      expect(lastCapture.setGain.mock.invocationCallOrder[0]).toBeLessThan(
+        lastCapture.start.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('remembers a gain set mid-session and re-applies it to the next capture', async () => {
+      const { result } = renderHook(() => useTranscription());
+      await driveToRecording(result, { systemAudio: true });
+      const firstCapture = lastCapture;
+
+      act(() => {
+        result.current.setGain(2.5);
+      });
+      expect(firstCapture.setGain).toHaveBeenCalledWith(2.5);
+
+      // Second recording: a fresh instance, born at unity unless the hook
+      // hands it the remembered value. The old one is dead - writing to it is
+      // what the buggy path did on every recording after the first.
+      act(() => {
+        result.current.stop();
+      });
+      await driveToRecording(result, { systemAudio: true });
+
+      expect(lastCapture).not.toBe(firstCapture);
+      expect(lastCapture.setGain).toHaveBeenCalledWith(2.5);
+    });
+
+    it('opens a microphone recording at unity whatever gain is remembered', async () => {
+      // Capture Gain is a system-audio control, but the slider forwards to both
+      // hooks unconditionally and the Active Input Source buttons stay live
+      // mid-session, so the remembered value can belong to a source this
+      // recording is not using. The clamp lives next to the seed so it holds
+      // for whatever builds the capture, not only for the SessionView path.
+      const { result } = renderHook(() => useTranscription());
+
+      act(() => {
+        result.current.setGain(4);
+      });
+      await driveToRecording(result, { systemAudio: false });
+
+      expect(lastCapture.setGain).toHaveBeenCalledWith(1);
+      expect(lastCapture.setGain).not.toHaveBeenCalledWith(4);
     });
   });
 

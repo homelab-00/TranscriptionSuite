@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -576,5 +576,148 @@ describe('Start Recording disabled-reason surface', () => {
     render(React.createElement(SessionView, props), { wrapper: createWrapper() });
 
     expect(screen.queryByTestId('recording-disabled-reason')).toBeNull();
+  });
+});
+
+// ── Capture Gain must be handed to the hook BEFORE start() ─────────────────
+//
+// The AudioCapture instance is built a server round trip after start(), so the
+// hook has nothing to apply a gain to at the moment start() is called. Handing
+// the value over first is what gets it into the recording's first sample; the
+// original code called setGain() on the line *after* start(), where it landed
+// on a null ref (first recording) or the previous, already-stopped instance.
+
+describe('capture gain handed to the hook at recording start', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTranscription.status = 'idle';
+    mockTranscription.result = null;
+    mockTranscription.error = null;
+    mockTranscription.vadActive = false;
+    mockTranscription.processingProgress = null;
+
+    vi.mocked(isModelDisabled).mockReturnValue(false);
+
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockResolvedValue(undefined),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+      },
+      audio: { listSinks: vi.fn().mockResolvedValue([]) },
+      tray: { onAction: vi.fn().mockReturnValue(vi.fn()) },
+      notifications: { show: vi.fn() },
+    };
+  });
+
+  /** Order of the LAST setGain call - the one that must precede start(). */
+  const lastSetGainOrder = (): number => {
+    const orders = mockTranscription.setGain.mock.invocationCallOrder;
+    return orders[orders.length - 1];
+  };
+
+  it('hands the slider gain to the hook before start() on system audio', async () => {
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    fireEvent.click(screen.getByRole('button', { name: /System Audio/i }));
+    fireEvent.change(screen.getByRole('slider'), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: /Start Recording/i }));
+
+    await waitFor(() => expect(mockTranscription.start).toHaveBeenCalled());
+
+    expect(mockTranscription.setGain).toHaveBeenLastCalledWith(3);
+    expect(lastSetGainOrder()).toBeLessThan(mockTranscription.start.mock.invocationCallOrder[0]);
+  });
+
+  it('resets the gain to unity for a microphone recording', async () => {
+    // Capture Gain is a system-audio-only control (its slider is not even
+    // rendered for the mic). Now that the hook remembers the last value across
+    // captures, a mic recording started after a boosted system one has to be
+    // told to go back to 1.0 - otherwise it would inherit the amplification.
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    fireEvent.click(screen.getByRole('button', { name: /System Audio/i }));
+    fireEvent.change(screen.getByRole('slider'), { target: { value: '3' } });
+    // Exact name: the mic-mix switch rendered by the system-audio card is also
+    // named "Also capture microphone" and would match a loose pattern.
+    fireEvent.click(screen.getByRole('button', { name: 'Microphone' }));
+    fireEvent.click(screen.getByRole('button', { name: /Start Recording/i }));
+
+    await waitFor(() => expect(mockTranscription.start).toHaveBeenCalled());
+
+    expect(mockTranscription.start.mock.calls[0][0]).toMatchObject({ systemAudio: false });
+    expect(mockTranscription.setGain).toHaveBeenLastCalledWith(1);
+    expect(lastSetGainOrder()).toBeLessThan(mockTranscription.start.mock.invocationCallOrder[0]);
+  });
+});
+
+// ── Live Mode has its own copy of the gain-before-start call site ──────────
+//
+// SessionView seeds the gain twice - once in handleStartRecording and once in
+// handleLiveToggle - and the two are independent lines that can drift apart.
+// The recording half is covered above; this covers the Live Mode half.
+
+describe('capture gain handed to the live hook at Live Mode start', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTranscription.status = 'idle';
+    mockTranscription.result = null;
+    mockTranscription.error = null;
+    mockTranscription.vadActive = false;
+    mockTranscription.processingProgress = null;
+
+    vi.mocked(isModelDisabled).mockReturnValue(false);
+
+    (window as any).electronAPI = {
+      config: {
+        get: vi.fn().mockResolvedValue(undefined),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+      docker: {
+        readComposeEnvValue: vi.fn().mockResolvedValue('false'),
+      },
+      audio: { listSinks: vi.fn().mockResolvedValue([]) },
+      tray: { onAction: vi.fn().mockReturnValue(vi.fn()) },
+      notifications: { show: vi.fn() },
+    };
+  });
+
+  /** A live state with its own mocks, so call order is not shared across tests. */
+  function makeLive() {
+    return { ...baseLiveState, start: vi.fn(), stop: vi.fn(), setGain: vi.fn() };
+  }
+
+  it('hands the slider gain to the live hook before start() on system audio', async () => {
+    const live = makeLive();
+    render(React.createElement(SessionView, { ...baseProps, live }), { wrapper: createWrapper() });
+
+    fireEvent.click(screen.getByRole('button', { name: /System Audio/i }));
+    fireEvent.change(screen.getByRole('slider'), { target: { value: '3' } });
+    fireEvent.click(screen.getAllByRole('switch', { name: 'Live Mode' })[0]);
+
+    await waitFor(() => expect(live.start).toHaveBeenCalled());
+
+    expect(live.setGain).toHaveBeenLastCalledWith(3);
+    const orders = live.setGain.mock.invocationCallOrder;
+    expect(orders[orders.length - 1]).toBeLessThan(live.start.mock.invocationCallOrder[0]);
+  });
+
+  it('resets the live gain to unity for a microphone session', async () => {
+    const live = makeLive();
+    render(React.createElement(SessionView, { ...baseProps, live }), { wrapper: createWrapper() });
+
+    fireEvent.click(screen.getByRole('button', { name: /System Audio/i }));
+    fireEvent.change(screen.getByRole('slider'), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Microphone' }));
+    fireEvent.click(screen.getAllByRole('switch', { name: 'Live Mode' })[0]);
+
+    await waitFor(() => expect(live.start).toHaveBeenCalled());
+
+    expect(live.start.mock.calls[0][0]).toMatchObject({ systemAudio: false });
+    expect(live.setGain).toHaveBeenLastCalledWith(1);
+    const orders = live.setGain.mock.invocationCallOrder;
+    expect(orders[orders.length - 1]).toBeLessThan(live.start.mock.invocationCallOrder[0]);
   });
 });

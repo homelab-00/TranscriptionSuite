@@ -68,9 +68,14 @@ vi.mock('../services/audioCapture', () => ({
 // ── Helpers ────────────────────────────────────────────────────────────
 
 /** Drive the hook through auth → state LISTENING → listening. */
-async function driveToListening(result: { current: ReturnType<typeof useLiveMode> }) {
+async function driveToListening(
+  result: { current: ReturnType<typeof useLiveMode> },
+  // Capture gain is clamped to unity for a microphone session, so gain tests
+  // have to say which source they are starting.
+  options: Parameters<ReturnType<typeof useLiveMode>['start']>[0] = {},
+) {
   act(() => {
-    result.current.start();
+    result.current.start(options);
   });
   act(() => {
     lastSocketCbs.onMessage!({ type: 'auth_ok' });
@@ -807,6 +812,77 @@ describe('[P1] useLiveMode', () => {
           monitorSinkName: 'alsa_output.sink',
         }),
       );
+    });
+  });
+
+  // ── Capture gain must cross the gap between start() and the instance ──
+  //
+  // Same shape as the longform hook: start() only opens the socket, and the
+  // AudioCapture is constructed later, when the engine reports LISTENING. A
+  // setGain() in between reached `captureRef.current?.setGain(...)` with
+  // nothing behind it and was silently dropped.
+
+  describe('capture gain reaches the AudioCapture built on LISTENING', () => {
+    it('applies a gain set before start() to the capture instance', async () => {
+      const { result } = renderHook(() => useLiveMode());
+
+      act(() => {
+        result.current.setGain(3);
+      });
+      await driveToListening(result, { systemAudio: true });
+
+      expect(lastCapture.setGain).toHaveBeenCalledWith(3);
+      // Before start(): start() reads the remembered gain when it builds the
+      // gain node, so a later call would leave the opening audio at unity.
+      expect(lastCapture.setGain.mock.invocationCallOrder[0]).toBeLessThan(
+        lastCapture.start.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('remembers a gain set mid-session and re-applies it to the next capture', async () => {
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result, { systemAudio: true });
+      const firstCapture = lastCapture;
+
+      act(() => {
+        result.current.setGain(2.5);
+      });
+      expect(firstCapture.setGain).toHaveBeenCalledWith(2.5);
+
+      act(() => {
+        result.current.stop();
+      });
+      await driveToListening(result, { systemAudio: true });
+
+      expect(lastCapture).not.toBe(firstCapture);
+      expect(lastCapture.setGain).toHaveBeenCalledWith(2.5);
+    });
+
+    it('a microphone session rebuilt inside the hook still opens at unity', async () => {
+      // The retarget hop and the auto-reconnect-on-ERROR re-enter start() from
+      // inside this hook with the same startOptsRef, so SessionView never gets
+      // to reset the gain for them. Meanwhile the Capture Gain slider forwards
+      // here unconditionally and the Active Input Source buttons stay live
+      // mid-session, so a mic session really can have a system gain remembered
+      // against it. Without the clamp at the seed, the rebuilt microphone
+      // capture would open amplified.
+      const { result } = renderHook(() => useLiveMode());
+      await driveToListening(result, { systemAudio: false });
+      expect(lastCapture.setGain).toHaveBeenCalledWith(1);
+
+      act(() => {
+        result.current.setGain(4);
+      });
+
+      // Drive the construction site directly rather than the reconnect timer:
+      // the LISTENING handler rebuilds whenever the previous capture is not
+      // capturing, which is the same code path a retarget lands on.
+      await act(async () => {
+        lastSocketCbs.onMessage!({ type: 'state', data: { state: 'LISTENING' } });
+      });
+
+      expect(lastCapture.setGain).toHaveBeenCalledWith(1);
+      expect(lastCapture.setGain).not.toHaveBeenCalledWith(4);
     });
   });
 
