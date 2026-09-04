@@ -56,9 +56,12 @@ When creating a brownfield PRD or planning a feature, point the planning workflo
 
 ## Branching Policy
 
+NEVER commit directly on `main`, no matter how minor the change, unless the user
+explicitly instructs you to.
+
 When committing, create a new feature branch. Feature branch *within* feature
 branch is allowed. Do not create a new branch if the change is minor (applies
-to both main and feature branches) or if already on feature branch and new
+only to feature branches) or if already on feature branch and new
 commit is about the same feature.
 
 ## PR Workflow
