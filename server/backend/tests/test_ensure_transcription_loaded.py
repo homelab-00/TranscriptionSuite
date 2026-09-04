@@ -100,6 +100,43 @@ class TestEnsureTranscriptionLoaded:
         assert result is loaded_engine
         load_spy.assert_called_once()
 
+    def test_reloads_after_an_oom_discard(self, tmp_path: Path):
+        """A GPU OOM discard must self-heal on the next request.
+
+        ``AudioToTextRecorder._discard_backend_after_oom()`` drops the backend
+        whose CUDA context an out-of-memory failure poisoned, leaving exactly
+        ``_backend is None`` / ``_model_loaded False``. Every route that reaches
+        transcription calls this helper first, so that state has to rebuild into
+        a fresh backend - which is what makes "reset, no auto-retry" sufficient.
+        """
+        mgr = _build_manager(tmp_path)
+
+        # The state the OOM discard leaves behind.
+        discarded_engine = SimpleNamespace(
+            _backend=None,
+            _model_loaded=False,
+            is_loaded=lambda: False,
+            model_name="tiny",
+        )
+        mgr._transcription_engine = discarded_engine
+
+        rebuilt_engine = SimpleNamespace(
+            _backend=MagicMock(name="rebuilt_backend"),
+            _model_loaded=True,
+            is_loaded=lambda: True,
+            model_name="tiny",
+        )
+
+        def fake_load(*_a, **_kw):
+            mgr._transcription_engine = rebuilt_engine
+
+        with patch.object(mgr, "load_transcription_model", side_effect=fake_load) as load_spy:
+            result = mgr.ensure_transcription_loaded()
+
+        load_spy.assert_called_once()
+        assert result is rebuilt_engine
+        assert result._backend is not None
+
     def test_reloads_when_engine_never_created(self, tmp_path: Path):
         """Scenario 3: preload failed at startup; engine is None."""
         mgr = _build_manager(tmp_path)
