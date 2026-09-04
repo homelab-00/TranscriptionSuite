@@ -30,6 +30,7 @@ const mockTranscription = {
   toggleMute: vi.fn(),
   setGain: vi.fn(),
   jobId: null,
+  resultJobId: null,
   loadResult: vi.fn(),
 };
 

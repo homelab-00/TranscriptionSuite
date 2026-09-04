@@ -33,6 +33,7 @@ const mockTranscription = {
   toggleMute: vi.fn(),
   setGain: vi.fn(),
   jobId: null as string | null,
+  resultJobId: null as string | null,
   busyInfo: null as null | { activeUser: string; isSalvage: boolean; salvageJobId: string | null },
   clearBusyInfo: vi.fn(),
   loadResult: vi.fn(),
@@ -297,6 +298,7 @@ describe('SessionView - recovery banner refresh', () => {
     mockTranscription.result = null;
     mockTranscription.error = null;
     mockTranscription.jobId = null;
+    mockTranscription.resultJobId = null;
     mockTranscription.busyInfo = null;
     mockGetConfig.mockResolvedValue(undefined);
     mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
@@ -367,7 +369,8 @@ describe('SessionView - recovery banner refresh', () => {
   it('does not offer to recover the transcript already on screen', async () => {
     // mark_delivered is best-effort, so a just-recovered job can still come
     // back from /recent. Announcing it beside its own transcript reads as a
-    // second, missing result.
+    // second, missing result. The test is resultJobId, not jobId: what matters
+    // is that THIS job's transcript is the one being displayed.
     mockFetchRecentUndelivered.mockResolvedValue({
       json: async () => [
         { job_id: JOB_ID, completed_at: COMPLETED_AT, text_preview: 'on screen now' },
@@ -376,6 +379,7 @@ describe('SessionView - recovery banner refresh', () => {
     });
     mockTranscription.status = 'complete';
     mockTranscription.jobId = JOB_ID;
+    mockTranscription.resultJobId = JOB_ID;
     mockTranscription.result = { text: 'on screen now', words: [] };
     renderSessionView();
 
@@ -385,6 +389,49 @@ describe('SessionView - recovery banner refresh', () => {
     const banners = screen.getAllByText(/is available\./);
     expect(banners).toHaveLength(1);
     expect(banners[0].closest('div')?.textContent).toContain('the half that made it');
+  });
+
+  // The incident, end to end. A longform job died on a CUDA OOM, the user
+  // pressed Retry, the retry succeeded, and the in-memory poll that was meant
+  // to deliver it died. The row stayed completed and undelivered, /retry
+  // refused it as already completed, and the banner - the last route to it -
+  // hid it because the filter tested jobId, which deliberately survives an
+  // error so the Retry button stays live. Nothing on screen pointed at a
+  // transcript that was in the database the whole time.
+  it('offers to recover the failed job whose transcript never arrived', async () => {
+    mockFetchRecentUndelivered.mockResolvedValue({
+      json: async () => [
+        { job_id: JOB_ID, completed_at: COMPLETED_AT, text_preview: 'the transcript nobody saw' },
+      ],
+    });
+    mockTranscription.status = 'error';
+    mockTranscription.error = 'CUDA failed with error out of memory';
+    mockTranscription.jobId = JOB_ID;
+    mockTranscription.result = null;
+    mockTranscription.resultJobId = null;
+    renderSessionView();
+
+    expect(await screen.findByText(/the transcript nobody saw/)).toBeInTheDocument();
+  });
+
+  // Same shape one step later: a PARTIAL transcript is on screen and the user
+  // retried from its amber banner. jobId still points at that job, so the old
+  // filter hid it again even though the retried, complete transcript is a
+  // different result the user has never seen.
+  it('still offers recovery while a partial from the same job is on screen', async () => {
+    mockFetchRecentUndelivered.mockResolvedValue({
+      json: async () => [
+        { job_id: JOB_ID, completed_at: COMPLETED_AT, text_preview: 'the retried whole thing' },
+      ],
+    });
+    mockTranscription.status = 'complete';
+    mockTranscription.jobId = JOB_ID;
+    mockTranscription.result = { text: 'only the first half', words: [], partial: true };
+    // The retry delivery never landed, so nothing on screen belongs to a job.
+    mockTranscription.resultJobId = null;
+    renderSessionView();
+
+    expect(await screen.findByText(/the retried whole thing/)).toBeInTheDocument();
   });
 
   // /recent returns at most 5 rows. A user who has been cancelling recordings
@@ -502,6 +549,49 @@ describe('SessionView - recovery banner refresh', () => {
     await waitFor(() => expect(mockTranscription.loadResult).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/from three days ago/)).toBeInTheDocument();
     expect(mockFetchRecentUndelivered).toHaveBeenCalledTimes(2);
+  });
+
+  // The banner is the safety net the whole fix leans on, and it was hand
+  // mapping four fewer fields than the hook does. A salvaged PARTIAL transcript
+  // arrived here looking complete: no amber banner, no Retry, no speaker
+  // labels, no reason. It also has to say which job it just delivered, or the
+  // filter above cannot tell that this row is now on screen.
+  it('View delivers the whole payload and names the job it belongs to', async () => {
+    mockFetchRecentUndelivered.mockResolvedValueOnce({ json: async () => SALVAGED });
+    mockFetchTranscriptionResult.mockResolvedValue({
+      status: 200,
+      json: async () => ({
+        result: {
+          text: 'the half that made it',
+          words: [],
+          partial: true,
+          partial_reason: 'Client disconnected mid-recording',
+          num_speakers: 3,
+          diarization: {
+            requested: true,
+            performed: false,
+            reason: 'model_missing',
+            remedy: 'Install the diarization model',
+          },
+        },
+      }),
+    });
+    renderSessionView();
+    expect(await screen.findByText(/the half that made it/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('View'));
+
+    await waitFor(() => expect(mockTranscription.loadResult).toHaveBeenCalledTimes(1));
+    expect(mockTranscription.loadResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'the half that made it',
+        partial: true,
+        partialReason: 'Client disconnected mid-recording',
+        numSpeakers: 3,
+        diarization: expect.objectContaining({ requested: true, performed: false }),
+      }),
+      'salvaged-job',
+    );
   });
 });
 
