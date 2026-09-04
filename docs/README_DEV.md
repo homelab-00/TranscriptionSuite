@@ -4068,23 +4068,12 @@ for quick comparison in a spreadsheet.
 ## 17.1 AI Agent Information
 
 If you are a fellow developer working on this project with the help of an AI
-coding agent and you want to share the same "thinking context" I use day-to-day,
-install the **BMad Method** in your own environment:
+coding agent, the project-level context it needs — architecture, API
+contracts, data models, source tree, invariants — lives in `docs/` and is
+indexed from `docs/index.md`. That is the entry point to point any agent at,
+regardless of which coding assistant you use.
 
-- Repo: https://github.com/bmad-code-org/BMAD-METHOD
-
-BMad is what I drive ~90% of the time while working on TranscriptionSuite. It
-is agent-agnostic — it installs into Claude Code, Codex, Cursor, Windsurf, and
-others — so you don't need to match my exact setup, only the methodology.
-
-A few notes:
-
-- The `.claude/` and `_bmad/` folders are intentionally **not** tracked in this
-  repo. They are large, change constantly as tooling evolves, and are personal
-  to each developer's environment. Install BMad fresh in your own clone via
-  its installer rather than expecting them to be checked in.
-- The project-level context an agent actually needs — architecture, API
-  contracts, data models, source tree, invariants — lives in `docs/` and is
-  indexed from `docs/index.md`. That is the entry point to point any agent at,
-  regardless of which coding assistant you use.
+The `.claude/` folder is intentionally **not** tracked in this repo. It is
+personal to each developer's environment and changes constantly as tooling
+evolves.
 
