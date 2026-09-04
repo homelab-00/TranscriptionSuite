@@ -45,6 +45,7 @@ import { useLanguages } from '../../src/hooks/useLanguages';
 import { summarizeJobProgress } from '../../src/services/jobProgress';
 import { JobProgressBlock } from '../ui/JobProgressBlock';
 import { writeToClipboard } from '../../src/hooks/useClipboard';
+import { useFileSaveDialog } from '../../src/hooks/useFileSaveDialog';
 import {
   pollForTranscriptionResult,
   toTranscriptionResult,
@@ -245,6 +246,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
       retryPollHandleRef.current = null;
     };
   }, []);
+  // Guards the Save Audio buttons while one download is in flight.
+  const [savingAudio, setSavingAudio] = useState(false);
+  const openSaveDialog = useFileSaveDialog();
   useEffect(() => {
     setEditedResultText(transcription.result?.text ?? '');
   }, [transcription.result?.text]);
@@ -1621,6 +1625,72 @@ export const SessionView: React.FC<SessionViewProps> = ({
     });
   }, [transcription, retrying, deliverExistingResult, refreshRecoveryJobs]);
 
+  // Save the source recording itself. A transcript can always be produced
+  // again from the audio; the audio cannot be produced again from anything.
+  //
+  // The window this is offered in is exactly the window Retry is offered in,
+  // and that is not a coincidence: viewing a delivered transcript deletes the
+  // WAV along with the job row (session ephemeral retention), while a FAILED
+  // job's audio is never swept. So the button belongs beside Retry, and in the
+  // recovery row it belongs BEFORE View, because View is what destroys it.
+  const handleSaveAudio = useCallback(
+    async (jobId: string, createdAt?: string) => {
+      if (savingAudio) return;
+      const url = apiClient.getJobAudioUrl(jobId);
+      if (!url) {
+        toast.error('Remote host not configured', {
+          description: 'Set the server address in the Server tab, then try again.',
+        });
+        return;
+      }
+      const stamp = (createdAt ?? '').replace(/[^0-9A-Za-z]/g, '-').slice(0, 19);
+      const filePath = await openSaveDialog({
+        defaultPath: stamp ? `transcription-${stamp}-${jobId}.wav` : `transcription-${jobId}.wav`,
+        filters: [{ name: 'WAV Audio', extensions: ['wav'] }],
+      });
+      // Cancelled, or there is no desktop bridge to open a dialog with.
+      if (!filePath) return;
+
+      setSavingAudio(true);
+      try {
+        // The bytes are streamed to disk by the main process. A five hour
+        // recording is roughly 576 MB, so buffering it in the renderer and
+        // structure-cloning it across the bridge would cost that twice over.
+        // The token travels as a header rather than a query param so it stays
+        // out of the URL and out of any access log.
+        const token = apiClient.getAuthToken();
+        const outcome = await window.electronAPI?.fileIO?.downloadToPath?.({
+          url,
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          filePath,
+        });
+        if (!outcome) {
+          toast.error('Could not save the audio', {
+            description: 'The desktop bridge is unavailable.',
+          });
+          return;
+        }
+        // Written as an explicit `=== false` because this tsconfig does not
+        // enable strictNullChecks, and without it TypeScript will not narrow a
+        // union by a boolean literal on the falsy side of the test.
+        if (outcome.ok === false) {
+          // A 410 carries the server's own reason: never preserved, lost from
+          // temporary storage on a restart, or already deleted. That distinction
+          // is the whole answer for the user, so surface it verbatim rather than
+          // flattening it into a generic failure.
+          toast.error('Could not save the audio', {
+            description: (outcome.body ? extractDetail(outcome.body) : undefined) ?? outcome.error,
+          });
+          return;
+        }
+        toast.success('Audio saved', { description: filePath });
+      } finally {
+        setSavingAudio(false);
+      }
+    },
+    [savingAudio, openSaveDialog],
+  );
+
   // Scroll State
   const leftScrollRef = useRef<HTMLDivElement>(null);
   const rightScrollRef = useRef<HTMLDivElement>(null);
@@ -1796,8 +1866,25 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       {job.text_preview.length >= 100 ? '\u2026' : ''}&rdquo;
                     </span>
                   )}
+                  <span className="mt-1 block text-amber-300/60">
+                    Save Audio first if you want to keep the recording: opening the transcript
+                    releases it.
+                  </span>
                 </div>
                 <div className="flex shrink-0 gap-2">
+                  {/* Before View on purpose: View delivers the transcript, and
+                    delivering a session job deletes its row AND unlinks its
+                    WAV. This is the last moment the audio exists. */}
+                  <button
+                    data-testid="recovery-save-audio"
+                    disabled={savingAudio}
+                    className="rounded px-2 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 disabled:opacity-50"
+                    onClick={() => {
+                      void handleSaveAudio(job.job_id, job.completed_at);
+                    }}
+                  >
+                    Save Audio
+                  </button>
                   <button
                     className="rounded px-2 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
                     onClick={() => {
@@ -2478,13 +2565,28 @@ export const SessionView: React.FC<SessionViewProps> = ({
                                 : ''}
                               .
                             </span>
-                            <Button
-                              variant="secondary"
-                              disabled={retrying || !transcription.jobId}
-                              onClick={handleRetry}
-                            >
-                              {retrying ? 'Retrying…' : 'Retry'}
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={<FileAudio size={14} />}
+                                data-testid="save-audio-partial"
+                                disabled={savingAudio || !transcription.jobId}
+                                onClick={() => {
+                                  if (transcription.jobId)
+                                    void handleSaveAudio(transcription.jobId);
+                                }}
+                              >
+                                {savingAudio ? 'Saving…' : 'Save Audio'}
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                disabled={retrying || !transcription.jobId}
+                                onClick={handleRetry}
+                              >
+                                {retrying ? 'Retrying…' : 'Retry'}
+                              </Button>
+                            </div>
                           </div>
                         )}
                         {/* GH-258: diarization degrades rather than failing, so a
@@ -2568,9 +2670,23 @@ export const SessionView: React.FC<SessionViewProps> = ({
                       >
                         <span>{transcription.error}</span>
                         {transcription.jobId && (
-                          <Button variant="secondary" disabled={retrying} onClick={handleRetry}>
-                            {retrying ? 'Retrying…' : 'Retry'}
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              icon={<FileAudio size={14} />}
+                              data-testid="save-audio-error"
+                              disabled={savingAudio}
+                              onClick={() => {
+                                if (transcription.jobId) void handleSaveAudio(transcription.jobId);
+                              }}
+                            >
+                              {savingAudio ? 'Saving…' : 'Save Audio'}
+                            </Button>
+                            <Button variant="secondary" disabled={retrying} onClick={handleRetry}>
+                              {retrying ? 'Retrying…' : 'Retry'}
+                            </Button>
+                          </div>
                         )}
                       </div>
                     )}

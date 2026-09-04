@@ -437,6 +437,18 @@ export interface ElectronAPI {
       defaultPath?: string;
       filters?: { name: string; extensions: string[] }[];
     }) => Promise<string | null>;
+    /**
+     * Stream an HTTP download straight to disk in the main process. The bytes
+     * never cross the IPC bridge, so a multi-hundred-MB WAV costs no renderer
+     * memory. Resolves to a result union and never rejects.
+     */
+    downloadToPath: (opts: {
+      url: string;
+      headers?: Record<string, string>;
+      filePath: string;
+    }) => Promise<
+      { ok: true; bytes?: number } | { ok: false; error: string; status?: number; body?: string }
+    >;
   };
   watcher: {
     startSession: (folderPath: string) => Promise<void>;
@@ -798,6 +810,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('file:writeText', filePath, content) as Promise<void>,
     selectFolder: () => ipcRenderer.invoke('dialog:selectFolder') as Promise<string | null>,
     saveFile: (opts) => ipcRenderer.invoke('dialog:saveFile', opts) as Promise<string | null>,
+    downloadToPath: (opts) =>
+      ipcRenderer.invoke('file:downloadToPath', opts) as Promise<
+        { ok: true; bytes?: number } | { ok: false; error: string; status?: number; body?: string }
+      >,
   },
   watcher: {
     startSession: (folderPath: string) =>

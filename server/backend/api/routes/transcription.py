@@ -13,6 +13,7 @@ import functools
 import json as _json
 import logging
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,8 +27,9 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from server.api.routes._http_utils import _content_disposition
 from server.api.routes.utils import get_client_name
 from server.config import resolve_main_transcriber_model, resolve_parallel_diarization_default
 from server.core.json_utils import sanitize_for_json
@@ -1167,6 +1169,86 @@ async def get_transcription_result(job_id: str, request: Request) -> JSONRespons
     return JSONResponse(
         status_code=200,
         content={"job_id": job_id, "status": "completed", "result": result_data},
+    )
+
+
+def _job_audio_filename(job_id: str, created_at: Any) -> str:
+    """Build the download filename for a job's saved source WAV.
+
+    ``created_at`` is written by SQLite CURRENT_TIMESTAMP, i.e. the string
+    "YYYY-MM-DD HH:MM:SS" (see job_repository.get_jobs_for_cleanup for the
+    format note), but legacy rows may hold an isoformat string or nothing at
+    all. The parse is total by design: anything unreadable degrades to the
+    timestamp-free form rather than raising and losing the download.
+    """
+    stamp = ""
+    if created_at:
+        try:
+            stamp = datetime.fromisoformat(str(created_at)).strftime("%Y%m%d-%H%M%S")
+        except (TypeError, ValueError):
+            stamp = ""
+    if stamp:
+        return f"transcription-{stamp}-{job_id}.wav"
+    return f"transcription-{job_id}.wav"
+
+
+@router.get("/audio/{job_id}", response_model=None)
+async def get_job_audio(job_id: str, request: Request) -> FileResponse:
+    """Download the source audio a transcription job was produced from.
+
+    Lets the user keep the recording itself even when transcription died (e.g.
+    a GPU OOM), so nothing irreplaceable depends on the transcript pipeline
+    succeeding. This is a PURE READ: it must never mark the job delivered and
+    never purge it, otherwise saving the audio would destroy it. The audio
+    exists only while the job is failed or awaiting delivery - fetching a
+    session job's result unlinks the WAV (session ephemeral retention), which
+    is deliberate and untouched here.
+
+    Returns:
+        200: The WAV file, sent as an attachment (audio/wav).
+        403: Job belongs to a different client.
+        404: Job not found.
+        410: Audio not available (never preserved, lost with /tmp, or deleted).
+    """
+    from ...database.job_repository import get_job
+
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    client_name = get_client_name(request)
+    if job.get("client_name") is not None and job["client_name"] != client_name:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    audio_path = job.get("audio_path")
+    if not audio_path:
+        raise HTTPException(
+            status_code=410, detail="Audio was not preserved for this job - cannot download"
+        )
+    if not Path(audio_path).exists():
+        if audio_path.startswith("/tmp/"):
+            raise HTTPException(
+                status_code=410,
+                detail=(
+                    "Audio was in temporary storage (/tmp) and lost on server restart "
+                    "- cannot download"
+                ),
+            )
+        raise HTTPException(status_code=410, detail="Audio file has been deleted - cannot download")
+
+    filename = _job_audio_filename(job_id, job.get("created_at"))
+    logger.info(
+        "Serving saved audio for job %s as %s",
+        sanitize_log_value(job_id),
+        sanitize_log_value(filename),
+    )
+    # Content-Disposition is built explicitly (not via FileResponse's own
+    # filename= kwarg) so non-ASCII names survive Uvicorn's Latin-1 header
+    # encoding - see _http_utils._content_disposition, Issue #106.
+    return FileResponse(
+        path=audio_path,
+        media_type="audio/wav",
+        headers={"Content-Disposition": _content_disposition("attachment", filename)},
     )
 
 

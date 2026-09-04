@@ -6,6 +6,7 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 import { fileURLToPath } from 'url';
+import { downloadToFile, type DownloadToFileResult } from './downloadToFile.js';
 import {
   ensureServerConfigSeed,
   getServerConfigDir,
@@ -1151,6 +1152,17 @@ ipcMain.handle('file:writeText', async (_event, filePath: string, content: strin
   const resolved = path.resolve(filePath);
   await fs.promises.writeFile(resolved, content, 'utf-8');
 });
+
+// Binary sibling of `file:writeText` above, which takes a JS string and is not
+// binary safe. The bytes deliberately never cross the IPC bridge - see
+// downloadToFile.ts for why that matters for a multi-hundred-MB recording.
+ipcMain.handle(
+  'file:downloadToPath',
+  async (
+    _event,
+    opts: { url: string; headers?: Record<string, string>; filePath: string },
+  ): Promise<DownloadToFileResult> => downloadToFile(opts),
+);
 
 ipcMain.handle('dialog:selectFolder', async () => {
   const mainWindow = BrowserWindow.getAllWindows()[0];

@@ -14,7 +14,7 @@
 
 import React from 'react';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // ── Hoisted mock state ────────────────────────────────────────────────────
@@ -137,6 +137,8 @@ const {
   mockRetryTranscription,
   mockFetchTranscriptionResult,
   mockFetchRecentUndelivered,
+  mockSaveFile,
+  mockDownloadToPath,
   mockToast,
 } = vi.hoisted(() => {
   class HoistedAPIError extends Error {
@@ -154,6 +156,8 @@ const {
     mockRetryTranscription: vi.fn(),
     mockFetchTranscriptionResult: vi.fn(),
     mockFetchRecentUndelivered: vi.fn(),
+    mockSaveFile: vi.fn(),
+    mockDownloadToPath: vi.fn(),
     mockToast: { success: vi.fn(), error: vi.fn() },
   };
 });
@@ -172,6 +176,7 @@ vi.mock('../../src/api/client', () => ({
     unloadLLMModel: vi.fn().mockResolvedValue(undefined),
     loadModelsStream: vi.fn().mockReturnValue(vi.fn()),
     fetchRecentUndelivered: (...a: unknown[]) => mockFetchRecentUndelivered(...a),
+    getJobAudioUrl: (id: string) => `http://localhost:7239/api/transcribe/audio/${id}`,
     fetchTranscriptionResult: (...a: unknown[]) => mockFetchTranscriptionResult(...a),
     dismissTranscriptionResult: vi.fn().mockResolvedValue({ status: 200 }),
     retryTranscription: (...a: unknown[]) => mockRetryTranscription(...a),
@@ -552,5 +557,75 @@ describe('SessionView - retry poll lifetime', () => {
     });
 
     expect(mockTranscription.loadResult).not.toHaveBeenCalled();
+  });
+});
+
+// Save Audio - the recording itself, kept before the transcript pipeline gets
+// another chance to fail. It sits beside Retry in both banners.
+describe('SessionView - Save Audio beside Retry', () => {
+  let previousElectronAPI: typeof window.electronAPI;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTranscription.status = 'error';
+    mockTranscription.result = null;
+    mockTranscription.error = OOM_ERROR;
+    mockTranscription.jobId = JOB_ID;
+    mockTranscription.resultJobId = null;
+    mockGetConfig.mockResolvedValue(undefined);
+    mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
+    mockSaveFile.mockResolvedValue('/home/user/keep.wav');
+    mockDownloadToPath.mockResolvedValue({ ok: true, bytes: 4096 });
+    previousElectronAPI = window.electronAPI;
+    window.electronAPI = {
+      fileIO: { saveFile: mockSaveFile, downloadToPath: mockDownloadToPath },
+    } as unknown as typeof window.electronAPI;
+  });
+
+  afterEach(() => {
+    window.electronAPI = previousElectronAPI;
+  });
+
+  it('offers Save Audio on the error banner and downloads that job WAV', async () => {
+    renderSessionView();
+    fireEvent.click(await screen.findByTestId('save-audio-error'));
+
+    await waitFor(() => expect(mockSaveFile).toHaveBeenCalledTimes(1));
+    expect(mockSaveFile.mock.calls[0][0]).toMatchObject({
+      filters: [{ name: 'WAV Audio', extensions: ['wav'] }],
+    });
+    await waitFor(() =>
+      expect(mockDownloadToPath).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: `http://localhost:7239/api/transcribe/audio/${JOB_ID}`,
+          filePath: '/home/user/keep.wav',
+        }),
+      ),
+    );
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalled());
+  });
+
+  it('offers Save Audio on the partial-transcript banner too', async () => {
+    mockTranscription.status = 'complete';
+    mockTranscription.error = null;
+    mockTranscription.result = {
+      text: 'only the first half',
+      words: [],
+      partial: true,
+      partialReason: 'sidecar died',
+    };
+    renderSessionView();
+
+    expect(await screen.findByTestId('save-audio-partial')).toBeInTheDocument();
+  });
+
+  it('sends the auth token as a header, never in the URL', async () => {
+    renderSessionView();
+    fireEvent.click(await screen.findByTestId('save-audio-error'));
+
+    await waitFor(() => expect(mockDownloadToPath).toHaveBeenCalledTimes(1));
+    const sent = mockDownloadToPath.mock.calls[0][0] as { url: string; headers: unknown };
+    expect(sent.url).not.toContain('token=');
+    expect(sent.headers).toEqual({});
   });
 });

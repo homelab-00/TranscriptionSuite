@@ -14,7 +14,7 @@
 
 import React from 'react';
 import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // ── Hoisted mock state ────────────────────────────────────────────────────
@@ -181,6 +181,7 @@ vi.mock('../../src/api/client', () => ({
     getStatus: (...a: unknown[]) => mockGetStatus(...a),
     getAuthToken: vi.fn().mockReturnValue(null),
     setAuthToken: vi.fn(),
+    getJobAudioUrl: (id: string) => `http://localhost:7239/api/transcribe/audio/${id}`,
     getBaseUrl: vi.fn().mockReturnValue('http://localhost:7239'),
     syncFromConfig: vi.fn().mockResolvedValue(undefined),
     unloadModels: vi.fn().mockResolvedValue(undefined),
@@ -279,6 +280,11 @@ function renderSessionView() {
 }
 
 const JOB_ID = '48eae812-f5ff-400e-b2bc-4dede99c5a15';
+
+// The Electron file bridge behind Save Audio. useFileSaveDialog reads
+// window.electronAPI.fileIO directly, so stubbing the object is enough.
+const mockSaveFile = vi.fn();
+const mockDownloadToPath = vi.fn();
 
 /** Fixed so the banner's relative-time label cannot drift between runs. */
 const COMPLETED_AT = '2026-08-03T00:00:00.000Z';
@@ -592,6 +598,114 @@ describe('SessionView - recovery banner refresh', () => {
       }),
       'salvaged-job',
     );
+  });
+});
+
+// Save Audio - the source recording is the one thing that cannot be recreated,
+// and in the recovery row it has to come BEFORE View, because View delivers the
+// transcript and delivering a session job unlinks its WAV.
+describe('SessionView - Save Audio in the recovery row', () => {
+  let previousElectronAPI: typeof window.electronAPI;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTranscription.status = 'idle';
+    mockTranscription.result = null;
+    mockTranscription.error = null;
+    mockTranscription.jobId = null;
+    mockTranscription.resultJobId = null;
+    mockTranscription.busyInfo = null;
+    mockGetConfig.mockResolvedValue(undefined);
+    mockFetchRecentUndelivered.mockResolvedValue({ json: async () => SALVAGED });
+    mockGetStatus.mockResolvedValue({
+      models: { job_tracker: { is_busy: false, salvage: null } },
+    });
+    useSalvageStore.setState({ checkNonce: 0, dropRequestedJobId: null, lastCompletedAt: null });
+    mockSaveFile.mockResolvedValue('/home/user/keep.wav');
+    mockDownloadToPath.mockResolvedValue({ ok: true, bytes: 1024 });
+    previousElectronAPI = window.electronAPI;
+    window.electronAPI = {
+      fileIO: { saveFile: mockSaveFile, downloadToPath: mockDownloadToPath },
+    } as unknown as typeof window.electronAPI;
+  });
+
+  // Restore rather than leave the stub behind: describes that run after this
+  // one share the same jsdom window.
+  afterEach(() => {
+    window.electronAPI = previousElectronAPI;
+  });
+
+  it('renders before View, so the audio can be kept before it is released', async () => {
+    renderSessionView();
+    const button = await screen.findByTestId('recovery-save-audio');
+    const view = screen.getByText('View');
+
+    // Node.DOCUMENT_POSITION_FOLLOWING === 4
+    expect(button.compareDocumentPosition(view) & 4).toBeTruthy();
+  });
+
+  it('downloads the WAV for that job to the chosen path', async () => {
+    renderSessionView();
+    fireEvent.click(await screen.findByTestId('recovery-save-audio'));
+
+    await waitFor(() => expect(mockDownloadToPath).toHaveBeenCalledTimes(1));
+    expect(mockDownloadToPath).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'http://localhost:7239/api/transcribe/audio/salvaged-job',
+        filePath: '/home/user/keep.wav',
+      }),
+    );
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalled());
+    expect(mockToast.success.mock.calls[0][1]).toMatchObject({
+      description: '/home/user/keep.wav',
+    });
+  });
+
+  it('says nothing when the save dialog is cancelled', async () => {
+    mockSaveFile.mockResolvedValue(null);
+    renderSessionView();
+    fireEvent.click(await screen.findByTestId('recovery-save-audio'));
+
+    await waitFor(() => expect(mockSaveFile).toHaveBeenCalledTimes(1));
+    expect(mockDownloadToPath).not.toHaveBeenCalled();
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  // The 410 body distinguishes never-preserved from lost-on-restart from
+  // already-deleted, and that distinction is the entire answer for the user.
+  it('surfaces the server own reason when the audio is gone', async () => {
+    mockDownloadToPath.mockResolvedValue({
+      ok: false,
+      error: 'HTTP 410',
+      status: 410,
+      body: JSON.stringify({ detail: 'Audio file has been deleted - cannot download' }),
+    });
+    renderSessionView();
+    fireEvent.click(await screen.findByTestId('recovery-save-audio'));
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled());
+    expect(mockToast.error.mock.calls[0][1]).toMatchObject({
+      description: 'Audio file has been deleted - cannot download',
+    });
+  });
+
+  it('disables itself while a save is in flight', async () => {
+    let settle: (v: { ok: true }) => void = () => {};
+    mockDownloadToPath.mockReturnValueOnce(
+      new Promise<{ ok: true }>((resolve) => {
+        settle = resolve;
+      }),
+    );
+    renderSessionView();
+    const button = await screen.findByTestId('recovery-save-audio');
+    fireEvent.click(button);
+
+    await waitFor(() => expect(button).toBeDisabled());
+    await act(async () => {
+      settle({ ok: true });
+    });
+    await waitFor(() => expect(button).not.toBeDisabled());
   });
 });
 

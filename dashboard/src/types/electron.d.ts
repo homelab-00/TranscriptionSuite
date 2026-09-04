@@ -279,6 +279,18 @@ interface ElectronAPI {
       defaultPath?: string;
       filters?: { name: string; extensions: string[] }[];
     }) => Promise<string | null>;
+    /**
+     * Stream an HTTP download straight to disk in the main process. The bytes
+     * never cross the IPC bridge, so a multi-hundred-MB WAV costs no renderer
+     * memory. Resolves to a result union and never rejects.
+     */
+    downloadToPath: (opts: {
+      url: string;
+      headers?: Record<string, string>;
+      filePath: string;
+    }) => Promise<
+      { ok: true; bytes?: number } | { ok: false; error: string; status?: number; body?: string }
+    >;
   };
   notifications: {
     show: (options: {
