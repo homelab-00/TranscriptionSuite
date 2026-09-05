@@ -16,7 +16,6 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
-from urllib.parse import quote
 
 import aiofiles
 from fastapi import (
@@ -31,6 +30,15 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, field_validator
+
+# _content_disposition and its translate table live in _http_utils so the
+# transcription router can build the same RFC 6266 header (Issue #106). They are
+# re-imported here under their original names: this module's call sites and the
+# tests that reach for notebook._content_disposition keep working unchanged.
+from server.api.routes._http_utils import (
+    _ASCII_FALLBACK_REPLACE,  # noqa: F401  re-exported for backwards compatibility
+    _content_disposition,
+)
 from server.api.routes.utils import get_client_name, sanitize_for_log
 from server.config import get_config, resolve_parallel_diarization_default
 from server.core.stt.backends.factory import detect_backend_type
@@ -61,12 +69,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# C0 control chars + backslash + quote violate RFC 7230 quoted-string rules.
-_ASCII_FALLBACK_REPLACE = str.maketrans(
-    {chr(c): "_" for c in range(0x20)} | {'"': "_", "\\": "_", "\x7f": "_"}
-)
-
-
 def _sanitize_for_log(value: object) -> str:
     """Strip CR/LF (and equivalents) from any value flowing into a logger.
 
@@ -77,24 +79,6 @@ def _sanitize_for_log(value: object) -> str:
     here before being logged.
     """
     return str(value).replace("\r", " ").replace("\n", " ")
-
-
-def _content_disposition(disposition: str, filename: str) -> str:
-    """Build an RFC 6266 Content-Disposition value with both an ASCII
-    fallback and a UTF-8 form so non-ASCII filenames (Greek, Cyrillic,
-    CJK, etc.) survive Uvicorn's Latin-1 header encoding. Issue #106.
-    """
-    if not isinstance(filename, str) or not filename.strip():
-        safe_name = "audio"
-    else:
-        # Round-trip through UTF-8 with replacement to scrub lone surrogates
-        # that filesystems on some platforms leak; quote() would otherwise raise.
-        safe_name = filename.encode("utf-8", "replace").decode("utf-8")
-    ascii_fallback = (
-        safe_name.encode("ascii", "replace").decode("ascii").translate(_ASCII_FALLBACK_REPLACE)
-    )
-    utf8_quoted = quote(safe_name, safe="")
-    return f"{disposition}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{utf8_quoted}"
 
 
 class RecordingResponse(BaseModel):

@@ -762,6 +762,10 @@ class AudioToTextRecorder:
                 # is really a full GPU. Say what actually happened.
                 oom = as_gpu_oom(e)
                 if oom is not None:
+                    # The OOM also poisoned the backend's CUDA context, so it
+                    # cannot be reused. Reset only - the error still reaches the
+                    # caller with its remedy, and the user decides about a retry.
+                    self._discard_backend_after_oom("_perform_transcription")
                     raise oom from e
                 raise
 
@@ -934,6 +938,8 @@ class AudioToTextRecorder:
                 # Transcribe via backend
                 partial = False
                 partial_reason: str | None = None
+                # Initialised here so the success path below is always defined.
+                oom_partial = False
                 try:
                     backend_segments, backend_info = self._backend.transcribe(
                         audio_data,
@@ -956,6 +962,12 @@ class AudioToTextRecorder:
                     # whole job being lost (GH #168 follow-up).
                     partial = True
                     partial_reason = str(partial_exc)
+                    # A partial caused by an OOM leaves exactly the same poisoned
+                    # CUDA context as a total failure, but it never reaches the
+                    # OOM handler below because this branch falls through to a
+                    # normal return. Remember it and discard the backend once the
+                    # salvaged result is assembled.
+                    oom_partial = as_gpu_oom(partial_exc.__cause__ or partial_exc) is not None
                     backend_segments = partial_exc.segments
                     backend_info = partial_exc.info
                     logger.warning(
@@ -1014,6 +1026,15 @@ class AudioToTextRecorder:
                     f"{len(all_segments)} segments, language={backend_info.language}, task={effective_task}"
                 )
 
+                if oom_partial:
+                    # Placement is deliberate: the partial transcript is fully
+                    # assembled in locals by now and the helper cannot raise, so
+                    # the salvaged text is still returned here and persisted
+                    # downstream. Save first, clean up second - discarding the
+                    # backend earlier would put the durability invariant at risk
+                    # for no gain.
+                    self._discard_backend_after_oom("partial result after GPU OOM")
+
                 return TranscriptionResult(
                     text=full_text,
                     segments=all_segments,
@@ -1029,6 +1050,17 @@ class AudioToTextRecorder:
                 logger.exception(f"Transcription error: {e}")
                 oom = as_gpu_oom(e)
                 if oom is not None:
+                    # Drop the poisoned backend before re-raising, deliberately
+                    # while transcription_lock is still held: discarding after
+                    # the lock is released would leave a window in which another
+                    # thread starts a transcription on the known-bad backend. The
+                    # helper takes no locks of its own, so this cannot deadlock.
+                    # Accepted residual: a thread that already passed
+                    # ensure_transcription_loaded() and is blocked on the lock
+                    # now hits the "_backend is None" guard and fails. Its route
+                    # marks that job failed with the audio preserved, so it stays
+                    # retryable and no transcript is lost.
+                    self._discard_backend_after_oom("transcribe_audio")
                     raise oom from e
                 raise
 
@@ -1216,6 +1248,63 @@ class AudioToTextRecorder:
         self._backend = None
         self._model_loaded = False
         logger.info("Model unloaded")
+
+    def _discard_backend_after_oom(self, reason: str) -> None:
+        """Detach and tear down the backend after a GPU out-of-memory failure.
+
+        A backend that hit an OOM keeps a poisoned CUDA context. Reusing it does
+        not fail on the current VRAM situation but on a *sticky* error code left
+        on the context - which is how a retry made one second after the user
+        freed VRAM still died with "parallel_for failed: cudaErrorInvalidDevice:
+        invalid device ordinal". The OOM path never clears ``_model_loaded``, so
+        neither ``load_model()`` nor ``ensure_transcription_loaded()`` can heal
+        it, and ``clear_gpu_cache()`` only returns cached allocator blocks.
+        Dropping the backend here is what lets the next
+        ``ensure_transcription_loaded()`` rebuild a clean one.
+
+        Reset only, no auto-retry: the caller still raises the classified OOM so
+        the user sees the remedy and decides.
+
+        Never raises - it runs from an ``except`` block whose own exception has
+        to reach the caller intact - and takes no locks, because both call sites
+        already hold ``transcription_lock``.
+
+        Args:
+            reason: Short call-site tag, logged so a hardware smoke test can
+                confirm the discard fired exactly once.
+        """
+        if self._backend is None:
+            return
+
+        if not self._owns_backend:
+            # A shared backend belongs to whoever built it (Live Mode). This
+            # recorder cannot rebuild it, and dropping the reference would strand
+            # the live engine with a backend nobody ever unloads.
+            logger.warning(
+                "GPU OOM during %s on a shared backend - leaving it attached; "
+                "only its owner can rebuild it",
+                reason,
+            )
+            return
+
+        logger.warning(
+            "Discarding the STT backend after a GPU out-of-memory failure (%s): "
+            "its CUDA context is poisoned and every retry on it would fail with a "
+            "sticky error. The next transcription reloads the model.",
+            reason,
+        )
+        try:
+            self._backend.unload()
+        except Exception:
+            # Tearing down a poisoned context can trip the same sticky CUDA
+            # error. Swallow it: this helper must never mask the OOM that the
+            # caller is about to raise.
+            logger.warning("Backend unload during OOM discard failed", exc_info=True)
+        finally:
+            # Load-bearing: even when unload() blows up, the poisoned backend has
+            # to be detached, or the recorder stays wedged on it forever.
+            self._backend = None
+            self._model_loaded = False
 
     def is_loaded(self) -> bool:
         """Check if the model is loaded."""

@@ -783,6 +783,22 @@ export class APIClient {
     return `${this.baseUrl}/api/notebook/recordings/${id}/export?${params}`;
   }
 
+  /**
+   * GET /api/transcribe/audio/:jobId
+   * Absolute URL for a transcription job's preserved source WAV. Returns null
+   * when the base URL is not configured (pre-sync or blank-remote) so callers
+   * can surface the established "Remote host not configured" message.
+   *
+   * Unlike getAudioUrl / getExportUrl this deliberately carries NO token query
+   * param: the caller hands the URL to the Electron main process, which can set
+   * a real Authorization header, so the token stays out of the URL and out of
+   * any access log.
+   */
+  getJobAudioUrl(jobId: string): string | null {
+    if (!this.isBaseUrlConfigured()) return null;
+    return `${this.baseUrl}/api/transcribe/audio/${encodeURIComponent(jobId)}`;
+  }
+
   // ─── Notebook: Upload & Transcribe ────────────────────────────────────────
 
   /**

@@ -11,6 +11,11 @@ import { TranscriptionSocket, ServerMessage } from '../services/websocket';
 import { AudioCapture } from '../services/audioCapture';
 import { apiClient } from '../api/client';
 import { useSalvageStore } from '../stores/salvageStore';
+import {
+  pollForTranscriptionResult,
+  toTranscriptionResult,
+  type PollHandle,
+} from '../services/resultPolling';
 
 export type TranscriptionStatus =
   | 'idle'
@@ -26,20 +31,6 @@ export interface BusyInfo {
   isSalvage: boolean;
   salvageJobId: string | null;
 }
-
-/** Gap between attempts when polling for a result the socket cannot deliver. */
-const POLL_INTERVAL_MS = 3000;
-
-/**
- * How long to keep polling for such a result before giving up.
- *
- * Sized for the slow case rather than the common one: after a mid-recording
- * drop the server still has to transcribe everything it received (GH-239), so
- * the wait scales with the length of the recording, not with the round-trip.
- * Giving up early would strand a result that is already saved in the database -
- * it stays reachable from the recovery list, but the user has to find it.
- */
-const POLL_BUDGET_MS = 15 * 60 * 1000;
 
 export interface TranscriptionResult {
   text: string;
@@ -112,8 +103,26 @@ export interface TranscriptionState {
   setGain: (value: number) => void;
   /** Job ID assigned by the server for this transcription session */
   jobId: string | null;
-  /** Load an externally-fetched result into the hook (e.g. recovered from DB) */
-  loadResult: (result: TranscriptionResult) => void;
+  /**
+   * Which job the transcript currently on screen belongs to, or null when there
+   * is none.
+   *
+   * Distinct from `jobId`, and the distinction is load bearing. `jobId` is the
+   * job the Retry button acts on and it deliberately survives an error, so it
+   * cannot answer "is this transcript already visible". The recovery banner
+   * needs that answer: hiding a job because it is the CURRENT one hid the one
+   * job that most needed recovering, while /retry refused it as already
+   * completed.
+   */
+  resultJobId: string | null;
+  /**
+   * Load an externally-fetched result into the hook (e.g. recovered from DB).
+   *
+   * `forJobId` says which job the transcript belongs to and defaults to the
+   * current session job. The recovery banner must pass it explicitly, because
+   * the job it views is by definition not the current one.
+   */
+  loadResult: (result: TranscriptionResult, forJobId?: string | null) => void;
   /** Ephemeral "last N seconds" preview text (null until a preview has run) */
   previewText: string | null;
   /** Detected language of the most recent preview */
@@ -140,6 +149,9 @@ const PREVIEW_REFRESH_BASE_MS = 5000;
 export function useTranscription(): TranscriptionState {
   const [status, setStatus] = useState<TranscriptionStatus>('idle');
   const [result, setResult] = useState<TranscriptionResult | null>(null);
+  // Written at every setResult site, so "whose transcript is on screen" can
+  // never drift from the transcript itself.
+  const [resultJobId, setResultJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyInfo, setBusyInfo] = useState<BusyInfo | null>(null);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
@@ -197,11 +209,11 @@ export function useTranscription(): TranscriptionState {
   // reconnect can't spawn a phantom job while the poll-for-result fallback
   // recovers the real one.
   const sessionEstablishedRef = useRef(false);
-  // Ref-based cancel flag for the disconnect poll loop — accessible from the
-  // useEffect cleanup on unmount (a plain `let cancelled` in the onClose closure
-  // cannot be reached from the cleanup function).
-  const pollCancelledRef = useRef(false);
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Handle for the disconnect poll loop, held in a ref so the useEffect cleanup
+  // on unmount can reach it (a plain `let` inside the onClose closure cannot be).
+  // One handle per invocation: cancelling this one never touches a poll started
+  // elsewhere, such as the one behind SessionView's Retry button.
+  const pollHandleRef = useRef<PollHandle | null>(null);
 
   // Keep statusRef in sync so onClose can read the latest status without stale closure
   const setStatusTracked = useCallback((s: TranscriptionStatus) => {
@@ -251,11 +263,8 @@ export function useTranscription(): TranscriptionState {
       previewActiveRef.current = false;
       const active = statusRef.current === 'recording' || statusRef.current === 'processing';
       if (!active) {
-        pollCancelledRef.current = true;
-        if (pollTimerRef.current !== null) {
-          clearTimeout(pollTimerRef.current);
-          pollTimerRef.current = null;
-        }
+        pollHandleRef.current?.cancel();
+        pollHandleRef.current = null;
         captureRef.current?.stop();
         socketRef.current?.disconnect();
       }
@@ -472,6 +481,7 @@ export function useTranscription(): TranscriptionState {
             numSpeakers: (msg.data?.num_speakers as number | undefined) ?? 0,
             diarization: msg.data?.diarization as TranscriptionResult['diarization'],
           });
+          setResultJobId(jobIdRef.current);
           setProcessingProgress(null);
           setStatusTracked('complete');
           captureRef.current?.stop();
@@ -490,17 +500,10 @@ export function useTranscription(): TranscriptionState {
             .then(async (resp) => {
               if (resp.status === 200) {
                 const data = await resp.json();
-                const r = data.result ?? {};
-                setResult({
-                  text: r.text ?? '',
-                  words: r.words ?? [],
-                  language: r.language,
-                  duration: r.duration,
-                  partial: r.partial ?? false,
-                  partialReason: r.partial_reason ?? null,
-                  numSpeakers: r.num_speakers ?? 0,
-                  diarization: r.diarization,
-                });
+                setResult(toTranscriptionResult(data.result));
+                // jobIdRef was already cleared below so onClose skips the poll,
+                // so the id has to come from the message that sent us here.
+                setResultJobId(job_id);
                 setProcessingProgress(null);
                 setStatusTracked('complete');
               } else {
@@ -600,6 +603,7 @@ export function useTranscription(): TranscriptionState {
     }) => {
       // Reset previous state
       setResult(null);
+      setResultJobId(null);
       setError(null);
       setBusyInfo(null);
       setVadActive(false);
@@ -670,74 +674,31 @@ export function useTranscription(): TranscriptionState {
           // server was already transcribing, or it is now salvaging the
           // interrupted recording.
           if ((wasRecording || statusRef.current === 'processing') && currentJobId) {
-            let networkErrors = 0;
-            const maxRetries = 10;
-            // A wall-clock budget, not an attempt count: the server has to
-            // transcribe the whole recording before the result exists, and the
-            // old ten-attempt cap gave up after 30 seconds - short of any real
-            // recording. Date.now() is read once so a suspended machine that
-            // wakes up late gives up rather than polling forever.
-            const pollDeadline = Date.now() + POLL_BUDGET_MS;
-            pollCancelledRef.current = false;
-
-            // Cancel polling if the hook re-initialises a new session
-            // (jobIdRef will be cleared by start() before a new socket is created)
-            const poll = async () => {
-              if (pollCancelledRef.current || jobIdRef.current !== currentJobId) return;
-              try {
-                // Absolute base URL via apiClient — a relative fetch fails in
-                // the packaged (file://) renderer (GH-202).
-                const resp = await apiClient.fetchTranscriptionResult(currentJobId);
-                if (pollCancelledRef.current || jobIdRef.current !== currentJobId) return;
-                if (resp.status === 200) {
-                  const data = await resp.json();
-                  const r = data.result ?? {};
-                  setResult({
-                    text: r.text ?? '',
-                    words: r.words ?? [],
-                    language: r.language,
-                    duration: r.duration,
-                    partial: r.partial ?? false,
-                    partialReason: r.partial_reason ?? null,
-                    numSpeakers: r.num_speakers ?? 0,
-                    diarization: r.diarization,
-                  });
-                  setProcessingProgress(null);
-                  // The recovery succeeded, so the "connection lost" banner has
-                  // done its job. A salvaged transcript still carries `partial`,
-                  // which SessionView renders as its own amber banner - showing
-                  // a red error next to a recovered transcript reads as failure.
-                  setError(null);
-                  setStatusTracked('complete');
-                  return;
-                }
-                if (resp.status === 202 && Date.now() < pollDeadline) {
-                  pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
-                  return;
-                }
-                // 410 = server says job failed
-                if (resp.status === 410) {
-                  setStatusTracked('error');
-                  setError('Transcription failed on server');
-                  return;
-                }
-                // 404 or unexpected — surface as error rather than silently idling
+            // Shared with SessionView's Retry button. It owns the wall-clock
+            // budget, the separate network-error budget, and the rule that a
+            // throw while delivering is never retried as "not ready yet".
+            pollHandleRef.current?.cancel();
+            pollHandleRef.current = pollForTranscriptionResult({
+              jobId: currentJobId,
+              // Drop the poll if the hook re-initialises a new session.
+              // start() clears jobIdRef before a new socket is created.
+              isStale: () => jobIdRef.current !== currentJobId,
+              onResult: (recovered, forJobId) => {
+                setResult(recovered);
+                setResultJobId(forJobId);
+                setProcessingProgress(null);
+                // The recovery succeeded, so the "connection lost" banner has
+                // done its job. A salvaged transcript still carries `partial`,
+                // which SessionView renders as its own amber banner - showing
+                // a red error next to a recovered transcript reads as failure.
+                setError(null);
+                setStatusTracked('complete');
+              },
+              onFailure: (failure) => {
                 setStatusTracked('error');
-                setError('Transcription result unavailable');
-              } catch {
-                // Network errors keep their own small budget: an unreachable
-                // server will not produce a result no matter how long we wait,
-                // so this must not inherit the long transcription budget.
-                if (!pollCancelledRef.current && networkErrors < maxRetries) {
-                  networkErrors++;
-                  pollTimerRef.current = setTimeout(poll, POLL_INTERVAL_MS);
-                } else if (!pollCancelledRef.current) {
-                  setStatusTracked('error');
-                  setError('Could not retrieve transcription result');
-                }
-              }
-            };
-            poll();
+                setError(failure.message);
+              },
+            });
           }
         },
       });
@@ -770,6 +731,7 @@ export function useTranscription(): TranscriptionState {
     socketRef.current?.disconnect();
     setStatusTracked('idle');
     setResult(null);
+    setResultJobId(null);
     setError(null);
     setBusyInfo(null);
     setAnalyser(null);
@@ -809,8 +771,12 @@ export function useTranscription(): TranscriptionState {
   }, []);
 
   const loadResult = useCallback(
-    (r: TranscriptionResult) => {
+    (r: TranscriptionResult, forJobId?: string | null) => {
       setResult(r);
+      // Default to the current session job. The recovery banner overrides it,
+      // because the job it views is by definition not the current one, and
+      // recording the wrong owner here would hide the wrong row from the banner.
+      setResultJobId(forJobId !== undefined ? forJobId : jobIdRef.current);
       // A delivered transcript supersedes whatever went wrong before it — a
       // recovered or retried result must not leave the old error banner on
       // screen next to the transcript it just replaced.
@@ -836,6 +802,7 @@ export function useTranscription(): TranscriptionState {
     setGain,
     processingProgress,
     jobId,
+    resultJobId,
     loadResult,
     previewText,
     previewLanguage,

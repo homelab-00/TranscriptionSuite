@@ -14,7 +14,7 @@
 
 import React from 'react';
 import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // ── Hoisted mock state ────────────────────────────────────────────────────
@@ -33,6 +33,7 @@ const mockTranscription = {
   toggleMute: vi.fn(),
   setGain: vi.fn(),
   jobId: null as string | null,
+  resultJobId: null as string | null,
   busyInfo: null as null | { activeUser: string; isSalvage: boolean; salvageJobId: string | null },
   clearBusyInfo: vi.fn(),
   loadResult: vi.fn(),
@@ -180,6 +181,7 @@ vi.mock('../../src/api/client', () => ({
     getStatus: (...a: unknown[]) => mockGetStatus(...a),
     getAuthToken: vi.fn().mockReturnValue(null),
     setAuthToken: vi.fn(),
+    getJobAudioUrl: (id: string) => `http://localhost:7239/api/transcribe/audio/${id}`,
     getBaseUrl: vi.fn().mockReturnValue('http://localhost:7239'),
     syncFromConfig: vi.fn().mockResolvedValue(undefined),
     unloadModels: vi.fn().mockResolvedValue(undefined),
@@ -279,6 +281,11 @@ function renderSessionView() {
 
 const JOB_ID = '48eae812-f5ff-400e-b2bc-4dede99c5a15';
 
+// The Electron file bridge behind Save Audio. useFileSaveDialog reads
+// window.electronAPI.fileIO directly, so stubbing the object is enough.
+const mockSaveFile = vi.fn();
+const mockDownloadToPath = vi.fn();
+
 /** Fixed so the banner's relative-time label cannot drift between runs. */
 const COMPLETED_AT = '2026-08-03T00:00:00.000Z';
 
@@ -297,6 +304,7 @@ describe('SessionView - recovery banner refresh', () => {
     mockTranscription.result = null;
     mockTranscription.error = null;
     mockTranscription.jobId = null;
+    mockTranscription.resultJobId = null;
     mockTranscription.busyInfo = null;
     mockGetConfig.mockResolvedValue(undefined);
     mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
@@ -367,7 +375,8 @@ describe('SessionView - recovery banner refresh', () => {
   it('does not offer to recover the transcript already on screen', async () => {
     // mark_delivered is best-effort, so a just-recovered job can still come
     // back from /recent. Announcing it beside its own transcript reads as a
-    // second, missing result.
+    // second, missing result. The test is resultJobId, not jobId: what matters
+    // is that THIS job's transcript is the one being displayed.
     mockFetchRecentUndelivered.mockResolvedValue({
       json: async () => [
         { job_id: JOB_ID, completed_at: COMPLETED_AT, text_preview: 'on screen now' },
@@ -376,6 +385,7 @@ describe('SessionView - recovery banner refresh', () => {
     });
     mockTranscription.status = 'complete';
     mockTranscription.jobId = JOB_ID;
+    mockTranscription.resultJobId = JOB_ID;
     mockTranscription.result = { text: 'on screen now', words: [] };
     renderSessionView();
 
@@ -385,6 +395,49 @@ describe('SessionView - recovery banner refresh', () => {
     const banners = screen.getAllByText(/is available\./);
     expect(banners).toHaveLength(1);
     expect(banners[0].closest('div')?.textContent).toContain('the half that made it');
+  });
+
+  // The incident, end to end. A longform job died on a CUDA OOM, the user
+  // pressed Retry, the retry succeeded, and the in-memory poll that was meant
+  // to deliver it died. The row stayed completed and undelivered, /retry
+  // refused it as already completed, and the banner - the last route to it -
+  // hid it because the filter tested jobId, which deliberately survives an
+  // error so the Retry button stays live. Nothing on screen pointed at a
+  // transcript that was in the database the whole time.
+  it('offers to recover the failed job whose transcript never arrived', async () => {
+    mockFetchRecentUndelivered.mockResolvedValue({
+      json: async () => [
+        { job_id: JOB_ID, completed_at: COMPLETED_AT, text_preview: 'the transcript nobody saw' },
+      ],
+    });
+    mockTranscription.status = 'error';
+    mockTranscription.error = 'CUDA failed with error out of memory';
+    mockTranscription.jobId = JOB_ID;
+    mockTranscription.result = null;
+    mockTranscription.resultJobId = null;
+    renderSessionView();
+
+    expect(await screen.findByText(/the transcript nobody saw/)).toBeInTheDocument();
+  });
+
+  // Same shape one step later: a PARTIAL transcript is on screen and the user
+  // retried from its amber banner. jobId still points at that job, so the old
+  // filter hid it again even though the retried, complete transcript is a
+  // different result the user has never seen.
+  it('still offers recovery while a partial from the same job is on screen', async () => {
+    mockFetchRecentUndelivered.mockResolvedValue({
+      json: async () => [
+        { job_id: JOB_ID, completed_at: COMPLETED_AT, text_preview: 'the retried whole thing' },
+      ],
+    });
+    mockTranscription.status = 'complete';
+    mockTranscription.jobId = JOB_ID;
+    mockTranscription.result = { text: 'only the first half', words: [], partial: true };
+    // The retry delivery never landed, so nothing on screen belongs to a job.
+    mockTranscription.resultJobId = null;
+    renderSessionView();
+
+    expect(await screen.findByText(/the retried whole thing/)).toBeInTheDocument();
   });
 
   // /recent returns at most 5 rows. A user who has been cancelling recordings
@@ -502,6 +555,157 @@ describe('SessionView - recovery banner refresh', () => {
     await waitFor(() => expect(mockTranscription.loadResult).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/from three days ago/)).toBeInTheDocument();
     expect(mockFetchRecentUndelivered).toHaveBeenCalledTimes(2);
+  });
+
+  // The banner is the safety net the whole fix leans on, and it was hand
+  // mapping four fewer fields than the hook does. A salvaged PARTIAL transcript
+  // arrived here looking complete: no amber banner, no Retry, no speaker
+  // labels, no reason. It also has to say which job it just delivered, or the
+  // filter above cannot tell that this row is now on screen.
+  it('View delivers the whole payload and names the job it belongs to', async () => {
+    mockFetchRecentUndelivered.mockResolvedValueOnce({ json: async () => SALVAGED });
+    mockFetchTranscriptionResult.mockResolvedValue({
+      status: 200,
+      json: async () => ({
+        result: {
+          text: 'the half that made it',
+          words: [],
+          partial: true,
+          partial_reason: 'Client disconnected mid-recording',
+          num_speakers: 3,
+          diarization: {
+            requested: true,
+            performed: false,
+            reason: 'model_missing',
+            remedy: 'Install the diarization model',
+          },
+        },
+      }),
+    });
+    renderSessionView();
+    expect(await screen.findByText(/the half that made it/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('View'));
+
+    await waitFor(() => expect(mockTranscription.loadResult).toHaveBeenCalledTimes(1));
+    expect(mockTranscription.loadResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'the half that made it',
+        partial: true,
+        partialReason: 'Client disconnected mid-recording',
+        numSpeakers: 3,
+        diarization: expect.objectContaining({ requested: true, performed: false }),
+      }),
+      'salvaged-job',
+    );
+  });
+});
+
+// Save Audio - the source recording is the one thing that cannot be recreated,
+// and in the recovery row it has to come BEFORE View, because View delivers the
+// transcript and delivering a session job unlinks its WAV.
+describe('SessionView - Save Audio in the recovery row', () => {
+  let previousElectronAPI: typeof window.electronAPI;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTranscription.status = 'idle';
+    mockTranscription.result = null;
+    mockTranscription.error = null;
+    mockTranscription.jobId = null;
+    mockTranscription.resultJobId = null;
+    mockTranscription.busyInfo = null;
+    mockGetConfig.mockResolvedValue(undefined);
+    mockFetchRecentUndelivered.mockResolvedValue({ json: async () => SALVAGED });
+    mockGetStatus.mockResolvedValue({
+      models: { job_tracker: { is_busy: false, salvage: null } },
+    });
+    useSalvageStore.setState({ checkNonce: 0, dropRequestedJobId: null, lastCompletedAt: null });
+    mockSaveFile.mockResolvedValue('/home/user/keep.wav');
+    mockDownloadToPath.mockResolvedValue({ ok: true, bytes: 1024 });
+    previousElectronAPI = window.electronAPI;
+    window.electronAPI = {
+      fileIO: { saveFile: mockSaveFile, downloadToPath: mockDownloadToPath },
+    } as unknown as typeof window.electronAPI;
+  });
+
+  // Restore rather than leave the stub behind: describes that run after this
+  // one share the same jsdom window.
+  afterEach(() => {
+    window.electronAPI = previousElectronAPI;
+  });
+
+  it('renders before View, so the audio can be kept before it is released', async () => {
+    renderSessionView();
+    const button = await screen.findByTestId('recovery-save-audio');
+    const view = screen.getByText('View');
+
+    // Node.DOCUMENT_POSITION_FOLLOWING === 4
+    expect(button.compareDocumentPosition(view) & 4).toBeTruthy();
+  });
+
+  it('downloads the WAV for that job to the chosen path', async () => {
+    renderSessionView();
+    fireEvent.click(await screen.findByTestId('recovery-save-audio'));
+
+    await waitFor(() => expect(mockDownloadToPath).toHaveBeenCalledTimes(1));
+    expect(mockDownloadToPath).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'http://localhost:7239/api/transcribe/audio/salvaged-job',
+        filePath: '/home/user/keep.wav',
+      }),
+    );
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalled());
+    expect(mockToast.success.mock.calls[0][1]).toMatchObject({
+      description: '/home/user/keep.wav',
+    });
+  });
+
+  it('says nothing when the save dialog is cancelled', async () => {
+    mockSaveFile.mockResolvedValue(null);
+    renderSessionView();
+    fireEvent.click(await screen.findByTestId('recovery-save-audio'));
+
+    await waitFor(() => expect(mockSaveFile).toHaveBeenCalledTimes(1));
+    expect(mockDownloadToPath).not.toHaveBeenCalled();
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  // The 410 body distinguishes never-preserved from lost-on-restart from
+  // already-deleted, and that distinction is the entire answer for the user.
+  it('surfaces the server own reason when the audio is gone', async () => {
+    mockDownloadToPath.mockResolvedValue({
+      ok: false,
+      error: 'HTTP 410',
+      status: 410,
+      body: JSON.stringify({ detail: 'Audio file has been deleted - cannot download' }),
+    });
+    renderSessionView();
+    fireEvent.click(await screen.findByTestId('recovery-save-audio'));
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled());
+    expect(mockToast.error.mock.calls[0][1]).toMatchObject({
+      description: 'Audio file has been deleted - cannot download',
+    });
+  });
+
+  it('disables itself while a save is in flight', async () => {
+    let settle: (v: { ok: true }) => void = () => {};
+    mockDownloadToPath.mockReturnValueOnce(
+      new Promise<{ ok: true }>((resolve) => {
+        settle = resolve;
+      }),
+    );
+    renderSessionView();
+    const button = await screen.findByTestId('recovery-save-audio');
+    fireEvent.click(button);
+
+    await waitFor(() => expect(button).toBeDisabled());
+    await act(async () => {
+      settle({ ok: true });
+    });
+    await waitFor(() => expect(button).not.toBeDisabled());
   });
 });
 

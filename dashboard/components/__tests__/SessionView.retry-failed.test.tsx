@@ -13,8 +13,8 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // ── Hoisted mock state ────────────────────────────────────────────────────
@@ -33,6 +33,7 @@ const mockTranscription = {
   toggleMute: vi.fn(),
   setGain: vi.fn(),
   jobId: null as string | null,
+  resultJobId: null as string | null,
   loadResult: vi.fn(),
   previewText: null,
   previewLanguage: undefined,
@@ -131,25 +132,35 @@ vi.mock('../../src/stores/importQueueStore', () => ({
 // vi.mock factories are hoisted above the declarations in this file, and the
 // api/client factory dereferences APIError eagerly — so the class has to be
 // created inside vi.hoisted or it is still in the temporal dead zone.
-const { MockAPIError, mockRetryTranscription, mockFetchTranscriptionResult, mockToast } =
-  vi.hoisted(() => {
-    class HoistedAPIError extends Error {
-      constructor(
-        public readonly status: number,
-        public readonly body: string,
-        public readonly path: string,
-      ) {
-        super(`API ${status} on ${path}`);
-        this.name = 'APIError';
-      }
+const {
+  MockAPIError,
+  mockRetryTranscription,
+  mockFetchTranscriptionResult,
+  mockFetchRecentUndelivered,
+  mockSaveFile,
+  mockDownloadToPath,
+  mockToast,
+} = vi.hoisted(() => {
+  class HoistedAPIError extends Error {
+    constructor(
+      public readonly status: number,
+      public readonly body: string,
+      public readonly path: string,
+    ) {
+      super(`API ${status} on ${path}`);
+      this.name = 'APIError';
     }
-    return {
-      MockAPIError: HoistedAPIError,
-      mockRetryTranscription: vi.fn(),
-      mockFetchTranscriptionResult: vi.fn(),
-      mockToast: { success: vi.fn(), error: vi.fn() },
-    };
-  });
+  }
+  return {
+    MockAPIError: HoistedAPIError,
+    mockRetryTranscription: vi.fn(),
+    mockFetchTranscriptionResult: vi.fn(),
+    mockFetchRecentUndelivered: vi.fn(),
+    mockSaveFile: vi.fn(),
+    mockDownloadToPath: vi.fn(),
+    mockToast: { success: vi.fn(), error: vi.fn() },
+  };
+});
 
 vi.mock('../../src/api/client', () => ({
   APIError: MockAPIError,
@@ -164,7 +175,8 @@ vi.mock('../../src/api/client', () => ({
     unloadModels: vi.fn().mockResolvedValue(undefined),
     unloadLLMModel: vi.fn().mockResolvedValue(undefined),
     loadModelsStream: vi.fn().mockReturnValue(vi.fn()),
-    fetchRecentUndelivered: vi.fn().mockResolvedValue({ json: async () => [] }),
+    fetchRecentUndelivered: (...a: unknown[]) => mockFetchRecentUndelivered(...a),
+    getJobAudioUrl: (id: string) => `http://localhost:7239/api/transcribe/audio/${id}`,
     fetchTranscriptionResult: (...a: unknown[]) => mockFetchTranscriptionResult(...a),
     dismissTranscriptionResult: vi.fn().mockResolvedValue({ status: 200 }),
     retryTranscription: (...a: unknown[]) => mockRetryTranscription(...a),
@@ -272,9 +284,11 @@ describe('SessionView - retry a failed transcription', () => {
     mockTranscription.result = null;
     mockTranscription.error = OOM_ERROR;
     mockTranscription.jobId = JOB_ID;
+    mockTranscription.resultJobId = null;
     mockGetConfig.mockResolvedValue(undefined);
     mockRetryTranscription.mockResolvedValue({ job_id: JOB_ID, status: 'processing' });
     mockFetchTranscriptionResult.mockResolvedValue({ status: 202, json: async () => ({}) });
+    mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
   });
 
   it('shows the error message with a Retry button when a job id is known', async () => {
@@ -314,6 +328,7 @@ describe('SessionView - retry a failed transcription', () => {
     await waitFor(() =>
       expect(mockTranscription.loadResult).toHaveBeenCalledWith(
         expect.objectContaining({ text: 'recovered transcript', language: 'el', duration: 329.6 }),
+        JOB_ID,
       ),
     );
   });
@@ -361,5 +376,256 @@ describe('SessionView - retry a failed transcription', () => {
         expect.objectContaining({ description: expect.stringContaining('deleted') }),
       ),
     );
+  });
+
+  // The toast from the incident. The first retry had already succeeded and its
+  // transcript was sitting in the database; every later press was refused with
+  // "Only failed or partial jobs can be retried (current status: completed)"
+  // and the user was shown that refusal instead of their transcript.
+  it('turns a completed-job 409 into a delivery instead of a refusal', async () => {
+    mockRetryTranscription.mockRejectedValue(
+      new MockAPIError(
+        409,
+        JSON.stringify({
+          detail: 'Only failed or partial jobs can be retried (current status: completed)',
+        }),
+        '/api/transcribe/retry/x',
+      ),
+    );
+    mockFetchTranscriptionResult.mockResolvedValue({
+      status: 200,
+      json: async () => ({ result: { text: 'the transcript nobody saw', words: [] } }),
+    });
+    renderSessionView();
+
+    await waitFor(() => expect(findErrorRetryButton()).toBeDefined());
+    fireEvent.click(findErrorRetryButton()!);
+
+    await waitFor(() =>
+      expect(mockTranscription.loadResult).toHaveBeenCalledWith(
+        expect.objectContaining({ text: 'the transcript nobody saw' }),
+        JOB_ID,
+      ),
+    );
+    expect(mockToast.error).not.toHaveBeenCalled();
+    await waitFor(() => expect(findErrorRetryButton()).not.toBeDisabled());
+  });
+
+  // The same 409 status also means "model busy", which is a genuine refusal.
+  // The probe answers 202 there, so it must fall through to the toast. This is
+  // why the branch is chosen on the status code and never on the refusal text.
+  it('still refuses when the 409 is a busy model rather than a finished job', async () => {
+    mockRetryTranscription.mockRejectedValue(
+      new MockAPIError(
+        409,
+        JSON.stringify({
+          detail: 'Model is currently busy. Try again when the active session ends.',
+        }),
+        '/api/transcribe/retry/x',
+      ),
+    );
+    mockFetchTranscriptionResult.mockResolvedValue({ status: 202, json: async () => ({}) });
+    renderSessionView();
+
+    await waitFor(() => expect(findErrorRetryButton()).toBeDefined());
+    fireEvent.click(findErrorRetryButton()!);
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled());
+    expect(mockTranscription.loadResult).not.toHaveBeenCalled();
+  });
+
+  // A retried job that was diarized used to come back with its speaker labels
+  // stripped, because this delivery site hand mapped fewer fields than the hook.
+  it('delivers the speaker fields a diarized job carries', async () => {
+    mockFetchTranscriptionResult.mockResolvedValue({
+      status: 200,
+      json: async () => ({
+        result: {
+          text: 'recovered transcript',
+          words: [],
+          num_speakers: 2,
+          diarization: { requested: true, performed: true, reason: null, remedy: null },
+          partial: true,
+          partial_reason: 'sidecar died',
+        },
+      }),
+    });
+    renderSessionView();
+
+    await waitFor(() => expect(findErrorRetryButton()).toBeDefined());
+    fireEvent.click(findErrorRetryButton()!);
+
+    await waitFor(() =>
+      expect(mockTranscription.loadResult).toHaveBeenCalledWith(
+        expect.objectContaining({
+          numSpeakers: 2,
+          diarization: expect.objectContaining({ performed: true }),
+          partial: true,
+          partialReason: 'sidecar died',
+        }),
+        JOB_ID,
+      ),
+    );
+  });
+
+  // A throw while DELIVERING used to sit inside the same try as the fetch, so
+  // it read as "not ready yet": the poll span on forever and the button stayed
+  // stuck on "Retrying...".
+  it('recovers when delivering the transcript itself throws', async () => {
+    mockFetchTranscriptionResult.mockResolvedValue({
+      status: 200,
+      json: async () => ({ result: { text: 'recovered transcript', words: [] } }),
+    });
+    mockTranscription.loadResult.mockImplementationOnce(() => {
+      throw new Error('render blew up');
+    });
+    renderSessionView();
+    await waitFor(() => expect(findErrorRetryButton()).toBeDefined());
+    mockFetchRecentUndelivered.mockClear();
+
+    fireEvent.click(findErrorRetryButton()!);
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled());
+    // The button is usable again and the banner has been re-checked, so the
+    // transcript is still reachable from the recovery notice.
+    await waitFor(() => expect(findErrorRetryButton()).not.toBeDisabled());
+    expect(mockFetchRecentUndelivered).toHaveBeenCalled();
+  });
+
+  it('ignores a second press while a retry is already in flight', async () => {
+    renderSessionView();
+    await waitFor(() => expect(findErrorRetryButton()).toBeDefined());
+    const button = findErrorRetryButton()!;
+    fireEvent.click(button);
+    await waitFor(() => expect(mockRetryTranscription).toHaveBeenCalledTimes(1));
+    fireEvent.click(button);
+
+    expect(mockRetryTranscription).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SessionView - retry poll lifetime', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTranscription.status = 'error';
+    mockTranscription.result = null;
+    mockTranscription.error = OOM_ERROR;
+    mockTranscription.jobId = JOB_ID;
+    mockTranscription.resultJobId = null;
+    mockGetConfig.mockResolvedValue(undefined);
+    mockRetryTranscription.mockResolvedValue({ job_id: JOB_ID, status: 'processing' });
+    mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
+  });
+
+  // Every give-up now ends by refreshing the recovery banner and saying so.
+  // Before, it ended in a toast that told the user to reopen the tab, which is
+  // exactly the manoeuvre that had already failed them.
+  it('refreshes the recovery banner and frees the button when the poll gives up', async () => {
+    mockFetchTranscriptionResult.mockResolvedValue({ status: 404, json: async () => ({}) });
+    renderSessionView();
+    await waitFor(() => expect(findErrorRetryButton()).toBeDefined());
+    mockFetchRecentUndelivered.mockClear();
+
+    fireEvent.click(findErrorRetryButton()!);
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled());
+    expect(mockFetchRecentUndelivered).toHaveBeenCalled();
+    expect(mockTranscription.loadResult).not.toHaveBeenCalled();
+    await waitFor(() => expect(findErrorRetryButton()).not.toBeDisabled());
+  });
+
+  // The poll used to survive the component. An in-flight request that answers
+  // after unmount must be dropped, not delivered into a dead tree.
+  it('drops a response that lands after the view unmounts', async () => {
+    let answer: (v: { status: number; json: () => Promise<unknown> }) => void = () => {};
+    mockFetchTranscriptionResult.mockReturnValue(
+      new Promise<{ status: number; json: () => Promise<unknown> }>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const { unmount } = renderSessionView();
+    await waitFor(() => expect(findErrorRetryButton()).toBeDefined());
+    fireEvent.click(findErrorRetryButton()!);
+    await waitFor(() => expect(mockFetchTranscriptionResult).toHaveBeenCalledTimes(1));
+
+    unmount();
+    await act(async () => {
+      answer({
+        status: 200,
+        json: async () => ({ result: { text: 'too late', words: [] } }),
+      });
+    });
+
+    expect(mockTranscription.loadResult).not.toHaveBeenCalled();
+  });
+});
+
+// Save Audio - the recording itself, kept before the transcript pipeline gets
+// another chance to fail. It sits beside Retry in both banners.
+describe('SessionView - Save Audio beside Retry', () => {
+  let previousElectronAPI: typeof window.electronAPI;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTranscription.status = 'error';
+    mockTranscription.result = null;
+    mockTranscription.error = OOM_ERROR;
+    mockTranscription.jobId = JOB_ID;
+    mockTranscription.resultJobId = null;
+    mockGetConfig.mockResolvedValue(undefined);
+    mockFetchRecentUndelivered.mockResolvedValue({ json: async () => [] });
+    mockSaveFile.mockResolvedValue('/home/user/keep.wav');
+    mockDownloadToPath.mockResolvedValue({ ok: true, bytes: 4096 });
+    previousElectronAPI = window.electronAPI;
+    window.electronAPI = {
+      fileIO: { saveFile: mockSaveFile, downloadToPath: mockDownloadToPath },
+    } as unknown as typeof window.electronAPI;
+  });
+
+  afterEach(() => {
+    window.electronAPI = previousElectronAPI;
+  });
+
+  it('offers Save Audio on the error banner and downloads that job WAV', async () => {
+    renderSessionView();
+    fireEvent.click(await screen.findByTestId('save-audio-error'));
+
+    await waitFor(() => expect(mockSaveFile).toHaveBeenCalledTimes(1));
+    expect(mockSaveFile.mock.calls[0][0]).toMatchObject({
+      filters: [{ name: 'WAV Audio', extensions: ['wav'] }],
+    });
+    await waitFor(() =>
+      expect(mockDownloadToPath).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: `http://localhost:7239/api/transcribe/audio/${JOB_ID}`,
+          filePath: '/home/user/keep.wav',
+        }),
+      ),
+    );
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalled());
+  });
+
+  it('offers Save Audio on the partial-transcript banner too', async () => {
+    mockTranscription.status = 'complete';
+    mockTranscription.error = null;
+    mockTranscription.result = {
+      text: 'only the first half',
+      words: [],
+      partial: true,
+      partialReason: 'sidecar died',
+    };
+    renderSessionView();
+
+    expect(await screen.findByTestId('save-audio-partial')).toBeInTheDocument();
+  });
+
+  it('sends the auth token as a header, never in the URL', async () => {
+    renderSessionView();
+    fireEvent.click(await screen.findByTestId('save-audio-error'));
+
+    await waitFor(() => expect(mockDownloadToPath).toHaveBeenCalledTimes(1));
+    const sent = mockDownloadToPath.mock.calls[0][0] as { url: string; headers: unknown };
+    expect(sent.url).not.toContain('token=');
+    expect(sent.headers).toEqual({});
   });
 });
