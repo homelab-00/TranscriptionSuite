@@ -20,7 +20,7 @@ classifiers = [
 tooling = [
     "ruff>=0.15.5",
     "pyright>=1.1.408",
-    "pre-commit>=4.5.1",
+    "prek>=0.5.2",
 ]
 
 # Security and license auditing tools

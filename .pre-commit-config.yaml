@@ -1,11 +1,15 @@
 ---
-# Pre-commit hook configuration for TranscriptionSuite.
+# Git hook configuration for TranscriptionSuite.
 #
-# Setup:   cd build && uv sync && cd .. && ./build/.venv/bin/pre-commit install
-# Ad-hoc:  ./build/.venv/bin/pre-commit run            (staged files only)
-#          ./build/.venv/bin/pre-commit run --all-files (entire repo)
+# Hooks are run by prek, a drop-in replacement for pre-commit written in Rust.
+# The file name and schema stay pre-commit compatible on purpose, so keep this
+# config free of prek-only extensions.
 #
-# Docs:    https://pre-commit.com
+# Setup:   cd build && uv sync && cd .. && ./build/.venv/bin/prek install
+# Ad-hoc:  ./build/.venv/bin/prek run            (staged files only)
+#          ./build/.venv/bin/prek run --all-files (entire repo)
+#
+# Docs:    https://prek.j178.dev
 
 # Generated design/spec artifacts — excluded globally from all hooks
 exclude: "^_bmad-output/"
