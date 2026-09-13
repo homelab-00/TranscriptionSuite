@@ -51,6 +51,8 @@ def _looks_like_whispercpp(name: str) -> bool:
 def detect_backend_type(model_name: str) -> str:
     """Return backend type based on the model name."""
     name = model_name.strip()
+    if name.lower() == "oruk/orukeet":
+        return "parakeet"
     if _PARAKEET_PATTERN.match(name):
         return "parakeet"
     if _CANARY_PATTERN.match(name):

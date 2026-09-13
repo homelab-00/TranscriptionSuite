@@ -12,6 +12,16 @@ from server.core.stt.backends.factory import (
 )
 
 
+def test_orukeet_uses_nemo_backend_without_matching_unrelated_repositories() -> None:
+    for model in ("oruk/orukeet", " ORUK/ORUKEET "):
+        assert detect_backend_type(model) == "parakeet"
+        assert is_parakeet_model(model)
+        assert is_nemo_model(model)
+        assert not is_mlx_model(model)
+    for model in ("other/orukeet", "oruk/orukeet-extra", "oruk/orukeet/../whisper"):
+        assert detect_backend_type(model) == "whisper"
+
+
 def test_detects_vibevoice_asr_backend() -> None:
     assert detect_backend_type("microsoft/VibeVoice-ASR") == "vibevoice_asr"
     assert is_vibevoice_asr_model("microsoft/VibeVoice-ASR")
