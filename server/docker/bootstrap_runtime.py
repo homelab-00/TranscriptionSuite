@@ -164,7 +164,14 @@ def is_nemo_model_name(model_name: str | None) -> bool:
     name = normalize_selected_model_name(model_name).lower()
     if not name:
         return False
-    return name.startswith("nvidia/parakeet") or name.startswith("nvidia/canary")
+    # Mirrors detect_backend_type() in server/backend/core/stt/backends/factory.py.
+    # oruk/orukeet is a Parakeet v3 fine-tune that runs on the NeMo backend.
+    return (
+        name.startswith("nvidia/parakeet")
+        or name.startswith("nvidia/nemotron-speech")
+        or name.startswith("nvidia/canary")
+        or name == "oruk/orukeet"
+    )
 
 
 def is_sensevoice_model_name(model_name: str | None) -> bool:

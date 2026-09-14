@@ -3,7 +3,9 @@
  * Mirrors server/backend/core/stt/capabilities.py logic.
  */
 
-const PARAKEET_PATTERN = /^nvidia\/(parakeet|nemotron-speech)/i;
+// oruk/orukeet is a Parakeet v3 fine-tune served by the NeMo Parakeet backend. It is
+// matched as an exact repo id, mirroring detect_backend_type() in backends/factory.py.
+const PARAKEET_PATTERN = /^(?:nvidia\/(?:parakeet|nemotron-speech)|oruk\/orukeet$)/i;
 const CANARY_PATTERN = /^nvidia\/canary/i;
 const VIBEVOICE_ASR_PATTERN = /^[^/]+\/vibevoice-asr(?:-[^/]+)?$/i;
 const WHISPERCPP_PATTERN = /(?:(?:^|\/)ggml-.*\.bin$|\.gguf$)/i;
@@ -90,7 +92,7 @@ export const SENSEVOICE_LANGUAGES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Returns true if the model is an NVIDIA Parakeet / NeMo ASR-only model.
+ * Returns true if the model is a Parakeet / NeMo ASR-only model (NVIDIA or Orukeet).
  */
 export function isParakeetModel(modelName: string | null | undefined): boolean {
   const name = (modelName ?? '').trim();
@@ -106,7 +108,7 @@ export function isCanaryModel(modelName: string | null | undefined): boolean {
 }
 
 /**
- * Returns true if the model is any NVIDIA NeMo model (Parakeet or Canary).
+ * Returns true if the model is any NeMo model (Parakeet, including Orukeet, or Canary).
  */
 export function isNemoModel(modelName: string | null | undefined): boolean {
   return isParakeetModel(modelName) || isCanaryModel(modelName);

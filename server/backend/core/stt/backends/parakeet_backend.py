@@ -244,7 +244,17 @@ class ParakeetBackend(STTBackend):
 
         import yaml
 
-        local_nemo_path = self._find_cached_nemo_file(model_name)
+        from server.core.stt.backends.orukeet_checkpoint import (
+            ORUKEET_REPO_ID,
+            resolve_orukeet_checkpoint,
+        )
+
+        is_orukeet = model_name.strip().lower() == ORUKEET_REPO_ID
+        local_nemo_path = (
+            resolve_orukeet_checkpoint()
+            if is_orukeet
+            else self._find_cached_nemo_file(model_name)
+        )
 
         config_override_path = None
 
@@ -309,6 +319,8 @@ class ParakeetBackend(STTBackend):
                     )
                     logger.info("Loaded from local cache using restore_from()")
                 except Exception as e:
+                    if is_orukeet:
+                        raise
                     logger.warning(f"restore_from() failed: {e}, falling back to from_pretrained()")
                     model = _load_with_optional_override(
                         model_cls.from_pretrained,

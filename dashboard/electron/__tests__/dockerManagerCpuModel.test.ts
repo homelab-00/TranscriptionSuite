@@ -53,12 +53,16 @@ describe('isNemoModelName', () => {
     expect(isNemoModelName('nvidia/canary-1b-v2')).toBe(true);
     expect(isNemoModelName('NVIDIA/Parakeet-TDT-1.1b')).toBe(true);
     expect(isNemoModelName('  nvidia/nemotron-speech-4b  ')).toBe(true);
+    expect(isNemoModelName('oruk/orukeet')).toBe(true);
+    expect(isNemoModelName(' ORUK/ORUKEET ')).toBe(true);
   });
 
   it('returns false for non-NeMo and empty inputs', () => {
     expect(isNemoModelName('Systran/faster-whisper-medium')).toBe(false);
     expect(isNemoModelName('ggml-large-v3.bin')).toBe(false);
     expect(isNemoModelName('mlx-community/whisper-large-v3-asr-fp16')).toBe(false);
+    expect(isNemoModelName('other/orukeet')).toBe(false);
+    expect(isNemoModelName('oruk/orukeet-extra')).toBe(false);
     expect(isNemoModelName('')).toBe(false);
     expect(isNemoModelName(undefined)).toBe(false);
     expect(isNemoModelName(null)).toBe(false);
@@ -75,6 +79,20 @@ describe('applyCpuModelDefaults', () => {
     expect(result.mainTranscriberModel).toBe('Systran/faster-whisper-medium');
     expect(result.installNemo).toBe(false);
     expect(result.installWhisper).toBe(true);
+  });
+
+  it('substitutes the Orukeet NeMo fine-tune on the CPU profile', () => {
+    expect(
+      applyCpuModelDefaults('cpu', {
+        mainTranscriberModel: 'oruk/orukeet',
+        installNemo: true,
+        installWhisper: false,
+      }),
+    ).toEqual({
+      mainTranscriberModel: 'Systran/faster-whisper-medium',
+      installNemo: false,
+      installWhisper: true,
+    });
   });
 
   it('leaves a whisper main model unchanged on the CPU profile', () => {

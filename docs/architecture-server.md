@@ -95,7 +95,7 @@ Central hub for all ML model lifecycle management:
 |---------|-------|--------------|-------------|----------|
 | WhisperX | `WhisperXBackend` | `Systran/*` (default) | Yes | CUDA |
 | Faster-Whisper | `FasterWhisperBackend` | Systran/* (fallback) | Yes | CUDA/CPU |
-| Parakeet | `ParakeetBackend` | `nvidia/parakeet*` | No | CUDA |
+| Parakeet | `ParakeetBackend` | `nvidia/parakeet*`, `nvidia/nemotron-speech*`, `oruk/orukeet` (exact, pinned checkpoint) | No | CUDA |
 | Canary | `CanaryBackend` | `nvidia/canary*` | Yes (24 EU langs) | CUDA |
 | VibeVoice-ASR | `VibeVoiceASRBackend` | `*/VibeVoice-ASR*` | No | CUDA |
 | whisper.cpp | `WhisperCppBackend` | `*.gguf`/`ggml-*.bin` | Yes | Vulkan sidecar |

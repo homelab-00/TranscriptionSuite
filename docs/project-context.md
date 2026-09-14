@@ -126,7 +126,9 @@ durability:
 #### STT Backend Architecture
 - **Factory pattern**: `create_backend(model_name)` in `factory.py` routes to correct backend class
 - **Detection order** (first match wins):
+  - `oruk/orukeet` (exact repo id, pinned SHA-256-verified checkpoint in `orukeet_checkpoint.py`) → ParakeetBackend (NeMo, Docker)
   - `nvidia/parakeet*` or `nvidia/nemotron-speech*` → ParakeetBackend (NeMo, Docker)
+  - Name-based family detection is duplicated outside `factory.py` (`capabilities.py`, `bootstrap_runtime.py`, and in the dashboard `modelCapabilities.ts`, `transcriptionBackend.ts`, `dockerManager.ts`); a new routing rule must be mirrored in all of them
   - `nvidia/canary*` → CanaryBackend (NeMo, Docker)
   - `mlx-community/vibevoice-asr*` → MLXVibeVoiceBackend (Apple Silicon) — checked before generic VibeVoice
   - `[user]/vibevoice-asr*` → VibeVoiceASRBackend
