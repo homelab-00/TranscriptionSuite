@@ -10,15 +10,23 @@ export const MODELSCOPE_TO_HF_REPO: Readonly<Record<string, string>> = Object.fr
   'iic/SenseVoiceSmall': 'FunAudioLLM/SenseVoiceSmall',
 });
 
+/** Mirrors ORUKEET_REPO_ID in server/backend/core/stt/backends/orukeet_checkpoint.py. */
+const ORUKEET_REPO_ID = 'oruk/orukeet';
+
 /**
  * Resolve a configured model id to the HuggingFace repo id it is cached under.
  *
  * HuggingFace repo ids are case-sensitive (the cache dir mirrors the exact repo
  * id), so this uses an exact-match lookup — it deliberately does NOT lowercase
  * the id. Unknown ids pass through unchanged.
+ *
+ * One exception: the server matches oruk/orukeet case-insensitively but always
+ * downloads it under the lowercase repo id (see orukeet_checkpoint.py), so every
+ * spelling resolves to that single cache dir.
  */
 export function resolveHfRepoId(modelId: string): string {
   const trimmed = modelId.trim();
+  if (trimmed.toLowerCase() === ORUKEET_REPO_ID) return ORUKEET_REPO_ID;
   return MODELSCOPE_TO_HF_REPO[trimmed] ?? trimmed;
 }
 
