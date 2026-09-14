@@ -35,6 +35,16 @@ describe('isParakeetModel', () => {
     expect(isParakeetModel('NVIDIA/Parakeet-TDT-0.6b-v3')).toBe(true);
   });
 
+  it('matches the Orukeet Parakeet fine-tune by exact repo id', () => {
+    expect(isParakeetModel('oruk/orukeet')).toBe(true);
+    expect(isParakeetModel(' ORUK/ORUKEET ')).toBe(true);
+  });
+
+  it('rejects repositories that only resemble Orukeet', () => {
+    expect(isParakeetModel('other/orukeet')).toBe(false);
+    expect(isParakeetModel('oruk/orukeet-extra')).toBe(false);
+  });
+
   it('rejects canary', () => {
     expect(isParakeetModel('nvidia/canary-1b-v2')).toBe(false);
   });
@@ -80,6 +90,10 @@ describe('isCanaryModel', () => {
 describe('isNemoModel', () => {
   it('returns true for parakeet', () => {
     expect(isNemoModel('nvidia/parakeet-tdt-0.6b-v3')).toBe(true);
+  });
+
+  it('returns true for Orukeet', () => {
+    expect(isNemoModel('oruk/orukeet')).toBe(true);
   });
 
   it('returns true for canary', () => {
@@ -241,6 +255,14 @@ describe('filterLanguagesForModel', () => {
     expect(result).not.toContain('Chinese');
   });
 
+  it('filters to NeMo languages + Auto Detect for Orukeet', () => {
+    expect(filterLanguagesForModel(allLanguages, 'oruk/orukeet')).toEqual([
+      'Auto Detect',
+      'English',
+      'French',
+    ]);
+  });
+
   it('filters to NeMo languages and drops Auto Detect for canary (gh-81)', () => {
     const result = filterLanguagesForModel(allLanguages, 'nvidia/canary-1b-v2');
 
@@ -294,6 +316,10 @@ describe('filterLanguagesForModel', () => {
 describe('supportsTranslation', () => {
   it('returns false for parakeet (ASR-only)', () => {
     expect(supportsTranslation('nvidia/parakeet-tdt-0.6b-v3')).toBe(false);
+  });
+
+  it('returns false for Orukeet (Parakeet fine-tune, ASR-only)', () => {
+    expect(supportsTranslation('oruk/orukeet')).toBe(false);
   });
 
   it('returns true for canary', () => {
@@ -554,6 +580,10 @@ describe('supportsAutoDetect', () => {
 describe('truncatesGreekFinalSigma', () => {
   it('returns true for NVIDIA Parakeet models (silent final-sigma drop)', () => {
     expect(truncatesGreekFinalSigma('nvidia/parakeet-tdt-0.6b-v3')).toBe(true);
+  });
+
+  it('returns true for Orukeet (reuses the Parakeet v3 tokenizer)', () => {
+    expect(truncatesGreekFinalSigma('oruk/orukeet')).toBe(true);
   });
 
   it('returns true for nemotron-speech models (same NeMo tokenizer defect)', () => {

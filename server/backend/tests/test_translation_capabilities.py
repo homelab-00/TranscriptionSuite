@@ -20,10 +20,18 @@ def test_supports_translation_for_multilingual_model() -> None:
         "deepdml/faster-whisper-large-v3-turbo-ct2",
         "microsoft/VibeVoice-ASR",
         "scerz/VibeVoice-ASR-4bit",
+        "nvidia/parakeet-tdt-0.6b-v3",
+        "oruk/orukeet",
+        " ORUK/ORUKEET ",
     ],
 )
 def test_rejects_known_unsupported_models(model_name: str) -> None:
     assert not supports_english_translation(model_name)
+
+
+@pytest.mark.parametrize("model_name", ["other/orukeet", "oruk/orukeet-extra"])
+def test_orukeet_lookalikes_are_not_treated_as_parakeet(model_name: str) -> None:
+    assert supports_english_translation(model_name)
 
 
 def test_validate_translation_rejects_non_english_target() -> None:

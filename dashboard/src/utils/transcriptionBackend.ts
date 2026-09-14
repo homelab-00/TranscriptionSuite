@@ -25,7 +25,7 @@ export function detectTranscriptionBackendType(
 ): TranscriptionBackendType {
   const model = normalizeModelName(modelName);
 
-  if (/^nvidia\/(parakeet|nemotron-speech)/.test(model)) return 'parakeet';
+  if (/^(?:nvidia\/(?:parakeet|nemotron-speech)|oruk\/orukeet$)/.test(model)) return 'parakeet';
   if (/^nvidia\/canary/.test(model)) return 'canary';
   // MLX VibeVoice must be checked before the generic VibeVoice pattern.
   if (MLX_VIBEVOICE_PATTERN.test(model)) return 'mlx_vibevoice';

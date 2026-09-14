@@ -2265,8 +2265,8 @@ async function getContainerStatus(): Promise<ContainerStatus> {
   }
 }
 
-// GH-125: NeMo models (Parakeet/Canary/Nemotron-speech) need a GPU to be
-// practical and pull in the heavy `nemo` extra that broke first-run CPU installs.
+// GH-125: NeMo models (Parakeet/Canary/Nemotron-speech, plus the Orukeet Parakeet
+// fine-tune) need a GPU to be practical and pull in the heavy `nemo` extra that broke first-run CPU installs.
 // Detection mirrors server/backend/core/stt/backends/factory.py and
 // src/services/modelCapabilities.ts — the Electron main process cannot import the
 // renderer-side service, so keep these in sync.
@@ -2278,7 +2278,8 @@ export function isNemoModelName(model: string | undefined | null): boolean {
   return (
     normalized.startsWith('nvidia/parakeet') ||
     normalized.startsWith('nvidia/canary') ||
-    normalized.startsWith('nvidia/nemotron-speech')
+    normalized.startsWith('nvidia/nemotron-speech') ||
+    normalized === 'oruk/orukeet'
   );
 }
 
@@ -4580,7 +4581,9 @@ export async function listRemoteTags(): Promise<RemoteTagsResult> {
       // Same treatment for vulkan-wsl2 — a new package starts private on GHCR.
       if (
         tokenResp.status === 401 &&
-        (useLegacyGpu || runtimeProfile === 'vulkan-wsl2' || resolveImageRepo(false, runtimeProfile) === DGX_SPARK_IMAGE_REPO)
+        (useLegacyGpu ||
+          runtimeProfile === 'vulkan-wsl2' ||
+          resolveImageRepo(false, runtimeProfile) === DGX_SPARK_IMAGE_REPO)
       ) {
         return { status: 'not-published', tags: [] };
       }

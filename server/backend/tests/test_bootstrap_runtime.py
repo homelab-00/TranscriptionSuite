@@ -548,6 +548,21 @@ def test_whisper_model_family_detection_helpers() -> None:
     assert module.is_whisper_model_name("microsoft/VibeVoice-ASR") is False
     assert module.is_whisper_model_name("__none__") is False
     assert module.is_whisper_model_name("") is False
+    assert module.is_whisper_model_name("oruk/orukeet") is False
+
+
+def test_nemo_model_family_detection_matches_backend_factory() -> None:
+    module = _load_bootstrap_module()
+
+    assert module.is_nemo_model_name("nvidia/parakeet-tdt-0.6b-v3") is True
+    assert module.is_nemo_model_name("nvidia/nemotron-speech-streaming-en-0.6b") is True
+    assert module.is_nemo_model_name("nvidia/canary-1b-v2") is True
+    assert module.is_nemo_model_name("oruk/orukeet") is True
+    assert module.is_nemo_model_name(" ORUK/ORUKEET ") is True
+    assert module.is_nemo_model_name("other/orukeet") is False
+    assert module.is_nemo_model_name("oruk/orukeet-extra") is False
+    assert module.is_nemo_model_name("Systran/faster-whisper-large-v3") is False
+    assert module.is_nemo_model_name("__none__") is False
 
 
 def test_check_whisper_import_returns_ready_payload(

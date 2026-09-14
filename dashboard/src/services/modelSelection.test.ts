@@ -91,6 +91,10 @@ describe('modelFamilyFromName', () => {
     expect(modelFamilyFromName('nvidia/canary-1b-v2')).toBe('nemo');
   });
 
+  it('returns nemo for the Orukeet Parakeet fine-tune', () => {
+    expect(modelFamilyFromName('oruk/orukeet')).toBe('nemo');
+  });
+
   it('returns vibevoice for VibeVoice-ASR', () => {
     expect(modelFamilyFromName('microsoft/VibeVoice-ASR')).toBe('vibevoice');
   });
@@ -291,6 +295,19 @@ describe('computeMissingModelFamilies', () => {
   it('returns missing family when compose flag not set', () => {
     const result = computeMissingModelFamilies({
       mainModel: 'nvidia/parakeet-tdt-0.6b-v3',
+      composeInstallWhisperEnabled: false,
+      composeInstallNemoEnabled: false,
+      composeInstallVibeVoiceAsrEnabled: false,
+      composeInstallFunasrEnabled: false,
+      bootstrapStatus: null,
+    });
+
+    expect(result).toEqual(['nemo']);
+  });
+
+  it('asks for NeMo, not faster-whisper, when Orukeet is selected', () => {
+    const result = computeMissingModelFamilies({
+      mainModel: 'oruk/orukeet',
       composeInstallWhisperEnabled: false,
       composeInstallNemoEnabled: false,
       composeInstallVibeVoiceAsrEnabled: false,

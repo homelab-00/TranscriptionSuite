@@ -58,7 +58,7 @@ main_transcriber:
     # Uses a pinned checkpoint with the same NeMo backend; requires INSTALL_NEMO=true.
     # VibeVoice-ASR examples: "microsoft/VibeVoice-ASR", "scerz/VibeVoice-ASR-4bit" (experimental, file/notebook only)
     # SenseVoice example: "iic/SenseVoiceSmall" (zh/en/yue/ja/ko only, fast NAR; requires INSTALL_FUNASR=true)
-    # Backend is auto-detected from the model name (nvidia/* → NeMo, */VibeVoice-ASR* → VibeVoice-ASR, */SenseVoice* → SenseVoice, else → Whisper).
+    # Backend is auto-detected from the model name (nvidia/* and oruk/orukeet → NeMo, */VibeVoice-ASR* → VibeVoice-ASR, */SenseVoice* → SenseVoice, else → Whisper).
     model: "nvidia/parakeet-tdt-0.6b-v3"
 
     # Compute type for the model. "default" is recommended.

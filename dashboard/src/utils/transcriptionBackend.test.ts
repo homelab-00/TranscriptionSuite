@@ -16,6 +16,13 @@ describe('detectTranscriptionBackendType', () => {
     expect(detectTranscriptionBackendType('nvidia/nemotron-speech-large')).toBe('parakeet');
   });
 
+  it('returns parakeet for oruk/orukeet but not for lookalike repositories', () => {
+    expect(detectTranscriptionBackendType('oruk/orukeet')).toBe('parakeet');
+    expect(detectTranscriptionBackendType(' ORUK/ORUKEET ')).toBe('parakeet');
+    expect(detectTranscriptionBackendType('other/orukeet')).toBe('whisper');
+    expect(detectTranscriptionBackendType('oruk/orukeet-extra')).toBe('whisper');
+  });
+
   it('returns canary for nvidia/canary models', () => {
     expect(detectTranscriptionBackendType('nvidia/canary-1b-v2')).toBe('canary');
   });

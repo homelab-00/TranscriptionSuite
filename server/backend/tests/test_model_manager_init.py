@@ -347,6 +347,41 @@ class TestIsSameModel:
         assert mgr.is_same_model("nvidia/parakeet-ctc-1.1b", "parakeet-ctc-1.1b") is True
 
 
+# ── Background NeMo import ────────────────────────────────────────────────
+
+
+class TestBackgroundNemoImport:
+    @pytest.mark.parametrize(
+        ("model_name", "expected"),
+        [
+            ("nvidia/parakeet-tdt-0.6b-v3", True),
+            ("nvidia/nemotron-speech-streaming-en-0.6b", True),
+            ("nvidia/canary-1b-v2", True),
+            ("oruk/orukeet", True),
+            (" ORUK/ORUKEET ", True),
+            ("oruk/orukeet-extra", False),
+            ("mlx-community/parakeet-tdt-0.6b-v3", False),
+            ("Systran/faster-whisper-large-v3", False),
+        ],
+    )
+    def test_starts_only_for_models_routed_to_nemo(
+        self, tmp_path: Path, model_name: str, expected: bool
+    ):
+        mgr = _build_manager(tmp_path)
+        mgr._nemo_feature_available = True
+
+        with (
+            patch(
+                "server.core.model_manager.resolve_main_transcriber_model",
+                return_value=model_name,
+            ),
+            patch("server.core.model_manager.threading.Thread") as thread_cls,
+        ):
+            mgr._start_background_nemo_import()
+
+        assert thread_cls.called is expected
+
+
 # ── GPU status ────────────────────────────────────────────────────────────
 
 

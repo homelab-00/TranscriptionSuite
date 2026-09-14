@@ -559,11 +559,12 @@ class ModelManager:
         if not self._nemo_feature_available:
             return
 
-        # Check if main transcriber is a NeMo model
-        model_name = self.main_model_name.lower()
-        is_nemo_model = "parakeet" in model_name or "canary" in model_name
+        # Check if main transcriber is a NeMo model. Use the backend factory so
+        # names routed to NeMo without "parakeet"/"canary" in them (oruk/orukeet,
+        # nvidia/nemotron-speech) are covered too.
+        from server.core.stt.backends.factory import is_nemo_model
 
-        if not is_nemo_model:
+        if not is_nemo_model(self.main_model_name):
             return
 
         def _import_nemo_async():

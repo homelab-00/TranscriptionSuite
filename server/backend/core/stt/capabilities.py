@@ -6,7 +6,11 @@ from __future__ import annotations
 
 import re
 
-_PARAKEET_PATTERN = re.compile(r"^nvidia/(parakeet|nemotron-speech)", re.IGNORECASE)
+# oruk/orukeet is a Parakeet v3 fine-tune served by ParakeetBackend. It is matched as
+# an exact repo id, mirroring detect_backend_type() in backends/factory.py.
+_PARAKEET_PATTERN = re.compile(
+    r"^(?:nvidia/(?:parakeet|nemotron-speech)|oruk/orukeet$)", re.IGNORECASE
+)
 _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
 _VIBEVOICE_ASR_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
 _MLX_PARAKEET_PATTERN = re.compile(r"^mlx-community/parakeet", re.IGNORECASE)

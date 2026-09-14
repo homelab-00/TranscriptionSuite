@@ -76,7 +76,7 @@ def detect_backend_type(model_name: str) -> str:
 
 
 def is_parakeet_model(model_name: str) -> bool:
-    """Return True if *model_name* is an NVIDIA Parakeet / NeMo ASR-only model."""
+    """Return True if *model_name* is a Parakeet / NeMo ASR-only model (NVIDIA or Orukeet)."""
     return detect_backend_type(model_name) == "parakeet"
 
 
@@ -86,7 +86,7 @@ def is_canary_model(model_name: str) -> bool:
 
 
 def is_nemo_model(model_name: str) -> bool:
-    """Return True if *model_name* is any NVIDIA NeMo model (Parakeet or Canary)."""
+    """Return True if *model_name* is any NeMo model (Parakeet, including Orukeet, or Canary)."""
     return detect_backend_type(model_name) in ("parakeet", "canary")
 
 
