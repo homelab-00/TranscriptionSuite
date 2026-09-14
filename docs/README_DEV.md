@@ -579,14 +579,14 @@ nvm use   # activates Node 22.22.3 from .nvmrc
 npm install
 cd ..
 
-# Build tools (Python - for server linting/testing + pre-commit)
+# Build tools (Python - for server linting/testing + git hooks)
 cd build
 uv venv --python 3.13
 uv sync
 cd ..
 
-# Install pre-commit hooks (one-time, see §12.4)
-./build/.venv/bin/pre-commit install
+# Install the git hook shims (one-time, see §12.4)
+./build/.venv/bin/prek install
 ```
 
 **Linux - Docker group membership:** The app talks to Docker without `sudo`, so your user must be in the `docker` group. If you haven't done this already:
@@ -3194,7 +3194,9 @@ Keep one active CodeQL workflow in `.github/workflows/` to avoid duplicate runs 
 
 ### 12.4 Pre-Commit Hooks
 
-Pre-commit checks are managed by the [pre-commit](https://pre-commit.com) framework. Configuration lives in `.pre-commit-config.yaml` at the repo root - this is the **only** tracked file related to pre-commit.
+Pre-commit checks are managed by [prek](https://prek.j178.dev), a drop-in replacement for [pre-commit](https://pre-commit.com) written in Rust. It ships as a single binary with no Python runtime dependencies and runs independent hooks concurrently.
+
+Configuration lives in `.pre-commit-config.yaml` at the repo root - this is the **only** tracked file related to the hooks. prek reads the pre-commit schema unchanged; keep it that way (no `prek.toml`, no `repo: builtin` entries) so the config stays portable to upstream pre-commit.
 
 #### Hooks
 
@@ -3214,34 +3216,38 @@ Pre-commit checks are managed by the [pre-commit](https://pre-commit.com) framew
 | `prettier` | local | Auto-formats dashboard files (TypeScript, CSS, JSON, etc.) |
 | `ui-contract-check` | local | Validates UI contract schema + token drift + fixture tests (§9.4) |
 
-Formatters (`ruff-format`, `prettier`) modify files in place. If any staged file changes, `pre-commit` aborts the commit so you can re-stage and retry.
+Formatters (`ruff-format`, `prettier`) modify files in place. If any staged file changes, `prek` aborts the commit so you can re-stage and retry.
 
 #### Setup (one-time, per clone)
 
 ```bash
 cd build && uv sync && cd ..
-./build/.venv/bin/pre-commit install
+./build/.venv/bin/prek install
 ```
 
-This writes a small stub into `.git/hooks/pre-commit` (untracked) that delegates to the framework.
+This writes a small stub into `.git/hooks/pre-commit` (untracked) that delegates to prek. If the clone still has a stub from the old `pre-commit` framework, run `./build/.venv/bin/prek install --force` to overwrite it.
 
 #### Running ad-hoc
 
 ```bash
 # Run on staged files only (same as what runs on commit)
-./build/.venv/bin/pre-commit run
+./build/.venv/bin/prek run
 
 # Run on every file in the repo
-./build/.venv/bin/pre-commit run --all-files
+./build/.venv/bin/prek run --all-files
 
 # Run a single hook by id
-./build/.venv/bin/pre-commit run ruff-format --all-files
-./build/.venv/bin/pre-commit run ui-contract-check --all-files
+./build/.venv/bin/prek run ruff-format --all-files
+./build/.venv/bin/prek run ui-contract-check --all-files
+
+# List the configured hooks / bump the pinned `rev:` of each repo
+./build/.venv/bin/prek list
+./build/.venv/bin/prek update
 ```
 
 #### Extending
 
-Add new hooks directly in `.pre-commit-config.yaml`. Use a `repo:` entry for third-party hooks or `repo: local` for project-specific scripts. See the [pre-commit docs](https://pre-commit.com/#plugins) for details.
+Add new hooks directly in `.pre-commit-config.yaml`. Use a `repo:` entry for third-party hooks or `repo: local` for project-specific scripts. See the [prek docs](https://prek.j178.dev) for details, and the [pre-commit hook index](https://pre-commit.com/hooks.html) for available third-party hooks.
 
 ---
 

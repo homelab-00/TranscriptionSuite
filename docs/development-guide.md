@@ -19,9 +19,9 @@
 ### 1. Build Tooling (one-time)
 ```bash
 cd build
-uv sync                    # Creates .venv with ruff, pyright, pre-commit, pytest
+uv sync                    # Creates .venv with ruff, pyright, prek, pytest
 cd ..
-./build/.venv/bin/pre-commit install  # Install git hooks
+./build/.venv/bin/prek install  # Install git hooks
 ```
 
 ### 2. Dashboard Dependencies
@@ -124,7 +124,7 @@ cd dashboard && npm run test
 ## Code Quality
 
 ### Pre-commit Hooks
-Automatically run on `git commit`:
+Automatically run on `git commit` by [prek](https://prek.j178.dev):
 1. **ruff-format** + **ruff** — Python formatting and linting
 2. **prettier** — TypeScript/CSS/JSON formatting
 3. **codespell** — Spell checking

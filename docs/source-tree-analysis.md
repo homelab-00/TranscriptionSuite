@@ -263,7 +263,7 @@ TranscriptionSuite/
 │       └── scripts-lint.yml        #     Shell + PowerShell linting
 │
 ├── CLAUDE.md / AGENTS.md           # AI assistant instructions
-├── .pre-commit-config.yaml         # Pre-commit hooks (ruff, codespell, prettier, ui-contract)
+├── .pre-commit-config.yaml         # Git hooks run by prek (ruff, codespell, prettier, ui-contract)
 └── LICENSE                         # GPL-3.0-or-later
 ```
 
