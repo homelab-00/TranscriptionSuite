@@ -135,12 +135,12 @@ export function useSessionWatcher() {
     if (!electronAPI?.watcher?.clearLedger) return;
     try {
       await electronAPI.watcher.clearLedger('session');
-      appendWatchLog({ message: 'Processed-files history cleared', level: 'info' });
-      toast.success('Session Watch history cleared. Files can be imported again.');
+      appendWatchLog({ message: 'Session processed-files history cleared', level: 'info' });
+      toast.success('Session Watch history cleared. Add files to the folder again to import them.');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       appendWatchLog({
-        message: `Failed to clear processed-files history: ${message}`,
+        message: `Failed to clear Session processed-files history: ${message}`,
         level: 'warn',
       });
       toast.error(`Failed to clear history: ${message}`);

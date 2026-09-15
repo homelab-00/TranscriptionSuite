@@ -845,10 +845,11 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
     const name = filenameFromPath(payload.path);
     const label = payload.type === 'session' ? 'Session Watch' : 'Notebook Watch';
     const detail: Record<WatchFileSkipReason, string> = {
-      empty: 'the file is empty',
+      empty:
+        'the file is still empty (if it is still being written, move it out of the folder and back in once it is complete)',
       unreadable: 'the file could not be read',
       'already-imported':
-        'it was already imported earlier (use "Clear processed-files history" to import it again)',
+        'it was already imported earlier (use "Clear processed-files history", then add the file to the folder again)',
       'already-queued': 'an identical file is already queued',
     };
     const message = `${label} skipped ${name}: ${detail[payload.reason]}`;

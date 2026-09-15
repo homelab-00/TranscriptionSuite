@@ -9,6 +9,7 @@
 
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 
 import { useNotebookWatcher } from '../useNotebookWatcher';
 import { useImportQueueStore } from '../../stores/importQueueStore';
@@ -182,8 +183,25 @@ describe('useNotebookWatcher — active flag persistence (Issue #100)', () => {
       expect(useImportQueueStore.getState().notebookWatchActive).toBe(true);
     });
   });
+});
 
-  it('clearProcessedHistory clears the notebook ledger and logs it (GH-311)', async () => {
+describe('clearProcessedHistory (GH-311)', () => {
+  beforeEach(() => {
+    useImportQueueStore.setState({
+      notebookWatchPath: '',
+      notebookWatchActive: false,
+      watchLog: [],
+    });
+    mockGetConfig.mockReset();
+    mockSetConfig.mockReset();
+    mockSetConfig.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    clearElectronStub();
+  });
+
+  it('clears the notebook ledger, logs it and toasts a recovery hint', async () => {
     const stub = installElectronStub();
     mockGetConfig.mockResolvedValue(undefined);
 
@@ -194,6 +212,9 @@ describe('useNotebookWatcher — active flag persistence (Issue #100)', () => {
 
     expect(stub.clearLedger).toHaveBeenCalledWith('notebook');
     const log = useImportQueueStore.getState().watchLog;
-    expect(log[log.length - 1].message).toBe('Processed-files history cleared');
+    expect(log[log.length - 1].message).toBe('Notebook processed-files history cleared');
+    expect(toast.success).toHaveBeenCalledWith(
+      'Notebook Watch history cleared. Add files to the folder again to import them.',
+    );
   });
 });

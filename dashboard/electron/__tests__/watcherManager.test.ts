@@ -106,16 +106,23 @@ afterEach(async () => {
 });
 
 describe('readiness - waits for writes to finish (GH-311 problem 1)', () => {
-  it('asks chokidar to hold `add` until the file size has been stable', async () => {
-    await manager.startSessionWatcher(watchDir);
+  it.each([['session'], ['notebook']] as const)(
+    'asks chokidar to hold `add` until the file size has been stable (%s watcher)',
+    async (type) => {
+      if (type === 'session') {
+        await manager.startSessionWatcher(watchDir);
+      } else {
+        await manager.startNotebookWatcher(watchDir);
+      }
 
-    expect(mockWatch).toHaveBeenCalledTimes(1);
-    expect(watchers[0].options).toMatchObject({
-      depth: 0,
-      ignoreInitial: true,
-      awaitWriteFinish: { stabilityThreshold: 5_000, pollInterval: 500 },
-    });
-  });
+      expect(mockWatch).toHaveBeenCalledTimes(1);
+      expect(watchers[0].options).toMatchObject({
+        depth: 0,
+        ignoreInitial: true,
+        awaitWriteFinish: { stabilityThreshold: 5_000, pollInterval: 500 },
+      });
+    },
+  );
 
   it('dispatches a non-empty file after the batch window', async () => {
     await manager.startSessionWatcher(watchDir);
@@ -301,5 +308,40 @@ describe('ledger - loading and clearing', () => {
 
     expect(sentPayloads('watcher:filesDetected')).toHaveLength(2);
     expect(sentPayloads('watcher:fileSkipped')).toEqual([]);
+  });
+
+  it('clearNotebookLedger also releases files that are still in flight', async () => {
+    await manager.startNotebookWatcher(watchDir);
+    const file = writeFile('a.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], file);
+
+    manager.clearNotebookLedger();
+    const copy = writeFile('a-copy.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], copy);
+
+    expect(sentPayloads('watcher:filesDetected')).toHaveLength(2);
+    expect(sentPayloads('watcher:fileSkipped')).toEqual([]);
+  });
+
+  it('honors an existing ledger after an app restart', async () => {
+    await manager.startSessionWatcher(watchDir);
+    const file = writeFile('a.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], file);
+    manager.reportImportOutcome({ type: 'session', path: file, outcome: 'imported' });
+    expect(readLedger('session')).toHaveLength(1);
+
+    await manager.destroyAll();
+    manager = new WatcherManager(
+      () => ({ webContents: { send }, isDestroyed: () => false }) as never,
+    );
+
+    await manager.startSessionWatcher(watchDir);
+    const copy = writeFile('a-copy.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[watchers.length - 1], copy);
+
+    expect(sentPayloads('watcher:fileSkipped')).toEqual([
+      { type: 'session', path: copy, reason: 'already-imported' },
+    ]);
+    expect(sentPayloads('watcher:filesDetected')).toHaveLength(1);
   });
 });

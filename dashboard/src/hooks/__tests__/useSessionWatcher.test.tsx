@@ -10,6 +10,7 @@
 
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 
 import { useSessionWatcher } from '../useSessionWatcher';
 import { useImportQueueStore } from '../../stores/importQueueStore';
@@ -192,8 +193,25 @@ describe('useSessionWatcher — active flag persistence (Issue #100)', () => {
     });
     // No electronAPI exposed → start effect early-returns; nothing to assert beyond no-throw.
   });
+});
 
-  it('clearProcessedHistory clears the session ledger and logs it (GH-311)', async () => {
+describe('clearProcessedHistory (GH-311)', () => {
+  beforeEach(() => {
+    useImportQueueStore.setState({
+      sessionWatchPath: '',
+      sessionWatchActive: false,
+      watchLog: [],
+    });
+    mockGetConfig.mockReset();
+    mockSetConfig.mockReset();
+    mockSetConfig.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    clearElectronStub();
+  });
+
+  it('clears the session ledger, logs it and toasts a recovery hint', async () => {
     const stub = installElectronStub();
     mockGetConfig.mockResolvedValue(undefined);
 
@@ -204,6 +222,9 @@ describe('useSessionWatcher — active flag persistence (Issue #100)', () => {
 
     expect(stub.clearLedger).toHaveBeenCalledWith('session');
     const log = useImportQueueStore.getState().watchLog;
-    expect(log[log.length - 1].message).toBe('Processed-files history cleared');
+    expect(log[log.length - 1].message).toBe('Session processed-files history cleared');
+    expect(toast.success).toHaveBeenCalledWith(
+      'Session Watch history cleared. Add files to the folder again to import them.',
+    );
   });
 });

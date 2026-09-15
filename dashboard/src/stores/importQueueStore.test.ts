@@ -1269,5 +1269,33 @@ describe('importQueueStore', () => {
       expect(lastWatchLogMessage()).toContain('Notebook Watch skipped chunk_00.wav');
       expect(toast.warning).not.toHaveBeenCalled();
     });
+
+    it('warns for a still-empty file and explains how to import it once written', () => {
+      getState().handleFileSkipped({
+        type: 'session',
+        path: '/watch/rec.wav',
+        reason: 'empty',
+      });
+
+      const msg =
+        'Session Watch skipped rec.wav: the file is still empty (if it is still being written, move it out of the folder and back in once it is complete)';
+      expect(toast.warning).toHaveBeenCalledWith(msg);
+      expect(lastWatchLogMessage()).toBe(msg);
+      const log = getState().watchLog;
+      expect(log[log.length - 1].level).toBe('warn');
+    });
+
+    it('informs (without warning) for a file already queued under another name', () => {
+      getState().handleFileSkipped({
+        type: 'session',
+        path: '/watch/dup.wav',
+        reason: 'already-queued',
+      });
+
+      expect(toast.info).toHaveBeenCalledWith(
+        expect.stringContaining('an identical file is already queued'),
+      );
+      expect(toast.warning).not.toHaveBeenCalled();
+    });
   });
 });
