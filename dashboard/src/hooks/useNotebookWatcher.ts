@@ -11,9 +11,11 @@
  * The watcher:filesDetected IPC subscription lives in `useWatcherFilesBridge`
  * (mounted once at the app root). Subscribing here too caused duplicate
  * imports once both watcher hooks were mounted — see Issue #94.
+ * - Exposes clearProcessedHistory() to reset the processed-files ledger (GH-311).
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
 import { useImportQueueStore } from '../stores/importQueueStore';
 import { getConfig, setConfig } from '../config/store';
 
@@ -126,11 +128,33 @@ export function useNotebookWatcher() {
     [notebookWatchActive, setNotebookWatchActiveRaw, setNotebookWatchPath],
   );
 
+  /**
+   * GH-311: forget every file the notebook watcher has recorded as imported so
+   * the same files can be imported again through the watch folder.
+   */
+  const clearProcessedHistory = useCallback(async () => {
+    const electronAPI = (window as any).electronAPI;
+    if (!electronAPI?.watcher?.clearLedger) return;
+    try {
+      await electronAPI.watcher.clearLedger('notebook');
+      appendWatchLog({ message: 'Processed-files history cleared', level: 'info' });
+      toast.success('Notebook Watch history cleared. Files can be imported again.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      appendWatchLog({
+        message: `Failed to clear processed-files history: ${message}`,
+        level: 'warn',
+      });
+      toast.error(`Failed to clear history: ${message}`);
+    }
+  }, [appendWatchLog]);
+
   return {
     notebookWatchPath,
     notebookWatchActive,
     setNotebookWatchActive,
     setWatchPath,
     notebookWatchAccessible,
+    clearProcessedHistory,
   };
 }

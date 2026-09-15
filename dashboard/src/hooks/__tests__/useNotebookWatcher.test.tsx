@@ -14,6 +14,8 @@ import { useNotebookWatcher } from '../useNotebookWatcher';
 import { useImportQueueStore } from '../../stores/importQueueStore';
 import { getConfig, setConfig } from '../../config/store';
 
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
 vi.mock('../../config/store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../config/store')>();
   return {
@@ -30,6 +32,7 @@ interface WatcherStub {
   startNotebook: ReturnType<typeof vi.fn>;
   stopNotebook: ReturnType<typeof vi.fn>;
   checkPath: ReturnType<typeof vi.fn>;
+  clearLedger: ReturnType<typeof vi.fn>;
 }
 
 function installElectronStub(): WatcherStub {
@@ -37,6 +40,7 @@ function installElectronStub(): WatcherStub {
     startNotebook: vi.fn(() => Promise.resolve()),
     stopNotebook: vi.fn(() => Promise.resolve()),
     checkPath: vi.fn(() => Promise.resolve(true)),
+    clearLedger: vi.fn(() => Promise.resolve()),
   };
   (window as unknown as Record<string, unknown>).electronAPI = {
     watcher: stub,
@@ -177,5 +181,19 @@ describe('useNotebookWatcher — active flag persistence (Issue #100)', () => {
     await waitFor(() => {
       expect(useImportQueueStore.getState().notebookWatchActive).toBe(true);
     });
+  });
+
+  it('clearProcessedHistory clears the notebook ledger and logs it (GH-311)', async () => {
+    const stub = installElectronStub();
+    mockGetConfig.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useNotebookWatcher());
+    await act(async () => {
+      await result.current.clearProcessedHistory();
+    });
+
+    expect(stub.clearLedger).toHaveBeenCalledWith('notebook');
+    const log = useImportQueueStore.getState().watchLog;
+    expect(log[log.length - 1].message).toBe('Processed-files history cleared');
   });
 });

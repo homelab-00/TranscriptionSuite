@@ -15,6 +15,8 @@ import { useSessionWatcher } from '../useSessionWatcher';
 import { useImportQueueStore } from '../../stores/importQueueStore';
 import { getConfig, setConfig } from '../../config/store';
 
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
 vi.mock('../../config/store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../config/store')>();
   return {
@@ -31,6 +33,7 @@ interface WatcherStub {
   startSession: ReturnType<typeof vi.fn>;
   stopSession: ReturnType<typeof vi.fn>;
   checkPath: ReturnType<typeof vi.fn>;
+  clearLedger: ReturnType<typeof vi.fn>;
 }
 
 function installElectronStub(): WatcherStub {
@@ -38,6 +41,7 @@ function installElectronStub(): WatcherStub {
     startSession: vi.fn(() => Promise.resolve()),
     stopSession: vi.fn(() => Promise.resolve()),
     checkPath: vi.fn(() => Promise.resolve(true)),
+    clearLedger: vi.fn(() => Promise.resolve()),
   };
   (window as unknown as Record<string, unknown>).electronAPI = {
     watcher: stub,
@@ -187,5 +191,19 @@ describe('useSessionWatcher — active flag persistence (Issue #100)', () => {
       expect(useImportQueueStore.getState().sessionWatchActive).toBe(true);
     });
     // No electronAPI exposed → start effect early-returns; nothing to assert beyond no-throw.
+  });
+
+  it('clearProcessedHistory clears the session ledger and logs it (GH-311)', async () => {
+    const stub = installElectronStub();
+    mockGetConfig.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useSessionWatcher());
+    await act(async () => {
+      await result.current.clearProcessedHistory();
+    });
+
+    expect(stub.clearLedger).toHaveBeenCalledWith('session');
+    const log = useImportQueueStore.getState().watchLog;
+    expect(log[log.length - 1].message).toBe('Processed-files history cleared');
   });
 });

@@ -95,6 +95,7 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
     setSessionWatchActive,
     setWatchPath,
     sessionWatchAccessible,
+    clearProcessedHistory,
   } = useSessionWatcher();
   const notebookWatchPath = useImportQueueStore((s) => s.notebookWatchPath);
   const watchConflict =
@@ -857,6 +858,20 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
               }
               disabled={!sessionWatchPath || Boolean(watchConflict)}
             />
+
+            {/* GH-311: reset the imported files ledger without restarting the app */}
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">
+                Files already imported through this watcher are skipped, even under another name.
+              </p>
+              <button
+                onClick={clearProcessedHistory}
+                title="Forget which files were imported so they can be imported again"
+                className="shrink-0 text-xs whitespace-nowrap text-slate-500 transition-colors hover:text-slate-400"
+              >
+                Clear processed-files history
+              </button>
+            </div>
 
             {/* 4.3 — activity log (collapsible) */}
             {watchLog.length > 0 && (
