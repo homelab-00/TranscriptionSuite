@@ -292,6 +292,35 @@ interface ElectronAPI {
       { ok: true; bytes?: number } | { ok: false; error: string; status?: number; body?: string }
     >;
   };
+  /** Folder Watch bridge. Mirrors the `watcher` block in electron/preload.ts (GH-311 added the last two). */
+  watcher: {
+    startSession: (folderPath: string) => Promise<void>;
+    stopSession: () => Promise<void>;
+    startNotebook: (folderPath: string) => Promise<void>;
+    stopNotebook: () => Promise<void>;
+    clearLedger: (type: 'session' | 'notebook') => Promise<void>;
+    checkPath: (folderPath: string) => Promise<boolean>;
+    onFilesDetected: (
+      callback: (payload: {
+        type: 'session' | 'notebook';
+        files: string[];
+        count: number;
+        fileMeta: Array<{ path: string; createdAt: string }>;
+      }) => void,
+    ) => () => void;
+    reportImportOutcome: (payload: {
+      type: 'session' | 'notebook';
+      path: string;
+      outcome: 'imported' | 'failed' | 'dropped';
+    }) => Promise<void>;
+    onFileSkipped: (
+      callback: (payload: {
+        type: 'session' | 'notebook';
+        path: string;
+        reason: 'empty' | 'unreadable' | 'already-imported' | 'already-queued';
+      }) => void,
+    ) => () => void;
+  };
   notifications: {
     show: (options: {
       title: string;

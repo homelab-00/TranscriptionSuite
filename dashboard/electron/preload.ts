@@ -466,6 +466,20 @@ export interface ElectronAPI {
         fileMeta: Array<{ path: string; createdAt: string }>;
       }) => void,
     ) => () => void;
+    /** GH-311: tell main whether a dispatched file was imported; the ledger records only real imports. */
+    reportImportOutcome: (payload: {
+      type: 'session' | 'notebook';
+      path: string;
+      outcome: 'imported' | 'failed' | 'dropped';
+    }) => Promise<void>;
+    /** GH-311: push listener for files the watcher skipped. Returns cleanup function. */
+    onFileSkipped: (
+      callback: (payload: {
+        type: 'session' | 'notebook';
+        path: string;
+        reason: 'empty' | 'unreadable' | 'already-imported' | 'already-queued';
+      }) => void,
+    ) => () => void;
   };
   notifications: {
     show: (options: {
@@ -845,6 +859,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ) => callback(payload);
       ipcRenderer.on('watcher:filesDetected', handler);
       return () => ipcRenderer.removeListener('watcher:filesDetected', handler);
+    },
+    reportImportOutcome: (payload: {
+      type: 'session' | 'notebook';
+      path: string;
+      outcome: 'imported' | 'failed' | 'dropped';
+    }) => ipcRenderer.invoke('watcher:reportImportOutcome', payload) as Promise<void>,
+    onFileSkipped: (
+      callback: (payload: {
+        type: 'session' | 'notebook';
+        path: string;
+        reason: 'empty' | 'unreadable' | 'already-imported' | 'already-queued';
+      }) => void,
+    ) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        payload: {
+          type: 'session' | 'notebook';
+          path: string;
+          reason: 'empty' | 'unreadable' | 'already-imported' | 'already-queued';
+        },
+      ) => callback(payload);
+      ipcRenderer.on('watcher:fileSkipped', handler);
+      return () => ipcRenderer.removeListener('watcher:fileSkipped', handler);
     },
   },
   notifications: {

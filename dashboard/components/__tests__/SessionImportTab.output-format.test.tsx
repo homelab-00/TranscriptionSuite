@@ -63,6 +63,8 @@ vi.mock('../../src/hooks/useAdminStatus', () => ({
   }),
 }));
 
+const mockClearProcessedHistory = vi.fn();
+
 vi.mock('../../src/hooks/useSessionWatcher', () => ({
   useSessionWatcher: () => ({
     sessionWatchPath: '',
@@ -70,6 +72,7 @@ vi.mock('../../src/hooks/useSessionWatcher', () => ({
     setSessionWatchActive: vi.fn(),
     setWatchPath: vi.fn(),
     sessionWatchAccessible: true,
+    clearProcessedHistory: mockClearProcessedHistory,
   }),
 }));
 
@@ -315,5 +318,15 @@ describe('SessionImportTab — explicit output-format selector (GH-212)', () => 
     const { container } = await renderTab();
 
     expect(container.textContent).not.toContain('when diarization is enabled');
+  });
+
+  it('Clear processed-files history button calls the watcher hook (GH-311)', async () => {
+    await renderTab();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Clear processed-files history' }));
+    });
+
+    expect(mockClearProcessedHistory).toHaveBeenCalledTimes(1);
   });
 });

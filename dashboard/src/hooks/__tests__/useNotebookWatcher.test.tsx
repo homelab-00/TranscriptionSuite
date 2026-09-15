@@ -9,10 +9,13 @@
 
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 
 import { useNotebookWatcher } from '../useNotebookWatcher';
 import { useImportQueueStore } from '../../stores/importQueueStore';
 import { getConfig, setConfig } from '../../config/store';
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 vi.mock('../../config/store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../config/store')>();
@@ -30,6 +33,7 @@ interface WatcherStub {
   startNotebook: ReturnType<typeof vi.fn>;
   stopNotebook: ReturnType<typeof vi.fn>;
   checkPath: ReturnType<typeof vi.fn>;
+  clearLedger: ReturnType<typeof vi.fn>;
 }
 
 function installElectronStub(): WatcherStub {
@@ -37,6 +41,7 @@ function installElectronStub(): WatcherStub {
     startNotebook: vi.fn(() => Promise.resolve()),
     stopNotebook: vi.fn(() => Promise.resolve()),
     checkPath: vi.fn(() => Promise.resolve(true)),
+    clearLedger: vi.fn(() => Promise.resolve()),
   };
   (window as unknown as Record<string, unknown>).electronAPI = {
     watcher: stub,
@@ -177,5 +182,39 @@ describe('useNotebookWatcher — active flag persistence (Issue #100)', () => {
     await waitFor(() => {
       expect(useImportQueueStore.getState().notebookWatchActive).toBe(true);
     });
+  });
+});
+
+describe('clearProcessedHistory (GH-311)', () => {
+  beforeEach(() => {
+    useImportQueueStore.setState({
+      notebookWatchPath: '',
+      notebookWatchActive: false,
+      watchLog: [],
+    });
+    mockGetConfig.mockReset();
+    mockSetConfig.mockReset();
+    mockSetConfig.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    clearElectronStub();
+  });
+
+  it('clears the notebook ledger, logs it and toasts a recovery hint', async () => {
+    const stub = installElectronStub();
+    mockGetConfig.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useNotebookWatcher());
+    await act(async () => {
+      await result.current.clearProcessedHistory();
+    });
+
+    expect(stub.clearLedger).toHaveBeenCalledWith('notebook');
+    const log = useImportQueueStore.getState().watchLog;
+    expect(log[log.length - 1].message).toBe('Notebook processed-files history cleared');
+    expect(toast.success).toHaveBeenCalledWith(
+      'Notebook Watch history cleared. Add files to the folder again to import them.',
+    );
   });
 });

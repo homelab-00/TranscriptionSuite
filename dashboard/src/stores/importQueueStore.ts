@@ -103,6 +103,17 @@ export interface WatchLogEntry {
   level: 'info' | 'warn';
 }
 
+/** GH-311: reasons the main-process watcher can skip a file. Mirrors watcherManager.FileSkipReason. */
+export type WatchFileSkipReason = 'empty' | 'unreadable' | 'already-imported' | 'already-queued';
+
+export interface WatchFileSkippedPayload {
+  type: 'session' | 'notebook';
+  path: string;
+  reason: WatchFileSkipReason;
+}
+
+export type WatchImportOutcome = 'imported' | 'failed' | 'dropped';
+
 export interface WatcherState {
   sessionWatchPath: string;
   sessionWatchActive: boolean;
@@ -166,6 +177,8 @@ interface ImportQueueState extends WatcherState {
     count: number;
     fileMeta: Array<{ path: string; createdAt: string }>;
   }) => void;
+  /** GH-311: the main-process watcher skipped a file (empty, unreadable, duplicate). */
+  handleFileSkipped: (payload: WatchFileSkippedPayload) => void;
   // 4.2 — server connectivity
   setWatcherServerConnected: (connected: boolean) => void;
   // 4.3 — activity log
@@ -227,6 +240,34 @@ function browserDownload(filename: string, content: string): void {
 function filenameFromPath(filePath: string): string {
   const parts = filePath.replace(/\\/g, '/').split('/');
   return parts[parts.length - 1] || filePath;
+}
+
+/**
+ * GH-311: tell the main-process watcher what happened to a file it dispatched.
+ * Only Folder Watch jobs (path-backed `*-auto` jobs) are reported. The watcher
+ * records a fingerprint only on 'imported', so a failed or dropped file can be
+ * imported again by putting it back into the folder.
+ */
+function reportWatchOutcome(
+  job: Pick<UnifiedImportJob, 'type' | 'file'>,
+  outcome: WatchImportOutcome,
+): void {
+  if (typeof job.file !== 'string') return;
+  if (job.type !== 'session-auto' && job.type !== 'notebook-auto') return;
+  const type = job.type === 'session-auto' ? 'session' : 'notebook';
+  const report = (window as any).electronAPI?.watcher?.reportImportOutcome;
+  if (typeof report !== 'function') return;
+  const warn = (err: unknown) => console.warn('[importQueue] Failed to report watch outcome:', err);
+  try {
+    void Promise.resolve(report({ type, path: job.file, outcome })).catch(warn);
+  } catch (err) {
+    warn(err);
+  }
+}
+
+function reportDroppedBatch(type: 'session' | 'notebook', files: string[]): void {
+  const jobType = type === 'session' ? 'session-auto' : 'notebook-auto';
+  for (const file of files) reportWatchOutcome({ type: jobType, file }, 'dropped');
 }
 
 /** Human-readable planned-format label stamped on queued session jobs (GH-212). */
@@ -491,6 +532,8 @@ async function processQueue(): Promise<void> {
         } else {
           await processNotebookJob(nextJob, store);
         }
+        // The result is durable once the processor resolves; acknowledge it before notification code runs (GH-311).
+        reportWatchOutcome(nextJob, 'imported');
 
         // Update exponential moving average on success (4.5)
         const startedAt = _jobStartedAt[jobId];
@@ -515,6 +558,7 @@ async function processQueue(): Promise<void> {
             j.id === jobId ? { ...j, status: 'error' as const, error: errorMsg } : j,
           ),
         }));
+        reportWatchOutcome(nextJob, 'failed');
 
         if (!isSession) {
           const { notebookCallbacks } = store.getState();
@@ -628,6 +672,10 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
   },
 
   removeJob: (id) => {
+    const victim = useImportQueueStore.getState().jobs.find((j) => j.id === id);
+    // A pending Folder Watch job never reached processQueue, so no outcome was
+    // reported yet; forget it so the file can be picked up again (GH-311).
+    if (victim && victim.status === 'pending') reportWatchOutcome(victim, 'dropped');
     set((s) => ({
       jobs: s.jobs.filter(
         (j) => j.id !== id || j.status === 'processing' || j.status === 'writing',
@@ -656,6 +704,10 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
 
   clearAll: () => {
     _abort = true;
+    // The job currently processing reports its own outcome from processQueue (GH-311).
+    for (const j of useImportQueueStore.getState().jobs) {
+      if (j.status === 'pending') reportWatchOutcome(j, 'dropped');
+    }
     set({ jobs: [] });
   },
 
@@ -709,6 +761,7 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
         message: `${files.length} file(s) detected but server offline — skipped`,
         level: 'warn',
       });
+      reportDroppedBatch(type, files);
       return;
     }
 
@@ -736,6 +789,7 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
       const msg = 'Folder Watch paused — languages still loading';
       toast.warning(msg);
       useImportQueueStore.getState().appendWatchLog({ message: msg, level: 'warn' });
+      reportDroppedBatch(type, files);
       return;
     }
 
@@ -750,6 +804,7 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
       const msg = 'Folder Watch paused — Source Language required for the active model';
       toast.warning(msg);
       useImportQueueStore.getState().appendWatchLog({ message: msg, level: 'warn' });
+      reportDroppedBatch(type, files);
       return;
     }
 
@@ -784,6 +839,26 @@ export const useImportQueueStore = create<ImportQueueState>()((set) => ({
       message: `${files.length} file(s) auto-queued from ${label}`,
       level: 'info',
     });
+  },
+
+  handleFileSkipped: (payload) => {
+    const name = filenameFromPath(payload.path);
+    const label = payload.type === 'session' ? 'Session Watch' : 'Notebook Watch';
+    const detail: Record<WatchFileSkipReason, string> = {
+      empty:
+        'the file is still empty (if it is still being written, move it out of the folder and back in once it is complete)',
+      unreadable: 'the file could not be read',
+      'already-imported':
+        'it was already imported earlier (use "Clear processed-files history", then add the file to the folder again)',
+      'already-queued': 'an identical file is already queued',
+    };
+    const message = `${label} skipped ${name}: ${detail[payload.reason]}`;
+    if (payload.reason === 'empty' || payload.reason === 'unreadable') {
+      toast.warning(message);
+    } else {
+      toast.info(message);
+    }
+    useImportQueueStore.getState().appendWatchLog({ message, level: 'warn' });
   },
 
   // 4.2 — server connectivity
