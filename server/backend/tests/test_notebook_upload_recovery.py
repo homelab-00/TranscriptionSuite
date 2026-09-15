@@ -108,11 +108,6 @@ class TestNotebookRunTranscription:
             "save_longform_to_database",
             lambda **_kw: 42,
         )
-        monkeypatch.setattr(
-            nb_route,
-            "check_time_slot_overlap",
-            lambda *_a, **_kw: None,
-        )
         # Stub convert_to_mp3 in the lazy-import location used by the route.
         import server.core.audio_utils as au
 
@@ -206,7 +201,6 @@ class TestNotebookRunTranscription:
             return 99
 
         monkeypatch.setattr(nb_route, "save_longform_to_database", _save)
-        monkeypatch.setattr(nb_route, "check_time_slot_overlap", lambda *_a, **_kw: None)
 
         # MP3 conversion fails exactly as it does when ffmpeg is not installed.
         def _boom(*_a, **_kw):
@@ -269,7 +263,6 @@ class TestNotebookRunTranscription:
             return 7
 
         monkeypatch.setattr(nb_route, "save_longform_to_database", _save)
-        monkeypatch.setattr(nb_route, "check_time_slot_overlap", lambda *_a, **_kw: None)
 
         def _boom(*_a, **_kw):
             raise RuntimeError("ffmpeg is not installed or not in PATH")
@@ -306,6 +299,113 @@ class TestNotebookRunTranscription:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Overlapping recording times on notebook import (GH-298)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestNotebookOverlappingImports:
+    """A long recording split into chunks (ffmpeg segment) is imported as many
+    files whose time ranges overlap: Folder Watch stamps them with near-identical
+    creation times, and a manual import falls back to "now" while each chunk
+    transcribes faster than its own duration. Every chunk must be saved; a
+    completed transcript must never be rejected because of its recording time."""
+
+    @pytest.fixture(autouse=True)
+    def _utc_process_clock(self):
+        """Run on a UTC clock like the server container (no TZ is set there).
+
+        A naive ``datetime.now()`` recorded_at only lines up with UTC epoch
+        comparisons when local time IS UTC; on a non-UTC host the manual-import
+        case would pass for the wrong reason.
+        """
+        import os
+        import time
+
+        if not hasattr(time, "tzset"):
+            pytest.skip("time.tzset() is unavailable on this platform")
+        previous = os.environ.get("TZ")
+        os.environ["TZ"] = "UTC"
+        time.tzset()
+        try:
+            yield
+        finally:
+            if previous is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = previous
+            time.tzset()
+
+    @pytest.mark.parametrize(
+        "file_created_at",
+        [
+            pytest.param("2026-08-29T15:00:00.000Z", id="folder-watch-same-created-at"),
+            pytest.param(None, id="manual-import-now"),
+        ],
+    )
+    def test_overlapping_recorded_at_is_saved_not_rejected(
+        self, tmp_path: Path, monkeypatch, file_created_at: str | None
+    ):
+        import sqlite3
+
+        import server.core.audio_utils as au
+        import server.database.database as db
+        from server.api.routes import notebook as nb_route
+
+        # Real SQLite database, so the save runs against the real schema.
+        data_dir = tmp_path / "data"
+        (data_dir / "database").mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("DATA_DIR", str(data_dir))
+        monkeypatch.setattr(db, "_data_dir", None)
+        monkeypatch.setattr(db, "_db_path", None)
+        db.set_data_directory(data_dir)
+        db.init_db()
+
+        # The stub must create the MP3: the worker de-collides stored filenames
+        # by checking what exists on disk, and recordings.filepath is UNIQUE.
+        monkeypatch.setattr(au, "convert_to_mp3", lambda _src, dst: Path(dst).write_bytes(b""))
+
+        mgr = _ModelManager(_make_engine())
+        for job_id in ("job-chunk-1", "job-chunk-2"):
+            tmp_file = tmp_path / f"{job_id}.wav"
+            tmp_file.write_bytes(b"\x00" * 1024)
+            nb_route._run_transcription(
+                model_manager=mgr,
+                tmp_path=tmp_file,
+                filename="session.wav",
+                language=None,
+                translation_enabled=False,
+                translation_target_language=None,
+                enable_diarization=False,
+                enable_word_timestamps=True,
+                file_created_at=file_created_at,
+                expected_speakers=None,
+                parallel_diarization=None,
+                use_parallel_default=False,
+                title=None,
+                job_id=job_id,
+                event_loop=None,
+            )
+
+        first = mgr.job_tracker.results["job-chunk-1"]
+        second = mgr.job_tracker.results["job-chunk-2"]
+        assert "error" not in first, f"first chunk failed: {first}"
+        assert "error" not in second, f"overlapping chunk was rejected: {second}"
+        assert first["recording_id"] != second["recording_id"]
+
+        conn = sqlite3.connect(str(db.get_db_path()))
+        try:
+            rows = conn.execute(
+                "SELECT filename, recorded_at FROM recordings ORDER BY id"
+            ).fetchall()
+        finally:
+            conn.close()
+        assert [r[0] for r in rows] == ["session.mp3", "session-2.mp3"]
+        if file_created_at is not None:
+            # Both keep the creation time they were imported with (not shifted).
+            assert rows[0][1] == rows[1][1]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Notebook upload diarization via diarization_dispatch (GH-274)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -328,7 +428,6 @@ class TestNotebookDiarizationDispatch:
             return 7
 
         monkeypatch.setattr(nb_route, "save_longform_to_database", _save)
-        monkeypatch.setattr(nb_route, "check_time_slot_overlap", lambda *_a, **_kw: None)
         monkeypatch.setattr(au, "convert_to_mp3", lambda *_a, **_kw: None)
         return saved
 
