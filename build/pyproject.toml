@@ -57,6 +57,10 @@ backend-test = [
     # runtime deps; keep in sync.
     "alembic>=1.18.4",
     "sqlalchemy>=2.0.48",
+    # core/token_store.py imports filelock, so every route test needs it. It used to
+    # arrive only transitively via pre-commit (virtualenv), which prek no longer pulls in.
+    # Mirror of server/backend/pyproject.toml runtime deps; keep in sync.
+    "filelock>=3.25.0",
 ]
 
 [tool.uv]

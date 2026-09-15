@@ -30,6 +30,17 @@ describe('resolveHfRepoId', () => {
     // HF repo ids are case-sensitive, so this must pass through unchanged.
     expect(resolveHfRepoId('iic/sensevoicesmall')).toBe('iic/sensevoicesmall');
   });
+
+  it('maps every spelling of oruk/orukeet to the lowercase repo id the server downloads', () => {
+    expect(resolveHfRepoId('oruk/orukeet')).toBe('oruk/orukeet');
+    expect(resolveHfRepoId('Oruk/Orukeet')).toBe('oruk/orukeet');
+    expect(resolveHfRepoId('  ORUK/ORUKEET  ')).toBe('oruk/orukeet');
+  });
+
+  it('leaves repositories that only resemble Orukeet unchanged', () => {
+    expect(resolveHfRepoId('Oruk/Orukeet-extra')).toBe('Oruk/Orukeet-extra');
+    expect(resolveHfRepoId('Other/Orukeet')).toBe('Other/Orukeet');
+  });
 });
 
 describe('hfCacheDirName', () => {
@@ -45,6 +56,10 @@ describe('hfCacheDirName', () => {
 
   it('derives the cache dir for a plain org/name id', () => {
     expect(hfCacheDirName('funasr/campplus')).toBe('models--funasr--campplus');
+  });
+
+  it('derives the lowercase Orukeet cache dir from a capitalized id', () => {
+    expect(hfCacheDirName('Oruk/Orukeet')).toBe('models--oruk--orukeet');
   });
 });
 
