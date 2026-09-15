@@ -748,9 +748,10 @@ def _run_file_import(
     Run transcription in a background thread for file import.
 
     Unlike _run_transcription in notebook.py, this does NOT:
-    - Check time-slot conflicts
     - Convert to MP3
     - Save to database
+
+    Neither path rejects overlapping recording times (GH-298).
 
     It persists the result to the transcription_jobs durability row
     (persist-before-deliver) and mirrors it into job_tracker for progress

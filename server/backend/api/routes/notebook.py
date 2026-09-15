@@ -48,7 +48,6 @@ from server.database.backup import DatabaseBackupManager
 # NOTE: audio_utils is imported lazily inside upload_and_transcribe() to avoid
 # loading torch at module import time. This reduces server startup time.
 from server.database.database import (
-    check_time_slot_overlap,
     delete_recording,
     get_all_recordings,
     get_db_path,
@@ -910,15 +909,9 @@ def _run_transcription(
                     f"Invalid file_created_at format: {sanitize_for_log(file_created_at)}"
                 )
 
-        # Check for time slot overlap before saving
-        check_time = recorded_at or datetime.now()
-        overlap = check_time_slot_overlap(check_time, result.duration)
-        if overlap:
-            overlap_title = overlap.get("title") or overlap.get("filename", "Unknown")
-            raise ValueError(
-                f"Time slot conflict: overlaps with existing recording '{overlap_title}' "
-                f"(recorded at {overlap.get('recorded_at', 'unknown time')})"
-            )
+        # GH-298: recordings may overlap in time. Do NOT reject on overlap here -
+        # this runs after the transcript is complete, so a rejection discards it,
+        # and the chunks of a split recording legitimately share a recording time.
 
         # Convert audio to MP3 and save to permanent storage
         config = get_config()

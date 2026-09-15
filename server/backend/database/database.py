@@ -899,52 +899,6 @@ def update_recording_date(recording_id: int, recorded_at: str) -> bool:
         return cursor.rowcount > 0
 
 
-def check_time_slot_overlap(
-    start_time: datetime,
-    duration_seconds: float,
-    exclude_recording_id: int | None = None,
-) -> dict[str, Any] | None:
-    """
-    Check if a recording would overlap with existing recordings.
-
-    Args:
-        start_time: Proposed start time for the new recording
-        duration_seconds: Duration of the new recording in seconds
-        exclude_recording_id: Optional recording ID to exclude (for updates)
-
-    Returns:
-        Dict with overlap info if conflict exists, None if no overlap
-    """
-    end_time = start_time.timestamp() + duration_seconds
-
-    with get_connection() as conn:
-        cursor = conn.cursor()
-
-        # Find any recording that overlaps with the proposed time range
-        # Overlap exists when: existing_start < new_end AND existing_end > new_start
-        query = """
-            SELECT id, filename, title, recorded_at, duration_seconds,
-                   datetime(recorded_at, '+' || CAST(duration_seconds AS TEXT) || ' seconds') as end_at
-            FROM recordings
-            WHERE datetime(recorded_at) < datetime(?, 'unixepoch')
-              AND datetime(recorded_at, '+' || CAST(duration_seconds AS TEXT) || ' seconds') > datetime(?, 'unixepoch')
-        """
-        params: list[Any] = [end_time, start_time.timestamp()]
-
-        if exclude_recording_id:
-            query += " AND id != ?"
-            params.append(exclude_recording_id)
-
-        query += " ORDER BY recorded_at ASC LIMIT 1"
-
-        cursor.execute(query, params)
-        row = cursor.fetchone()
-
-        if row:
-            return dict(row)
-        return None
-
-
 def get_next_available_start_time(
     target_date: str,
     hour: int,
