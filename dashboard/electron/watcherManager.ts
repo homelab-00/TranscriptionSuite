@@ -9,7 +9,7 @@
  *  - chokidar `awaitWriteFinish` holds `add` until a file has stopped growing (GH-311)
  *  - Audio extension whitelist (7 extensions)
  *  - 3-second event batching for bursts of new files
- *  - xxhash fingerprint ledger (atomic write) to prevent re-queuing on restart
+ *  - xxhash fingerprint ledger (atomic write) recorded only after the renderer confirms an import (GH-311)
  *  - Depth 0 — watches only the top-level directory, not sub-directories
  */
 
@@ -60,6 +60,14 @@ export interface FilesDetectedPayload {
   fileMeta: FileDetectedMeta[];
 }
 
+export type ImportOutcome = 'imported' | 'failed' | 'dropped';
+
+export interface ImportOutcomePayload {
+  type: WatchType;
+  path: string;
+  outcome: ImportOutcome;
+}
+
 // ─── WatcherManager ──────────────────────────────────────────────────────────
 
 export class WatcherManager {
@@ -72,6 +80,8 @@ export class WatcherManager {
   private sessionLedgerPath: string;
   private sessionBatchTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionBatch: string[] = [];
+  /** Dispatched to the renderer but not yet acknowledged: path -> fingerprint (GH-311) */
+  private sessionInFlight = new Map<string, string>();
 
   // Notebook watcher
   private notebookWatcher: FSWatcher | null = null;
@@ -80,6 +90,8 @@ export class WatcherManager {
   private notebookLedgerPath: string;
   private notebookBatchTimer: ReturnType<typeof setTimeout> | null = null;
   private notebookBatch: string[] = [];
+  /** Dispatched to the renderer but not yet acknowledged: path -> fingerprint (GH-311) */
+  private notebookInFlight = new Map<string, string>();
 
   // xxhash-wasm (initialized once asynchronously)
   private hasher: XXHashAPI | null = null;
@@ -123,7 +135,7 @@ export class WatcherManager {
     this.sessionWatcher.on('add', (filePath: string) => {
       const ext = path.extname(filePath).toLowerCase();
       if (!AUDIO_EXTS.has(ext)) return;
-      // Run the readiness + fingerprint check asynchronously
+      // Guard + fingerprint check (chokidar already waited for writes to finish)
       this.handleNewFile(filePath, 'session').catch((err) => {
         console.warn('[WatcherManager] Error processing file:', filePath, err);
       });
@@ -142,6 +154,10 @@ export class WatcherManager {
       this.sessionBatchTimer = null;
     }
     this.sessionBatch = [];
+    // Forget batched and dispatched-but-unacknowledged files alike: after a
+    // renderer reload nothing will ever acknowledge them, and an ack that does
+    // still arrive re-fingerprints the file (GH-311).
+    this.sessionInFlight.clear();
 
     if (this.sessionWatcher) {
       await this.sessionWatcher.close();
@@ -154,6 +170,7 @@ export class WatcherManager {
 
   clearSessionLedger(): void {
     this.sessionLedger.clear();
+    this.sessionInFlight.clear();
     this.saveLedger('session');
     console.log('[WatcherManager] Session ledger cleared.');
   }
@@ -203,6 +220,10 @@ export class WatcherManager {
       this.notebookBatchTimer = null;
     }
     this.notebookBatch = [];
+    // Forget batched and dispatched-but-unacknowledged files alike: after a
+    // renderer reload nothing will ever acknowledge them, and an ack that does
+    // still arrive re-fingerprints the file (GH-311).
+    this.notebookInFlight.clear();
 
     if (this.notebookWatcher) {
       await this.notebookWatcher.close();
@@ -215,8 +236,41 @@ export class WatcherManager {
 
   clearNotebookLedger(): void {
     this.notebookLedger.clear();
+    this.notebookInFlight.clear();
     this.saveLedger('notebook');
     console.log('[WatcherManager] Notebook ledger cleared.');
+  }
+
+  /**
+   * Renderer acknowledgement for a dispatched file (GH-311). The fingerprint is
+   * written to the ledger only on 'imported'; any other outcome forgets the
+   * file so that putting it back into the folder imports it again.
+   */
+  reportImportOutcome(payload: ImportOutcomePayload): void {
+    const { type, path: filePath, outcome } = payload;
+    const inFlight = type === 'session' ? this.sessionInFlight : this.notebookInFlight;
+    const known = inFlight.get(filePath);
+    inFlight.delete(filePath);
+
+    if (outcome !== 'imported') {
+      console.log(`[WatcherManager] ${type} file ${outcome}, not recorded:`, filePath);
+      return;
+    }
+
+    // A job retried from the queue after a failure is no longer in flight;
+    // re-fingerprint the file so its eventual success is still recorded.
+    const fingerprint = known ?? this.computeFingerprint(filePath);
+    if (!fingerprint) {
+      console.warn(
+        '[WatcherManager] Imported file could not be fingerprinted, not recorded:',
+        filePath,
+      );
+      return;
+    }
+    const ledger = type === 'session' ? this.sessionLedger : this.notebookLedger;
+    ledger.add(fingerprint);
+    this.saveLedger(type);
+    console.log(`[WatcherManager] Recorded ${type} import:`, filePath);
   }
 
   /** Stop all active watchers. Call from will-quit / gracefulShutdown. */
@@ -234,18 +288,20 @@ export class WatcherManager {
 
   private loadLedger(type: WatchType): void {
     const ledgerPath = type === 'session' ? this.sessionLedgerPath : this.notebookLedgerPath;
+    let ledger = new Set<string>();
     try {
-      const data = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+      const data: unknown = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
       if (Array.isArray(data)) {
-        const ledger = new Set<string>(data);
-        if (type === 'session') {
-          this.sessionLedger = ledger;
-        } else {
-          this.notebookLedger = ledger;
-        }
+        ledger = new Set(data.filter((x): x is string => typeof x === 'string'));
       }
     } catch {
-      // No existing ledger — start fresh
+      // Missing or unreadable ledger: start fresh. Deleting the file while the
+      // app runs must not keep stale fingerprints alive in memory (GH-311).
+    }
+    if (type === 'session') {
+      this.sessionLedger = ledger;
+    } else {
+      this.notebookLedger = ledger;
     }
   }
 
@@ -322,8 +378,15 @@ export class WatcherManager {
       return;
     }
 
-    ledger.add(fingerprint);
-    this.saveLedger(type);
+    const inFlight = type === 'session' ? this.sessionInFlight : this.notebookInFlight;
+    for (const pending of inFlight.values()) {
+      if (pending === fingerprint) {
+        this.reportSkip(type, filePath, 'already-queued');
+        return;
+      }
+    }
+
+    inFlight.set(filePath, fingerprint);
     this.queueBatch(type, filePath);
   }
 
@@ -363,7 +426,14 @@ export class WatcherManager {
   private dispatchBatch(type: WatchType, files: string[]): void {
     if (files.length === 0) return;
     const win = this.getWindow();
-    if (!win || win.isDestroyed()) return;
+    if (!win || win.isDestroyed()) {
+      const inFlight = type === 'session' ? this.sessionInFlight : this.notebookInFlight;
+      for (const p of files) inFlight.delete(p);
+      console.warn(
+        `[WatcherManager] No window for ${files.length} ${type} file(s); forgetting them.`,
+      );
+      return;
+    }
 
     const fileMeta: FileDetectedMeta[] = files.map((filePath) => {
       try {

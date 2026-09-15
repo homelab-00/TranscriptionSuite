@@ -152,3 +152,154 @@ describe('readiness - waits for writes to finish (GH-311 problem 1)', () => {
     ]);
   });
 });
+
+describe('ledger - recorded only after the renderer confirms the import (GH-311 problem 2)', () => {
+  it('does not write the ledger when a file is merely dispatched', async () => {
+    await manager.startSessionWatcher(watchDir);
+    const file = writeFile('a.wav', Buffer.alloc(4096, 1));
+
+    await detect(watchers[0], file);
+
+    expect(sentPayloads('watcher:filesDetected')).toHaveLength(1);
+    expect(fs.existsSync(ledgerPath('session'))).toBe(false);
+  });
+
+  it("records the fingerprint on 'imported' and skips identical content afterwards", async () => {
+    await manager.startSessionWatcher(watchDir);
+    const file = writeFile('a.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], file);
+
+    manager.reportImportOutcome({ type: 'session', path: file, outcome: 'imported' });
+    expect(readLedger('session')).toHaveLength(1);
+
+    const copy = writeFile('a-copy.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], copy);
+
+    expect(sentPayloads('watcher:filesDetected')).toHaveLength(1);
+    expect(sentPayloads('watcher:fileSkipped')).toEqual([
+      { type: 'session', path: copy, reason: 'already-imported' },
+    ]);
+  });
+
+  it.each(['failed', 'dropped'] as const)(
+    "forgets the file on '%s' so putting it back imports it again",
+    async (outcome) => {
+      await manager.startNotebookWatcher(watchDir);
+      const file = writeFile('chunk_00.wav', Buffer.alloc(4096, 2));
+      await detect(watchers[0], file);
+
+      manager.reportImportOutcome({ type: 'notebook', path: file, outcome });
+      expect(fs.existsSync(ledgerPath('notebook'))).toBe(false);
+
+      const again = writeFile('chunk_00-again.wav', Buffer.alloc(4096, 2));
+      await detect(watchers[0], again);
+
+      expect(sentPayloads('watcher:filesDetected')).toHaveLength(2);
+      expect(sentPayloads('watcher:fileSkipped')).toEqual([]);
+    },
+  );
+
+  it('skips identical content while the first copy is still in flight', async () => {
+    await manager.startSessionWatcher(watchDir);
+    const file = writeFile('a.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], file);
+
+    const copy = writeFile('b.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], copy);
+
+    expect(sentPayloads('watcher:filesDetected')).toHaveLength(1);
+    expect(sentPayloads('watcher:fileSkipped')).toEqual([
+      { type: 'session', path: copy, reason: 'already-queued' },
+    ]);
+  });
+
+  it("records a retried job's success even though it is no longer in flight", async () => {
+    await manager.startSessionWatcher(watchDir);
+    const file = writeFile('a.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], file);
+
+    manager.reportImportOutcome({ type: 'session', path: file, outcome: 'failed' });
+    manager.reportImportOutcome({ type: 'session', path: file, outcome: 'imported' });
+
+    expect(readLedger('session')).toHaveLength(1);
+  });
+
+  it('forgets files that were batched but never dispatched when the watcher stops', async () => {
+    await manager.startSessionWatcher(watchDir);
+    const file = writeFile('a.wav', Buffer.alloc(4096, 1));
+    watchers[0].emit('add', file);
+    await vi.advanceTimersByTimeAsync(0);
+    await manager.stopSessionWatcher(); // before the batch window elapses
+
+    await manager.startSessionWatcher(watchDir);
+    await detect(watchers[1], file);
+
+    expect(sentPayloads('watcher:filesDetected')).toHaveLength(1);
+    expect(sentPayloads('watcher:fileSkipped')).toEqual([]);
+  });
+});
+
+describe('ledger - loading and clearing', () => {
+  it('drops stale in-memory fingerprints when the ledger file is missing on restart', async () => {
+    await manager.startSessionWatcher(watchDir);
+    const file = writeFile('a.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], file);
+    manager.reportImportOutcome({ type: 'session', path: file, outcome: 'imported' });
+    expect(readLedger('session')).toHaveLength(1);
+
+    fs.rmSync(ledgerPath('session'));
+    await manager.stopSessionWatcher();
+    await manager.startSessionWatcher(watchDir);
+
+    const copy = writeFile('a-copy.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[1], copy);
+
+    expect(sentPayloads('watcher:filesDetected')).toHaveLength(2);
+  });
+
+  it('clearSessionLedger empties the ledger file and allows the file to be imported again', async () => {
+    await manager.startSessionWatcher(watchDir);
+    const file = writeFile('a.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], file);
+    manager.reportImportOutcome({ type: 'session', path: file, outcome: 'imported' });
+
+    manager.clearSessionLedger();
+    expect(readLedger('session')).toEqual([]);
+
+    const copy = writeFile('a-copy.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], copy);
+
+    expect(sentPayloads('watcher:filesDetected')).toHaveLength(2);
+  });
+
+  it('releases dispatched but unacknowledged files when the watcher restarts (renderer reload)', async () => {
+    await manager.startSessionWatcher(watchDir);
+    const file = writeFile('a.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], file);
+
+    await manager.stopSessionWatcher();
+    await manager.startSessionWatcher(watchDir);
+    const copy = writeFile('a-copy.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[1], copy);
+
+    expect(sentPayloads('watcher:filesDetected')).toHaveLength(2);
+    expect(sentPayloads('watcher:fileSkipped')).toEqual([]);
+
+    // A late acknowledgement for the first file is still recorded.
+    manager.reportImportOutcome({ type: 'session', path: file, outcome: 'imported' });
+    expect(readLedger('session')).toHaveLength(1);
+  });
+
+  it('clearSessionLedger also releases files that are still in flight', async () => {
+    await manager.startSessionWatcher(watchDir);
+    const file = writeFile('a.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], file);
+
+    manager.clearSessionLedger();
+    const copy = writeFile('a-copy.wav', Buffer.alloc(4096, 1));
+    await detect(watchers[0], copy);
+
+    expect(sentPayloads('watcher:filesDetected')).toHaveLength(2);
+    expect(sentPayloads('watcher:fileSkipped')).toEqual([]);
+  });
+});
