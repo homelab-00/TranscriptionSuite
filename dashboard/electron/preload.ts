@@ -171,6 +171,7 @@ export interface ElectronAPI {
         pass: boolean;
         fixCommand?: string;
         docsUrl?: string;
+        detail?: string;
       }>;
     }>;
     runGpuDiagnostic: () => Promise<{

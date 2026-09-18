@@ -149,4 +149,28 @@ describe('GpuHealthCard', () => {
     button.click();
     expect(onRun).toHaveBeenCalledTimes(1);
   });
+
+  it('failed check with a detail: shows what exactly was found wrong', () => {
+    render(
+      <GpuHealthCard
+        gpuDetected={true}
+        preflight={{
+          status: 'warning',
+          checks: [
+            {
+              name: 'CDI spec host paths exist',
+              pass: false,
+              fixCommand: 'sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml',
+              detail: 'Missing on host: /usr/lib/libnvidia-egl-wayland.so.1.1.21',
+            },
+          ],
+        }}
+        backendError={null}
+        onRunDiagnostic={() => {}}
+      />,
+    );
+    expect(
+      screen.getByText('Missing on host: /usr/lib/libnvidia-egl-wayland.so.1.1.21'),
+    ).toBeInTheDocument();
+  });
 });

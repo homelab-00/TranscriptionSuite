@@ -34,6 +34,10 @@ interface Env {
   driverMtime: number;
   charSymlinks: string[];
   lsmodOutput: string;
+  /** Raw /etc/cdi/nvidia.yaml content; null = unreadable. */
+  cdiContent: string | null;
+  /** Host paths (as referenced by the CDI spec) that exist on disk. */
+  existingPaths: string[];
 }
 
 function makeDeps(env: Env) {
@@ -41,7 +45,7 @@ function makeDeps(env: Env) {
     fsExists: (p: string) => {
       if (p === '/etc/cdi/nvidia.yaml') return env.cdiExists;
       if (p === '/dev/char') return true;
-      return false;
+      return env.existingPaths.includes(p);
     },
     readDir: (p: string) => {
       if (p === '/dev/char') return env.charSymlinks;
@@ -53,8 +57,25 @@ function makeDeps(env: Env) {
       return null;
     },
     runLsmod: () => env.lsmodOutput,
+    readFile: (p: string) => (p === '/etc/cdi/nvidia.yaml' ? env.cdiContent : null),
   };
 }
+
+// Trimmed-down shape of a real `nvidia-ctk cdi generate` spec: a device node
+// plus versioned library bind mounts, each with a hostPath/containerPath pair.
+function cdiSpec(hostPaths: string[]): string {
+  const mounts = hostPaths
+    .map(
+      (hp) =>
+        `        - hostPath: ${hp}\n          containerPath: ${hp}\n          options:\n            - ro\n`,
+    )
+    .join('');
+  return `cdiVersion: 0.5.0\nkind: nvidia.com/gpu\ncontainerEdits:\n    mounts:\n${mounts}`;
+}
+
+const LIB_GLX = '/usr/lib/libGLX_nvidia.so.615.71.09';
+const LIB_EGL_WAYLAND = '/usr/lib/libnvidia-egl-wayland.so.1.1.21';
+const LIB_EGL_WAYLAND2 = '/usr/lib/libnvidia-egl-wayland2.so.1.0.1';
 
 const healthyEnv: Env = {
   cdiExists: true,
@@ -62,6 +83,8 @@ const healthyEnv: Env = {
   driverMtime: 1_000_000_000,
   charSymlinks: ['195:0', '195:255', '512:0'],
   lsmodOutput: 'nvidia\nnvidia_modeset\nnvidia_uvm\nnvidia_drm\n',
+  cdiContent: cdiSpec([LIB_GLX, LIB_EGL_WAYLAND, LIB_EGL_WAYLAND2]),
+  existingPaths: [LIB_GLX, LIB_EGL_WAYLAND, LIB_EGL_WAYLAND2],
 };
 
 describe('validateGpuPreflight', () => {
@@ -86,6 +109,7 @@ describe('validateGpuPreflight', () => {
     expect(result.checks.map((c) => c.name)).toEqual([
       'CDI spec exists',
       'CDI spec newer than driver',
+      'CDI spec host paths exist',
       '/dev/char NVIDIA symlinks',
       'nvidia_uvm module loaded',
     ]);
@@ -146,5 +170,55 @@ describe('validateGpuPreflight', () => {
     const result = validateGpuPreflight('linux', deps);
     const driverCheck = result.checks.find((c) => c.name === 'CDI spec newer than driver');
     expect(driverCheck?.pass).toBe(true); // conservative: skip rather than false-warn
+  });
+
+  // Regression: a distro hook rewrote the spec in place (driver version string
+  // substitution) right after a driver upgrade, so its mtime looked fresh while
+  // it still bind-mounted a library version that the same upgrade had removed.
+  it('Linux + fresh-mtime spec referencing a removed library: status=warning, names the path', () => {
+    const result = validateGpuPreflight(
+      'linux',
+      makeDeps({ ...healthyEnv, existingPaths: [LIB_GLX, LIB_EGL_WAYLAND2] }),
+    );
+    expect(result.status).toBe('warning');
+    const mtimeCheck = result.checks.find((c) => c.name === 'CDI spec newer than driver');
+    expect(mtimeCheck?.pass).toBe(true);
+    const failed = result.checks.find((c) => c.name === 'CDI spec host paths exist');
+    expect(failed?.pass).toBe(false);
+    expect(failed?.fixCommand).toMatch(/nvidia-ctk cdi generate/);
+    expect(failed?.detail).toContain(LIB_EGL_WAYLAND);
+  });
+
+  it('Linux + several missing host paths: detail reports the first and how many more', () => {
+    const result = validateGpuPreflight('linux', makeDeps({ ...healthyEnv, existingPaths: [] }));
+    const failed = result.checks.find((c) => c.name === 'CDI spec host paths exist');
+    expect(failed?.pass).toBe(false);
+    expect(failed?.detail).toContain(LIB_GLX);
+    expect(failed?.detail).toContain('2 more');
+  });
+
+  it('Linux + quoted hostPath values: quotes are stripped before the existence check', () => {
+    const content = cdiSpec([`"${LIB_GLX}"`, `'${LIB_EGL_WAYLAND}'`]);
+    const result = validateGpuPreflight(
+      'linux',
+      makeDeps({ ...healthyEnv, cdiContent: content, existingPaths: [LIB_GLX, LIB_EGL_WAYLAND] }),
+    );
+    const check = result.checks.find((c) => c.name === 'CDI spec host paths exist');
+    expect(check?.pass).toBe(true);
+  });
+
+  it('Linux + missing CDI spec: host-path check passes vacuously (reported by check 1)', () => {
+    const result = validateGpuPreflight(
+      'linux',
+      makeDeps({ ...healthyEnv, cdiExists: false, cdiContent: null }),
+    );
+    const check = result.checks.find((c) => c.name === 'CDI spec host paths exist');
+    expect(check?.pass).toBe(true);
+    expect(check?.detail).toBeUndefined();
+  });
+
+  it('Linux + unreadable CDI spec: skips host-path check, no warning', () => {
+    const result = validateGpuPreflight('linux', makeDeps({ ...healthyEnv, cdiContent: null }));
+    expect(result.status).toBe('healthy'); // conservative: skip rather than false-warn
   });
 });
