@@ -8,6 +8,7 @@ export interface GpuPreflightCheckProp {
   pass: boolean;
   fixCommand?: string;
   docsUrl?: string;
+  detail?: string;
 }
 
 export interface GpuPreflightProp {
@@ -192,6 +193,9 @@ export function GpuHealthCard({
                     </>
                   ) : null}
                 </div>
+                {check.detail ? (
+                  <p className="m-0 text-xs break-all text-slate-400">{check.detail}</p>
+                ) : null}
                 {check.fixCommand ? <CopyableCommand cmd={check.fixCommand} /> : null}
               </div>
             ))}

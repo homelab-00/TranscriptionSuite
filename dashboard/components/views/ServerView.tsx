@@ -1580,6 +1580,7 @@ export const ServerView: React.FC<ServerViewProps> = ({
       pass: boolean;
       fixCommand?: string;
       docsUrl?: string;
+      detail?: string;
     }>;
   } | null>(null);
   const [gpuBackendError, setGpuBackendError] = useState<{

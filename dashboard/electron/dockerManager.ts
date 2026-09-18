@@ -287,6 +287,8 @@ export interface GpuPreflightCheck {
   fixCommand?: string;
   /** External URL with more context. Present only when pass=false. */
   docsUrl?: string;
+  /** What exactly was found wrong (e.g. the missing path). Present only when pass=false. */
+  detail?: string;
 }
 
 export interface GpuPreflightResult {
@@ -301,6 +303,8 @@ export interface GpuPreflightDeps {
   statMtime: (path: string) => number | null;
   /** Returns lsmod stdout (one module name per line). Empty string on failure. */
   runLsmod: () => string;
+  /** Returns the file's UTF-8 content or null when it cannot be read. */
+  readFile: (path: string) => string | null;
 }
 
 const NVIDIA_DRIVER_MTIME_PATHS: readonly string[] = ['/lib/modules', '/usr/lib/modules'];
@@ -317,6 +321,22 @@ function newestDriverMtime(statMtime: GpuPreflightDeps['statMtime']): number | n
     }
   }
   return newest;
+}
+
+/**
+ * Host paths the CDI spec asks the runtime to bind-mount or pass through.
+ * Line-based on purpose: the spec is machine-generated (`nvidia-ctk cdi
+ * generate`) with one `hostPath:` scalar per line, so no YAML parser is needed.
+ */
+function parseCdiHostPaths(specContent: string): string[] {
+  const paths: string[] = [];
+  for (const line of specContent.split('\n')) {
+    const match = /^\s*-?\s*hostPath:\s*(.+?)\s*$/.exec(line);
+    if (!match) continue;
+    const value = match[1].replace(/^(["'])(.*)\1$/, '$2');
+    if (value.startsWith('/')) paths.push(value);
+  }
+  return paths;
 }
 
 export function validateGpuPreflight(
@@ -353,7 +373,27 @@ export function validateGpuPreflight(
     fixCommand: cdiFresh ? undefined : `sudo nvidia-ctk cdi generate --output=${CDI_SPEC_PATH}`,
   });
 
-  // Check 3: /dev/char symlinks for major 195 (NVIDIA)
+  // Check 3: every host path the spec references still exists. The mtime check
+  // above cannot see this: distro hooks may rewrite the spec in place on a
+  // driver upgrade (Arch substitutes the driver version string), refreshing its
+  // mtime while mounts of independently-versioned libraries (egl-wayland, ...)
+  // still point at files the same upgrade removed. The runtime then refuses to
+  // create the container ("failed to fulfil mount request").
+  const cdiContent = cdiExists ? deps.readFile(CDI_SPEC_PATH) : null;
+  const missingHostPaths =
+    cdiContent === null ? [] : parseCdiHostPaths(cdiContent).filter((p) => !deps.fsExists(p));
+  const hostPathsOk = missingHostPaths.length === 0;
+  checks.push({
+    name: 'CDI spec host paths exist',
+    pass: hostPathsOk,
+    fixCommand: hostPathsOk ? undefined : `sudo nvidia-ctk cdi generate --output=${CDI_SPEC_PATH}`,
+    detail: hostPathsOk
+      ? undefined
+      : `Missing on host: ${missingHostPaths[0]}` +
+        (missingHostPaths.length > 1 ? ` (and ${missingHostPaths.length - 1} more)` : ''),
+  });
+
+  // Check 4: /dev/char symlinks for major 195 (NVIDIA)
   const charEntries = deps.fsExists('/dev/char') ? deps.readDir('/dev/char') : [];
   const hasNvidiaSymlinks = charEntries.some((e) => e.startsWith('195:'));
   checks.push({
@@ -367,7 +407,7 @@ export function validateGpuPreflight(
       : 'https://github.com/NVIDIA/nvidia-container-toolkit/issues/48',
   });
 
-  // Check 4: nvidia_uvm kernel module loaded
+  // Check 5: nvidia_uvm kernel module loaded
   const lsmodLines = deps
     .runLsmod()
     .split('\n')
@@ -437,6 +477,13 @@ export function runGpuPreflight(): GpuPreflightResult {
           .join('\n');
       } catch {
         return '';
+      }
+    },
+    readFile: (p) => {
+      try {
+        return fs.readFileSync(p, 'utf8');
+      } catch {
+        return null;
       }
     },
   };
