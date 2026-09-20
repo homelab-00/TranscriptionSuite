@@ -22,7 +22,7 @@
  */
 
 import React from 'react';
-import { render, fireEvent, act } from '@testing-library/react';
+import { render, fireEvent, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -97,6 +97,8 @@ vi.mock('../../src/hooks/useAdminStatus', () => ({
   }),
 }));
 
+const mockClearProcessedHistory = vi.fn();
+
 vi.mock('../../src/hooks/useNotebookWatcher', () => ({
   useNotebookWatcher: () => ({
     notebookWatchPath: '',
@@ -106,6 +108,7 @@ vi.mock('../../src/hooks/useNotebookWatcher', () => ({
     setWatchPath: vi.fn(),
     setNotebookWatchActive: vi.fn(),
     toggleNotebookWatch: vi.fn(),
+    clearProcessedHistory: mockClearProcessedHistory,
   }),
 }));
 
@@ -430,5 +433,22 @@ describe('NotebookView ImportTab — Canary language plumbing (gh-102 followup #
     // Auto-Detect refuse case above.
     expect(title).toBe('Source language required');
     expect(opts?.description).toBe('Loading languages — please try again in a moment.');
+  });
+
+  it('Clear processed-files history button calls the watcher hook (GH-311)', async () => {
+    render(React.createElement(NotebookView, { activeTab: NotebookTab.IMPORT }), {
+      wrapper: createWrapper(),
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Clear processed-files history' }));
+    });
+
+    expect(mockClearProcessedHistory).toHaveBeenCalledTimes(1);
   });
 });

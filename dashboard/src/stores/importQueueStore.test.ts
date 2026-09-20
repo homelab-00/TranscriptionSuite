@@ -116,6 +116,11 @@ function httpResult(status: number, body?: unknown): Response {
   return { status, json: async () => body } as unknown as Response;
 }
 
+function lastWatchLogMessage() {
+  const { watchLog } = getState();
+  return watchLog[watchLog.length - 1]?.message;
+}
+
 function makeJob(overrides: Partial<UnifiedImportJob> = {}): UnifiedImportJob {
   return {
     id: `test-${Date.now()}-${Math.random()}`,
@@ -641,10 +646,6 @@ describe('importQueueStore', () => {
       const { jobs } = getState();
       return jobs[jobs.length - 1].options;
     }
-    function lastWatchLogMessage() {
-      const { watchLog } = getState();
-      return watchLog[watchLog.length - 1]?.message;
-    }
 
     it('session: Canary + Spanish loaded → enqueues with language=es', () => {
       getState().updateSessionConfig({ language: 'Spanish' });
@@ -1055,6 +1056,246 @@ describe('importQueueStore', () => {
       const notebookJobs = selectNotebookJobs(getState());
       expect(notebookJobs).toHaveLength(3);
       expect(notebookJobs.every((j) => j.type.startsWith('notebook'))).toBe(true);
+    });
+  });
+
+  describe('GH-311 - watcher import acknowledgements', () => {
+    let reportImportOutcome: Mock;
+
+    const sessionTranscription = {
+      text: 'Hello world.',
+      segments: [{ text: 'Hello world.', start: 0, end: 1.5 }],
+      words: [],
+      language_probability: 0.99,
+      duration: 1.5,
+      num_speakers: 0,
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      resetStore();
+      vi.mocked(toast.warning).mockClear();
+      vi.mocked(toast.info).mockClear();
+      reportImportOutcome = vi.fn().mockResolvedValue(undefined);
+      (window as any).electronAPI = {
+        watcher: { reportImportOutcome },
+        fileIO: { writeText: vi.fn().mockResolvedValue(undefined) },
+        app: {
+          readLocalFile: vi.fn().mockResolvedValue({ buffer: new Uint8Array([1, 2, 3]).buffer }),
+        },
+      };
+      vi.mocked(getConfig).mockImplementation(
+        (key: string) =>
+          Promise.resolve(key === 'sessionImport.outputFormat' ? 'txt' : undefined) as never,
+      );
+      vi.mocked(apiClient.importAndTranscribe).mockResolvedValue({
+        job_id: 'server-job-1',
+      } as never);
+      vi.mocked(apiClient.uploadAndTranscribe).mockResolvedValue({
+        job_id: 'server-job-2',
+      } as never);
+    });
+
+    afterEach(() => {
+      delete (window as any).electronAPI;
+      vi.useRealTimers();
+    });
+
+    function outcomes() {
+      return reportImportOutcome.mock.calls.map((c) => c[0]);
+    }
+
+    it("reports 'dropped' for every file when the server is offline", () => {
+      getState().setWatcherServerConnected(false);
+      getState().handleFilesDetected({
+        type: 'notebook',
+        files: ['/watch/a.wav', '/watch/b.wav'],
+        count: 2,
+        fileMeta: [
+          { path: '/watch/a.wav', createdAt: '2026-09-15T10:00:00Z' },
+          { path: '/watch/b.wav', createdAt: '2026-09-15T10:10:00Z' },
+        ],
+      });
+      expect(getState().jobs).toHaveLength(0);
+      expect(outcomes()).toEqual([
+        { type: 'notebook', path: '/watch/a.wav', outcome: 'dropped' },
+        { type: 'notebook', path: '/watch/b.wav', outcome: 'dropped' },
+      ]);
+    });
+
+    it("reports 'dropped' when languages are still loading", () => {
+      getState().setLanguagesCache({ model: null, languages: [], loading: true });
+      getState().handleFilesDetected({
+        type: 'session',
+        files: ['/watch/early.wav'],
+        count: 1,
+        fileMeta: [],
+      });
+      expect(outcomes()).toEqual([
+        { type: 'session', path: '/watch/early.wav', outcome: 'dropped' },
+      ]);
+    });
+
+    it("reports 'dropped' when the active model needs an explicit Source Language", () => {
+      getState().updateSessionConfig({ language: 'Spanish' });
+      getState().setLanguagesCache({ model: 'nvidia/canary-1b-v2', languages: [], loading: false });
+      getState().handleFilesDetected({
+        type: 'session',
+        files: ['/watch/x.wav'],
+        count: 1,
+        fileMeta: [],
+      });
+      expect(outcomes()).toEqual([{ type: 'session', path: '/watch/x.wav', outcome: 'dropped' }]);
+    });
+
+    it("reports 'imported' once a session-auto job succeeds", async () => {
+      vi.mocked(apiClient.fetchTranscriptionResult).mockResolvedValue(
+        httpResult(200, {
+          job_id: 'server-job-1',
+          status: 'completed',
+          result: { job_id: 'server-job-1', transcription: sessionTranscription },
+        }),
+      );
+      getState().updateSessionConfig({ outputDir: '/out' });
+      getState().addFiles(['/watch/memo.wav'], 'session-auto');
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(getState().jobs[0].status).toBe('success');
+      expect(outcomes()).toEqual([
+        { type: 'session', path: '/watch/memo.wav', outcome: 'imported' },
+      ]);
+    });
+
+    it("reports 'failed' when a notebook-auto job errors", async () => {
+      vi.mocked(apiClient.getAdminStatus).mockResolvedValue({
+        models: {
+          job_tracker: { is_busy: false, result: { job_id: 'server-job-2', error: 'boom' } },
+        },
+      } as never);
+      getState().addFiles(['/watch/chunk.wav'], 'notebook-auto');
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(getState().jobs[0].status).toBe('error');
+      expect(outcomes()).toEqual([
+        { type: 'notebook', path: '/watch/chunk.wav', outcome: 'failed' },
+      ]);
+    });
+
+    it('never reports manual (File-backed) jobs', async () => {
+      vi.mocked(apiClient.fetchTranscriptionResult).mockResolvedValue(
+        httpResult(200, {
+          job_id: 'server-job-1',
+          status: 'completed',
+          result: { job_id: 'server-job-1', transcription: sessionTranscription },
+        }),
+      );
+      getState().updateSessionConfig({ outputDir: '/out' });
+      getState().addFiles([new File(['audio'], 'memo.m4a')], 'session-normal');
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(getState().jobs[0].status).toBe('success');
+      expect(reportImportOutcome).not.toHaveBeenCalled();
+    });
+
+    it("reports 'dropped' when a pending auto job is removed from the queue", () => {
+      getState().pauseQueue();
+      getState().addFiles(['/watch/a.wav'], 'session-auto');
+      const id = getState().jobs[0].id;
+
+      getState().removeJob(id);
+
+      expect(getState().jobs).toHaveLength(0);
+      expect(outcomes()).toEqual([{ type: 'session', path: '/watch/a.wav', outcome: 'dropped' }]);
+    });
+
+    it("reports 'dropped' for pending auto jobs cleared from the queue", () => {
+      getState().pauseQueue();
+      getState().addFiles(['/watch/a.wav', '/watch/b.wav'], 'notebook-auto');
+
+      getState().clearAll();
+
+      expect(getState().jobs).toHaveLength(0);
+      expect(outcomes()).toEqual([
+        { type: 'notebook', path: '/watch/a.wav', outcome: 'dropped' },
+        { type: 'notebook', path: '/watch/b.wav', outcome: 'dropped' },
+      ]);
+    });
+
+    it('does not throw when the preload lacks reportImportOutcome (older build)', () => {
+      (window as any).electronAPI = { watcher: {} };
+      getState().setWatcherServerConnected(false);
+      expect(() =>
+        getState().handleFilesDetected({
+          type: 'session',
+          files: ['/watch/a.wav'],
+          count: 1,
+          fileMeta: [],
+        }),
+      ).not.toThrow();
+    });
+  });
+
+  describe('GH-311 - handleFileSkipped', () => {
+    beforeEach(() => {
+      resetStore();
+      vi.mocked(toast.warning).mockClear();
+      vi.mocked(toast.info).mockClear();
+    });
+
+    it('logs and warns for an unreadable file', () => {
+      getState().handleFileSkipped({
+        type: 'session',
+        path: '/watch/broken.wav',
+        reason: 'unreadable',
+      });
+
+      const msg = 'Session Watch skipped broken.wav: the file could not be read';
+      expect(toast.warning).toHaveBeenCalledWith(msg);
+      expect(lastWatchLogMessage()).toBe(msg);
+      const log = getState().watchLog;
+      expect(log[log.length - 1].level).toBe('warn');
+    });
+
+    it('logs and informs for a duplicate, pointing at the history reset', () => {
+      getState().handleFileSkipped({
+        type: 'notebook',
+        path: '/watch/chunk_00.wav',
+        reason: 'already-imported',
+      });
+
+      expect(toast.info).toHaveBeenCalledWith(
+        expect.stringContaining('Clear processed-files history'),
+      );
+      expect(lastWatchLogMessage()).toContain('Notebook Watch skipped chunk_00.wav');
+      expect(toast.warning).not.toHaveBeenCalled();
+    });
+
+    it('warns for a still-empty file and explains how to import it once written', () => {
+      getState().handleFileSkipped({
+        type: 'session',
+        path: '/watch/rec.wav',
+        reason: 'empty',
+      });
+
+      const msg =
+        'Session Watch skipped rec.wav: the file is still empty (if it is still being written, move it out of the folder and back in once it is complete)';
+      expect(toast.warning).toHaveBeenCalledWith(msg);
+      expect(lastWatchLogMessage()).toBe(msg);
+      const log = getState().watchLog;
+      expect(log[log.length - 1].level).toBe('warn');
+    });
+
+    it('informs (without warning) for a file already queued under another name', () => {
+      getState().handleFileSkipped({
+        type: 'session',
+        path: '/watch/dup.wav',
+        reason: 'already-queued',
+      });
+
+      expect(toast.info).toHaveBeenCalledWith(
+        expect.stringContaining('an identical file is already queued'),
+      );
+      expect(toast.warning).not.toHaveBeenCalled();
     });
   });
 });

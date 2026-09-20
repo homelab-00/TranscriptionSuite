@@ -1602,6 +1602,7 @@ const ImportTab = ({
     setNotebookWatchActive,
     setWatchPath,
     notebookWatchAccessible,
+    clearProcessedHistory,
   } = useNotebookWatcher();
   const sessionWatchPath = useImportQueueStore((s) => s.sessionWatchPath);
   const watchConflict =
@@ -2078,6 +2079,20 @@ const ImportTab = ({
               }
               disabled={!notebookWatchPath || Boolean(watchConflict)}
             />
+
+            {/* GH-311: reset the imported files ledger without restarting the app */}
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">
+                Files already imported through this watcher are skipped, even under another name.
+              </p>
+              <button
+                onClick={clearProcessedHistory}
+                title="Forget which files were imported so they can be imported again"
+                className="shrink-0 text-xs whitespace-nowrap text-slate-500 transition-colors hover:text-slate-400"
+              >
+                Clear processed-files history
+              </button>
+            </div>
 
             {/* 4.3 — activity log (collapsible) */}
             {watchLog.length > 0 && (

@@ -2,6 +2,7 @@
  * useWatcherFilesBridge — singleton bridge that subscribes to
  * `electronAPI.watcher.onFilesDetected` and forwards every payload to
  * `useImportQueueStore.handleFilesDetected`.
+ * Also forwards `watcher:fileSkipped` to `handleFileSkipped` (GH-311).
  *
  * Why this exists (Issue #94):
  *   The preload's `onFilesDetected` registers a fresh `ipcRenderer.on(
@@ -22,9 +23,12 @@ import { useImportQueueStore } from '../stores/importQueueStore';
 
 type FilesDetectedHandler = ReturnType<typeof useImportQueueStore.getState>['handleFilesDetected'];
 type OnFilesDetected = ((cb: FilesDetectedHandler) => () => void) | undefined;
+type FileSkippedHandler = ReturnType<typeof useImportQueueStore.getState>['handleFileSkipped'];
+type OnFileSkipped = ((cb: FileSkippedHandler) => () => void) | undefined;
 
 export function useWatcherFilesBridge(): void {
   const handleFilesDetected = useImportQueueStore((s) => s.handleFilesDetected);
+  const handleFileSkipped = useImportQueueStore((s) => s.handleFileSkipped);
 
   useEffect(() => {
     const electronAPI = (window as any).electronAPI;
@@ -32,4 +36,12 @@ export function useWatcherFilesBridge(): void {
     if (!onFilesDetected) return;
     return onFilesDetected(handleFilesDetected);
   }, [handleFilesDetected]);
+
+  // GH-311: skipped-file notices ride the same singleton so they cannot double up either.
+  useEffect(() => {
+    const electronAPI = (window as any).electronAPI;
+    const onFileSkipped: OnFileSkipped = electronAPI?.watcher?.onFileSkipped;
+    if (!onFileSkipped) return;
+    return onFileSkipped(handleFileSkipped);
+  }, [handleFileSkipped]);
 }

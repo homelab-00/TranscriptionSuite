@@ -61,7 +61,7 @@ import {
 import { pasteAtCursor } from './pasteAtCursor.js';
 import { ensureDesktopFileInstalled } from './desktopIntegration.js';
 import { reliableWriteText, cleanupClipboard } from './clipboardWayland.js';
-import { WatcherManager } from './watcherManager.js';
+import { WatcherManager, type ImportOutcomePayload } from './watcherManager.js';
 
 // When launched via a wrapper (e.g. AppImage through GearLevel), the stdout/stderr
 // pipes may already be closed.  Any console.log/warn/error call will then raise
@@ -2662,6 +2662,10 @@ ipcMain.handle('watcher:checkPath', async (_event, folderPath: string) => {
   } catch {
     return false;
   }
+});
+
+ipcMain.handle('watcher:reportImportOutcome', async (_event, payload: ImportOutcomePayload) => {
+  watcherManager.reportImportOutcome(payload);
 });
 
 // ─── Shortcuts IPC Handlers ─────────────────────────────────────────────────
