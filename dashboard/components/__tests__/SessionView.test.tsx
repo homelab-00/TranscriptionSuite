@@ -409,13 +409,15 @@ describe('Start Recording disabled-reason surface', () => {
     };
   });
 
-  it('shows "Server is not running" warning when clientRunning is false', () => {
+  it('shows "Client link is not started" warning when clientRunning is false', () => {
     const props = { ...baseProps, clientRunning: false };
     render(React.createElement(SessionView, props), { wrapper: createWrapper() });
 
     const warning = screen.getByTestId('recording-disabled-reason');
     expect(warning).toBeDefined();
-    expect(warning.textContent).toBe('Server is not running — start it from the Server view.');
+    expect(warning.textContent).toBe(
+      'Client link is not started - press Start Local in the Client Link card above.',
+    );
   });
 
   it('shows "Server is starting or model is loading" warning when reachable but not ready', () => {
@@ -478,7 +480,9 @@ describe('Start Recording disabled-reason surface', () => {
     render(React.createElement(SessionView, props), { wrapper: createWrapper() });
 
     const warning = screen.getByTestId('recording-disabled-reason');
-    expect(warning.textContent).toBe('Server is not running — start it from the Server view.');
+    expect(warning.textContent).toBe(
+      'Client link is not started - press Start Local in the Client Link card above.',
+    );
     // Existing model warning ALSO renders (its gate is independent of the
     // server-state warning).
     expect(screen.getByText('Main model not selected.')).toBeDefined();
@@ -547,7 +551,9 @@ describe('Start Recording disabled-reason surface', () => {
     render(React.createElement(SessionView, props), { wrapper: createWrapper() });
 
     const warning = screen.getByTestId('recording-disabled-reason');
-    expect(warning.textContent).toBe('Server is not running — start it from the Server view.');
+    expect(warning.textContent).toBe(
+      'Client link is not started - press Start Local in the Client Link card above.',
+    );
   });
 
   it('server-starting message wins priority over isLive', () => {

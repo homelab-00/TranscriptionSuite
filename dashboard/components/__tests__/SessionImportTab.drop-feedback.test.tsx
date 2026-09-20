@@ -158,6 +158,14 @@ vi.mock('sonner', () => ({
 }));
 
 import { SessionImportTab } from '../views/SessionImportTab';
+
+// GH-302: the Source Language selection lives in SessionView and is handed
+// down. Standalone renders here supply the same three props the parent does.
+const langProps = {
+  mainLanguage: 'Auto Detect',
+  mainTranslate: false,
+  mainBidiTarget: 'Off',
+};
 import { useAriaAnnouncerStore } from '../../src/stores/ariaAnnouncerStore';
 import { useNotificationsStore } from '../../src/stores/notificationsStore';
 
@@ -181,7 +189,7 @@ function dropFiles(files: File[]): { dataTransfer: { files: FileList } } {
 }
 
 async function renderAndSettle() {
-  const utils = render(React.createElement(SessionImportTab));
+  const utils = render(React.createElement(SessionImportTab, langProps));
   // Wait for mount-time getConfig promises to resolve.
   await act(async () => {
     await Promise.resolve();
@@ -281,7 +289,7 @@ describe('SessionImportTab drop feedback (GH-210)', () => {
       },
     ];
     await act(async () => {
-      rerender(React.createElement(SessionImportTab));
+      rerender(React.createElement(SessionImportTab, langProps));
     });
 
     expect(Element.prototype.scrollIntoView).toHaveBeenCalled();

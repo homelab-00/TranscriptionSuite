@@ -56,6 +56,10 @@ let mockLanguageSet: MockLanguageSet = {
 
 const mockToastError = vi.fn();
 const mockGetConfig = vi.fn();
+// GH-302 - records every props object SessionView hands the import surface,
+// so the parent-to-child seam can be asserted. Every other SessionView test
+// stubs this child out entirely, which is exactly why the seam regressed.
+const mockImportTabProps = vi.fn();
 
 vi.mock('../../src/hooks/useTranscription', () => ({
   useTranscription: () => mockTranscription,
@@ -184,7 +188,10 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('../views/SessionImportTab', () => ({
-  SessionImportTab: () => React.createElement('div', { 'data-testid': 'session-import-tab' }),
+  SessionImportTab: (props: Record<string, unknown>) => {
+    mockImportTabProps(props);
+    return React.createElement('div', { 'data-testid': 'session-import-tab' });
+  },
 }));
 vi.mock('../PopOutWindow', () => ({ PopOutWindow: () => null }));
 vi.mock('../views/FullscreenVisualizer', () => ({ FullscreenVisualizer: () => null }));
@@ -275,6 +282,7 @@ describe('SessionView — Canary language guards (gh-102)', () => {
     mockTranscription.start.mockReset();
     mockTranscription.reset.mockReset();
     mockToastError.mockReset();
+    mockImportTabProps.mockReset();
 
     // Default: no persisted language (mainLanguage starts at "Auto Detect").
     mockGetConfig.mockResolvedValue(undefined);
@@ -398,6 +406,49 @@ describe('SessionView — Canary language guards (gh-102)', () => {
     // was called from the snap effect on placeholder data.)
     const mainLanguageWrites = setConfigCalls.filter((c) => c.key === 'session.mainLanguage');
     expect(mainLanguageWrites).toEqual([]);
+  });
+
+  // ── GH-302 - the parent-to-child language seam ──────────────────────────
+  //
+  // SessionView owns the Source Language selection and snaps an invalid one
+  // (Auto Detect on Canary) to English once the language list resolves. The
+  // inline Transcribe File surface below it is mounted once at app start and
+  // only hidden when collapsed, so the corrected value has to travel down as
+  // a prop. Pre-fix SessionView passed nothing but ffmpegAvailable and the
+  // child kept its own mount-time copy, so the dropdown read English while
+  // the import guard still saw Auto Detect. Every other SessionView test
+  // stubs the child out and every SessionImportTab test renders it
+  // standalone, which is why nothing caught this.
+  it('GH-302: hands the corrected Source Language down to the import surface as a prop', async () => {
+    // Persisted Auto Detect is what a pre-gh-81 install leaves behind and is
+    // invalid for Canary.
+    mockGetConfig.mockImplementation(async (key: string) => {
+      if (key === 'session.mainLanguage') return 'Auto Detect';
+      return undefined;
+    });
+    mockLanguageSet = {
+      languages: NEMO_LANGUAGES_FOR_TEST,
+      loading: false,
+    };
+
+    render(React.createElement(SessionView, baseProps), { wrapper: createWrapper() });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await screen.findByText('Start Recording');
+
+    await waitFor(() => {
+      const last = mockImportTabProps.mock.calls.at(-1)?.[0] as Record<string, unknown> | undefined;
+      expect(last?.mainLanguage).toBe('English');
+    });
+
+    // The translation envelope travels with it, so the import surface builds
+    // the same payload handleStartRecording builds.
+    const last = mockImportTabProps.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(last.mainTranslate).toBe(false);
+    expect(last.mainBidiTarget).toBe('Off');
   });
 
   // Tray-menu Start Recording must run the same gh-102 guard the on-screen

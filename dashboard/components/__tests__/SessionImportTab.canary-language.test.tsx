@@ -1,9 +1,11 @@
 /**
  * SessionImportTab — Canary language plumbing (gh-102 followup, issue 102 reopened)
  *
- * Verifies the file-import surface honors the persisted `session.mainLanguage`
- * (and translation-target keys when Canary bidi is active). Mirrors the
- * live-recording guard pattern at SessionView.handleStartRecording (gh-102):
+ * Verifies the file-import surface honors the Source Language selection
+ * (and the translation target when Canary bidi is active) that SessionView
+ * owns and passes down as props (GH-302 moved these off a mount-time config
+ * read). Mirrors the live-recording guard pattern at
+ * SessionView.handleStartRecording (gh-102):
  *
  *   1. Canary + Source Language = Spanish, drop file → addFiles called with
  *      options.language="es".
@@ -18,6 +20,8 @@
  *   5. Languages still loading when user drops a file (Canary active) →
  *      refuse-with-toast using "loading languages — please try again in a
  *      moment." wording (mirrors handleStartRecording's loading branch).
+ *   6. GH-302 - a mainLanguage prop update after mount is honored by both the
+ *      drop guard and the Folder Watch session config.
  */
 
 import React from 'react';
@@ -50,6 +54,7 @@ let mockLanguageSet: MockLanguageSet = {
 const mockToastError = vi.fn();
 const mockGetConfig = vi.fn();
 const mockAddFiles = vi.fn();
+const mockUpdateSessionConfig = vi.fn();
 
 vi.mock('../../src/hooks/useLanguages', () => ({
   useLanguages: () => ({
@@ -111,7 +116,7 @@ vi.mock('../../src/stores/importQueueStore', () => {
     clearFinished: vi.fn(),
     pauseQueue: vi.fn(),
     resumeQueue: vi.fn(),
-    updateSessionConfig: vi.fn(),
+    updateSessionConfig: (...args: unknown[]) => mockUpdateSessionConfig(...args),
     setLanguagesCache: vi.fn(),
     clearWatchLog: vi.fn(),
   };
@@ -193,12 +198,21 @@ function dropFile(file: File): { dataTransfer: { files: FileList } } {
   return { dataTransfer: { files: list } };
 }
 
+// GH-302: the Source Language selection is owned by SessionView and handed
+// down. Standalone renders here supply the same three props the parent does.
+const langProps = {
+  mainLanguage: 'Auto Detect',
+  mainTranslate: false,
+  mainBidiTarget: 'Off',
+};
+
 describe('SessionImportTab — Canary language plumbing (gh-102 followup)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockToastError.mockReset();
     mockAddFiles.mockReset();
     mockGetConfig.mockReset();
+    mockUpdateSessionConfig.mockReset();
 
     // Default: no persisted config keys.
     mockGetConfig.mockResolvedValue(undefined);
@@ -223,13 +237,10 @@ describe('SessionImportTab — Canary language plumbing (gh-102 followup)', () =
     };
   });
 
-  it('Canary + Spanish persisted: drop file enqueues with options.language="es"', async () => {
-    mockGetConfig.mockImplementation(async (key: string) => {
-      if (key === 'session.mainLanguage') return 'Spanish';
-      return undefined;
-    });
-
-    const { container } = render(React.createElement(SessionImportTab));
+  it('Canary + Spanish selected: drop file enqueues with options.language="es"', async () => {
+    const { container } = render(
+      React.createElement(SessionImportTab, { ...langProps, mainLanguage: 'Spanish' }),
+    );
 
     // Wait for mount-time getConfig promises to resolve.
     await act(async () => {
@@ -255,12 +266,9 @@ describe('SessionImportTab — Canary language plumbing (gh-102 followup)', () =
   });
 
   it('Canary + Auto Detect: drop refuses with toast.error and does not enqueue', async () => {
-    mockGetConfig.mockImplementation(async (key: string) => {
-      if (key === 'session.mainLanguage') return 'Auto Detect';
-      return undefined;
-    });
-
-    const { container } = render(React.createElement(SessionImportTab));
+    const { container } = render(
+      React.createElement(SessionImportTab, { ...langProps, mainLanguage: 'Auto Detect' }),
+    );
 
     await act(async () => {
       await Promise.resolve();
@@ -282,16 +290,16 @@ describe('SessionImportTab — Canary language plumbing (gh-102 followup)', () =
   });
 
   it('Canary + bidi (English source, French target): drop enqueues with translation fields', async () => {
-    mockGetConfig.mockImplementation(async (key: string) => {
-      if (key === 'session.mainLanguage') return 'English';
-      if (key === 'session.mainBidiTarget') return 'French';
-      // mainTranslate is irrelevant when bidi is active (Canary path uses
-      // mainBidiTarget !== 'Off' as the activation signal — same shape
-      // SessionView.handleStartRecording produces).
-      return undefined;
-    });
-
-    const { container } = render(React.createElement(SessionImportTab));
+    // mainTranslate is irrelevant when bidi is active (Canary path uses
+    // mainBidiTarget !== 'Off' as the activation signal — same shape
+    // SessionView.handleStartRecording produces).
+    const { container } = render(
+      React.createElement(SessionImportTab, {
+        ...langProps,
+        mainLanguage: 'English',
+        mainBidiTarget: 'French',
+      }),
+    );
 
     await act(async () => {
       await Promise.resolve();
@@ -318,12 +326,10 @@ describe('SessionImportTab — Canary language plumbing (gh-102 followup)', () =
       loading: false,
       backendType: 'whisper',
     };
-    mockGetConfig.mockImplementation(async (key: string) => {
-      if (key === 'session.mainLanguage') return 'Auto Detect';
-      return undefined;
-    });
 
-    const { container } = render(React.createElement(SessionImportTab));
+    const { container } = render(
+      React.createElement(SessionImportTab, { ...langProps, mainLanguage: 'Auto Detect' }),
+    );
 
     await act(async () => {
       await Promise.resolve();
@@ -349,12 +355,10 @@ describe('SessionImportTab — Canary language plumbing (gh-102 followup)', () =
       loading: true,
       backendType: 'canary',
     };
-    mockGetConfig.mockImplementation(async (key: string) => {
-      if (key === 'session.mainLanguage') return 'Spanish';
-      return undefined;
-    });
 
-    const { container } = render(React.createElement(SessionImportTab));
+    const { container } = render(
+      React.createElement(SessionImportTab, { ...langProps, mainLanguage: 'Spanish' }),
+    );
 
     await act(async () => {
       await Promise.resolve();
@@ -371,5 +375,63 @@ describe('SessionImportTab — Canary language plumbing (gh-102 followup)', () =
     const [title, opts] = mockToastError.mock.calls[0] as [string, { description?: string }];
     expect(title).toMatch(/source language required/i);
     expect(String(opts?.description ?? '')).toMatch(/loading languages/i);
+  });
+
+  // ── GH-302 - the language arrives as a prop, never as a mount-time copy ──
+  //
+  // Since PR 282 this surface lives inside the collapsed Transcribe File
+  // expander, which hides with the `hidden` attribute instead of unmounting,
+  // so it mounts exactly once at app start. Any language picked (or
+  // auto-corrected by SessionView once the Canary list resolves) afterwards
+  // has to reach it as a prop update. Pre-fix it kept its own state hydrated
+  // once from config, so the drop below used a stale Auto Detect and was
+  // refused with the toast the GH-302 reporter screenshotted.
+
+  it('GH-302: a mainLanguage prop update is honored on the next drop', async () => {
+    const { container, rerender } = render(
+      React.createElement(SessionImportTab, { ...langProps, mainLanguage: 'Auto Detect' }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // SessionView snaps the invalid Auto Detect to English once the Canary
+    // language list resolves and re-renders this child with the new value.
+    await act(async () => {
+      rerender(React.createElement(SessionImportTab, { ...langProps, mainLanguage: 'English' }));
+    });
+
+    const dropZone = container.querySelector('.cursor-pointer');
+    expect(dropZone).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.drop(dropZone as Element, dropFile(buildFile()));
+    });
+
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(mockAddFiles).toHaveBeenCalledTimes(1);
+    const [, , options] = mockAddFiles.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
+    expect(options.language).toBe('en');
+  });
+
+  it('GH-302: the Folder Watch session config follows the mainLanguage prop', async () => {
+    const { rerender } = render(
+      React.createElement(SessionImportTab, { ...langProps, mainLanguage: 'Auto Detect' }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      rerender(React.createElement(SessionImportTab, { ...langProps, mainLanguage: 'Spanish' }));
+    });
+
+    expect(mockUpdateSessionConfig).toHaveBeenCalled();
+    const lastConfig = mockUpdateSessionConfig.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(lastConfig.language).toBe('Spanish');
   });
 });
