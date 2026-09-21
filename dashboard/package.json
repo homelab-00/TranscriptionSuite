@@ -83,7 +83,7 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.70.1",
     "vite": "7.3.6",
-    "vitest": "4.1.8",
+    "vitest": "4.1.11",
     "yaml": "2.9.1"
   },
   "build": {
@@ -227,7 +227,7 @@
     ]
   },
   "overrides": {
-    "js-yaml": "4.3.1",
+    "js-yaml": "4.3.2",
     "minimatch": "10.2.4",
     "form-data": "4.0.6",
     "esbuild": "0.28.1",
