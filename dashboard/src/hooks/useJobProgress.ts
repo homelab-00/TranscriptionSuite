@@ -20,6 +20,7 @@ export function useJobProgress(active: boolean): {
   const tracker = jobTrackerFromAdminStatus(admin.status);
   const [, forceTick] = useState(0);
   const lastChangeRef = useRef<{ key: string; at: number }>({ key: '', at: Date.now() / 1000 });
+  const wasActiveRef = useRef(false);
 
   // re-render every second while active so elapsed/ETA tick smoothly
   useEffect(() => {
@@ -34,7 +35,13 @@ export function useJobProgress(active: boolean): {
     tracker?.progress?.total,
     tracker?.progress?.phase,
   ]);
-  if (key !== lastChangeRef.current.key) {
+  // The host view never unmounts, so this hook outlives individual jobs. Start
+  // the stall clock when a job becomes active; otherwise the idle key keeps a
+  // timestamp from mount (or from the end of the previous job) and every job
+  // started 2+ idle minutes later reads as stalled from its first frame.
+  const becameActive = active && !wasActiveRef.current;
+  wasActiveRef.current = active;
+  if (becameActive || key !== lastChangeRef.current.key) {
     lastChangeRef.current = { key, at: now };
   }
   const stalled = active && now - lastChangeRef.current.at > STALL_AFTER_SECONDS;
