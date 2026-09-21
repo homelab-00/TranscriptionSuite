@@ -86,12 +86,10 @@ function resolveConfiguredMainModel(cfg: Record<string, unknown>): string {
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const { status: adminStatus } = useAdminStatus();
   const mlxFeature = (adminStatus?.models as any)?.features?.mlx as
-    | { available: boolean; reason: string }
-    | undefined;
+    { available: boolean; reason: string } | undefined;
   const metalSupported = mlxFeature?.available ?? false;
   const diarizationFeature = (adminStatus?.models as any)?.features?.diarization as
-    | { available: boolean; reason: string }
-    | undefined;
+    { available: boolean; reason: string } | undefined;
   const [activeTab, setActiveTab] = useState('App');
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [showAuthToken, setShowAuthToken] = useState(false);

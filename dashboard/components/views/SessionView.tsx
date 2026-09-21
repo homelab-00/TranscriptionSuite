@@ -936,8 +936,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // GH-209 gate, same contract the Import tab uses: the server computes this
   // ONCE at container startup, so adding a token in Settings needs a restart.
   const diarizationFeature = (admin.status?.models as any)?.features?.diarization as
-    | { available: boolean; reason: string }
-    | undefined;
+    { available: boolean; reason: string } | undefined;
   const diarizationUnavailable = diarizationFeature?.available === false;
   const effectiveDiarization = diarizationUnavailable ? false : diarizationEnabled;
 

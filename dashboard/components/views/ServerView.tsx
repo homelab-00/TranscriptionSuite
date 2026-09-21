@@ -405,8 +405,7 @@ export const ServerView: React.FC<ServerViewProps> = ({
 
   // Metal (Apple Silicon) detection – derived from server-side feature check
   const mlxFeature = (adminStatus?.models as any)?.features?.mlx as
-    | { available: boolean; reason: string }
-    | undefined;
+    { available: boolean; reason: string } | undefined;
   const metalSupported = mlxFeature?.available ?? false;
   const [isAppleSilicon] = useState<boolean>(() => {
     return (window as any).electronAPI?.app?.getArch?.() === 'arm64';

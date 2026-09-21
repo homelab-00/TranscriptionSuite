@@ -76,8 +76,7 @@ function installExecFileRouter() {
   mockExecFile.mockImplementation(
     (cmd: string, args: string[], optsOrCb: unknown, maybeCb?: unknown) => {
       const cb = (typeof optsOrCb === 'function' ? optsOrCb : maybeCb) as
-        | ((err: Error | null, result?: { stdout: string }) => void)
-        | undefined;
+        ((err: Error | null, result?: { stdout: string }) => void) | undefined;
       if (!cb) return;
       if (cmd === 'wl-copy') {
         return state.wlCopyAvailable ? cb(null, { stdout: 'wl-copy 1.0' }) : cb(enoent());

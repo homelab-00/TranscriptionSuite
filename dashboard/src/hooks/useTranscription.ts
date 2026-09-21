@@ -18,12 +18,7 @@ import {
 } from '../services/resultPolling';
 
 export type TranscriptionStatus =
-  | 'idle'
-  | 'connecting'
-  | 'recording'
-  | 'processing'
-  | 'complete'
-  | 'error';
+  'idle' | 'connecting' | 'recording' | 'processing' | 'complete' | 'error';
 
 /** Structured payload of a salvage-caused session_busy rejection (GH-239). */
 export interface BusyInfo {
