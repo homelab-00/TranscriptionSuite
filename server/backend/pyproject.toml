@@ -67,9 +67,10 @@ whisper = [
     "whisperx>=3.8.1",       # WhisperX: faster-whisper + wav2vec2 alignment + diarization
     # NOTE (Dependabot): security floor for nltk, pulled in transitively by
     # whisperx (unbounded). GHSA-p4gq-832x-fm9v / CVE-2026-54293 (URL-encoded
-    # path traversal in nltk.data.load) is patched in 3.10.0; whisperx allows
+    # path traversal in nltk.data.load) is patched in 3.10.0; the later nltk
+    # advisories flagged by Dependabot are patched in 3.10.3. whisperx allows
     # it, so pin the floor.
-    "nltk>=3.10.0",
+    "nltk>=3.10.3",
 ]
 nemo = [
     "nemo_toolkit[asr]>=2.7.0",
