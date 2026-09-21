@@ -409,7 +409,7 @@ export const SessionView: React.FC<SessionViewProps> = ({
     ? `Live Mode is not compatible with "${activeLiveModel}" — only faster-whisper and whisper.cpp (GGML) models are supported. Set a supported model as the Live Mode model in Server settings.`
     : 'Live Mode only supports faster-whisper and whisper.cpp (GGML) models. Change the Live Mode model in Server settings.';
   const liveModeDisabledReason = (() => {
-    if (!clientRunning) return 'Server is not running';
+    if (!clientRunning) return 'Client link is not started';
     if (!serverConnection.ready) return 'Server is not ready';
     if (liveModelDisabled) return 'No live model selected — configure one in Server settings';
     if (!liveModeWhisperOnlyCompatible)
@@ -431,7 +431,8 @@ export const SessionView: React.FC<SessionViewProps> = ({
   // state any time the user starts Live Mode while main transcription is idle,
   // because the two state machines are independent.
   const recordingDisabledReason = (() => {
-    if (!clientRunning) return 'Server is not running — start it from the Server view.';
+    if (!clientRunning)
+      return 'Client link is not started - press Start Local in the Client Link card above.';
     if (!serverConnection.ready)
       return 'Server is starting or model is loading — check the Server view for progress.';
     if (isLive) return 'Live Mode is active — stop Live Mode to start recording.';
@@ -2716,8 +2717,20 @@ export const SessionView: React.FC<SessionViewProps> = ({
                         re-arms a persisted watch at app start instead of on
                         first visit. */}
                       <div hidden={!transcribeFileOpen} className="mt-4">
+                        {/* GH-302: the language / translation selection is
+                          passed down rather than re-read from config by the
+                          child. Because the child never unmounts (see above)
+                          a mount-time read would freeze at whatever was
+                          persisted when the app started, so the import guard
+                          would refuse a drop on Canary while the dropdown
+                          right here already showed a valid language. Raw
+                          state is passed: the child applies canTranslate
+                          itself. */}
                         <SessionImportTab
                           ffmpegAvailable={serverConnection.details?.ffmpeg_available}
+                          mainLanguage={mainLanguage}
+                          mainTranslate={mainTranslate}
+                          mainBidiTarget={mainBidiTarget}
                         />
                       </div>
                     </div>

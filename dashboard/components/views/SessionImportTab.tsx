@@ -66,9 +66,24 @@ interface SessionImportTabProps {
    * server predates the field and no warning should be shown.
    */
   ffmpegAvailable?: boolean;
+  /**
+   * Source Language selection owned by SessionView (GH-302). Required, not
+   * optional with a default: a default would silently recreate the
+   * forgot-to-wire-it failure this prop exists to fix.
+   */
+  mainLanguage: string;
+  /** Translate-to-English toggle owned by SessionView (GH-302). */
+  mainTranslate: boolean;
+  /** Canary bidirectional translation target owned by SessionView (GH-302). */
+  mainBidiTarget: string;
 }
 
-export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvailable }) => {
+export const SessionImportTab: React.FC<SessionImportTabProps> = ({
+  ffmpegAvailable,
+  mainLanguage,
+  mainTranslate,
+  mainBidiTarget,
+}) => {
   // Zustand store
   const jobs = useImportQueueStore(useShallow(selectSessionJobs));
   const isPaused = useImportQueueStore((s) => s.isPaused);
@@ -163,15 +178,21 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
     : backendType !== 'vibevoice_asr';
 
   // gh-102 followup: file-import surface honors the same language /
-  // translation selection the live-recording surface persists from
-  // SessionView. We mirror the SessionView load pattern (SessionView.tsx:393–
-  // 412): read session.mainLanguage + session.mainTranslate +
-  // session.mainBidiTarget on mount, then plumb them through addFiles options
-  // in handleFiles. The persisted picker is the single source of truth — no
-  // duplicate UI here.
-  const [mainLanguage, setMainLanguage] = useState<string>('Auto Detect');
-  const [mainTranslate, setMainTranslate] = useState<boolean>(false);
-  const [mainBidiTarget, setMainBidiTarget] = useState<string>('Off');
+  // translation selection the live-recording surface uses, then plumbs them
+  // through addFiles options in handleFiles. The Source Language picker in
+  // SessionView is the single source of truth - no duplicate UI here.
+  //
+  // GH-302: mainLanguage / mainTranslate / mainBidiTarget arrive as props and
+  // are deliberately NOT mirrored into local state here. This surface lives
+  // inside the Transcribe File expander, which collapses with the `hidden`
+  // attribute instead of unmounting (SessionView.tsx), and SessionView itself
+  // stays mounted behind `display: none` (App.tsx), so this component mounts
+  // exactly once per app run. A mount-time read of config would therefore
+  // freeze the selection at whatever was persisted at app start and miss both
+  // later picks and the SessionView snap that corrects an invalid selection
+  // (Auto Detect on Canary) once the language list resolves. Three scalar
+  // props rather than one object so the useCallback / useEffect deps below
+  // stay referentially stable.
 
   // Canary bidirectional mode mirrors SessionView.tsx:376 — same predicate
   // shape so the import surface produces the same translation envelope as
@@ -215,32 +236,6 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({ ffmpegAvaila
       }
     };
     init();
-  }, []);
-
-  // gh-102 followup: hydrate the persisted Source Language picker selection
-  // (and Canary bidi state) from config. Mirrors SessionView.tsx:393–412 so
-  // both surfaces converge on the same source-of-truth on every mount and
-  // every config change driven by setConfig writes from SessionView.
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      const [savedMainLanguage, savedMainTranslate, savedMainBidiTarget] = await Promise.all([
-        getConfig<string>('session.mainLanguage'),
-        getConfig<boolean>('session.mainTranslate'),
-        getConfig<string>('session.mainBidiTarget'),
-      ]);
-      if (!active) return;
-      if (typeof savedMainLanguage === 'string' && savedMainLanguage) {
-        setMainLanguage(savedMainLanguage);
-      }
-      if (typeof savedMainTranslate === 'boolean') setMainTranslate(savedMainTranslate);
-      if (typeof savedMainBidiTarget === 'string' && savedMainBidiTarget) {
-        setMainBidiTarget(savedMainBidiTarget);
-      }
-    })().catch(() => {});
-    return () => {
-      active = false;
-    };
   }, []);
 
   // 4.6 — load manual import count and hint state on mount

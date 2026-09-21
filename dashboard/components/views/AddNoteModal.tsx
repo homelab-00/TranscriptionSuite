@@ -111,10 +111,16 @@ export const AddNoteModal: React.FC<AddNoteModalProps> = ({
   }, [supportsExplicitWordTimestampToggle]);
 
   // gh-102 followup #2: hydrate the persisted Source Language picker
-  // selection (and Canary bidi state) from config. Mirrors
-  // SessionImportTab.tsx:163–183 so all import surfaces converge on the same
-  // source-of-truth on every mount and every config change driven by setConfig
-  // writes from SessionView.
+  // selection (and Canary bidi state) from config, so all import surfaces
+  // converge on the same source of truth.
+  //
+  // GH-302: this reads config once per mount, and that is only correct
+  // because the modal is created fresh every time it opens, so the effect
+  // runs again on each use. A surface that stays mounted for the whole app
+  // session would freeze on the value persisted at app start; the inline
+  // Session import surface hit exactly that and now takes the selection from
+  // SessionView as props instead. Do not copy this pattern into a surface
+  // that never unmounts.
   useEffect(() => {
     let active = true;
     void (async () => {

@@ -142,6 +142,14 @@ vi.mock('sonner', () => ({
 
 import { SessionImportTab } from '../views/SessionImportTab';
 
+// GH-302: the Source Language selection lives in SessionView and is handed
+// down. Standalone renders here supply the same three props the parent does.
+const langProps = {
+  mainLanguage: 'Auto Detect',
+  mainTranslate: false,
+  mainBidiTarget: 'Off',
+};
+
 function buildFile(name = 'sample.mp3'): File {
   return new File([new Uint8Array([0])], name, { type: 'audio/mpeg' });
 }
@@ -187,7 +195,7 @@ describe('SessionImportTab diarization gating (GH-209)', () => {
 
   it('renders the Speaker Diarization switch enabled and ON when the feature is available', async () => {
     mockDiarizationFeature = { available: true, reason: 'ready' };
-    const { container } = render(React.createElement(SessionImportTab));
+    const { container } = render(React.createElement(SessionImportTab, langProps));
     await flushMountEffects();
 
     const toggle = screen.getByRole('switch', { name: /speaker diarization/i });
@@ -207,7 +215,7 @@ describe('SessionImportTab diarization gating (GH-209)', () => {
 
   it('renders the switch disabled and OFF when reason=token_missing, and sends enable_diarization: false', async () => {
     mockDiarizationFeature = { available: false, reason: 'token_missing' };
-    const { container } = render(React.createElement(SessionImportTab));
+    const { container } = render(React.createElement(SessionImportTab, langProps));
     await flushMountEffects();
 
     const toggle = screen.getByRole('switch', { name: /speaker diarization/i });
@@ -228,7 +236,7 @@ describe('SessionImportTab diarization gating (GH-209)', () => {
 
   it('leaves the switch usable while admin status has not loaded yet (feature undefined)', async () => {
     mockDiarizationFeature = undefined;
-    render(React.createElement(SessionImportTab));
+    render(React.createElement(SessionImportTab, langProps));
     await flushMountEffects();
 
     const toggle = screen.getByRole('switch', { name: /speaker diarization/i });
@@ -247,7 +255,7 @@ describe('SessionImportTab diarization gating (GH-209)', () => {
         diarizationOutcome: { requested: true, performed: false, reason: 'token_missing' },
       },
     ];
-    render(React.createElement(SessionImportTab));
+    render(React.createElement(SessionImportTab, langProps));
     await flushMountEffects();
 
     expect(screen.getByText(/diarization skipped: no HF token/i)).toBeInTheDocument();

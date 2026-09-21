@@ -124,8 +124,16 @@ vi.mock('sonner', () => ({
 
 import { SessionImportTab } from '../views/SessionImportTab';
 
+// GH-302: the Source Language selection lives in SessionView and is handed
+// down. Standalone renders here supply the same three props the parent does.
+const langProps = {
+  mainLanguage: 'Auto Detect',
+  mainTranslate: false,
+  mainBidiTarget: 'Off',
+};
+
 async function renderAndSettle(props?: { ffmpegAvailable?: boolean }) {
-  const utils = render(React.createElement(SessionImportTab, props));
+  const utils = render(React.createElement(SessionImportTab, { ...langProps, ...props }));
   // Wait for mount-time getConfig promises to resolve.
   await act(async () => {
     await Promise.resolve();
