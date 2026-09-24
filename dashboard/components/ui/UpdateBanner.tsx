@@ -166,12 +166,7 @@ function isFailedDownload(r: DownloadResult): r is Extract<DownloadResult, { ok:
 }
 
 export type BannerVisualState =
-  | 'hidden'
-  | 'available'
-  | 'downloading'
-  | 'ready'
-  | 'ready_blocked'
-  | 'manual-download';
+  'hidden' | 'available' | 'downloading' | 'ready' | 'ready_blocked' | 'manual-download';
 
 export interface DerivedBanner {
   state: BannerVisualState;

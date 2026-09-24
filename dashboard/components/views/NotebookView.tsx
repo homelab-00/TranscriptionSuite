@@ -1692,8 +1692,7 @@ const ImportTab = ({
   // GH-209: gate the diarization toggle on the server-side feature flag
   // (computed once at container startup — adding a token needs a restart).
   const diarizationFeature = (adminStatus?.models as any)?.features?.diarization as
-    | { available: boolean; reason: string }
-    | undefined;
+    { available: boolean; reason: string } | undefined;
   const diarizationUnavailable = diarizationFeature?.available === false;
   const effectiveDiarization = diarizationUnavailable ? false : diarization;
 

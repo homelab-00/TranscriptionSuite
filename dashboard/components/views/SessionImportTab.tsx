@@ -162,8 +162,7 @@ export const SessionImportTab: React.FC<SessionImportTabProps> = ({
   // Computed ONCE at container startup (ModelManager._initialize_diarization_
   // feature_status) — adding a token in Settings requires a server restart.
   const diarizationFeature = (admin.status?.models as any)?.features?.diarization as
-    | { available: boolean; reason: string }
-    | undefined;
+    { available: boolean; reason: string } | undefined;
   const diarizationUnavailable = diarizationFeature?.available === false;
   // Effective value: forced OFF when the server says the feature is unavailable.
   const effectiveDiarization = diarizationUnavailable ? false : diarization;

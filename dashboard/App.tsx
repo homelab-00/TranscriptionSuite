@@ -462,9 +462,7 @@ const AppInner: React.FC = () => {
 
         const readComposeEnvValue = async (key: string): Promise<string> => {
           const value = (await dockerApi?.readComposeEnvValue(key).catch(() => null)) as
-            | string
-            | null
-            | undefined;
+            string | null | undefined;
           return (value ?? '').trim();
         };
 

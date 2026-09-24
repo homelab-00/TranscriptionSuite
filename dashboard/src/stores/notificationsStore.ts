@@ -18,13 +18,7 @@ import { create } from 'zustand';
 // --- Types -------------------------------------------------------------------
 
 export type NotificationCategory =
-  | 'download'
-  | 'server'
-  | 'update'
-  | 'recording'
-  | 'import'
-  | 'note'
-  | 'transcription';
+  'download' | 'server' | 'update' | 'recording' | 'import' | 'note' | 'transcription';
 
 export type NotificationStatus = 'active' | 'complete' | 'error';
 

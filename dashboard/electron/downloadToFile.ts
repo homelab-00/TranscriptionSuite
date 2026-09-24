@@ -26,8 +26,7 @@ export interface DownloadToFileOptions {
 }
 
 export type DownloadToFileResult =
-  | { ok: true; bytes?: number }
-  | { ok: false; error: string; status?: number; body?: string };
+  { ok: true; bytes?: number } | { ok: false; error: string; status?: number; body?: string };
 
 /** Cap on the error body relayed to the renderer. */
 export const MAX_ERROR_BODY_CHARS = 2000;

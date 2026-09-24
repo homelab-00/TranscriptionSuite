@@ -14,11 +14,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 export type AppVariant =
-  | 'mac-metal'
-  | 'mac-standard-arm64'
-  | 'mac-standard-x64'
-  | 'linux'
-  | 'windows';
+  'mac-metal' | 'mac-standard-arm64' | 'mac-standard-x64' | 'linux' | 'windows';
 
 const PRODUCT_NAME = 'TranscriptionSuite';
 const REPO_PATH = 'homelab-00/TranscriptionSuite';

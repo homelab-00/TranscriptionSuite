@@ -1972,12 +1972,7 @@ const NOT_FOUND_PULL_SIGNALS = ['manifest unknown', 'not found', ' 404'];
 const DISK_FULL_PULL_SIGNALS = ['no space left', 'enospc', 'disk full'];
 
 export type PullErrorKind =
-  | 'transient'
-  | 'auth'
-  | 'not_found'
-  | 'disk_full'
-  | 'unknown'
-  | 'cancelled';
+  'transient' | 'auth' | 'not_found' | 'disk_full' | 'unknown' | 'cancelled';
 
 export interface ClassifiedPullError {
   kind: PullErrorKind;
@@ -2082,8 +2077,7 @@ async function pullImage(tag: string): Promise<string> {
   pullCancelled = false;
 
   type AttemptResult =
-    | { ok: true; stdout: string }
-    | { ok: false; code: number | null; stderr: string };
+    { ok: true; stdout: string } | { ok: false; code: number | null; stderr: string };
 
   const runOne = (): Promise<AttemptResult> =>
     new Promise((resolve) => {

@@ -33,11 +33,7 @@ import { StatusLight } from '../ui/StatusLight';
 import { useAriaAnnouncer } from '../../src/hooks/useAriaAnnouncer';
 
 export type AutoActionSeverity =
-  | 'ok'
-  | 'warn'
-  | 'error'
-  | 'processing'
-  | 'manual_intervention_required';
+  'ok' | 'warn' | 'error' | 'processing' | 'manual_intervention_required';
 // Sprint 5 — Story 7.7: 'webhook' joins the existing two action types
 // so the badge can surface webhook delivery failures with the same
 // retry-button affordance.
