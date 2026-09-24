@@ -1620,8 +1620,9 @@ one sense — they're byte-identical to the default image (same `Dockerfile`,
 same cu129 wheels, no `PYTORCH_VARIANT` override; only the sidecar differs, see
 §6.9) — but `docker-build-push.sh` has no `vulkan-linux` case, and `vulkan-wsl2`
 isn't actually published through it either despite the script accepting
-`--variant vulkan-wsl2`. Both are built with a plain `docker compose build` and
-published with a manual `docker tag` + `docker push --all-tags` instead.
+`--variant vulkan-wsl2`. Neither needs a build of its own: both are published by
+re-tagging the already-built default image into the variant's repo with
+`docker tag` + `docker push --all-tags`.
 
 *Default and Legacy, two-step (mirrors the default-image release process):*
 ```bash
@@ -1648,41 +1649,36 @@ The three env vars for the legacy build:
 ./build/docker-build-push.sh --variant legacy --build v1.3.3
 ```
 
-*Vulkan-WSL2 (Windows) — build the plain default image, then tag it into the
-dedicated repo and push everything:*
+*Vulkan-WSL2 and Vulkan-Linux - no rebuild, re-tag the default image built
+above into each variant's dedicated repo and push:*
 ```bash
-cd server/docker
-docker compose -f docker-compose.yml -f docker-compose.desktop-vm.yml build transcriptionsuite
-docker tag ghcr.io/homelab-00/transcriptionsuite-server:latest \
-  ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2:v1.3.7
-docker tag ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2:v1.3.7 \
+# Vulkan-WSL2 (Windows):
+docker tag ghcr.io/homelab-00/transcriptionsuite-server:v1.3.3 \
+  ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2:v1.3.3
+docker tag ghcr.io/homelab-00/transcriptionsuite-server:v1.3.3 \
   ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2:latest
 docker push --all-tags ghcr.io/homelab-00/transcriptionsuite-server-vulkan-wsl2
-```
 
-*Vulkan-Linux — same shape, built with the Linux Vulkan overlay so the local
-image matches the full stack that will actually run:*
-```bash
-cd server/docker
-docker compose -f docker-compose.yml -f docker-compose.linux-host.yml -f docker-compose.vulkan.yml build transcriptionsuite
-docker tag ghcr.io/homelab-00/transcriptionsuite-server:latest \
-  ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux:v1.3.7
-docker tag ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux:v1.3.7 \
+# Vulkan-Linux:
+docker tag ghcr.io/homelab-00/transcriptionsuite-server:v1.3.3 \
+  ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux:v1.3.3
+docker tag ghcr.io/homelab-00/transcriptionsuite-server:v1.3.3 \
   ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux:latest
 docker push --all-tags ghcr.io/homelab-00/transcriptionsuite-server-vulkan-linux
 ```
 
-Both Vulkan builds compile the same `transcriptionsuite` service from the
-unmodified `Dockerfile` with no `IMAGE_REPO`/`PYTORCH_VARIANT` override, so the
-result is tagged under the plain default repo (`...transcriptionsuite-server:latest`)
-first; the compose overlays (`desktop-vm` / `linux-host` + `vulkan`) only affect
-*runtime* networking and the sidecar, not the image contents. The subsequent
-`docker tag` moves that image into the variant's own dedicated repo without a
-rebuild, and `docker push --all-tags` publishes every locally-tagged version for
-that repo (the version tag and `latest`) in one call.
+This works because the Vulkan variants are the unmodified default image: the
+compose overlays they run with (`desktop-vm` for WSL2, `linux-host` + `vulkan`
+for Linux) only affect *runtime* networking and the sidecar, not the image
+contents. Tagging from the explicit version tag (`:v1.3.3`) rather than the
+local `:latest` guarantees the Vulkan repos receive exactly the image that was
+just pushed as the default. Note that `docker push --all-tags` publishes every
+locally-tagged version for that repo, so any stale local tags from earlier
+releases get re-pushed too (harmless, they already exist on GHCR).
 
-*Releasing all variants of the same version:* run the legacy, vulkan-wsl2, and
-vulkan-linux commands after the two default ones. Each targets its own GHCR
+*Releasing all variants of the same version:* run the default commands first
+(the Vulkan re-tags depend on the default image existing locally under the
+version tag), then legacy, vulkan-wsl2, and vulkan-linux. Each targets its own GHCR
 repo and its own `:latest` alias, so they never collide.
 
 > **First push of a new GHCR package?** GHCR defaults new package visibility to
