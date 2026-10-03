@@ -4,8 +4,9 @@
 # This script runs as root to:
 # 1) handle TLS certificate permissions,
 # 2) install operator-supplied CA certificates into the container trust store,
-# 3) bootstrap runtime dependencies into /runtime/.venv,
-# 4) drop privileges to appuser and launch the Python server.
+# 3) make the startup-events file writable by appuser,
+# 4) bootstrap runtime dependencies into /runtime/.venv,
+# 5) drop privileges to appuser and launch the Python server.
 
 set -e
 
@@ -87,6 +88,13 @@ fi
 # and changing ownership here can break host-side dashboard permissions.
 mkdir -p /data /models /user-config /runtime /runtime/cache
 chown -R appuser:appuser /data /models /runtime
+
+# Hand the bind-mounted startup-events file to appuser (GH-318). The dashboard
+# creates it on the host as the desktop user, in a private directory appuser
+# cannot traverse - without this every startup and download event is dropped
+# with EACCES and the dashboard never sees one. Must precede bootstrap, which
+# emits the first events. Best-effort: never blocks startup.
+"$PY_BOOTSTRAP_BIN" docker/prepare_events_file.py || true
 
 # Bootstrap runtime dependencies and feature status.
 log "Bootstrapping runtime environment..."

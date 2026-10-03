@@ -2525,3 +2525,55 @@ def test_pyproject_declares_vibevoice_dependency_metadata() -> None:
     assert any(r == "torch" or r.startswith("torch") for r in requires), (
         "vibevoice dependency-metadata must declare its torch dependency"
     )
+
+
+# ── GH-318: startup events must actually reach the dashboard ──────────────
+
+
+def test_startup_events_module_path_matches_the_image_layout() -> None:
+    """The image copies server/backend/ to /app/server/, so the writer lives
+    at /app/server/core/ - not /app/server/backend/core/, which never exists
+    in the container and made every bootstrap event a silent no-op."""
+    module = _load_bootstrap_module()
+    repo_root = Path(__file__).resolve().parents[3]
+    dockerfile = (repo_root / "server/docker/Dockerfile").read_text(encoding="utf-8")
+
+    assert "WORKDIR /app" in dockerfile
+    assert "server/backend/ ./server/" in dockerfile
+
+    in_image = module._startup_events_module_path(Path("/app"))
+    in_repo = repo_root / "server/backend" / in_image.relative_to("/app/server")
+    assert in_repo.is_file(), f"{in_image} maps to {in_repo}, which does not exist"
+
+
+def test_bootstrap_writes_events_when_the_writer_module_is_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_bootstrap_module()
+    repo_root = Path(__file__).resolve().parents[3]
+    app_root = tmp_path / "app"
+    writer = module._startup_events_module_path(app_root)
+    writer.parent.mkdir(parents=True)
+    writer.write_text(
+        (repo_root / "server/backend/core/startup_events.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    events_file = tmp_path / "events" / "startup-events.jsonl"
+    monkeypatch.setenv("STARTUP_EVENTS_FILE", str(events_file))
+
+    emit_event, truncate_events_file = module._load_startup_events(app_root)
+    truncate_events_file()
+    emit_event("bootstrap-deps", "download", "Installing dependencies", phase="download")
+
+    line = json.loads(events_file.read_text(encoding="utf-8").strip())
+    assert line["id"] == "bootstrap-deps"
+    assert line["phase"] == "download"
+
+
+def test_bootstrap_events_fall_back_to_no_ops_outside_the_image(tmp_path: Path) -> None:
+    module = _load_bootstrap_module()
+
+    emit_event, truncate_events_file = module._load_startup_events(tmp_path / "nowhere")
+
+    truncate_events_file()
+    emit_event("bootstrap-deps", "download", "Installing dependencies")  # must not raise

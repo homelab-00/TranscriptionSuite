@@ -73,25 +73,45 @@ _VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS: tuple[str, ...] = (
     "bitsandbytes>=0.43.1",
 )
 
-# Load startup event writer (stdlib-only module, safe to import before deps).
-# Falls back to no-ops when running outside the container (e.g. tests).
-try:
-    _se_path = APP_ROOT / "server" / "backend" / "core" / "startup_events.py"
-    _se_spec = importlib.util.spec_from_file_location("startup_events", _se_path)
-    if _se_spec and _se_spec.loader:
-        _se_mod = importlib.util.module_from_spec(_se_spec)
-        _se_spec.loader.exec_module(_se_mod)
-        emit_event = _se_mod.emit_event
-        truncate_events_file = _se_mod.truncate_events_file
-    else:
-        raise ImportError("spec_from_file_location returned None")
-except (FileNotFoundError, ImportError):
 
-    def emit_event(*_args: object, **_kwargs: object) -> None:  # type: ignore[misc]
-        pass
+def _startup_events_module_path(app_root: Path = APP_ROOT) -> Path:
+    """Where the startup event writer lives inside the image.
 
-    def truncate_events_file() -> None:
-        pass
+    The Dockerfile copies ``server/backend/`` to ``<app_root>/server/``, so the
+    module is at ``server/core/`` - there is no ``backend`` segment in the
+    container. Looking under ``server/backend/core/`` never found it, and every
+    bootstrap event silently became a no-op.
+    """
+    return app_root / "server" / "core" / "startup_events.py"
+
+
+def _noop_emit_event(*_args: object, **_kwargs: object) -> None:
+    pass
+
+
+def _noop_truncate_events_file() -> None:
+    pass
+
+
+def _load_startup_events(app_root: Path = APP_ROOT) -> tuple[Any, Any]:
+    """Load the startup event writer (stdlib-only, safe to import before deps).
+
+    Returns ``(emit_event, truncate_events_file)``, falling back to no-ops when
+    running outside the container (e.g. tests).
+    """
+    try:
+        se_path = _startup_events_module_path(app_root)
+        se_spec = importlib.util.spec_from_file_location("startup_events", se_path)
+        if se_spec is None or se_spec.loader is None:
+            raise ImportError("spec_from_file_location returned None")
+        se_mod = importlib.util.module_from_spec(se_spec)
+        se_spec.loader.exec_module(se_mod)
+        return se_mod.emit_event, se_mod.truncate_events_file
+    except (FileNotFoundError, ImportError):
+        return _noop_emit_event, _noop_truncate_events_file
+
+
+emit_event, truncate_events_file = _load_startup_events()
 
 
 def _utc_now_iso() -> str:
@@ -432,7 +452,12 @@ def _propagate_ca_bundle(env: dict[str, str]) -> None:
         ca = _SYSTEM_CA_BUNDLE
     else:
         return
-    for var in ("SSL_CERT_FILE", "GIT_SSL_CAINFO", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+    for var in (
+        "SSL_CERT_FILE",
+        "GIT_SSL_CAINFO",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+    ):
         env.setdefault(var, ca)
 
 
@@ -511,7 +536,10 @@ def run_dependency_sync(
         str(PROJECT_DIR),
     ]
     use_system_torch = parse_bool_env("BOOTSTRAP_USE_SYSTEM_TORCH", False)
-    is_linux_arm64 = sys.platform == "linux" and platform.machine().lower() in {"arm64", "aarch64"}
+    is_linux_arm64 = sys.platform == "linux" and platform.machine().lower() in {
+        "arm64",
+        "aarch64",
+    }
     # Non-default variants swap the URL of the *named* index `pytorch-cu129`
     # (which [tool.uv.sources] pins torch/torchaudio to): cu126 for legacy GPUs
     # (Pascal/Maxwell, sm_50..sm_90) and cpu for CPU-only hosts (GH #125 — no
@@ -2553,7 +2581,14 @@ def main() -> int:
             log("Installing FunASR for SenseVoice support...")
             try:
                 run_command(
-                    ["uv", "pip", "install", "--python", str(venv_python), "funasr>=1.3.12"],
+                    [
+                        "uv",
+                        "pip",
+                        "install",
+                        "--python",
+                        str(venv_python),
+                        "funasr>=1.3.12",
+                    ],
                     timeout_seconds=timeout_seconds,
                     env=build_uv_sync_env(venv_dir=venv_dir, cache_dir=cache_dir),
                 )
@@ -2583,7 +2618,10 @@ def main() -> int:
                 }
                 log(f"FunASR installation failed: {exc}")
         else:
-            sensevoice_status = {"available": False, "reason": "selected_but_not_requested"}
+            sensevoice_status = {
+                "available": False,
+                "reason": "selected_but_not_requested",
+            }
             log(
                 "SenseVoice model selected but INSTALL_FUNASR is not enabled, "
                 "skipping optional install"
