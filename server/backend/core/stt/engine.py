@@ -449,14 +449,27 @@ class AudioToTextRecorder:
                 )
 
             backend = create_backend(self.model_name)
-            backend.load(
-                model_name=self.model_name,
-                device=self.device,
-                compute_type=self.compute_type,
-                gpu_device_index=self.gpu_device_index,
-                download_root=self.download_root,
-                batch_size=self.batch_size,
-            )
+            # Report a first-time download to the dashboard's download bar
+            # (GH-318). A no-op when the caller already tracks this load
+            # (model_manager.load_transcription_model), so only the recorders
+            # that load on their own - Live Mode - open a download here.
+            from server.core.download_progress import track_model_download
+
+            is_live = self.instance_name.startswith(("live", "realtime"))
+            short_name = self.model_name.split("/")[-1]
+            with track_model_download(
+                self.model_name,
+                kind="live-model" if is_live else "model",
+                name=f"Live model ({short_name})" if is_live else None,
+            ):
+                backend.load(
+                    model_name=self.model_name,
+                    device=self.device,
+                    compute_type=self.compute_type,
+                    gpu_device_index=self.gpu_device_index,
+                    download_root=self.download_root,
+                    batch_size=self.batch_size,
+                )
 
             # Pass extra decode options (e.g. no_speech_threshold) to Whisper-family backends.
             self._apply_decode_options(backend)

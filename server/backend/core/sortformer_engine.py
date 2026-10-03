@@ -97,7 +97,16 @@ class SortformerEngine(MLXThreadAffinityMixin):
             return
 
         logger.info("Loading Sortformer model: %s", self.model_name)
-        self._model = _load_sortformer(self.model_name)
+        # Report a first-time download to the dashboard's download bar (GH-318).
+        from server.core.download_progress import track_model_download
+
+        short_name = self.model_name.split("/")[-1]
+        with track_model_download(
+            self.model_name,
+            kind="diarization-model",
+            name=f"Diarization model ({short_name})",
+        ):
+            self._model = _load_sortformer(self.model_name)
         self._loaded = True
         logger.info("Sortformer model loaded")
 
