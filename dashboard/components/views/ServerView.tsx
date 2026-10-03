@@ -860,7 +860,7 @@ export const ServerView: React.FC<ServerViewProps> = ({
   }, [applyConnectionModeChange]);
 
   // Pulls the Vulkan sidecar image. Triggered from the Start Local click
-  // handler below — only for runtimeProfile === 'vulkan', and never merely
+  // handler below - only for runtimeProfile === 'vulkan', and never merely
   // from selecting the tile. Progress, completion and failure are shown by
   // the download bar (the main process reports the pull to the download hub).
   // Resolves with the pull error message (or null on success) so the caller

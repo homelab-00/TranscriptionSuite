@@ -52,10 +52,10 @@ audio notebook with calendar/full-text search/LLM chat, transcription/recording 
 | `clipboardWayland.ts` | **NEW** — reliable Wayland clipboard write (verify-retry + `wl-copy` fallback) |
 | `pasteAtCursor.ts` | System-wide paste (xdotool / AppleScript) |
 | `startupEventWatcher.ts` | Watch server bootstrap events via fs.watch on JSONL |
-| `downloadHub.ts` | **NEW** — single registry of in-flight downloads (GH-318): throttling, speed/ETA, reload snapshot; broadcasts `downloads:changed` |
-| `serverDownloadEvents.ts` | **NEW** — maps server startup `download` events into hub items (only on evidence of a real download) |
-| `bootstrapLogDownloads.ts` | **NEW** — container log parser for dependency installs (start/complete/fail), fallback signal for the hub |
-| `installerDownloads.ts` | **NEW** — reports the app-update pipeline (electron-updater, macOS DMG) into the hub |
+| `downloadHub.ts` | **NEW** - single registry of in-flight downloads (GH-318): throttling, speed/ETA, reload snapshot; broadcasts `downloads:changed` |
+| `serverDownloadEvents.ts` | **NEW** - maps server startup `download` events into hub items (only on evidence of a real download) |
+| `bootstrapLogDownloads.ts` | **NEW** - container log parser for dependency installs (start/complete/fail), fallback signal for the hub |
+| `installerDownloads.ts` | **NEW** - reports the app-update pipeline (electron-updater, macOS DMG) into the hub |
 | `watcherManager.ts` | Folder watcher for auto-import of audio files |
 | `wslDetect.ts` | **NEW** — detect WSL2 Docker backend + `/dev/dxg` GPU-PV (gates vulkan-wsl2) |
 | `platformGate.ts` | **NEW** — resolve per-OS install strategy (`electron-updater` vs `manual-download`) |
@@ -128,9 +128,9 @@ one strip above the view area for every download in the app).
 ### Three-tier pattern
 
 1. **React Query** — server data (models, recordings, admin status, health), `staleTime` tuned per query.
-2. **Zustand** — ephemeral client-only stores (selector pattern, `useShallow` for arrays):
-   - `notificationsStore` — session notification log (history; toasts are a view over it)
-   - `downloadsStore` **NEW** — live state of the download bar, mirrored from the main-process `downloadHub`
+2. **Zustand** - ephemeral client-only stores (selector pattern, `useShallow` for arrays):
+   - `notificationsStore` - session notification log (history; toasts are a view over it)
+   - `downloadsStore` **NEW** - live state of the download bar, mirrored from the main-process `downloadHub`
    - `importQueueStore` — upload/import queue + watcher state
    - `activeProfileStore` **NEW** — active notebook profile id (persisted)
    - `ariaAnnouncerStore` **NEW** — polite/assertive aria-live messages (self-clears after 5 s)

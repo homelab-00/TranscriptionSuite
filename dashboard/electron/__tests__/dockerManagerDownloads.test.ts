@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
+import fsDefault from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -120,6 +121,17 @@ describe('pullImage download tracking', () => {
     expect(hubItem('server-image:v-ok')?.status).toBe('complete');
   });
 
+  it('lets a caller that raises its own failure toast silence the one from the bar', async () => {
+    const { finish } = controllableSpawn();
+    const pull = dockerManager.pullImage('v-quiet', { errorToast: false });
+    await settle();
+
+    expect(hubItem('server-image:v-quiet')?.errorToast).toBe(false);
+
+    finish(0);
+    await pull;
+  });
+
   it('fails the item with the friendly message, not the raw stderr', async () => {
     const { finish } = controllableSpawn();
     const pull = dockerManager.pullImage('v-auth');
@@ -224,6 +236,27 @@ describe('downloadGgmlModelToHost download tracking', () => {
     response.emit('end');
     await download;
     expect(hubItem('ggml-download-ggml-tiny.bin')?.status).toBe('complete');
+  });
+
+  it('fails the item when the finished file cannot be moved into place', async () => {
+    // e.g. antivirus briefly locking the freshly written file. The item must
+    // not stay "downloading" forever.
+    const response = fakeNetResponse(200, 4);
+    const rename = vi.spyOn(fsDefault, 'renameSync').mockImplementation(() => {
+      throw new Error('EBUSY: resource busy or locked');
+    });
+    try {
+      const download = dockerManager.downloadGgmlModelToHost('ggml-locked.bin');
+      await vi.waitFor(() => expect(netRequest).toHaveBeenCalled());
+      await settle();
+      response.emit('data', Buffer.from('abcd'));
+      response.emit('end');
+
+      await expect(download).rejects.toThrow(/EBUSY/);
+      expect(hubItem('ggml-download-ggml-locked.bin')).toMatchObject({ status: 'error' });
+    } finally {
+      rename.mockRestore();
+    }
   });
 
   it('fails the item on an HTTP error', async () => {

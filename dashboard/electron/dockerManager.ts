@@ -42,7 +42,8 @@ import {
 import { type WslSupport, resetWslSupportCache } from './wslDetect.js';
 import { hfCacheDirName } from './hfRepoAliases.js';
 import { downloadHub } from './downloadHub.js';
-import { applyBootstrapLogLine } from './bootstrapLogDownloads.js';
+import { BootstrapLogTracker } from './bootstrapLogDownloads.js';
+import type { StartupEvent } from './startupEventWatcher.js';
 import {
   type GpuDevice,
   enumerateGpus,
@@ -2064,7 +2065,13 @@ export function classifyPullError(
  * final error translated into a one-sentence friendly message before reject.
  * Retries fire only when `classifyPullError` returns `retriable: true`.
  */
-async function pullImage(tag: string): Promise<string> {
+async function pullImage(
+  tag: string,
+  options: {
+    /** False when the caller raises its own failure toast (default true). */
+    errorToast?: boolean;
+  } = {},
+): Promise<string> {
   // Reported to the download bar (GH-318). The CLI gives no progress on a
   // non-TTY, so the item stays indeterminate here.
   const download = downloadHub.begin({
@@ -2074,6 +2081,7 @@ async function pullImage(tag: string): Promise<string> {
     cancel: () => {
       cancelPull();
     },
+    errorToast: options.errorToast ?? true,
   });
   try {
     const output = await runImagePull(tag);
@@ -3301,6 +3309,17 @@ let logProcess: ChildProcess | null = null;
 const logSubscribers = new Set<(line: string) => void>();
 const logLineBuffer: string[] = [];
 
+/** Receives server events derived from log lines (set by main.ts). */
+let serverLogEventListener: ((event: StartupEvent) => void) | null = null;
+
+function setServerLogEventListener(listener: ((event: StartupEvent) => void) | null): void {
+  serverLogEventListener = listener;
+}
+
+const bootstrapLogTracker = new BootstrapLogTracker(downloadHub, (event) =>
+  serverLogEventListener?.(event),
+);
+
 function resolveDockerTailArg(tail?: number): string {
   if (typeof tail !== 'number' || !Number.isFinite(tail) || tail < 0) {
     // Docker accepts "all"; Podman requires an integer (0 = all logs by default).
@@ -3324,7 +3343,7 @@ function dispatchLogLine(line: string): void {
   // Called directly rather than as a log subscriber so it survives
   // stopBackgroundLogStream() clearing the subscriber set.
   try {
-    applyBootstrapLogLine(downloadHub, line);
+    bootstrapLogTracker.apply(line);
   } catch (err) {
     console.warn('[DockerManager] bootstrap download parser failed:', err);
   }
@@ -3935,7 +3954,13 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
     throw err;
   });
 
-  fs.renameSync(tmp, dest);
+  try {
+    fs.renameSync(tmp, dest);
+  } catch (err) {
+    // A locked or vanished file must not leave the item downloading forever.
+    download.fail(err instanceof Error ? err.message : String(err));
+    throw err;
+  }
   download.complete();
 }
 
@@ -4607,6 +4632,7 @@ export const dockerManager = {
   downloadWhisperServerExe,
   checkTailscaleCertsExist,
   getStartupEventsFilePath,
+  setServerLogEventListener,
   VOLUME_NAMES,
   CONTAINER_NAME,
   IMAGE_REPO,

@@ -208,7 +208,7 @@ export interface ElectronAPI {
     listVariantTags: () => Promise<
       Record<'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux', string[]>
     >;
-    pullImage: (tag: string) => Promise<string>;
+    pullImage: (tag: string, options?: { errorToast?: boolean }) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;
     hasSidecarImage: () => Promise<boolean>;
@@ -602,7 +602,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('docker:listVariantTags') as Promise<
         Record<'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux', string[]>
       >,
-    pullImage: (tag: string) => ipcRenderer.invoke('docker:pullImage', tag),
+    pullImage: (tag: string, options?: { errorToast?: boolean }) =>
+      ipcRenderer.invoke('docker:pullImage', tag, options),
     cancelPull: () => ipcRenderer.invoke('docker:cancelPull'),
     isPulling: () => ipcRenderer.invoke('docker:isPulling'),
     hasSidecarImage: () => ipcRenderer.invoke('docker:hasSidecarImage'),

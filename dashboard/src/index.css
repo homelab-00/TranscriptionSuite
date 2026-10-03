@@ -263,13 +263,6 @@ body {
   }
 }
 
-/* Dropdown fade-in animation.
- * Keeps the element invisible during the initial ~20ms delay so that
- * Floating UI (headlessui anchor positioning, async Promise chain) can
- * place the element at the correct position before it becomes visible.
- * animation-fill-mode:both = apply `from` state during delay (opacity:0)
- *                          + retain `to` state after completion (opacity:1).
- */
 /* Indeterminate progress bar (ProgressBar.tsx): a third-width fill sweeping
    the track. Transform-only so it stays on the compositor. */
 @keyframes progress-indeterminate {
@@ -291,6 +284,13 @@ body {
   }
 }
 
+/* Dropdown fade-in animation.
+ * Keeps the element invisible during the initial ~20ms delay so that
+ * Floating UI (headlessui anchor positioning, async Promise chain) can
+ * place the element at the correct position before it becomes visible.
+ * animation-fill-mode:both = apply `from` state during delay (opacity:0)
+ *                          + retain `to` state after completion (opacity:1).
+ */
 @keyframes dropdown-appear {
   from {
     opacity: 0;

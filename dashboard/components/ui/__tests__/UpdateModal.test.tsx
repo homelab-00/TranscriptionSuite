@@ -402,7 +402,8 @@ describe('<UpdateModal>', () => {
     await flush();
 
     expect(h.pullImage).toHaveBeenCalledTimes(1);
-    expect(h.pullImage).toHaveBeenCalledWith('1.5.0');
+    // The modal raises its own failure toast, so the download bar must not add one.
+    expect(h.pullImage).toHaveBeenCalledWith('1.5.0', { errorToast: false });
     expect(vi.mocked(toast.success).mock.calls[0]?.[0]).toMatch(/Restart the server/);
     // Modal stayed open (onClose NOT called) + compat re-fetched.
     expect(onClose).not.toHaveBeenCalled();
@@ -445,6 +446,48 @@ describe('<UpdateModal>', () => {
     await flush();
 
     expect(vi.mocked(toast.error).mock.calls[0]?.[0]).toMatch(/network unreachable/);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('Update Server First cancelled from the download bar: no failure toast', async () => {
+    const h = buildHarness();
+    h.checkCompatibility.mockResolvedValue({
+      result: 'incompatible',
+      manifest: {
+        version: '1.3.3',
+        compatibleServerRange: '>=1.5.0',
+        sha256: {},
+        releaseType: 'stable',
+      },
+      serverVersion: '1.0.0',
+      compatibleRange: '>=1.5.0',
+      deployment: 'local',
+    });
+    h.pullImage.mockRejectedValue(
+      new Error("Error invoking remote method 'docker:pullImage': Error: Pull cancelled."),
+    );
+    install(h, { serverLatest: '1.5.0' });
+
+    const onClose = vi.fn();
+
+    render(
+      <UpdateModal
+        isOpen
+        targetVersion="1.3.3"
+        currentVersion="1.3.2"
+        onClose={onClose}
+        onConfirmInstall={() => {}}
+      />,
+    );
+    await flush();
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: /update server first/i }));
+    await flush();
+    await flush();
+
+    // Cancelling is something the user asked for, not a failure.
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });
 

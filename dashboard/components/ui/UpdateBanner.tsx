@@ -3,7 +3,7 @@
  *
  * Five states driven by InstallerStatus + UpdateStatus:
  *   • available        — "v{x} available — [Download] [Later]"
- *   • downloading      — renders nothing: the download bar shows the progress
+ *   • downloading      - renders nothing: the download bar shows the progress
  *                        (also covers checking / verifying, so [Download]
  *                        stays out of the DOM while a download is in flight)
  *   • ready            — "v{x} ready — [Quit & Install] [Later]"

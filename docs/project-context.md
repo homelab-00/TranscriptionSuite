@@ -236,7 +236,7 @@ durability:
 #### File Organization
 - **Backend**: Feature modules in `server/backend/core/`, API routes in `server/backend/api/routes/`, WebSocket in `api/routes/live.py`, durability layer in `server/backend/database/job_repository.py` + `audio_cleanup.py`
 - **Frontend**: Components in `dashboard/components/` (with `ui/` and `views/` subdirs), logic in `dashboard/src/` (`hooks/`, `services/`, `stores/`, `api/`, `utils/`, `types/`, `config/`)
-- **Shared UI**: `dashboard/components/ui/` — reusable primitives (GlassCard, Button, AppleSwitch, StatusLight, ErrorFallback, CustomSelect, ShortcutCapture, LogTerminal, NotificationToasts, QueuePausedBanner, ProgressBar, DownloadBar). Use `ProgressBar` for any progress track instead of inlining the markup
+- **Shared UI**: `dashboard/components/ui/` - reusable primitives (GlassCard, Button, AppleSwitch, StatusLight, ErrorFallback, CustomSelect, ShortcutCapture, LogTerminal, NotificationToasts, QueuePausedBanner, ProgressBar, DownloadBar). Use `ProgressBar` for any progress track instead of inlining the markup
 
 ### Development Workflow Rules
 
@@ -269,7 +269,7 @@ durability:
 - **NEVER use default exports** in frontend hooks/services — always named exports
 - **NEVER mock at the source module** for lazily-imported code — patch at the call site
 - **NEVER skip `_ensure_server_package_alias()`** in new test files — import conftest or it won't resolve `server.*`
-- **NEVER show a running download in a toast or in the Notifications view** — a new download source calls `downloadHub.begin(...)` in the main process (or emits a `download` startup event from the server) and the download bar does the rest. Do not write download progress into `notificationsStore`, and do not add per-feature progress bars for downloads
+- **NEVER show a running download in a toast or in the Notifications view** - a new download source calls `downloadHub.begin(...)` in the main process (or emits a `download` startup event from the server) and the download bar does the rest. Do not write download progress into `notificationsStore`, and do not add per-feature progress bars for downloads
 - **NEVER use silent `except: pass`** for `asyncio.CancelledError` — always log at debug level for clean shutdown tracing (CodeQL flags this)
 - **NEVER overwrite `created_at` on retry** — `reset_for_retry()` preserves the original timestamp; orphan sweep uses it to detect stuck jobs
 

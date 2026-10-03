@@ -15,6 +15,8 @@ export interface StartupActivityEventLike {
   label: string;
   status?: string;
   progress?: number;
+  // Legacy download fields: still part of the payload older servers send,
+  // read by the main process (serverDownloadEvents.ts), not here.
   totalSize?: string;
   downloadedSize?: string;
   detail?: string;

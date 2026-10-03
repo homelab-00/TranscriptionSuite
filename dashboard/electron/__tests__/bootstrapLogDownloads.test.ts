@@ -9,7 +9,8 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DownloadHub, type DownloadItem } from '../downloadHub.js';
-import { applyBootstrapLogLine } from '../bootstrapLogDownloads.js';
+import { applyBootstrapLogLine, BootstrapLogTracker } from '../bootstrapLogDownloads.js';
+import type { StartupEvent } from '../startupEventWatcher.js';
 
 let hub: DownloadHub;
 
@@ -83,5 +84,63 @@ describe('applyBootstrapLogLine', () => {
     applyBootstrapLogLine(hub, 'INFO:     Uvicorn running on http://0.0.0.0:9786');
 
     expect(hub.snapshot()).toHaveLength(0);
+  });
+});
+
+describe('BootstrapLogTracker', () => {
+  it('ignores a line it has already seen, so a replayed log stream adds nothing', () => {
+    // The log stream restarts with --since <session start> (e.g. when the
+    // Logs view subscribes after the container exited) and replays every
+    // line. Lines carry timestamps, so a repeat is exactly that: a repeat.
+    const tracker = new BootstrapLogTracker(hub);
+    const lines = [
+      '2026-10-03T10:00:00.000Z [bootstrap] Installing NeMo toolkit for NVIDIA Parakeet support...',
+      '2026-10-03T10:04:00.000Z [bootstrap] NeMo toolkit installed',
+    ];
+
+    for (const line of lines) tracker.apply(line);
+    for (const line of lines) tracker.apply(line);
+
+    expect(hub.snapshot()).toHaveLength(1);
+    expect(hub.snapshot()[0].status).toBe('complete');
+  });
+
+  it('still tracks a second real install with a new timestamp', () => {
+    const tracker = new BootstrapLogTracker(hub);
+    tracker.apply('2026-10-03T10:00:00.000Z [bootstrap] Installing NeMo toolkit');
+    tracker.apply('2026-10-03T10:04:00.000Z [bootstrap] NeMo toolkit installed');
+    tracker.apply('2026-10-03T12:00:00.000Z [bootstrap] Installing NeMo toolkit');
+
+    expect(hub.snapshot().filter((i) => i.status === 'active')).toHaveLength(1);
+  });
+
+  it('raises a failed model preload as a server warning, not as a download', () => {
+    // The only signal of a failed preload on a server whose startup events
+    // do not reach the dashboard (older images on Linux).
+    const events: StartupEvent[] = [];
+    const tracker = new BootstrapLogTracker(hub, (event) => events.push(event));
+    const line =
+      '2026-10-03T10:05:00.000Z ERROR Model preload failed for model=large-v3 — continuing startup without a model';
+
+    tracker.apply(line);
+    tracker.apply(line);
+
+    expect(hub.snapshot()).toHaveLength(0);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      id: 'model-preload-error',
+      category: 'warning',
+      status: 'error',
+      severity: 'error',
+    });
+    expect(events[0].label).toMatch(/model preload failed/i);
+  });
+
+  it('survives a listener that throws', () => {
+    const tracker = new BootstrapLogTracker(hub, () => {
+      throw new Error('window gone');
+    });
+
+    expect(() => tracker.apply('ERROR Model preload failed for model=x')).not.toThrow();
   });
 });

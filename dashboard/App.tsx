@@ -123,7 +123,7 @@ const AppInner: React.FC = () => {
 
   // Always-on Docker log token scanner
   useAuthTokenSync(serverConnection.reachable, useRemote);
-  // Bridge bootstrap log events → notifications store (runs regardless of active tab)
+  // Bridge server lifecycle events into the notifications store (runs regardless of active tab)
   useNotificationBridge();
   // Mirror the main-process download hub into the download bar (GH-318).
   useDownloadsBridge();

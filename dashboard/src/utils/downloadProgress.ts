@@ -2,8 +2,10 @@
  * Pure progress math and formatting for the universal download bar (GH-318).
  *
  * The one rule that matters: a percent is never invented. An item is
- * determinate only when it reports bytes or an honest coarse fraction, and an
- * aggregate over several items never mixes the two into a single number.
+ * determinate only when it reports bytes or an honest coarse fraction. The
+ * aggregate is byte-weighted when every item reports bytes; when some only
+ * have a coarse fraction it is the plain average of the items' fractions
+ * (no byte total, no ETA); with one indeterminate item it is indeterminate.
  */
 
 export interface DownloadAggregate {

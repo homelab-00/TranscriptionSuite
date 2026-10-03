@@ -14,6 +14,7 @@
  */
 
 import type { DownloadHub, DownloadKind } from './downloadHub.js';
+import type { StartupEvent } from './startupEventWatcher.js';
 
 interface BootstrapPattern {
   /** Substring to match inside the log line. */
@@ -122,5 +123,69 @@ export function applyBootstrapLogLine(hub: DownloadHub, line: string): void {
       hub.active(pattern.id)?.fail(error);
     }
     return; // First match wins per line
+  }
+}
+
+/** Server log line that reports a failed model preload. */
+const MODEL_PRELOAD_FAILED_MARKER = 'Model preload failed';
+
+/** How many acted-on lines are remembered for replay detection. */
+const SEEN_LINES_MAX = 500;
+
+/**
+ * Stateful front of the parser: feeds the hub, and remembers the lines it
+ * acted on.
+ *
+ * The container log stream is restarted with `--since <session start>` (for
+ * example when the Logs view subscribes after the container exited), which
+ * replays every line. Log lines carry timestamps, so a line seen before is a
+ * replay and must not open a second download or raise a second warning.
+ */
+export class BootstrapLogTracker {
+  private readonly seen = new Set<string>();
+
+  constructor(
+    private readonly hub: DownloadHub,
+    /** Receives server events derived from the log (never download events). */
+    private readonly onServerEvent?: (event: StartupEvent) => void,
+  ) {}
+
+  /** Feed one container log line. */
+  apply(line: string): void {
+    const isInstallMarker = BOOTSTRAP_PATTERNS.some((p) => line.includes(p.match));
+    const isPreloadFailure = line.includes(MODEL_PRELOAD_FAILED_MARKER);
+    if (!isInstallMarker && !isPreloadFailure) return;
+
+    if (this.seen.has(line)) return;
+    this.seen.add(line);
+    if (this.seen.size > SEEN_LINES_MAX) {
+      // Sets iterate in insertion order: drop the oldest remembered line.
+      this.seen.delete(this.seen.values().next().value as string);
+    }
+
+    if (isInstallMarker) applyBootstrapLogLine(this.hub, line);
+    if (isPreloadFailure) this.reportPreloadFailure();
+  }
+
+  /**
+   * A failed preload is a load failure, not a download, so it goes out as a
+   * server warning. On a server whose startup events do not reach the
+   * dashboard this log line is the only signal there is; where they do, the
+   * server's own event has the same id and simply updates the same record.
+   */
+  private reportPreloadFailure(): void {
+    try {
+      this.onServerEvent?.({
+        id: 'model-preload-error',
+        category: 'warning',
+        label:
+          'Model preload failed. The server started without a loaded model - check the Logs tab, fix the model selection and restart.',
+        status: 'error',
+        severity: 'error',
+        persistent: true,
+      });
+    } catch {
+      // A listener failure (window gone) must not break log handling.
+    }
   }
 }

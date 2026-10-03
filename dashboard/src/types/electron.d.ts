@@ -192,7 +192,8 @@ interface ElectronAPI {
     listVariantTags: () => Promise<
       Record<'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux', string[]>
     >;
-    pullImage: (tag: string) => Promise<string>;
+    /** `errorToast: false` when the caller raises its own failure toast. */
+    pullImage: (tag: string, options?: { errorToast?: boolean }) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;
     hasSidecarImage: () => Promise<boolean>;

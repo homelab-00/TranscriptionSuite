@@ -1269,9 +1269,12 @@ ipcMain.handle('docker:fetchRemoteTagDates', async (_event, tags: string[]) => {
   return dockerManager.fetchRemoteTagDates(tags);
 });
 
-ipcMain.handle('docker:pullImage', async (_event, tag: string) => {
-  return dockerManager.pullImage(tag);
-});
+ipcMain.handle(
+  'docker:pullImage',
+  async (_event, tag: string, options?: { errorToast?: boolean }) => {
+    return dockerManager.pullImage(tag, options);
+  },
+);
 
 ipcMain.handle('docker:cancelPull', () => {
   return dockerManager.cancelPull();
@@ -1484,6 +1487,12 @@ ipcMain.handle('docker:stopLogStream', async () => {
 // renderer also fetches a snapshot on mount to recover after a reload.
 
 downloadHub.setBroadcaster((change) => broadcastToWindows('downloads:changed', change));
+
+// Server events the container log parser derives (a failed model preload):
+// the only signal of it on a server whose startup events do not arrive.
+dockerManager.setServerLogEventListener((event) => {
+  mainWindow?.webContents.send('activity:event', event);
+});
 
 ipcMain.handle('downloads:getSnapshot', () => downloadHub.snapshot());
 
