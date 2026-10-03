@@ -67,6 +67,28 @@ describe('applyBootstrapLogLine', () => {
     expect(only()).toMatchObject({ status: 'error', error: 'git clone exited with 128' });
   });
 
+  it('tracks the FunASR install', () => {
+    applyBootstrapLogLine(hub, '[bootstrap] Installing FunASR for SenseVoice support...');
+    expect(only()).toMatchObject({ id: 'bootstrap-funasr', kind: 'feature-deps', label: 'FunASR' });
+
+    applyBootstrapLogLine(hub, '[bootstrap] FunASR installed');
+    expect(only().status).toBe('complete');
+  });
+
+  it('tracks the VibeVoice quantization runtime install separately from VibeVoice itself', () => {
+    applyBootstrapLogLine(
+      hub,
+      '[bootstrap] VibeVoice-ASR core already installed; installing quantization runtime dependencies for selected quantized model...',
+    );
+    expect(only()).toMatchObject({ id: 'bootstrap-vibevoice-quant', kind: 'feature-deps' });
+
+    applyBootstrapLogLine(
+      hub,
+      '[bootstrap] VibeVoice-ASR quantization runtime dependency installation failed: no matching wheel',
+    );
+    expect(only()).toMatchObject({ status: 'error', error: 'no matching wheel' });
+  });
+
   it('does not invent an item from a completion line with no install in flight', () => {
     applyBootstrapLogLine(hub, '[bootstrap] Runtime dependencies installed');
 

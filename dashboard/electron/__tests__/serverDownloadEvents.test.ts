@@ -218,6 +218,56 @@ describe('applyServerDownloadEvent', () => {
     expect(byId.bad).toMatchObject({ status: 'error', error: 'Failed to load bad' });
   });
 
+  it('counts a load failure after the bytes arrived as a finished download', () => {
+    // The download itself succeeded; what failed is loading the weights
+    // (CUDA OOM, bad file). That is reported as a server warning, not as a
+    // failed download.
+    applyServerDownloadEvent(hub, {
+      id: 'm',
+      category: 'download',
+      label: 'Downloading m...',
+      phase: 'download',
+      status: 'active',
+      downloadedBytes: 10,
+      totalBytes: 10,
+    });
+    applyServerDownloadEvent(hub, {
+      id: 'm',
+      category: 'download',
+      label: 'Failed to load m',
+      phase: 'load',
+      status: 'error',
+      error: 'RuntimeError: CUDA out of memory',
+    });
+
+    expect(only().status).toBe('complete');
+  });
+
+  it('fails the item with the server error text when the download itself broke', () => {
+    applyServerDownloadEvent(hub, {
+      id: 'm',
+      category: 'download',
+      label: 'Downloading m...',
+      phase: 'download',
+      status: 'active',
+      downloadedBytes: 4,
+      totalBytes: 10,
+    });
+    applyServerDownloadEvent(hub, {
+      id: 'm',
+      category: 'download',
+      label: 'Failed to load m',
+      phase: 'download',
+      status: 'error',
+      error: 'ConnectionError: connection reset',
+    });
+
+    expect(only()).toMatchObject({
+      status: 'error',
+      error: 'ConnectionError: connection reset',
+    });
+  });
+
   it('ignores terminal events for ids that never downloaded', () => {
     applyServerDownloadEvent(hub, {
       id: 'ghost',

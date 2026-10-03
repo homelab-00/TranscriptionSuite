@@ -120,6 +120,52 @@ describe('useNotificationBridge (GH-207)', () => {
     expect(useNotificationsStore.getState().notifications).toHaveLength(0);
   });
 
+  it('shows a model being loaded into memory as the stage of a running start', () => {
+    renderHook(() => useNotificationBridge());
+    useNotificationsStore.getState().notify({
+      id: 'server-start',
+      category: 'server',
+      title: 'Starting server...',
+      status: 'active',
+    });
+
+    activityEventCallback!({
+      id: 'model-load-x',
+      category: 'download',
+      label: 'Loading x into memory...',
+      phase: 'load',
+      status: 'active',
+    });
+
+    expect(newest('server-start')?.detail).toBe('Loading x into memory...');
+  });
+
+  it('does not reopen the server-start card for a model load long after startup', () => {
+    // Live Mode, a model switch or a first diarization run all load models
+    // while the server is already up. That must not raise "Starting server".
+    renderHook(() => useNotificationBridge());
+    useNotificationsStore.getState().notify({
+      id: 'server-start',
+      category: 'server',
+      title: 'Server ready',
+      status: 'complete',
+    });
+
+    activityEventCallback!({
+      id: 'model-load-x',
+      category: 'download',
+      label: 'Loading x into memory...',
+      phase: 'load',
+      status: 'active',
+    });
+
+    const entries = useNotificationsStore
+      .getState()
+      .notifications.filter((n) => n.id === 'server-start');
+    expect(entries).toHaveLength(1);
+    expect(entries[0].status).toBe('complete');
+  });
+
   it('completes the server-start aggregate when MLX reports running', () => {
     let mlxCb: ((status: string) => void) | null = null;
     (window as unknown as { electronAPI: unknown }).electronAPI = {

@@ -85,6 +85,29 @@ const BOOTSTRAP_PATTERNS: BootstrapPattern[] = [
     kind: 'feature-deps',
     label: 'NeMo toolkit',
   },
+  // ── VibeVoice-ASR quantization runtime ────────────────────────────────────
+  // Listed before the plain VibeVoice-ASR patterns: first match wins per line.
+  {
+    match: '[bootstrap] VibeVoice-ASR core already installed; installing quantization runtime',
+    action: 'start',
+    id: 'bootstrap-vibevoice-quant',
+    kind: 'feature-deps',
+    label: 'VibeVoice-ASR quantization runtime',
+  },
+  {
+    match: '[bootstrap] VibeVoice-ASR quantization runtime dependencies ready',
+    action: 'complete',
+    id: 'bootstrap-vibevoice-quant',
+    kind: 'feature-deps',
+    label: 'VibeVoice-ASR quantization runtime',
+  },
+  {
+    match: '[bootstrap] VibeVoice-ASR quantization runtime dependency installation failed:',
+    action: 'fail',
+    id: 'bootstrap-vibevoice-quant',
+    kind: 'feature-deps',
+    label: 'VibeVoice-ASR quantization runtime',
+  },
   // ── VibeVoice-ASR ─────────────────────────────────────────────────────────
   {
     match: '[bootstrap] Installing VibeVoice-ASR',
@@ -106,6 +129,28 @@ const BOOTSTRAP_PATTERNS: BootstrapPattern[] = [
     id: 'bootstrap-vibevoice',
     kind: 'feature-deps',
     label: 'VibeVoice-ASR',
+  },
+  // ── FunASR (SenseVoice) ───────────────────────────────────────────────────
+  {
+    match: '[bootstrap] Installing FunASR for SenseVoice support',
+    action: 'start',
+    id: 'bootstrap-funasr',
+    kind: 'feature-deps',
+    label: 'FunASR',
+  },
+  {
+    match: '[bootstrap] FunASR installed',
+    action: 'complete',
+    id: 'bootstrap-funasr',
+    kind: 'feature-deps',
+    label: 'FunASR',
+  },
+  {
+    match: '[bootstrap] FunASR installation failed:',
+    action: 'fail',
+    id: 'bootstrap-funasr',
+    kind: 'feature-deps',
+    label: 'FunASR',
   },
 ];
 

@@ -69,7 +69,10 @@ export function applyServerDownloadEvent(hub: DownloadHub, event: StartupEvent):
     return;
   }
   if (event.status === 'error') {
-    running?.fail(event.error || event.label || 'Download failed');
+    // A failure after the bytes arrived is a load failure (CUDA OOM, bad
+    // weights), reported as a server warning. The download itself finished.
+    if (event.phase === 'load') running?.complete();
+    else running?.fail(event.error || event.label || 'Download failed');
     return;
   }
 
