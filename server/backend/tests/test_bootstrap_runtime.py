@@ -2577,3 +2577,444 @@ def test_bootstrap_events_fall_back_to_no_ops_outside_the_image(tmp_path: Path) 
 
     truncate_events_file()
     emit_event("bootstrap-deps", "download", "Installing dependencies")  # must not raise
+
+
+# ── GH-318: dependency installs report download progress ──────────────────
+
+# Real `uv pip install` output, captured on a non-TTY inside the server image
+# (uv 0.10.8). Without a terminal uv prints no byte progress - only which
+# wheels it started and finished - so progress is wheel-granular by nature.
+_UV_NON_TTY_OUTPUT = """Using CPython 3.13.15 interpreter at: /runtime/.venv/bin/python
+Resolved 3 packages in 310ms
+Downloading pillow (6.6MiB)
+Downloading numpy (15.8MiB)
+ Downloaded pillow
+ Downloaded numpy
+Prepared 3 packages in 574ms
+Installed 3 packages in 280ms
+ + idna==3.20
+ + numpy==2.2.6
+ + pillow==12.3.0
+"""
+
+_MIB = 1024 * 1024
+
+
+def _capture_events(module: ModuleType, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    events: list[dict] = []
+
+    def fake_emit(id: str, category: str, label: str, status: str = "active", **extra):
+        events.append({"id": id, "category": category, "label": label, "status": status, **extra})
+
+    monkeypatch.setattr(module, "emit_event", fake_emit)
+    return events
+
+
+def test_uv_progress_parser_follows_real_non_tty_output() -> None:
+    module = _load_bootstrap_module()
+    parser = module.UvProgressParser()
+    lines = _UV_NON_TTY_OUTPUT.splitlines()
+
+    assert parser.feed(lines[0]) is False  # interpreter line
+    assert parser.feed(lines[1]) is False  # Resolved
+    assert parser.started is False
+
+    assert parser.feed(lines[2]) is True  # Downloading pillow
+    assert parser.feed(lines[3]) is True  # Downloading numpy
+    assert parser.started is True
+    assert parser.total_bytes == int(6.6 * _MIB) + int(15.8 * _MIB)
+    assert parser.done_bytes == 0
+    assert parser.in_flight == ["pillow", "numpy"]
+
+    assert parser.feed(lines[4]) is True  # Downloaded pillow
+    assert parser.done_bytes == int(6.6 * _MIB)
+    assert parser.in_flight == ["numpy"]
+
+    assert parser.feed(lines[5]) is True  # Downloaded numpy
+    assert parser.done_bytes == parser.total_bytes
+    assert parser.prepared is False
+
+    assert parser.feed(lines[6]) is True  # Prepared
+    assert parser.prepared is True
+    assert parser.feed(lines[8]) is False  # " + idna==3.20"
+
+
+def test_uv_progress_parser_reads_gib_and_strips_ansi() -> None:
+    module = _load_bootstrap_module()
+    parser = module.UvProgressParser()
+
+    assert parser.feed("\x1b[1mDownloading\x1b[0m torch \x1b[2m(1.2GiB)\x1b[0m") is True
+    assert parser.feed("Downloading tiny (850.0KiB)") is True
+
+    assert parser.total_bytes == int(1.2 * 1024 * _MIB) + int(850.0 * 1024)
+    assert parser.in_flight == ["torch", "tiny"]
+
+
+def test_uv_reporter_emits_wheel_granular_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_bootstrap_module()
+    events = _capture_events(module, monkeypatch)
+    reporter = module.UvDownloadReporter("bootstrap-nemo", "NeMo toolkit", "feature-deps")
+
+    for line in _UV_NON_TTY_OUTPUT.splitlines():
+        reporter.on_line(line)
+    reporter.complete()
+
+    assert all(e["id"] == "bootstrap-nemo" and e["category"] == "download" for e in events)
+    first = events[0]
+    assert first["phase"] == "download"
+    assert first["kind"] == "feature-deps"
+    assert first["name"] == "NeMo toolkit"
+    assert first["totalBytes"] == int(6.6 * _MIB)
+    assert first["downloadedBytes"] == 0
+    assert first["detail"] == "pillow"
+
+    halfway = next(e for e in events if e["downloadedBytes"] == int(6.6 * _MIB))
+    assert halfway["detail"] == "numpy"
+
+    assert events[-1]["status"] == "complete"
+    assert events[-1]["downloadedBytes"] == events[-1]["totalBytes"]
+
+
+def test_uv_reporter_stays_silent_when_nothing_is_downloaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Everything served from the uv cache: no download, so no download item."""
+    module = _load_bootstrap_module()
+    events = _capture_events(module, monkeypatch)
+    reporter = module.UvDownloadReporter("bootstrap-deps", "Runtime dependencies", "server-deps")
+
+    for line in ["Resolved 200 packages in 1ms", "Installed 200 packages in 3.2s"]:
+        reporter.on_line(line)
+    reporter.complete()
+    reporter.fail(RuntimeError("late"))
+
+    assert events == []
+
+
+def test_uv_reporter_reports_a_failure_only_after_a_download_started(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    events = _capture_events(module, monkeypatch)
+    reporter = module.UvDownloadReporter("bootstrap-deps", "Runtime dependencies", "server-deps")
+
+    reporter.on_line("Downloading torch (1.2GiB)")
+    reporter.fail(RuntimeError("Command failed (2): uv sync\nconnection reset by peer"))
+
+    assert events[-1]["status"] == "error"
+    assert events[-1]["phase"] == "download"
+    assert "Command failed" in events[-1]["error"]
+
+
+def test_uv_reporter_never_raises_into_the_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_bootstrap_module()
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("events file gone")
+
+    monkeypatch.setattr(module, "emit_event", boom)
+    reporter = module.UvDownloadReporter("bootstrap-deps", "Runtime dependencies", "server-deps")
+
+    reporter.on_line("Downloading torch (1.2GiB)")
+    reporter.complete()
+
+
+def _py(code: str) -> list[str]:
+    import sys
+
+    return [sys.executable, "-c", code]
+
+
+def test_run_command_streaming_returns_the_same_output_as_capturing() -> None:
+    import os
+
+    module = _load_bootstrap_module()
+    cmd = _py("import sys; print('out-1'); print('err-1', file=sys.stderr); print('out-2')")
+    seen: list[str] = []
+
+    captured = module.run_command(cmd, timeout_seconds=30, env=os.environ.copy())
+    streamed = module.run_command(
+        cmd, timeout_seconds=30, env=os.environ.copy(), on_line=seen.append
+    )
+
+    assert streamed.stdout == captured.stdout == "out-1\nout-2\n"
+    assert streamed.stderr == captured.stderr == "err-1\n"
+    assert streamed.returncode == 0
+    assert sorted(seen) == ["err-1", "out-1", "out-2"]
+
+
+def test_run_command_streaming_fails_with_the_same_error_text() -> None:
+    """The retry and TLS classifiers read this text; streaming must not change it."""
+    import os
+
+    module = _load_bootstrap_module()
+    cmd = _py(
+        "import sys; print('resolving'); "
+        "print('error: connection reset by peer', file=sys.stderr); sys.exit(2)"
+    )
+
+    with pytest.raises(RuntimeError) as captured:
+        module.run_command(cmd, timeout_seconds=30, env=os.environ.copy())
+    with pytest.raises(RuntimeError) as streamed:
+        module.run_command(
+            cmd, timeout_seconds=30, env=os.environ.copy(), on_line=lambda _line: None
+        )
+
+    assert str(streamed.value) == str(captured.value)
+    assert "Command failed (2)" in str(streamed.value)
+
+
+def test_run_command_streaming_times_out_like_capturing() -> None:
+    import os
+
+    module = _load_bootstrap_module()
+    cmd = _py("import time; print('started', flush=True); time.sleep(30)")
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        module.run_command(
+            cmd, timeout_seconds=1, env=os.environ.copy(), on_line=lambda _line: None
+        )
+
+
+def test_run_command_streaming_survives_a_failing_line_callback() -> None:
+    import os
+
+    module = _load_bootstrap_module()
+
+    def boom(_line: str) -> None:
+        raise ValueError("parser bug")
+
+    result = module.run_command(
+        _py("print('a'); print('b')"), timeout_seconds=30, env=os.environ.copy(), on_line=boom
+    )
+
+    assert result.stdout == "a\nb\n"
+
+
+def test_dependency_sync_reports_progress_and_survives_a_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A transient failure is retried: the download must stay one running item,
+    not flash a failure and start over."""
+    module = _load_bootstrap_module()
+    events = _capture_events(module, monkeypatch)
+    monkeypatch.setattr(module, "_sleep_between_sync_attempts", lambda _seconds: None)
+    attempts: list[int] = []
+
+    def fake_sync(**kwargs: object) -> None:
+        on_line = kwargs["on_line"]
+        attempts.append(1)
+        on_line("Downloading torch (1.2GiB)")  # type: ignore[operator]
+        if len(attempts) == 1:
+            raise RuntimeError("Command failed (2): uv sync\nconnection reset by peer")
+        on_line(" Downloaded torch")  # type: ignore[operator]
+        on_line("Prepared 1 package in 3m")  # type: ignore[operator]
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+
+    module.run_dependency_sync_with_retries(
+        venv_dir=tmp_path / "venv",
+        cache_dir=tmp_path / "cache",
+        timeout_seconds=60,
+        attempts=3,
+    )
+
+    deps = [e for e in events if e["id"] == "bootstrap-deps"]
+    assert len(attempts) == 2
+    assert deps[0]["phase"] == "download"
+    assert deps[0]["kind"] == "server-deps"
+    assert not any(e["status"] == "error" for e in deps)
+    assert deps[-1]["status"] == "complete"
+
+
+def test_dependency_sync_reports_the_final_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = _load_bootstrap_module()
+    events = _capture_events(module, monkeypatch)
+
+    def fake_sync(**kwargs: object) -> None:
+        kwargs["on_line"]("Downloading torch (1.2GiB)")  # type: ignore[operator]
+        raise RuntimeError("Command failed (2): uv sync\nno space left on device")
+
+    monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
+
+    with pytest.raises(RuntimeError, match="no space left"):
+        module.run_dependency_sync_with_retries(
+            venv_dir=tmp_path / "venv",
+            cache_dir=tmp_path / "cache",
+            timeout_seconds=60,
+            attempts=3,
+        )
+
+    deps = [e for e in events if e["id"] == "bootstrap-deps"]
+    assert deps[-1]["status"] == "error"
+
+
+def test_feature_install_runs_through_the_progress_reporter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_bootstrap_module()
+    events = _capture_events(module, monkeypatch)
+    seen: dict[str, object] = {}
+
+    def fake_run_command(cmd: list[str], **kwargs: object) -> None:
+        seen["cmd"] = cmd
+        seen["timeout_seconds"] = kwargs["timeout_seconds"]
+        for line in _UV_NON_TTY_OUTPUT.splitlines():
+            kwargs["on_line"](line)  # type: ignore[operator]
+
+    monkeypatch.setattr(module, "run_command", fake_run_command)
+
+    module.run_uv_install_with_progress(
+        ["uv", "pip", "install", "funasr>=1.3.12"],
+        timeout_seconds=600,
+        env={},
+        event_id="bootstrap-funasr",
+        name="FunASR",
+    )
+
+    assert seen["cmd"] == ["uv", "pip", "install", "funasr>=1.3.12"]
+    assert seen["timeout_seconds"] == 600
+    assert events[0]["id"] == "bootstrap-funasr"
+    assert events[0]["kind"] == "feature-deps"
+    assert events[-1]["status"] == "complete"
+
+
+# ── GH-318: model preloads in bootstrap child processes ───────────────────
+
+
+def _child_app_root(tmp_path: Path) -> Path:
+    """An app root laid out like the image: <root>/server is the backend package."""
+    repo_root = Path(__file__).resolve().parents[3]
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    (app_root / "server").symlink_to(repo_root / "server/backend", target_is_directory=True)
+    return app_root
+
+
+def _stub_packages(tmp_path: Path) -> Path:
+    """Fake huggingface_hub / pyannote that 'download' through the real tracker bar."""
+    stubs = tmp_path / "stubs"
+    (stubs / "huggingface_hub").mkdir(parents=True)
+    (stubs / "huggingface_hub" / "__init__.py").write_text(
+        "def _download(size):\n"
+        "    try:\n"
+        "        from server.core.download_progress import _ProgressTqdm\n"
+        "    except Exception:\n"
+        "        return\n"
+        "    bar = _ProgressTqdm(total=size, unit='B')\n"
+        "    bar.update(size)\n"
+        "\n"
+        "class HfApi:\n"
+        "    def model_info(self, repo_id, token=None):\n"
+        "        return None\n"
+        "\n"
+        "def snapshot_download(repo_id, **kwargs):\n"
+        "    _download(15_000_000)\n"
+        "    return '/models/' + repo_id\n",
+        encoding="utf-8",
+    )
+    (stubs / "pyannote" / "audio").mkdir(parents=True)
+    (stubs / "pyannote" / "__init__.py").write_text("", encoding="utf-8")
+    (stubs / "pyannote" / "audio" / "__init__.py").write_text(
+        "from huggingface_hub import _download\n"
+        "\n"
+        "class Pipeline:\n"
+        "    @classmethod\n"
+        "    def from_pretrained(cls, model, token=None):\n"
+        "        _download(30_000_000)\n"
+        "        return cls()\n",
+        encoding="utf-8",
+    )
+    return stubs
+
+
+def _read_events(events_file: Path) -> list[dict]:
+    if not events_file.exists():
+        return []
+    return [json.loads(line) for line in events_file.read_text(encoding="utf-8").splitlines()]
+
+
+def test_pyannote_preload_reports_its_download(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import sys
+
+    module = _load_bootstrap_module()
+    events_file = tmp_path / "events.jsonl"
+    monkeypatch.setattr(module, "APP_ROOT", _child_app_root(tmp_path))
+    monkeypatch.setenv("PYTHONPATH", str(_stub_packages(tmp_path)))
+    monkeypatch.setenv("STARTUP_EVENTS_FILE", str(events_file))
+    # The child inherits the cwd on its sys.path. From server/backend the
+    # local `logging` package would shadow the stdlib one; the image runs the
+    # bootstrap from /app, where no such top-level package exists.
+    monkeypatch.chdir(tmp_path)
+
+    result = module.check_diarization_access(
+        venv_python=Path(sys.executable),
+        diarization_model="pyannote/speaker-diarization-community-1",
+        hf_token="hf_test",
+        hf_home=str(tmp_path / "hf"),
+        timeout_seconds=120,
+    )
+
+    assert result == {"available": True, "reason": "ready"}
+    events = _read_events(events_file)
+    done = events[-1]
+    assert done["id"] == "diarization-model-load-pyannote--speaker-diarization-community-1"
+    assert done["kind"] == "diarization-model"
+    assert done["status"] == "complete"
+    assert done["totalBytes"] == 30_000_000
+
+
+def test_pyannote_preload_works_when_the_tracker_cannot_be_imported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The preload decides whether diarization is available. It must not depend
+    on the progress plumbing being importable."""
+    import sys
+
+    module = _load_bootstrap_module()
+    monkeypatch.setattr(module, "APP_ROOT", tmp_path / "no-such-app-root")
+    monkeypatch.setenv("PYTHONPATH", str(_stub_packages(tmp_path)))
+    monkeypatch.setenv("STARTUP_EVENTS_FILE", str(tmp_path / "events.jsonl"))
+
+    result = module.check_diarization_access(
+        venv_python=Path(sys.executable),
+        diarization_model="pyannote/speaker-diarization-community-1",
+        hf_token="hf_test",
+        hf_home=str(tmp_path / "hf"),
+        timeout_seconds=120,
+    )
+
+    assert result == {"available": True, "reason": "ready"}
+
+
+def test_sensevoice_warm_download_reports_its_download(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import sys
+
+    module = _load_bootstrap_module()
+    events_file = tmp_path / "events.jsonl"
+    monkeypatch.setattr(module, "APP_ROOT", _child_app_root(tmp_path))
+    monkeypatch.setenv("PYTHONPATH", str(_stub_packages(tmp_path)))
+    monkeypatch.setenv("STARTUP_EVENTS_FILE", str(events_file))
+    # The child inherits the cwd on its sys.path. From server/backend the
+    # local `logging` package would shadow the stdlib one; the image runs the
+    # bootstrap from /app, where no such top-level package exists.
+    monkeypatch.chdir(tmp_path)
+
+    assert (
+        module.warm_download_sensevoice_models(
+            venv_python=Path(sys.executable), timeout_seconds=120
+        )
+        is True
+    )
+
+    done = _read_events(events_file)[-1]
+    assert done["id"] == "sensevoice-aux"
+    assert done["name"] == "SenseVoice speaker models"
+    assert done["status"] == "complete"
+    assert done["totalBytes"] == 30_000_000  # cam++ and fsmn-vad, one item
