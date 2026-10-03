@@ -1494,6 +1494,11 @@ dockerManager.setServerLogEventListener((event) => {
   mainWindow?.webContents.send('activity:event', event);
 });
 
+// Image pulls report real bytes through the Engine API where a local docker
+// socket is reachable; everywhere else, and on any failure, the CLI pull is
+// used as before.
+dockerManager.configureEnginePull({ enabled: true });
+
 ipcMain.handle('downloads:getSnapshot', () => downloadHub.snapshot());
 
 ipcMain.handle('downloads:cancel', (_event, id: string) => downloadHub.cancel(id));

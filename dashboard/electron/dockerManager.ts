@@ -43,6 +43,13 @@ import { type WslSupport, resetWslSupportCache } from './wslDetect.js';
 import { hfCacheDirName } from './hfRepoAliases.js';
 import { downloadHub, type DownloadProgress } from './downloadHub.js';
 import { PullProgressAggregator } from './pullProgress.js';
+import {
+  parseEngineHost,
+  pingEngine,
+  pullViaEngine,
+  splitImageReference,
+  type EngineEndpoint,
+} from './enginePull.js';
 import { BootstrapLogTracker } from './bootstrapLogDownloads.js';
 import type { StartupEvent } from './startupEventWatcher.js';
 import {
@@ -1722,6 +1729,7 @@ function retryDetection(): void {
   detectedRuntimeKind = null;
   _detectionGuidance = null;
   _composeAvailable = null;
+  cachedEngineEndpoint = undefined;
 }
 
 // ─── Image Operations ───────────────────────────────────────────────────────
@@ -1731,6 +1739,10 @@ let pullProcess: ChildProcess | null = null;
 
 /** Active sidecar pull process — independent from main image pull */
 let sidecarPullProcess: ChildProcess | null = null;
+
+/** Abort handles of in-flight Engine API pulls (the CLI pulls use the processes above). */
+let pullAbort: AbortController | null = null;
+let sidecarPullAbort: AbortController | null = null;
 
 /** True if the active sidecar pull was killed by a cancel rather than failing on its own. */
 let sidecarPullCancelled = false;
@@ -2054,6 +2066,89 @@ export function classifyPullError(
   };
 }
 
+// ─── Engine API pull (GH-318) ───────────────────────────────────────────────
+//
+// `docker pull` without a TTY reports no bytes; the Engine API does. It is an
+// optional fast path in front of the CLI pull: off unless main.ts turns it
+// on, used only for docker (podman's compat stream is unverified), and any
+// failure falls back to the CLI, which owns credentials, error
+// classification and retries.
+
+let enginePullEnabled = false;
+let engineEndpointOverride: (() => Promise<EngineEndpoint | null>) | null = null;
+/** undefined = not resolved yet; null = resolved, no usable local endpoint. */
+let cachedEngineEndpoint: EngineEndpoint | null | undefined;
+
+function configureEnginePull(config: {
+  enabled: boolean;
+  /** Test seam: replaces endpoint discovery. */
+  resolveEndpoint?: () => Promise<EngineEndpoint | null>;
+}): void {
+  enginePullEnabled = config.enabled;
+  engineEndpointOverride = config.resolveEndpoint ?? null;
+  cachedEngineEndpoint = undefined;
+}
+
+async function resolveEngineEndpoint(): Promise<EngineEndpoint | null> {
+  if (!enginePullEnabled) return null;
+  if (engineEndpointOverride) return engineEndpointOverride();
+  if (detectedRuntimeKind !== 'docker') return null;
+  if (cachedEngineEndpoint !== undefined) return cachedEngineEndpoint;
+
+  let host = buildProcessEnv(undefined, 'docker').DOCKER_HOST;
+  if (!host) {
+    try {
+      host = (
+        await exec(await runtimeBin(), [
+          'context',
+          'inspect',
+          '--format',
+          '{{.Endpoints.docker.Host}}',
+        ])
+      ).trim();
+    } catch {
+      host = undefined;
+    }
+  }
+  const endpoint = parseEngineHost(host);
+  cachedEngineEndpoint = endpoint && (await pingEngine(endpoint)) ? endpoint : null;
+  return cachedEngineEndpoint;
+}
+
+/**
+ * Try to pull *reference* through the Engine API, reporting byte progress.
+ * 'unavailable' means "use the CLI": no local endpoint, or the pull failed.
+ */
+async function pullThroughEngine(
+  reference: string,
+  onProgress: (progress: DownloadProgress) => void,
+  signal: AbortSignal,
+): Promise<'ok' | 'cancelled' | 'unavailable'> {
+  let endpoint: EngineEndpoint | null = null;
+  try {
+    endpoint = await resolveEngineEndpoint();
+  } catch {
+    endpoint = null;
+  }
+  if (!endpoint) return 'unavailable';
+
+  const aggregator = new PullProgressAggregator();
+  const result = await pullViaEngine(
+    endpoint,
+    splitImageReference(reference),
+    (message) => {
+      if (aggregator.applyApiMessage(message)) onProgress(aggregator.progress());
+    },
+    signal,
+  );
+  if (result.ok) return 'ok';
+  if (result.cancelled) return 'cancelled';
+  console.warn(
+    `[DockerManager] Engine API pull of ${reference} failed (${result.error}); falling back to the CLI`,
+  );
+  return 'unavailable';
+}
+
 /**
  * Report the output of a pull process to the download bar as it arrives
  * (GH-318). docker writes its layer lines to stdout, podman its blob lines to
@@ -2144,7 +2239,7 @@ async function runImagePull(
   type AttemptResult =
     { ok: true; stdout: string } | { ok: false; code: number | null; stderr: string };
 
-  const runOne = (): Promise<AttemptResult> =>
+  const runCli = (): Promise<AttemptResult> =>
     new Promise((resolve) => {
       const proc = spawn(bin, ['pull', `${imageRepo}:${tag}`], {
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -2179,6 +2274,17 @@ async function runImagePull(
         resolve({ ok: false, code: null, stderr: err.message });
       });
     });
+
+  const runOne = async (): Promise<AttemptResult> => {
+    const abort = new AbortController();
+    pullAbort = abort;
+    const viaEngine = await pullThroughEngine(`${imageRepo}:${tag}`, onProgress, abort.signal);
+    if (pullAbort === abort) pullAbort = null;
+    if (viaEngine === 'ok') return { ok: true, stdout: '' };
+    // The cancel check after runOne() turns this into 'Pull cancelled.'.
+    if (viaEngine === 'cancelled') return { ok: false, code: null, stderr: '' };
+    return runCli();
+  };
 
   for (let attempt = 1; attempt <= MAX_PULL_ATTEMPTS; attempt++) {
     // No top-of-loop cancel check here: pullCancelled is reset to false above
@@ -2235,8 +2341,12 @@ async function runImagePull(
  * Returns true if anything was cancelled.
  */
 function cancelPull(): boolean {
-  const wasActive = pullProcess !== null || pullRetryTimer !== null;
+  const wasActive = pullProcess !== null || pullRetryTimer !== null || pullAbort !== null;
   pullCancelled = true;
+  if (pullAbort) {
+    pullAbort.abort();
+    pullAbort = null;
+  }
   if (pullRetryTimer) {
     clearTimeout(pullRetryTimer);
     pullRetryTimer = null;
@@ -2256,7 +2366,7 @@ function cancelPull(): boolean {
  * Check if a pull is currently in progress.
  */
 function isPulling(): boolean {
-  return pullProcess !== null;
+  return pullProcess !== null || pullAbort !== null;
 }
 
 // ─── Sidecar Image Operations ─────────────────────────────────────────────
@@ -2300,7 +2410,20 @@ async function pullSidecarImage(): Promise<string> {
   }
 }
 
-function runSidecarPull(
+async function runSidecarPull(
+  bin: string,
+  onProgress: (progress: DownloadProgress) => void,
+): Promise<string> {
+  const abort = new AbortController();
+  sidecarPullAbort = abort;
+  const viaEngine = await pullThroughEngine(VULKAN_SIDECAR_IMAGE, onProgress, abort.signal);
+  if (sidecarPullAbort === abort) sidecarPullAbort = null;
+  if (viaEngine === 'ok') return '';
+  if (viaEngine === 'cancelled') throw new Error('Sidecar pull cancelled.');
+  return runSidecarCliPull(bin, onProgress);
+}
+
+function runSidecarCliPull(
   bin: string,
   onProgress: (progress: DownloadProgress) => void,
 ): Promise<string> {
@@ -2343,20 +2466,27 @@ function runSidecarPull(
  * Returns true if a pull was actually cancelled.
  */
 function cancelSidecarPull(): boolean {
+  let cancelled = false;
+  if (sidecarPullAbort) {
+    sidecarPullCancelled = true;
+    sidecarPullAbort.abort();
+    sidecarPullAbort = null;
+    cancelled = true;
+  }
   if (sidecarPullProcess) {
     sidecarPullCancelled = true;
     sidecarPullProcess.kill('SIGTERM');
     sidecarPullProcess = null;
-    return true;
+    cancelled = true;
   }
-  return false;
+  return cancelled;
 }
 
 /**
  * Check if a sidecar pull is currently in progress.
  */
 function isSidecarPulling(): boolean {
-  return sidecarPullProcess !== null;
+  return sidecarPullProcess !== null || sidecarPullAbort !== null;
 }
 
 /**
@@ -4641,6 +4771,7 @@ export const dockerManager = {
   pullSidecarImage,
   cancelSidecarPull,
   isSidecarPulling,
+  configureEnginePull,
   removeImage,
   getContainerStatus,
   startContainer,

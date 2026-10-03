@@ -6,10 +6,11 @@
  * how they ended.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import fsDefault from 'fs';
+import * as http from 'http';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -87,11 +88,12 @@ function controllableSpawn(): {
   return { proc, finish };
 }
 
-const hubItem = (id: string): DownloadItem | undefined =>
-  downloadHub
-    .snapshot()
-    .filter((i) => i.id === id)
-    .sort((a, b) => b.startedAt - a.startedAt)[0];
+/** The running item with this id, else the one that ended last. */
+const hubItem = (id: string): DownloadItem | undefined => {
+  // snapshot() lists running items first, then ended ones in the order they ended.
+  const matches = downloadHub.snapshot().filter((i) => i.id === id);
+  return matches.find((i) => i.status === 'active') ?? matches[matches.length - 1];
+};
 
 /** Let the awaits inside pullImage (runtimeBin etc.) settle. */
 async function settle(): Promise<void> {
@@ -239,6 +241,118 @@ describe('pullSidecarImage download tracking', () => {
 
     await expect(pull).rejects.toThrow();
     expect(hubItem('sidecar-image')?.status).toBe('cancelled');
+  });
+});
+
+describe('image pull through the Engine API', () => {
+  let dir = '';
+  let socketPath = '';
+  let server: http.Server | null = null;
+  let hits = 0;
+
+  function serveEngine(handler: http.RequestListener): Promise<void> {
+    return new Promise((resolve) => {
+      server = http.createServer((req, res) => {
+        hits += 1;
+        handler(req, res);
+      });
+      server.listen(socketPath, resolve);
+    });
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-dm-engine-'));
+    socketPath = path.join(dir, 'docker.sock');
+    hits = 0;
+    dockerManager.configureEnginePull({
+      enabled: true,
+      resolveEndpoint: async () => ({ socketPath }),
+    });
+  });
+
+  afterEach(async () => {
+    dockerManager.configureEnginePull({ enabled: false });
+    if (server) {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server?.close(() => resolve()));
+      server = null;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('pulls without the CLI and reports the bytes the daemon streams', async () => {
+    let finishStream: () => void = () => {};
+    await serveEngine((_req, res) => {
+      res.writeHead(200);
+      res.write('{"status":"Pulling fs layer","progressDetail":{},"id":"aaaaaaaaaaaa"}\r\n');
+      res.write(
+        '{"status":"Downloading","progressDetail":{"current":1000,"total":4000},"id":"aaaaaaaaaaaa"}\r\n',
+      );
+      finishStream = () => res.end('{"status":"Status: Downloaded newer image"}\r\n');
+    });
+    vi.mocked(spawn).mockReset();
+
+    const pull = dockerManager.pullImage('v-api');
+    await vi.waitFor(() =>
+      expect(hubItem('server-image:v-api')).toMatchObject({ bytesDone: 1000, percent: 25 }),
+    );
+
+    finishStream();
+    await pull;
+    expect(hubItem('server-image:v-api')?.status).toBe('complete');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the CLI when the Engine API pull fails', async () => {
+    await serveEngine((_req, res) => {
+      res.writeHead(200);
+      res.end('{"errorDetail":{"message":"unauthorized"},"error":"unauthorized"}\r\n');
+    });
+    const { finish } = controllableSpawn();
+
+    const pull = dockerManager.pullImage('v-fallback');
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+    finish(0);
+    await pull;
+
+    expect(hits).toBe(1);
+    expect(hubItem('server-image:v-fallback')?.status).toBe('complete');
+  });
+
+  it('cancels an Engine API pull by hanging up', async () => {
+    await serveEngine((_req, res) => {
+      res.writeHead(200);
+      res.write('{"status":"Pulling fs layer","progressDetail":{},"id":"aaaaaaaaaaaa"}\r\n');
+      // Never ends.
+    });
+    vi.mocked(spawn).mockReset();
+
+    const pull = dockerManager.pullImage('v-api-cancel');
+    await vi.waitFor(() => expect(hits).toBe(1));
+    await settle();
+    expect(dockerManager.isPulling()).toBe(true);
+    expect(downloadHub.cancel('server-image:v-api-cancel')).toBe(true);
+
+    await expect(pull).rejects.toThrow('Pull cancelled.');
+    expect(hubItem('server-image:v-api-cancel')?.status).toBe('cancelled');
+    expect(spawn).not.toHaveBeenCalled();
+    expect(dockerManager.isPulling()).toBe(false);
+  });
+
+  it('pulls the sidecar image through the Engine API too', async () => {
+    let seenUrl = '';
+    await serveEngine((req, res) => {
+      seenUrl = req.url ?? '';
+      res.writeHead(200);
+      res.end('{"status":"Status: Image is up to date"}\r\n');
+    });
+    vi.mocked(spawn).mockReset();
+
+    await dockerManager.pullSidecarImage();
+
+    expect(seenUrl).toContain('/images/create?fromImage=');
+    expect(spawn).not.toHaveBeenCalled();
+    expect(hubItem('sidecar-image')?.status).toBe('complete');
   });
 });
 
