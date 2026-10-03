@@ -16,6 +16,25 @@ describe('mapStartupEvent (individual log entries)', () => {
     ).toBeNull();
   });
 
+  it('still surfaces a failed model preload from an older server', () => {
+    // Older servers emit this load failure with category "download". It is
+    // not a download, and it must not vanish with the download mapping.
+    const entry = mapStartupEvent({
+      id: 'model-preload-error',
+      category: 'download',
+      label: 'Model preload failed for large-v3. The server started without a loaded model.',
+      status: 'error',
+      severity: 'error',
+      persistent: true,
+    });
+    expect(entry).toMatchObject({
+      id: 'model-preload-error',
+      category: 'server',
+      status: 'error',
+      severity: 'error',
+    });
+  });
+
   it('maps a warning event to a server-category record', () => {
     const entry = mapStartupEvent({
       id: 'warn-nemo',

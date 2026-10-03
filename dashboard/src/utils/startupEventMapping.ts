@@ -26,10 +26,18 @@ export interface StartupActivityEventLike {
 
 export const SERVER_START_ID = 'server-start';
 
+const MODEL_PRELOAD_ERROR_ID = 'model-preload-error';
+
 export function mapStartupEvent(event: StartupActivityEventLike): NotifyInput | null {
   // category === 'download' is deliberately not mapped: the main process
-  // routes those into the download bar (GH-318).
-  if (event.category === 'warning' || event.category === 'info') {
+  // routes those into the download bar (GH-318). The one exception is a
+  // failed model preload, which older servers emit as a download although it
+  // is a load failure - it stays a server notification.
+  if (
+    event.category === 'warning' ||
+    event.category === 'info' ||
+    event.id === MODEL_PRELOAD_ERROR_ID
+  ) {
     return {
       id: event.id,
       category: 'server',
