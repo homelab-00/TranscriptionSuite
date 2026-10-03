@@ -24,6 +24,9 @@ import {
 } from './appVariant.js';
 import { buildReleaseUrl } from './releaseUrl.js';
 
+/** Minimum gap between two download progress statuses. */
+const PROGRESS_STATUS_INTERVAL_MS = 250;
+
 export interface MacVariantDeps {
   variant: AppVariant;
   onStatus: (status: InstallerStatus) => void;
@@ -86,6 +89,7 @@ export async function downloadMacVariantDmg(
   }
 
   const destPath = path.join(deps.getDownloadsDir(), assetName);
+  let out: fs.WriteStream | null = null;
 
   try {
     deps.onStatus({
@@ -105,6 +109,23 @@ export async function downloadMacVariantDmg(
     const hash = createHash('sha512');
     let transferred = 0;
 
+    // One status per chunk floods the IPC channel for nothing: throttle, and
+    // send the exact final count once the body is through.
+    let lastStatusAt = 0;
+    const reportProgress = (force: boolean) => {
+      const now = Date.now();
+      if (!force && now - lastStatusAt < PROGRESS_STATUS_INTERVAL_MS) return;
+      lastStatusAt = now;
+      deps.onStatus({
+        state: 'downloading',
+        version: targetVersion,
+        percent: total > 0 ? (transferred / total) * 100 : 0,
+        bytesPerSecond: 0,
+        transferred,
+        total,
+      });
+    };
+
     // res.body is a web ReadableStream in Node/Electron; it is async-iterable.
     const body = res.body as unknown as AsyncIterable<Uint8Array>;
     const source = (async function* () {
@@ -112,19 +133,14 @@ export async function downloadMacVariantDmg(
         const buf = Buffer.from(chunk);
         transferred += buf.length;
         hash.update(buf);
-        deps.onStatus({
-          state: 'downloading',
-          version: targetVersion,
-          percent: total > 0 ? (transferred / total) * 100 : 0,
-          bytesPerSecond: 0,
-          transferred,
-          total,
-        });
+        reportProgress(false);
         yield buf;
       }
+      reportProgress(true);
     })();
 
-    await pipeline(source, fs.createWriteStream(destPath));
+    out = fs.createWriteStream(destPath);
+    await pipeline(source, out);
     const actualSha512 = hash.digest('base64');
 
     // Verify STANDARD variants against latest-mac.yml (best-effort). Metal has
@@ -161,10 +177,23 @@ export async function downloadMacVariantDmg(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[macVariantUpdater] download failed:', message);
+    // The write stream opens the file asynchronously. Removing the path before
+    // that open has finished leaves the partial file behind after all, so wait
+    // for the stream to be fully closed first.
+    await streamClosed(out);
     fs.rmSync(destPath, { force: true });
     deps.onStatus({ state: 'error', message });
     return { ok: false, reason: 'manual-download-required', downloadUrl: releaseUrl };
   }
+}
+
+/** Resolves once *stream* has released its file (immediately if it never existed). */
+function streamClosed(stream: fs.WriteStream | null): Promise<void> {
+  if (!stream || stream.closed) return Promise.resolve();
+  return new Promise((resolve) => {
+    stream.once('close', () => resolve());
+    stream.destroy();
+  });
 }
 
 async function fetchExpectedSha512(

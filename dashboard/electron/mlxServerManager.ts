@@ -35,6 +35,11 @@ export interface MLXStartOptions {
   mainTranscriberModel?: string;
   liveTranscriberModel?: string;
   diarizationModel?: string;
+  /**
+   * File the server writes its startup and download events to (GH-318).
+   * Without it the bare-metal server has nowhere to report a model download.
+   */
+  startupEventsFile?: string;
 }
 
 export interface MLXModelCacheEntry {
@@ -47,6 +52,7 @@ const MAX_LOG_LINES = 500;
 export class MLXServerManager {
   private _process: ChildProcess | null = null;
   private _status: MLXServerStatus = 'stopped';
+  private _statusListener: ((status: MLXServerStatus) => void) | null = null;
   private _logs: string[] = [];
   private _getWindow: () => BrowserWindow | null;
   private _sink: MlxLogSink | null;
@@ -134,6 +140,7 @@ export class MLXServerManager {
       PATH: spawnPath,
     };
     if (opts.hfToken) env.HF_TOKEN = opts.hfToken;
+    if (opts.startupEventsFile) env.STARTUP_EVENTS_FILE = opts.startupEventsFile;
     if (opts.mainTranscriberModel) env.MAIN_TRANSCRIBER_MODEL = opts.mainTranscriberModel;
     if (opts.liveTranscriberModel) env.LIVE_TRANSCRIBER_MODEL = opts.liveTranscriberModel;
     // GH-288: substitute the Settings-modal overlay model when the PyAnnote
@@ -507,8 +514,18 @@ export class MLXServerManager {
     }
   }
 
+  /** Observe status transitions from the main process (the renderer gets `mlx:statusChanged`). */
+  onStatus(listener: (status: MLXServerStatus) => void): void {
+    this._statusListener = listener;
+  }
+
   private _setStatus(status: MLXServerStatus): void {
     this._status = status;
+    try {
+      this._statusListener?.(status);
+    } catch (err) {
+      console.warn('[MLX] status listener failed:', err);
+    }
   }
 
   private _emit(channel: string, ...args: unknown[]): void {

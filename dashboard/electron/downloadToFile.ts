@@ -15,7 +15,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { Readable } from 'stream';
+import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import type { ReadableStream as NodeWebReadableStream } from 'stream/web';
 
@@ -23,10 +23,19 @@ export interface DownloadToFileOptions {
   url: string;
   headers?: Record<string, string>;
   filePath: string;
+  /**
+   * Called once with (0, total) when the server accepts the download, then as
+   * bytes are written. `total` is undefined when the server sent no
+   * Content-Length. Never called for a refused download.
+   */
+  onProgress?: (bytesDone: number, bytesTotal: number | undefined) => void;
+  /** Aborting cancels the download and removes the partial file. */
+  signal?: AbortSignal;
 }
 
 export type DownloadToFileResult =
-  { ok: true; bytes?: number } | { ok: false; error: string; status?: number; body?: string };
+  | { ok: true; bytes?: number }
+  | { ok: false; error: string; status?: number; body?: string; cancelled?: boolean };
 
 /** Cap on the error body relayed to the renderer. */
 export const MAX_ERROR_BODY_CHARS = 2000;
@@ -55,7 +64,7 @@ export async function downloadToFile(opts: DownloadToFileOptions): Promise<Downl
   let destinationOpened = false;
   try {
     resolved = path.resolve(opts.filePath);
-    const res = await fetch(opts.url, { headers: opts.headers });
+    const res = await fetch(opts.url, { headers: opts.headers, signal: opts.signal });
     if (!res.ok) {
       let body = '';
       try {
@@ -72,8 +81,26 @@ export async function downloadToFile(opts: DownloadToFileOptions): Promise<Downl
     // distinct to TypeScript even though fetch hands back the same object at
     // runtime, so the cast is the documented bridge between them.
     const source = Readable.fromWeb(res.body as unknown as NodeWebReadableStream<Uint8Array>);
+    const declared = Number(res.headers?.get?.('content-length') ?? 0);
+    const total = Number.isFinite(declared) && declared > 0 ? declared : undefined;
+    const report = (done: number) => {
+      try {
+        opts.onProgress?.(done, total);
+      } catch {
+        // Progress reporting must never fail the download it is watching.
+      }
+    };
+    let written = 0;
+    const counter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        written += chunk.length;
+        report(written);
+        callback(null, chunk);
+      },
+    });
+    report(0);
     destinationOpened = true;
-    await pipeline(source, fs.createWriteStream(resolved));
+    await pipeline(source, counter, fs.createWriteStream(resolved), { signal: opts.signal });
     let bytes: number | undefined;
     try {
       bytes = (await fs.promises.stat(resolved)).size;
@@ -92,6 +119,7 @@ export async function downloadToFile(opts: DownloadToFileOptions): Promise<Downl
         // Nothing to clean up, or the path is not ours to remove.
       }
     }
+    if (opts.signal?.aborted) return { ok: false, error: 'cancelled', cancelled: true };
     return { ok: false, error: String(err) };
   }
 }

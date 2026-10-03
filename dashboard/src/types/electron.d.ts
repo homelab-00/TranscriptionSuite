@@ -323,7 +323,8 @@ interface ElectronAPI {
       headers?: Record<string, string>;
       filePath: string;
     }) => Promise<
-      { ok: true; bytes?: number } | { ok: false; error: string; status?: number; body?: string }
+      | { ok: true; bytes?: number }
+      | { ok: false; error: string; status?: number; body?: string; cancelled?: boolean }
     >;
   };
   /** Folder Watch bridge. Mirrors the `watcher` block in electron/preload.ts (GH-311 added the last two). */

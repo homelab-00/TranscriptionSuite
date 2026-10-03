@@ -167,6 +167,37 @@ describe('downloadMacVariantDmg', () => {
     expect(fs.existsSync(path.join(tmpDir, asset))).toBe(false);
   });
 
+  it('throttles progress statuses but always reports the final byte count', async () => {
+    const asset = 'TranscriptionSuite-1.4.0-arm64-mac-metal.dmg';
+    const chunks = Array.from({ length: 500 }, () => new Uint8Array(Buffer.from('ab')));
+    const manyChunkFetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => '1000' },
+      body: (async function* () {
+        for (const chunk of chunks) yield chunk;
+      })(),
+      text: async () => '',
+    })) as unknown as typeof fetch;
+    const statuses: InstallerStatus[] = [];
+
+    const result = await downloadMacVariantDmg('1.4.0', {
+      variant: 'mac-metal',
+      onStatus: (s) => statuses.push(s),
+      revealFile: async () => {},
+      getDownloadsDir: () => tmpDir,
+      fetchImpl: manyChunkFetch,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, asset))).toBe(true);
+    const progress = statuses.filter((s) => s.state === 'downloading');
+    // 500 chunks arrive within a few milliseconds: nowhere near one status each.
+    expect(progress.length).toBeLessThan(20);
+    const last = progress[progress.length - 1];
+    expect(last.state === 'downloading' && last.transferred).toBe(1000);
+  });
+
   it('keeps the verified download and returns ok when reveal fails (no data loss)', async () => {
     const asset = 'TranscriptionSuite-1.4.0-arm64-mac-metal.dmg';
     const dmgUrl = `https://github.com/homelab-00/TranscriptionSuite/releases/download/v1.4.0/${asset}`;

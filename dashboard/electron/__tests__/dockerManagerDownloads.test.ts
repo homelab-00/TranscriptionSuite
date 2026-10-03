@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createHash } from 'crypto';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import fsDefault from 'fs';
@@ -244,6 +245,50 @@ describe('pullSidecarImage download tracking', () => {
   });
 });
 
+describe('ensureVulkanSidecarImage (pull before compose up)', () => {
+  it('pulls the sidecar image when the Vulkan profile starts without it', async () => {
+    const pull = vi.fn(async () => '');
+
+    await dockerManager.ensureVulkanSidecarImage('vulkan', {
+      hasImage: async () => false,
+      pull,
+    });
+
+    expect(pull).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not pull when the image is already there', async () => {
+    const pull = vi.fn(async () => '');
+
+    await dockerManager.ensureVulkanSidecarImage('vulkan', { hasImage: async () => true, pull });
+
+    expect(pull).not.toHaveBeenCalled();
+  });
+
+  it('leaves every other profile alone', async () => {
+    const hasImage = vi.fn(async () => false);
+    const pull = vi.fn(async () => '');
+
+    for (const profile of ['gpu', 'cpu', 'vulkan-wsl2', 'metal'] as const) {
+      await dockerManager.ensureVulkanSidecarImage(profile, { hasImage, pull });
+    }
+
+    expect(hasImage).not.toHaveBeenCalled();
+    expect(pull).not.toHaveBeenCalled();
+  });
+
+  it('fails the start with the pull error instead of letting compose time out on it', async () => {
+    await expect(
+      dockerManager.ensureVulkanSidecarImage('vulkan', {
+        hasImage: async () => false,
+        pull: async () => {
+          throw new Error('manifest unknown');
+        },
+      }),
+    ).rejects.toThrow('manifest unknown');
+  });
+});
+
 describe('image pull through the Engine API', () => {
   let dir = '';
   let socketPath = '';
@@ -423,5 +468,77 @@ describe('downloadGgmlModelToHost download tracking', () => {
       /HTTP 404/,
     );
     expect(hubItem('ggml-download-ggml-base.bin')?.status).toBe('error');
+  });
+});
+
+describe('downloadWhisperServerExe download tracking', () => {
+  const exeBytes = Buffer.from('MZ-whisper-server-payload');
+  const goodDigest = `sha256:${createHash('sha256').update(exeBytes).digest('hex')}`;
+
+  function stubRegistry(digest: string): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/token')) {
+          return { ok: true, status: 200, json: async () => ({ token: 't' }) };
+        }
+        if (url.includes('/manifests/')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              layers: [
+                {
+                  digest,
+                  mediaType: 'application/vnd.microsoft.portable-executable',
+                  size: exeBytes.length,
+                },
+              ],
+            }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => String(exeBytes.length) },
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array(exeBytes.subarray(0, 5)));
+              controller.enqueue(new Uint8Array(exeBytes.subarray(5)));
+              controller.close();
+            },
+          }),
+        };
+      }),
+    );
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reports the bytes of the verified download and completes', async () => {
+    stubRegistry(goodDigest);
+
+    await dockerManager.downloadWhisperServerExe();
+
+    expect(hubItem('whisper-server')).toMatchObject({
+      kind: 'whisper-server',
+      status: 'complete',
+      bytesDone: exeBytes.length,
+      bytesTotal: exeBytes.length,
+    });
+  });
+
+  it('fails the item and leaves no executable when the content hash does not match', async () => {
+    stubRegistry(`sha256:${'0'.repeat(64)}`);
+
+    await expect(dockerManager.downloadWhisperServerExe()).rejects.toThrow(/integrity check/);
+
+    expect(hubItem('whisper-server')?.status).toBe('error');
+    const leftovers = fs
+      .readdirSync(userDataRoot, { recursive: true })
+      .filter((f) => String(f).endsWith('.tmp'));
+    expect(leftovers).toEqual([]);
   });
 });

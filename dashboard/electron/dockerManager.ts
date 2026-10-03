@@ -43,6 +43,8 @@ import { type WslSupport, resetWslSupportCache } from './wslDetect.js';
 import { hfCacheDirName } from './hfRepoAliases.js';
 import { downloadHub, type DownloadProgress } from './downloadHub.js';
 import { PullProgressAggregator } from './pullProgress.js';
+import { readBodyWithProgress } from './readBodyWithProgress.js';
+import { eventsFileFromMounts } from './startupEventWatcher.js';
 import {
   parseEngineHost,
   pingEngine,
@@ -184,6 +186,28 @@ let _startupEventsFilePath: string | null = null;
 /** Get the current startup events file path (null if container not started). */
 function getStartupEventsFilePath(): string | null {
   return _startupEventsFilePath;
+}
+
+/**
+ * Events file of the container that is running right now, recovered from its
+ * mount list (GH-318). The path of the per-start temp dir only lives in the
+ * memory of the dashboard that started the container; a dashboard that starts
+ * later would otherwise never see a download the server performs afterwards
+ * (a Live Mode model, a first diarization run).
+ */
+async function findRunningStartupEventsFile(): Promise<string | null> {
+  try {
+    const output = await exec(await runtimeBin(), [
+      'inspect',
+      '--format',
+      '{{json .Mounts}}',
+      CONTAINER_NAME,
+    ]);
+    const file = eventsFileFromMounts(output.trim());
+    return file && fs.existsSync(file) ? file : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -2462,6 +2486,28 @@ function runSidecarCliPull(
 }
 
 /**
+ * Make sure the Vulkan sidecar image is local before `compose up` (GH-318).
+ *
+ * Left to itself, compose pulls a missing sidecar image inline: with no
+ * progress anywhere and inside its own exec timeout, which a multi-GB image
+ * on a slow link can exceed. Pulling here puts the download in the download
+ * bar, makes it cancellable, and turns a failed pull into the start error
+ * instead of a compose timeout. Covers every start surface, not just the
+ * Server tab (which used to pre-pull from the renderer).
+ */
+async function ensureVulkanSidecarImage(
+  runtimeProfile: RuntimeProfile,
+  deps: { hasImage: () => Promise<boolean>; pull: () => Promise<string> } = {
+    hasImage: hasSidecarImage,
+    pull: pullSidecarImage,
+  },
+): Promise<void> {
+  if (runtimeProfile !== 'vulkan') return;
+  if (await deps.hasImage()) return;
+  await deps.pull();
+}
+
+/**
  * Cancel an in-progress sidecar image pull.
  * Returns true if a pull was actually cancelled.
  */
@@ -3053,6 +3099,8 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     }
   }
 
+  await ensureVulkanSidecarImage(runtimeProfile);
+
   const upArgs = ['compose', ...fileArgs, 'up', '-d'];
   // --no-build: the build section is for manual dev builds only; the packaged
   //   app copies compose files to a writable dir where the relative build
@@ -3061,8 +3109,8 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   //   (see https://github.com/containers/podman-compose/issues/816).
   //   Safe to omit: the image exists locally so compose won't auto-build.
   // Pull policy: compose defaults to "missing" (pull only if not local).
-  //   The main image is pre-pulled by pullImage(); sidecar images (e.g.
-  //   whisper.cpp for Vulkan) are pulled automatically on first compose up.
+  //   The main image is pre-pulled by pullImage() and the Vulkan sidecar by
+  //   ensureVulkanSidecarImage() above, so compose has nothing left to pull.
   if (detectedRuntimeKind !== 'podman') {
     upArgs.push('--no-build');
   }
@@ -4227,7 +4275,7 @@ async function downloadWhisperServerExe(): Promise<void> {
     );
   }
   const manifest = (await manifestResp.json()) as {
-    layers?: Array<{ digest?: string; mediaType?: string }>;
+    layers?: Array<{ digest?: string; mediaType?: string; size?: number }>;
   };
   const layers = manifest.layers ?? [];
   // Prefer the PE-typed layer; fall back to the last layer (oras pushes the
@@ -4251,6 +4299,14 @@ async function downloadWhisperServerExe(): Promise<void> {
   if (digestAlgo !== 'sha256' || !expectedHash) {
     throw new Error(`Unsupported blob digest '${digest}' in whisper-server manifest`);
   }
+  // Shown in the download bar (GH-318). The body is still read fully into
+  // memory and verified before anything is written, so the integrity order
+  // above is unchanged; only the read now reports its progress.
+  const download = downloadHub.begin({
+    id: 'whisper-server',
+    kind: 'whisper-server',
+    label: 'whisper.cpp server',
+  });
   try {
     const blobResp = await fetch(`${registryBase}/blobs/${digest}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -4258,7 +4314,13 @@ async function downloadWhisperServerExe(): Promise<void> {
     if (!blobResp.ok) {
       throw new Error(`HTTP ${blobResp.status} downloading whisper-server.exe blob ${digest}`);
     }
-    const buffer = Buffer.from(await blobResp.arrayBuffer());
+    const bytesTotal =
+      typeof layer?.size === 'number' && layer.size > 0
+        ? layer.size
+        : Number(blobResp.headers.get('content-length') ?? 0);
+    const buffer = await readBodyWithProgress(blobResp.body, (bytesDone) =>
+      download.update({ bytesDone, bytesTotal }),
+    );
     const actualHash = crypto.createHash('sha256').update(buffer).digest('hex');
     if (actualHash !== expectedHash) {
       throw new Error(
@@ -4272,10 +4334,12 @@ async function downloadWhisperServerExe(): Promise<void> {
     } catch {
       /* best-effort */
     }
+    download.fail(err instanceof Error ? err.message : String(err));
     throw err;
   }
 
   fs.renameSync(tmp, exePath);
+  download.complete();
   console.log(
     `[DockerManager] whisper-server.exe downloaded from ${WHISPER_SERVER_BLOB_REPO}:${WHISPER_SERVER_BLOB_TAG} to ${exePath}`,
   );
@@ -4772,6 +4836,7 @@ export const dockerManager = {
   cancelSidecarPull,
   isSidecarPulling,
   configureEnginePull,
+  ensureVulkanSidecarImage,
   removeImage,
   getContainerStatus,
   startContainer,
@@ -4799,6 +4864,7 @@ export const dockerManager = {
   checkTailscaleCertsExist,
   getStartupEventsFilePath,
   setServerLogEventListener,
+  findRunningStartupEventsFile,
   VOLUME_NAMES,
   CONTAINER_NAME,
   IMAGE_REPO,
