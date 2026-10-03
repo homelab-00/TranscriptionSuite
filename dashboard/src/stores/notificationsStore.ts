@@ -150,7 +150,9 @@ export const useNotificationsStore = create<NotificationsStore>((set) => ({
         createdAt: Date.now(),
         toastDismissed: false,
         ...stripUndefined(item),
-        entryId: nextEntryId(item.id),
+        // A caller may pin the entryId (download history rows do) so the same
+        // row cannot be written twice across a renderer reload.
+        entryId: item.entryId ?? nextEntryId(item.id),
       } as AppNotification);
       return { notifications: capLog([...state.notifications, entry]) };
     }),

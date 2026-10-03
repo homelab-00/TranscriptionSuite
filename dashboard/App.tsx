@@ -28,11 +28,13 @@ import { getConfig, setConfig } from './src/config/store';
 import { useLiveMode } from './src/hooks/useLiveMode';
 import { useImportQueueStore, selectIsUploading } from './src/stores/importQueueStore';
 import { QueuePausedBanner } from './components/ui/QueuePausedBanner';
+import { DownloadBar } from './components/ui/DownloadBar';
 import { UpdateBanner } from './components/ui/UpdateBanner';
 import { NotificationToasts } from './components/ui/NotificationToasts';
 import { HfTokenExplainer } from './components/ui/HfTokenExplainer';
 import { useStarPopup } from './src/hooks/useStarPopup';
 import { useNotificationBridge } from './src/hooks/useNotificationBridge';
+import { useDownloadsBridge } from './src/hooks/useDownloadsBridge';
 import { useSalvageProgress } from './src/hooks/useSalvageProgress';
 import { useServerEventReactor } from './src/hooks/useServerEventReactor';
 import { useNotificationsStore } from './src/stores/notificationsStore';
@@ -123,6 +125,8 @@ const AppInner: React.FC = () => {
   useAuthTokenSync(serverConnection.reachable, useRemote);
   // Bridge bootstrap log events → notifications store (runs regardless of active tab)
   useNotificationBridge();
+  // Mirror the main-process download hub into the download bar (GH-318).
+  useDownloadsBridge();
   // GH-239 follow-up: mirror server-side salvage progress into notifications.
   useSalvageProgress();
   // Singleton subscriber for the watcher:filesDetected IPC channel — must be
@@ -819,6 +823,9 @@ const AppInner: React.FC = () => {
 
         {/* Queue paused banner — visible across all views */}
         <QueuePausedBanner />
+
+        {/* Universal download bar - every download in the app, on every view (GH-318). */}
+        <DownloadBar />
 
         {/* Scrollable View Content - Removed p-6 to allow full-width scrolling in Server View */}
         {/* @container: makes the content area a container-query context so SessionView/

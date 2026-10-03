@@ -270,6 +270,27 @@ body {
  * animation-fill-mode:both = apply `from` state during delay (opacity:0)
  *                          + retain `to` state after completion (opacity:1).
  */
+/* Indeterminate progress bar (ProgressBar.tsx): a third-width fill sweeping
+   the track. Transform-only so it stays on the compositor. */
+@keyframes progress-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+.progress-indeterminate {
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-indeterminate {
+    animation: none;
+  }
+}
+
 @keyframes dropdown-appear {
   from {
     opacity: 0;
