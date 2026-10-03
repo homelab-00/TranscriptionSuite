@@ -130,7 +130,7 @@ export class DownloadHub {
   private seq = 0;
 
   constructor(options: { now?: () => number } = {}) {
-    this.now = options.now ?? Date.now;
+    this.now = options.now ?? (() => Date.now());
   }
 
   setBroadcaster(broadcaster: ((change: DownloadChange) => void) | null): void {

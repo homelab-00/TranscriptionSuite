@@ -1,7 +1,7 @@
 /**
  * Pure mapping from startup-events.jsonl payloads (activity:event IPC) to
  * notifications-store inputs. Two outputs per event:
- *  - mapStartupEvent: an individual log entry (downloads, warnings) or null
+ *  - mapStartupEvent: an individual log entry (warnings, info) or null
  *  - serverStartPatch: a patch for the aggregate "Starting server" card
  * Kept side-effect-free so vitest covers the mapping without IPC mocks.
  */
@@ -35,25 +35,9 @@ const STAGE_PROGRESS: Record<string, number> = {
   'server-ready': 100,
 };
 
-function terminalStatus(status?: string): 'active' | 'complete' | 'error' {
-  return status === 'complete' || status === 'error' ? status : 'active';
-}
-
 export function mapStartupEvent(event: StartupActivityEventLike): NotifyInput | null {
-  if (event.category === 'download') {
-    const status = terminalStatus(event.status);
-    return {
-      id: event.id,
-      category: 'download',
-      title: event.label,
-      status,
-      ...(event.progress !== undefined ? { progress: event.progress } : {}),
-      ...(event.totalSize ? { totalSize: event.totalSize } : {}),
-      ...(event.downloadedSize ? { downloadedSize: event.downloadedSize } : {}),
-      ...(event.detail ? { detail: event.detail } : {}),
-      ...(status === 'error' ? { error: event.label } : {}),
-    };
-  }
+  // category === 'download' is deliberately not mapped: the main process
+  // routes those into the download bar (GH-318).
   if (event.category === 'warning' || event.category === 'info') {
     return {
       id: event.id,
@@ -67,7 +51,8 @@ export function mapStartupEvent(event: StartupActivityEventLike): NotifyInput | 
       ...(event.severity === 'error' ? { error: event.label } : {}),
     };
   }
-  // category === 'server' stage events feed only the aggregate card.
+  // category === 'server' stage events feed only the aggregate card;
+  // downloads feed only the download bar.
   return null;
 }
 

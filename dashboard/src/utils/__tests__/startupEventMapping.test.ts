@@ -2,25 +2,18 @@ import { describe, it, expect } from 'vitest';
 import { mapStartupEvent, serverStartPatch, SERVER_START_ID } from '../startupEventMapping';
 
 describe('mapStartupEvent (individual log entries)', () => {
-  it('maps a download event with progress', () => {
-    const entry = mapStartupEvent({
-      id: 'model-load-openai--whisper-large-v3',
-      category: 'download',
-      label: 'Downloading Whisper large-v3...',
-      status: 'active',
-      progress: 42,
-      downloadedSize: '1.2 GB',
-      totalSize: '3.1 GB',
-    });
-    expect(entry).toMatchObject({
-      id: 'model-load-openai--whisper-large-v3',
-      category: 'download',
-      title: 'Downloading Whisper large-v3...',
-      status: 'active',
-      progress: 42,
-      downloadedSize: '1.2 GB',
-      totalSize: '3.1 GB',
-    });
+  it('returns null for download events - the download bar owns them', () => {
+    expect(
+      mapStartupEvent({
+        id: 'model-load-openai--whisper-large-v3',
+        category: 'download',
+        label: 'Downloading Whisper large-v3...',
+        status: 'active',
+        progress: 42,
+        downloadedSize: '1.2 GB',
+        totalSize: '3.1 GB',
+      }),
+    ).toBeNull();
   });
 
   it('maps a warning event to a server-category record', () => {

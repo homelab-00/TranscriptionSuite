@@ -72,19 +72,6 @@ interface TrayMenuState {
   canTranscribeFile?: boolean;
 }
 
-type DownloadEventType = 'runtime-dep' | 'ml-model' | 'model-preload';
-
-interface BootstrapDownloadEvent {
-  action: 'start' | 'complete' | 'fail';
-  id: string;
-  type: DownloadEventType;
-  label: string;
-  error?: string;
-  progress?: number; // 0-100 (GH-207)
-  downloadedSize?: string; // human-readable, e.g. "312 MB"
-  totalSize?: string;
-}
-
 /**
  * Download bar model (GH-318). Mirrors electron/downloadHub.ts - the hub in
  * the main process is the source of truth for these shapes.
@@ -250,7 +237,6 @@ interface ElectronAPI {
     startLogStream: (tail?: number) => Promise<void>;
     stopLogStream: () => Promise<void>;
     onLogLine: (callback: (line: string) => void) => () => void;
-    onDownloadEvent: (callback: (event: BootstrapDownloadEvent) => void) => () => void;
     onActivityEvent: (callback: (event: StartupActivityEvent) => void) => () => void;
   };
   tray: {

@@ -7,9 +7,11 @@
  *  1. Hydrate the store from the semi-persistent session file, then persist
  *     changes back (debounced) so a renderer reload keeps the session log.
  *  2. Subscribe to every notification-relevant IPC channel:
- *     docker:downloadEvent, activity:event, updates:installerStatus (+ a
- *     mount-time snapshot: that channel is broadcast-only with no replay),
- *     updates:updateAvailable, mlx:statusChanged.
+ *     activity:event, updates:updateAvailable, mlx:statusChanged.
+ *
+ * Downloads are not handled here (GH-318): live download progress belongs to
+ * the download bar, and useDownloadsBridge writes the single history row a
+ * download leaves behind when it ends.
  *
  * Must be mounted exactly once at the app root (App.tsx).
  */
@@ -96,40 +98,10 @@ export function useNotificationBridge(): void {
     const cleanups: Array<() => void> = [];
     const store = () => useNotificationsStore.getState();
 
-    // Bootstrap-log download events (docker pulls, GGML host download, model preloads).
-    if (docker?.onDownloadEvent) {
-      cleanups.push(
-        docker.onDownloadEvent((event) => {
-          const status =
-            event.action === 'start'
-              ? 'active'
-              : event.action === 'complete'
-                ? 'complete'
-                : 'error';
-          store().notify({
-            id: event.id,
-            category: 'download',
-            title: event.label,
-            status,
-            ...(event.progress !== undefined ? { progress: event.progress } : {}),
-            ...(event.downloadedSize ? { downloadedSize: event.downloadedSize } : {}),
-            ...(event.totalSize ? { totalSize: event.totalSize } : {}),
-            ...(status === 'error' && event.error ? { error: event.error } : {}),
-          });
-        }),
-      );
-    }
-
-    // startup-events.jsonl stream (server stages, HF model downloads, warnings).
+    // startup-events.jsonl stream (server stages and warnings).
     if (docker?.onActivityEvent) {
       cleanups.push(
         docker.onActivityEvent((event) => {
-          // A granular model-load event supersedes the coarse log-parser card
-          // (GH-207): hide its toast; the record itself stays in the log and
-          // completes on its own when the parser sees the loaded line.
-          if (event.id.startsWith('model-load-')) {
-            store().dismissToast('model-preload');
-          }
           const entry = mapStartupEvent(event);
           if (entry) store().notify(entry);
           const aggregate = serverStartPatch(event);
@@ -138,55 +110,6 @@ export function useNotificationBridge(): void {
       );
     }
 
-    // App auto-update pipeline (real percent). Broadcast-only channel: also
-    // fetch a snapshot on mount so a renderer reload mid-download recovers.
-    const handleInstallerStatus = (status: InstallerStatus) => {
-      const s = store();
-      switch (status.state) {
-        case 'downloading':
-          s.notify({
-            id: 'app-update-download',
-            category: 'update',
-            title: `Downloading update v${status.version ?? ''}`.trim(),
-            status: 'active',
-            ...(status.percent !== undefined && Number.isFinite(status.percent)
-              ? { progress: Math.round(status.percent) }
-              : {}),
-          });
-          break;
-        case 'downloaded':
-          s.notify({
-            id: 'app-update-download',
-            category: 'update',
-            title: `Update v${status.version ?? ''} downloaded`.trim(),
-            detail: 'Restart the app to install.',
-            status: 'complete',
-          });
-          break;
-        case 'cancelled':
-          s.updateNotification('app-update-download', {
-            title: 'Update download cancelled',
-            status: 'complete',
-          });
-          break;
-        case 'error':
-          s.updateNotification('app-update-download', {
-            title: 'Update download failed',
-            status: 'error',
-            error: status.message ?? 'Unknown error',
-          });
-          break;
-        default:
-          break; // idle / checking / verifying / manual-download-required: no card
-      }
-    };
-    if (updates?.onInstallerStatus) {
-      cleanups.push(updates.onInstallerStatus(handleInstallerStatus));
-      void updates
-        .getInstallerStatus?.()
-        .then(handleInstallerStatus)
-        .catch(() => {});
-    }
     if (updates?.onUpdateAvailable) {
       cleanups.push(
         updates.onUpdateAvailable((payload) => {

@@ -256,15 +256,6 @@ export interface ElectronAPI {
     startLogStream: (tail?: number) => Promise<void>;
     stopLogStream: () => Promise<void>;
     onLogLine: (callback: (line: string) => void) => () => void;
-    onDownloadEvent: (
-      callback: (event: {
-        action: 'start' | 'complete' | 'fail';
-        id: string;
-        type: string;
-        label: string;
-        error?: string;
-      }) => void,
-    ) => () => void;
     onActivityEvent: (
       callback: (event: {
         id: string;
@@ -666,28 +657,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = (_event: Electron.IpcRendererEvent, line: string) => callback(line);
       ipcRenderer.on('docker:logLine', handler);
       return () => ipcRenderer.removeListener('docker:logLine', handler);
-    },
-    onDownloadEvent: (
-      callback: (event: {
-        action: 'start' | 'complete' | 'fail';
-        id: string;
-        type: string;
-        label: string;
-        error?: string;
-      }) => void,
-    ) => {
-      const handler = (
-        _event: Electron.IpcRendererEvent,
-        evt: {
-          action: 'start' | 'complete' | 'fail';
-          id: string;
-          type: string;
-          label: string;
-          error?: string;
-        },
-      ) => callback(evt);
-      ipcRenderer.on('docker:downloadEvent', handler);
-      return () => ipcRenderer.removeListener('docker:downloadEvent', handler);
     },
     onActivityEvent: (
       callback: (event: {
