@@ -29,6 +29,7 @@ const execFileAsync = promisify(execFile);
 import Store from 'electron-store';
 import { CONTAINER_NAME, dockerManager, type StartContainerOptions } from './dockerManager.js';
 import { NotificationLog } from './notificationLog.js';
+import { downloadHub } from './downloadHub.js';
 import { StartupEventWatcher } from './startupEventWatcher.js';
 import { MLXServerManager, type MLXStartOptions } from './mlxServerManager.js';
 import { createMlxLogSink, type MlxLogSink } from './mlxLogSink.js';
@@ -1456,6 +1457,17 @@ ipcMain.handle('docker:stopLogStream', async () => {
 dockerManager.subscribeToDownloadEvents((event) => {
   mainWindow?.webContents.send('docker:downloadEvent', event);
 });
+
+// ─── Download Hub Bridge (GH-318) ─────────────────────────────────────────
+// Every download source reports into downloadHub; this is the only place its
+// state crosses to the renderer. The channel is broadcast-only, so the
+// renderer also fetches a snapshot on mount to recover after a reload.
+
+downloadHub.setBroadcaster((change) => broadcastToWindows('downloads:changed', change));
+
+ipcMain.handle('downloads:getSnapshot', () => downloadHub.snapshot());
+
+ipcMain.handle('downloads:cancel', (_event, id: string) => downloadHub.cancel(id));
 
 // ─── Audio IPC ──────────────────────────────────────────────────────────────
 

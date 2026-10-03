@@ -28,6 +28,12 @@ export interface StartupEvent {
   expandableDetail?: string;
   durationMs?: number;
   ts?: number;
+  /** Download events (GH-318): DownloadKind, clean display name, raw byte counts. */
+  kind?: string;
+  name?: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  error?: string;
 }
 
 /**

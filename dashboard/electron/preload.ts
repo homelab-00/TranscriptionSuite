@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
+// Type-only: erased at compile time, so the sandboxed preload stays self-contained.
+import type { DownloadChange, DownloadItem } from './downloadHub.js';
 
 /**
  * Preload script — exposes a safe IPC bridge to the renderer process.
@@ -494,6 +496,11 @@ export interface ElectronAPI {
     load: () => Promise<unknown[]>;
     persist: (items: unknown[]) => Promise<void>;
   };
+  downloads: {
+    getSnapshot: () => Promise<DownloadItem[]>;
+    cancel: (id: string) => Promise<boolean>;
+    onChanged: (callback: (change: DownloadChange) => void) => () => void;
+  };
   mlx: {
     start: (opts: {
       port: number;
@@ -893,6 +900,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     load: () => ipcRenderer.invoke('notificationLog:load') as Promise<unknown[]>,
     persist: (items: unknown[]) =>
       ipcRenderer.invoke('notificationLog:persist', items) as Promise<void>,
+  },
+  downloads: {
+    getSnapshot: () => ipcRenderer.invoke('downloads:getSnapshot') as Promise<DownloadItem[]>,
+    cancel: (id: string) => ipcRenderer.invoke('downloads:cancel', id) as Promise<boolean>,
+    onChanged: (callback: (change: DownloadChange) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, change: DownloadChange) =>
+        callback(change);
+      ipcRenderer.on('downloads:changed', handler);
+      return () => ipcRenderer.removeListener('downloads:changed', handler);
+    },
   },
   mlx: {
     start: (opts: {

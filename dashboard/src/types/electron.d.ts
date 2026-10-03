@@ -85,6 +85,53 @@ interface BootstrapDownloadEvent {
   totalSize?: string;
 }
 
+/**
+ * Download bar model (GH-318). Mirrors electron/downloadHub.ts - the hub in
+ * the main process is the source of truth for these shapes.
+ */
+type DownloadKind =
+  | 'server-image'
+  | 'sidecar-image'
+  | 'server-deps'
+  | 'feature-deps'
+  | 'model'
+  | 'live-model'
+  | 'diarization-model'
+  | 'alignment-model'
+  | 'ggml-model'
+  | 'whisper-server'
+  | 'app-update'
+  | 'export';
+
+type DownloadStatus = 'active' | 'complete' | 'error' | 'cancelled';
+
+interface DownloadItem {
+  /** Stable source key; one running item per id. */
+  id: string;
+  /** Unique per run of an id - the identity of the history row it leaves behind. */
+  runId: string;
+  kind: DownloadKind;
+  source: 'app' | 'server';
+  label: string;
+  detail?: string;
+  status: DownloadStatus;
+  bytesDone?: number;
+  bytesTotal?: number;
+  /** 0-100. Only for sources that cannot report bytes (layer / package fraction). */
+  percent?: number;
+  bytesPerSecond?: number;
+  etaSeconds?: number;
+  cancellable: boolean;
+  error?: string;
+  startedAt: number;
+  updatedAt: number;
+  endedAt?: number;
+  /** False where the caller already raises its own, richer failure toast. */
+  errorToast: boolean;
+}
+
+type DownloadChange = { type: 'upsert'; item: DownloadItem } | { type: 'remove'; runId: string };
+
 interface StartupActivityEvent {
   id: string;
   category: string;
@@ -332,6 +379,11 @@ interface ElectronAPI {
   notificationLog?: {
     load: () => Promise<unknown[]>;
     persist: (items: unknown[]) => Promise<void>;
+  };
+  downloads?: {
+    getSnapshot: () => Promise<DownloadItem[]>;
+    cancel: (id: string) => Promise<boolean>;
+    onChanged: (callback: (change: DownloadChange) => void) => () => void;
   };
   mlx?: {
     onStatusChanged: (
