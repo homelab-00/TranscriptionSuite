@@ -132,6 +132,29 @@ describe('pullImage download tracking', () => {
     await pull;
   });
 
+  it('turns docker layer lines into layer-fraction progress, across chunk boundaries', async () => {
+    const { proc, finish } = controllableSpawn();
+    const pull = dockerManager.pullImage('v-layers');
+    await settle();
+
+    proc.stdout.emit(
+      'data',
+      Buffer.from(
+        'aaaaaaaaaaaa: Pulling fs layer\nbbbbbbbbbbbb: Pulling fs layer\naaaaaaaaaaaa: Download comp',
+      ),
+    );
+    proc.stdout.emit('data', Buffer.from('lete\n'));
+
+    expect(hubItem('server-image:v-layers')).toMatchObject({
+      status: 'active',
+      percent: 50,
+      detail: '1 of 2 layers',
+    });
+
+    finish(0);
+    await pull;
+  });
+
   it('fails the item with the friendly message, not the raw stderr', async () => {
     const { finish } = controllableSpawn();
     const pull = dockerManager.pullImage('v-auth');
@@ -175,6 +198,26 @@ describe('pullSidecarImage download tracking', () => {
     finish(0);
     await pull;
     expect(hubItem('sidecar-image')?.status).toBe('complete');
+  });
+
+  it('reports podman blob lines, which arrive on stderr, as an indeterminate detail', async () => {
+    const { proc, finish } = controllableSpawn();
+    const pull = dockerManager.pullSidecarImage();
+    await settle();
+
+    proc.stderr.emit(
+      'data',
+      Buffer.from(
+        'Trying to pull ghcr.io/x/y:latest...\nCopying blob sha256:aaaa1111\nCopying blob sha256:bbbb2222\n',
+      ),
+    );
+
+    const item = hubItem('sidecar-image');
+    expect(item?.detail).toBe('Copying 2 layers');
+    expect(item?.percent).toBeUndefined();
+
+    finish(0);
+    await pull;
   });
 
   it('fails the item when the pull exits non-zero', async () => {

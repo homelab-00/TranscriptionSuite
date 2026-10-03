@@ -41,7 +41,8 @@ import {
 } from './containerRuntime.js';
 import { type WslSupport, resetWslSupportCache } from './wslDetect.js';
 import { hfCacheDirName } from './hfRepoAliases.js';
-import { downloadHub } from './downloadHub.js';
+import { downloadHub, type DownloadProgress } from './downloadHub.js';
+import { PullProgressAggregator } from './pullProgress.js';
 import { BootstrapLogTracker } from './bootstrapLogDownloads.js';
 import type { StartupEvent } from './startupEventWatcher.js';
 import {
@@ -2054,6 +2055,32 @@ export function classifyPullError(
 }
 
 /**
+ * Report the output of a pull process to the download bar as it arrives
+ * (GH-318). docker writes its layer lines to stdout, podman its blob lines to
+ * stderr, so both streams are parsed. Each stream keeps its own partial-line
+ * buffer: a chunk boundary can fall in the middle of a line.
+ */
+function trackPullOutput(
+  proc: ChildProcess,
+  onProgress: (progress: DownloadProgress) => void,
+): void {
+  const aggregator = new PullProgressAggregator();
+  const lineFeeder = () => {
+    let remainder = '';
+    return (data: Buffer) => {
+      const text = remainder + data.toString();
+      const lines = text.split(/\r?\n/);
+      remainder = lines.pop() ?? '';
+      let changed = false;
+      for (const line of lines) changed = aggregator.applyCliLine(line) || changed;
+      if (changed) onProgress(aggregator.progress());
+    };
+  };
+  proc.stdout?.on('data', lineFeeder());
+  proc.stderr?.on('data', lineFeeder());
+}
+
+/**
  * Pull an image tag from the registry.
  * Uses spawn instead of exec so the process can be cancelled.
  *
@@ -2072,8 +2099,8 @@ async function pullImage(
     errorToast?: boolean;
   } = {},
 ): Promise<string> {
-  // Reported to the download bar (GH-318). The CLI gives no progress on a
-  // non-TTY, so the item stays indeterminate here.
+  // Reported to the download bar (GH-318). Without a TTY the CLI prints only
+  // per-layer states, so progress is the fraction of layers downloaded.
   const download = downloadHub.begin({
     id: `server-image:${tag}`,
     kind: 'server-image',
@@ -2084,7 +2111,7 @@ async function pullImage(
     errorToast: options.errorToast ?? true,
   });
   try {
-    const output = await runImagePull(tag);
+    const output = await runImagePull(tag, (progress) => download.update(progress));
     download.complete();
     return output;
   } catch (err) {
@@ -2094,7 +2121,10 @@ async function pullImage(
   }
 }
 
-async function runImagePull(tag: string): Promise<string> {
+async function runImagePull(
+  tag: string,
+  onProgress: (progress: DownloadProgress) => void,
+): Promise<string> {
   const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
   const bin = await runtimeBin();
   const env = buildProcessEnv(undefined, detectedRuntimeKind ?? undefined);
@@ -2121,6 +2151,7 @@ async function runImagePull(tag: string): Promise<string> {
         env,
       });
       pullProcess = proc;
+      trackPullOutput(proc, onProgress);
 
       let stdout = '';
       let stderr = '';
@@ -2259,7 +2290,7 @@ async function pullSidecarImage(): Promise<string> {
     },
   });
   try {
-    const output = await runSidecarPull(bin);
+    const output = await runSidecarPull(bin, (progress) => download.update(progress));
     download.complete();
     return output;
   } catch (err) {
@@ -2269,13 +2300,17 @@ async function pullSidecarImage(): Promise<string> {
   }
 }
 
-function runSidecarPull(bin: string): Promise<string> {
+function runSidecarPull(
+  bin: string,
+  onProgress: (progress: DownloadProgress) => void,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(bin, ['pull', VULKAN_SIDECAR_IMAGE], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
     });
     sidecarPullProcess = proc;
+    trackPullOutput(proc, onProgress);
 
     let stdout = '';
     let stderr = '';
