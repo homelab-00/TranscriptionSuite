@@ -137,7 +137,6 @@ export function useNotificationBridge(): void {
               // Clear any lingering active-phase stage label.
               detail: '',
               status: 'complete',
-              progress: 100,
             });
           } else if (status === 'error') {
             store().notify({

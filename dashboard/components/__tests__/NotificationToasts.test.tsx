@@ -13,15 +13,41 @@ describe('NotificationToasts', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('shows an active notification with its progress bar', () => {
+  it('shows a progress bar for an active notification that reports progress', () => {
     useNotificationsStore.getState().notify({
-      id: 'dl-1',
-      category: 'download',
-      title: 'Downloading model',
+      id: 'salvage-1',
+      category: 'transcription',
+      title: 'Recovering transcription',
       progress: 40,
     });
     render(<NotificationToasts />);
-    expect(screen.getByText('Downloading model')).toBeInTheDocument();
+    expect(screen.getByText('Recovering transcription')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '40');
+  });
+
+  it('shows no bar for an active notification without a measured progress', () => {
+    useNotificationsStore.getState().notify({
+      id: 'server-start',
+      category: 'server',
+      title: 'Starting server...',
+      detail: 'Loading model',
+    });
+    render(<NotificationToasts />);
+    expect(screen.getByText('Starting server...')).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
+  it('never shows a bar or sizes on a download row - the download bar owns that', () => {
+    useNotificationsStore.getState().notify({
+      id: 'download:x@1',
+      category: 'download',
+      title: 'parakeet downloaded',
+      detail: '2.6 GB in 3m 12s',
+      status: 'complete',
+    });
+    render(<NotificationToasts />);
+    expect(screen.getByText('parakeet downloaded')).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).toBeNull();
   });
 
   it('dismiss hides the toast but keeps the record', () => {

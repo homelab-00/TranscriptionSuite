@@ -41,7 +41,7 @@ describe('mapStartupEvent (individual log entries)', () => {
 });
 
 describe('serverStartPatch (aggregate "Starting server" card)', () => {
-  it('advances the aggregate through known stages', () => {
+  it('shows the current stage as the detail, without a made-up percent', () => {
     const patch = serverStartPatch({
       id: 'lifespan-start',
       category: 'server',
@@ -50,19 +50,38 @@ describe('serverStartPatch (aggregate "Starting server" card)', () => {
     expect(patch).toMatchObject({
       id: SERVER_START_ID,
       status: 'active',
-      progress: 55,
       detail: 'Starting server...',
     });
+    expect(patch).not.toHaveProperty('progress');
   });
 
-  it('scales model-load percent into the 65-95 band', () => {
+  it('shows the model being loaded into memory as the stage', () => {
     const patch = serverStartPatch({
       id: 'model-load-x',
       category: 'download',
-      label: 'Downloading X...',
-      progress: 50,
+      label: 'Loading X into memory...',
+      phase: 'load',
+      status: 'active',
     });
-    expect(patch).toMatchObject({ id: SERVER_START_ID, progress: 80 });
+    expect(patch).toMatchObject({
+      id: SERVER_START_ID,
+      status: 'active',
+      detail: 'Loading X into memory...',
+    });
+    expect(patch).not.toHaveProperty('progress');
+  });
+
+  it('leaves a model download to the download bar', () => {
+    expect(
+      serverStartPatch({
+        id: 'model-load-x',
+        category: 'download',
+        label: 'Downloading X...',
+        phase: 'download',
+        status: 'active',
+        progress: 50,
+      }),
+    ).toBeNull();
   });
 
   it('completes as Server ready', () => {
@@ -76,8 +95,8 @@ describe('serverStartPatch (aggregate "Starting server" card)', () => {
       id: SERVER_START_ID,
       title: 'Server ready',
       status: 'complete',
-      progress: 100,
     });
+    expect(patch).not.toHaveProperty('progress');
   });
 
   it('ignores unrelated download events', () => {

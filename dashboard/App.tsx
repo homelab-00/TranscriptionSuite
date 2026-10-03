@@ -693,7 +693,6 @@ const AppInner: React.FC = () => {
           title: 'Starting server...',
           detail: 'Preparing the container',
           status: 'active',
-          progress: 0,
         });
 
         const startError = await docker.startContainer(

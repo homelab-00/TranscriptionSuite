@@ -59,3 +59,13 @@ export function severityBorderClass(item: AppNotification): string {
   if (item.severity === 'warning') return 'border-l-2 border-l-amber-400';
   return '';
 }
+
+/**
+ * Whether a notification renders a progress bar: only while it is active and
+ * reports a measured progress (e.g. transcription recovery). Downloads never
+ * do - their live progress belongs to the download bar (GH-318), and a
+ * download row here is just the history of how it ended.
+ */
+export function showsProgress(item: AppNotification): boolean {
+  return item.status === 'active' && item.progress !== undefined && item.category !== 'download';
+}

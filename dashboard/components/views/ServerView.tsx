@@ -40,7 +40,6 @@ import { GpuDiagnosticModal, type GpuDiagnosticResultProp } from './GpuDiagnosti
 import { InstanceSettingsSelectors } from './server/InstanceSettingsSelectors';
 import { RemoteClientSettingsCard } from './server/RemoteClientSettingsCard';
 import { RemoteConnectionCard } from './server/RemoteConnectionCard';
-import { StartupActivityInline } from './server/StartupActivityInline';
 
 import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { SERVER_START_ID } from '../../src/utils/startupEventMapping';
@@ -1103,7 +1102,6 @@ export const ServerView: React.FC<ServerViewProps> = ({
       title: 'Starting server...',
       detail: 'Launching the Metal (MLX) server process',
       status: 'active',
-      progress: 0,
     });
     try {
       const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
@@ -2493,13 +2491,7 @@ export const ServerView: React.FC<ServerViewProps> = ({
                         onClick={handleFetchFreshImage}
                         disabled={docker.operating}
                       >
-                        {docker.pulling ? (
-                          <>
-                            <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
-                          </>
-                        ) : (
-                          'Fetch Fresh Image'
-                        )}
+                        Fetch Fresh Image
                       </Button>
                       {docker.pulling && (
                         <Button
@@ -2855,7 +2847,6 @@ export const ServerView: React.FC<ServerViewProps> = ({
                     </div>
                   )}
                   {/* Active model downloads while the server is starting (GH-207) */}
-                  {!isMetal && isRunning && !isRunningAndHealthy && <StartupActivityInline />}
                   {!isMetal && containerStatus.startedAt && isRunning && (
                     <div className="mt-2 font-mono text-xs text-slate-500">
                       Started: {new Date(containerStatus.startedAt).toLocaleString()}

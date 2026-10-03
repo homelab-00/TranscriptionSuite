@@ -1,9 +1,11 @@
 /**
  * UpdateBanner — persistent banner surfacing in-app Dashboard updates.
  *
- * Five visual states driven by InstallerStatus + UpdateStatus:
+ * Five states driven by InstallerStatus + UpdateStatus:
  *   • available        — "v{x} available — [Download] [Later]"
- *   • downloading      — "Downloading v{x} — {n}%"  (progress bar, no buttons)
+ *   • downloading      — renders nothing: the download bar shows the progress
+ *                        (also covers checking / verifying, so [Download]
+ *                        stays out of the DOM while a download is in flight)
  *   • ready            — "v{x} ready — [Quit & Install] [Later]"
  *   • ready_blocked    — "v{x} ready — will install when jobs finish"
  *                        (install disabled, no Later)
@@ -632,32 +634,11 @@ export function UpdateBanner({ isBusy }: UpdateBannerProps) {
       );
       break;
 
-    case 'downloading': {
-      // Nullish coalescing doesn't defend against NaN (electron-updater can emit
-      // partial progress during early connection). Clamp explicitly.
-      const rawPercent = derived.percent;
-      const percent = Number.isFinite(rawPercent)
-        ? Math.max(0, Math.min(100, rawPercent as number))
-        : 0;
-      bannerContent = (
-        <div
-          role="status"
-          aria-label="Update downloading"
-          className={`flex flex-col gap-1 border ${accent} px-4 py-2 text-sm`}
-        >
-          <span>
-            Downloading {derived.version ?? '…'} — {percent}%
-          </span>
-          <div className="h-1 w-full overflow-hidden rounded-full bg-white/10">
-            <div
-              className="h-full rounded-full bg-cyan-400/70 transition-all duration-300"
-              style={{ width: `${percent}%` }}
-            />
-          </div>
-        </div>
-      );
+    case 'downloading':
+      // Nothing to offer while the update downloads (no buttons in this
+      // state), and the progress itself is shown by the download bar.
+      bannerContent = null;
       break;
-    }
 
     case 'ready':
       bannerContent = (

@@ -2,7 +2,7 @@
  * Pure mapping from startup-events.jsonl payloads (activity:event IPC) to
  * notifications-store inputs. Two outputs per event:
  *  - mapStartupEvent: an individual log entry (warnings, info) or null
- *  - serverStartPatch: a patch for the aggregate "Starting server" card
+ *  - serverStartPatch: a patch for the "Starting server" card (stage text only)
  * Kept side-effect-free so vitest covers the mapping without IPC mocks.
  */
 
@@ -25,15 +25,6 @@ export interface StartupActivityEventLike {
 }
 
 export const SERVER_START_ID = 'server-start';
-
-/** Coarse stage weights for the aggregate progress bar (server stages emit no percent). */
-const STAGE_PROGRESS: Record<string, number> = {
-  'bootstrap-env': 5,
-  'bootstrap-deps': 35,
-  'lifespan-start': 55,
-  'lifespan-gpu': 65,
-  'server-ready': 100,
-};
 
 export function mapStartupEvent(event: StartupActivityEventLike): NotifyInput | null {
   // category === 'download' is deliberately not mapped: the main process
@@ -66,39 +57,33 @@ export function serverStartPatch(event: StartupActivityEventLike): NotifyInput |
       // linger under the terminal 'Server ready' title.
       detail: '',
       status: 'complete',
-      progress: 100,
     };
   }
+  // The card carries the current stage as its detail and no percent: server
+  // stages are not measurable, and a download's real progress is shown by
+  // the download bar.
   if (event.category === 'server') {
-    const progress = STAGE_PROGRESS[event.id];
     return {
       id: SERVER_START_ID,
       category: 'server',
       title: 'Starting server...',
       status: 'active',
       detail: event.label,
-      ...(progress !== undefined ? { progress } : {}),
     };
   }
-  // Model downloads/loads advance the aggregate bar through the 65-95 band.
-  if (event.id.startsWith('model-load-') && event.progress !== undefined) {
+  // Loading model weights into memory is a startup stage, not a download.
+  if (
+    event.id.startsWith('model-load-') &&
+    event.status !== 'complete' &&
+    event.status !== 'error' &&
+    (event.phase === 'load' || event.progress === 100)
+  ) {
     return {
       id: SERVER_START_ID,
       category: 'server',
       title: 'Starting server...',
       status: 'active',
       detail: event.label,
-      progress: 65 + Math.round((event.progress / 100) * 30),
-    };
-  }
-  if (event.id === 'bootstrap-deps') {
-    return {
-      id: SERVER_START_ID,
-      category: 'server',
-      title: 'Starting server...',
-      status: 'active',
-      detail: event.label,
-      progress: STAGE_PROGRESS['bootstrap-deps'],
     };
   }
   return null;

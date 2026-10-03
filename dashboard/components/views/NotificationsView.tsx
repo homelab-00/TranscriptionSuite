@@ -15,7 +15,9 @@ import {
   CATEGORY_ICON,
   NotificationStatusIcon,
   severityBorderClass,
+  showsProgress,
 } from '../ui/notificationVisuals';
+import { ProgressBar } from '../ui/ProgressBar';
 import {
   useNotificationsStore,
   selectAllNotifications,
@@ -53,7 +55,6 @@ function TranscriptBlock({ transcript }: { transcript: string }) {
 }
 
 function NotificationRow({ item }: { item: AppNotification }) {
-  const isActive = item.status === 'active';
   return (
     <div
       className={`rounded-xl border border-white/10 bg-white/5 px-4 py-3 ${severityBorderClass(item)}`}
@@ -74,22 +75,8 @@ function NotificationRow({ item }: { item: AppNotification }) {
         </span>
       </div>
 
-      {isActive && (
-        <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/10">
-          {item.progress !== undefined ? (
-            <div
-              className="bg-accent-cyan h-full rounded-full transition-all duration-300"
-              style={{ width: `${item.progress}%` }}
-            />
-          ) : (
-            <div className="bg-accent-cyan h-full w-1/3 animate-pulse rounded-full" />
-          )}
-        </div>
-      )}
-      {isActive && item.downloadedSize && item.totalSize && (
-        <p className="mt-0.5 text-[10px] text-slate-500">
-          {item.downloadedSize} / {item.totalSize}
-        </p>
+      {showsProgress(item) && (
+        <ProgressBar className="mt-2" value={item.progress} label={item.title} />
       )}
       {item.status === 'error' && item.error && (
         <p className="mt-1 text-xs text-red-400">{item.error}</p>

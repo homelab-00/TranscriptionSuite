@@ -41,7 +41,6 @@ export function useServerEventReactor(serverConnection: ServerConnectionInfo): v
           // Clear any lingering active-phase stage label.
           detail: '',
           status: 'complete',
-          progress: 100,
         });
       }
     }

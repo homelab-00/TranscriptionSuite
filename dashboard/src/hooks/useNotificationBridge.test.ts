@@ -94,7 +94,7 @@ describe('useNotificationBridge (GH-207)', () => {
 
     const aggregate = newest('server-start');
     expect(aggregate?.status).toBe('complete');
-    expect(aggregate?.progress).toBe(100);
+    expect(aggregate?.progress).toBeUndefined();
   });
 
   it('ignores installer status - the app update download belongs to the download bar', () => {

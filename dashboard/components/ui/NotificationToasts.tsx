@@ -14,7 +14,9 @@ import {
   CATEGORY_ICON,
   NotificationStatusIcon,
   severityBorderClass,
+  showsProgress,
 } from './notificationVisuals';
+import { ProgressBar } from './ProgressBar';
 import {
   useNotificationsStore,
   selectToastNotifications,
@@ -50,23 +52,8 @@ function ToastCard({ item }: { item: AppNotification }) {
           <p className="mt-0.5 truncate text-[10px] text-slate-500">{item.detail}</p>
         )}
 
-        {isActive && (
-          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-white/10">
-            {item.progress !== undefined ? (
-              <div
-                className="bg-accent-cyan h-full rounded-full transition-all duration-300"
-                style={{ width: `${item.progress}%` }}
-              />
-            ) : (
-              <div className="bg-accent-cyan h-full w-1/3 animate-pulse rounded-full" />
-            )}
-          </div>
-        )}
-
-        {isActive && item.downloadedSize && item.totalSize && (
-          <p className="mt-0.5 text-[10px] text-slate-500">
-            {item.downloadedSize} / {item.totalSize}
-          </p>
+        {showsProgress(item) && (
+          <ProgressBar className="mt-1.5" value={item.progress} label={item.title} />
         )}
 
         {item.status === 'error' && item.error && (
