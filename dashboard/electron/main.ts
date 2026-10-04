@@ -594,7 +594,12 @@ const mlxServerManager = new MLXServerManager(() => mainWindow ?? null, mlxLogSi
 // renderer for the server-start card and warnings.
 
 function forwardServerEvent(event: StartupEvent): void {
-  applyServerDownloadEvent(downloadHub, event);
+  applyServerDownloadEvent(downloadHub, event, 'server');
+  mainWindow?.webContents.send('activity:event', event);
+}
+
+function forwardMlxServerEvent(event: StartupEvent): void {
+  applyServerDownloadEvent(downloadHub, event, 'mlx-server');
   mainWindow?.webContents.send('activity:event', event);
 }
 
@@ -623,7 +628,7 @@ function beginMlxEvents(): string | undefined {
     const file = path.join(dir, 'startup-events.jsonl');
     fs.writeFileSync(file, '', { encoding: 'utf-8', mode: 0o600 });
     mlxEventsDir = dir;
-    mlxEventWatcher.start(file, forwardServerEvent);
+    mlxEventWatcher.start(file, forwardMlxServerEvent);
     return file;
   } catch (err) {
     console.warn('[MLX] could not set up the startup-events file:', err);
@@ -631,11 +636,16 @@ function beginMlxEvents(): string | undefined {
   }
 }
 
+// The manager asks for the file from inside start(), once it has decided to
+// actually spawn: a redundant start must not replace the events file of the
+// server that is already running.
+mlxServerManager.setStartupEventsFileProvider(beginMlxEvents);
+
 mlxServerManager.onStatus((status) => {
   if (status === 'stopped' || status === 'error') {
     endMlxEvents();
     // Whatever the server was still downloading is gone with it.
-    downloadHub.endAllFromSource('server', 'Server stopped');
+    downloadHub.endAllFromSource('mlx-server', 'Server stopped');
   }
 });
 
@@ -2669,7 +2679,6 @@ app.whenReady().then(async () => {
         mainTranscriberModel,
         liveTranscriberModel: resolvedLiveModel || undefined,
         diarizationModel: diarizationModel || undefined,
-        startupEventsFile: beginMlxEvents(),
       })
       .catch((err: unknown) => console.warn('[MLX] Auto-start failed:', err));
   }
@@ -2721,7 +2730,7 @@ app.whenReady().then(async () => {
 // ─── MLX Server IPC Handlers ────────────────────────────────────────────────
 
 ipcMain.handle('mlx:start', async (_event, opts: MLXStartOptions) => {
-  await mlxServerManager.start({ ...opts, startupEventsFile: beginMlxEvents() });
+  await mlxServerManager.start(opts);
   store.set('server.mlxDesiredRunning', true);
 });
 

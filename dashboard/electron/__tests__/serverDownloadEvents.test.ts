@@ -218,6 +218,30 @@ describe('applyServerDownloadEvent', () => {
     expect(byId.bad).toMatchObject({ status: 'error', error: 'Failed to load bad' });
   });
 
+  it('keeps the bare-metal server apart from the container, so one stopping never ends the other', () => {
+    // A Mac on the Metal profile can still have a stopped container left over
+    // from an earlier Docker run. Its "not running" status must not cancel a
+    // download the MLX server is doing.
+    applyServerDownloadEvent(
+      hub,
+      {
+        id: 'model-load-mlx',
+        category: 'download',
+        label: 'Downloading mlx...',
+        phase: 'download',
+        status: 'active',
+      },
+      'mlx-server',
+    );
+    expect(only().source).toBe('mlx-server');
+
+    hub.endAllFromSource('server', 'Server stopped');
+    expect(only().status).toBe('active');
+
+    hub.endAllFromSource('mlx-server', 'Server stopped');
+    expect(only().status).toBe('cancelled');
+  });
+
   it('ignores terminal events for ids that never downloaded', () => {
     applyServerDownloadEvent(hub, {
       id: 'ghost',

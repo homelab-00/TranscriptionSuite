@@ -2305,16 +2305,19 @@ async function runImagePull(
     const viaEngine = await pullThroughEngine(`${imageRepo}:${tag}`, onProgress, abort.signal);
     if (pullAbort === abort) pullAbort = null;
     if (viaEngine === 'ok') return { ok: true, stdout: '' };
-    // The cancel check after runOne() turns this into 'Pull cancelled.'.
-    if (viaEngine === 'cancelled') return { ok: false, code: null, stderr: '' };
+    // Cancelled during the API pull, or while its endpoint was still being
+    // resolved: never fall through to the CLI. The cancel check after
+    // runOne() turns this into 'Pull cancelled.'.
+    if (viaEngine === 'cancelled' || pullCancelled) return { ok: false, code: null, stderr: '' };
     return runCli();
   };
 
   for (let attempt = 1; attempt <= MAX_PULL_ATTEMPTS; attempt++) {
     // No top-of-loop cancel check here: pullCancelled is reset to false above
-    // and the loop has no yield points outside of the awaited backoff (which
-    // is followed by its own post-await check). cancelPull() can only flip
-    // the flag during an await, and every await already has a paired check.
+    // and the loop has no yield points outside of runOne() and the awaited
+    // backoff, each followed by its own post-await check. cancelPull() can
+    // only flip the flag during an await, and every await has a paired check
+    // (runOne() also checks before it falls back from the Engine API to the CLI).
     const result = await runOne();
 
     if (pullCancelled) {
@@ -2411,7 +2414,12 @@ async function hasSidecarImage(): Promise<boolean> {
  * Pull the Vulkan sidecar image from the registry.
  * Uses spawn so the process can be cancelled independently of the main pull.
  */
-async function pullSidecarImage(): Promise<string> {
+async function pullSidecarImage(
+  options: {
+    /** False when the caller raises its own failure toast (default true). */
+    errorToast?: boolean;
+  } = {},
+): Promise<string> {
   const bin = await runtimeBin();
   cancelSidecarPull(); // kill any existing sidecar pull first
   sidecarPullCancelled = false;
@@ -2422,6 +2430,7 @@ async function pullSidecarImage(): Promise<string> {
     cancel: () => {
       cancelSidecarPull();
     },
+    errorToast: options.errorToast ?? true,
   });
   try {
     const output = await runSidecarPull(bin, (progress) => download.update(progress));
@@ -2443,7 +2452,10 @@ async function runSidecarPull(
   const viaEngine = await pullThroughEngine(VULKAN_SIDECAR_IMAGE, onProgress, abort.signal);
   if (sidecarPullAbort === abort) sidecarPullAbort = null;
   if (viaEngine === 'ok') return '';
-  if (viaEngine === 'cancelled') throw new Error('Sidecar pull cancelled.');
+  // Also covers a cancel that landed while the endpoint was being resolved.
+  if (viaEngine === 'cancelled' || sidecarPullCancelled) {
+    throw new Error('Sidecar pull cancelled.');
+  }
   return runSidecarCliPull(bin, onProgress);
 }
 
@@ -2499,7 +2511,8 @@ async function ensureVulkanSidecarImage(
   runtimeProfile: RuntimeProfile,
   deps: { hasImage: () => Promise<boolean>; pull: () => Promise<string> } = {
     hasImage: hasSidecarImage,
-    pull: pullSidecarImage,
+    // A failed pull fails the start, and the start flow reports that itself.
+    pull: () => pullSidecarImage({ errorToast: false }),
   },
 ): Promise<void> {
   if (runtimeProfile !== 'vulkan') return;
@@ -4170,7 +4183,13 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
   try {
     fs.renameSync(tmp, dest);
   } catch (err) {
-    // A locked or vanished file must not leave the item downloading forever.
+    // A locked or vanished file must not leave the item downloading forever,
+    // and the .tmp must not linger.
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best-effort */
+    }
     download.fail(err instanceof Error ? err.message : String(err));
     throw err;
   }
@@ -4338,7 +4357,19 @@ async function downloadWhisperServerExe(): Promise<void> {
     throw err;
   }
 
-  fs.renameSync(tmp, exePath);
+  try {
+    fs.renameSync(tmp, exePath);
+  } catch (err) {
+    // e.g. antivirus briefly locking the freshly written file. The item must
+    // not stay downloading forever, and the .tmp must not linger.
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best-effort */
+    }
+    download.fail(err instanceof Error ? err.message : String(err));
+    throw err;
+  }
   download.complete();
   console.log(
     `[DockerManager] whisper-server.exe downloaded from ${WHISPER_SERVER_BLOB_REPO}:${WHISPER_SERVER_BLOB_TAG} to ${exePath}`,

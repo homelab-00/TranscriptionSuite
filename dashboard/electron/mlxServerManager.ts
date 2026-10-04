@@ -53,6 +53,7 @@ export class MLXServerManager {
   private _process: ChildProcess | null = null;
   private _status: MLXServerStatus = 'stopped';
   private _statusListener: ((status: MLXServerStatus) => void) | null = null;
+  private _startupEventsFileProvider: (() => string | undefined) | null = null;
   private _logs: string[] = [];
   private _getWindow: () => BrowserWindow | null;
   private _sink: MlxLogSink | null;
@@ -140,7 +141,9 @@ export class MLXServerManager {
       PATH: spawnPath,
     };
     if (opts.hfToken) env.HF_TOKEN = opts.hfToken;
-    if (opts.startupEventsFile) env.STARTUP_EVENTS_FILE = opts.startupEventsFile;
+    // Asked for here, after start() has decided to actually spawn.
+    const startupEventsFile = opts.startupEventsFile ?? this._startupEventsFileProvider?.();
+    if (startupEventsFile) env.STARTUP_EVENTS_FILE = startupEventsFile;
     if (opts.mainTranscriberModel) env.MAIN_TRANSCRIBER_MODEL = opts.mainTranscriberModel;
     if (opts.liveTranscriberModel) env.LIVE_TRANSCRIBER_MODEL = opts.liveTranscriberModel;
     // GH-288: substitute the Settings-modal overlay model when the PyAnnote
@@ -512,6 +515,14 @@ export class MLXServerManager {
     } else {
       this._emit('mlx:logLine', line);
     }
+  }
+
+  /**
+   * Supplies the startup-events file for each run. Called from inside
+   * start(), once it is certain a server will be spawned.
+   */
+  setStartupEventsFileProvider(provider: () => string | undefined): void {
+    this._startupEventsFileProvider = provider;
   }
 
   /** Observe status transitions from the main process (the renderer gets `mlx:statusChanged`). */

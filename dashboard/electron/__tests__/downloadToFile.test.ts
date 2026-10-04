@@ -253,6 +253,69 @@ describe('downloadToFile', () => {
     expect(result).toEqual({ ok: true, bytes: payload.length });
   });
 
+  it('keeps a pre-existing file intact when the stream dies mid-download', async () => {
+    // The user picked "Replace" in the save dialog. A failed download must
+    // not cost them the file they already had.
+    writeFileSync(target, 'the recording I already saved');
+    const dying = new Readable({
+      read() {
+        this.push(Buffer.from('RIFF____WAVE'));
+        this.destroy(new Error('connection reset'));
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse(dying)));
+
+    const result = await downloadToFile({ url: 'http://server/audio/job-1', filePath: target });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(readFileSync(target, 'utf-8')).toBe('the recording I already saved');
+    expect(existsSync(`${target}.part`)).toBe(false);
+  });
+
+  it('keeps a pre-existing file intact when the download is cancelled', async () => {
+    writeFileSync(target, 'the recording I already saved');
+    const controller = new AbortController();
+    const endless = new ReadableStream<Uint8Array>({
+      pull(streamController) {
+        streamController.enqueue(new Uint8Array(Buffer.from('RIFF____WAVE')));
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        body: endless,
+      }),
+    );
+
+    const result = await downloadToFile({
+      url: 'http://server/audio/job-1',
+      filePath: target,
+      signal: controller.signal,
+      onProgress: (done) => {
+        if (done > 0) controller.abort();
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, cancelled: true });
+    expect(readFileSync(target, 'utf-8')).toBe('the recording I already saved');
+    expect(existsSync(`${target}.part`)).toBe(false);
+  });
+
+  it('replaces a pre-existing file only once the download is complete', async () => {
+    writeFileSync(target, 'old');
+    const payload = Buffer.from('RIFF____WAVEfmt new recording');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse(payload)));
+
+    const result = await downloadToFile({ url: 'http://server/audio/job-1', filePath: target });
+
+    expect(result).toEqual({ ok: true, bytes: payload.length });
+    expect(readFileSync(target).equals(payload)).toBe(true);
+    expect(existsSync(`${target}.part`)).toBe(false);
+  });
+
   it('reports a response with no body instead of writing an empty file', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, body: null }));
 

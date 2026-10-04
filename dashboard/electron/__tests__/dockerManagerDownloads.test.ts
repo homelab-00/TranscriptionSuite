@@ -223,6 +223,17 @@ describe('pullSidecarImage download tracking', () => {
     await pull;
   });
 
+  it('lets the container start silence the sidecar failure toast it reports itself', async () => {
+    const { finish } = controllableSpawn();
+    const pull = dockerManager.pullSidecarImage({ errorToast: false });
+    await settle();
+
+    expect(hubItem('sidecar-image')?.errorToast).toBe(false);
+
+    finish(0);
+    await pull;
+  });
+
   it('fails the item when the pull exits non-zero', async () => {
     const { finish } = controllableSpawn();
     const pull = dockerManager.pullSidecarImage();
@@ -384,6 +395,48 @@ describe('image pull through the Engine API', () => {
     expect(dockerManager.isPulling()).toBe(false);
   });
 
+  it('does not start the CLI pull when cancelled while the endpoint is still resolving', async () => {
+    let resolveEndpoint: (endpoint: null) => void = () => {};
+    dockerManager.configureEnginePull({
+      enabled: true,
+      resolveEndpoint: () =>
+        new Promise((resolve) => {
+          resolveEndpoint = resolve;
+        }),
+    });
+    vi.mocked(spawn).mockReset();
+
+    const pull = dockerManager.pullImage('v-cancel-early');
+    await settle();
+    dockerManager.cancelPull();
+    resolveEndpoint(null); // no usable endpoint: the old code fell through to the CLI
+
+    await expect(pull).rejects.toThrow('Pull cancelled.');
+    expect(spawn).not.toHaveBeenCalled();
+    expect(hubItem('server-image:v-cancel-early')?.status).toBe('cancelled');
+  });
+
+  it('does not start the sidecar CLI pull when cancelled while the endpoint is still resolving', async () => {
+    let resolveEndpoint: (endpoint: null) => void = () => {};
+    dockerManager.configureEnginePull({
+      enabled: true,
+      resolveEndpoint: () =>
+        new Promise((resolve) => {
+          resolveEndpoint = resolve;
+        }),
+    });
+    vi.mocked(spawn).mockReset();
+
+    const pull = dockerManager.pullSidecarImage();
+    await settle();
+    dockerManager.cancelSidecarPull();
+    resolveEndpoint(null);
+
+    await expect(pull).rejects.toThrow();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(hubItem('sidecar-image')?.status).toBe('cancelled');
+  });
+
   it('pulls the sidecar image through the Engine API too', async () => {
     let seenUrl = '';
     await serveEngine((req, res) => {
@@ -528,6 +581,19 @@ describe('downloadWhisperServerExe download tracking', () => {
       bytesDone: exeBytes.length,
       bytesTotal: exeBytes.length,
     });
+  });
+
+  it('fails the item when the verified file cannot be moved into place', async () => {
+    stubRegistry(goodDigest);
+    const rename = vi.spyOn(fsDefault, 'renameSync').mockImplementation(() => {
+      throw new Error('EPERM: operation not permitted');
+    });
+    try {
+      await expect(dockerManager.downloadWhisperServerExe()).rejects.toThrow(/EPERM/);
+      expect(hubItem('whisper-server')?.status).toBe('error');
+    } finally {
+      rename.mockRestore();
+    }
   });
 
   it('fails the item and leaves no executable when the content hash does not match', async () => {

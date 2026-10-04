@@ -98,7 +98,7 @@ interface DownloadItem {
   /** Unique per run of an id - the identity of the history row it leaves behind. */
   runId: string;
   kind: DownloadKind;
-  source: 'app' | 'server';
+  source: 'app' | 'server' | 'mlx-server';
   label: string;
   detail?: string;
   status: DownloadStatus;

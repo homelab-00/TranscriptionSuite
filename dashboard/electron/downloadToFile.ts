@@ -56,14 +56,21 @@ export async function downloadToFile(opts: DownloadToFileOptions): Promise<Downl
   // ERR_INVALID_ARG_TYPE for a non-string filePath, and callers are promised
   // this never rejects.
   let resolved = '';
+  // The body is written next to the destination as `<name>.part` and moved
+  // into place only once it is complete. The user reaches this code by
+  // picking a path in a save dialog, so the destination often already exists
+  // ("Replace"): writing straight into it would truncate that file up front,
+  // and a failed or cancelled download would then cost them the copy they
+  // already had - exactly the kind of silent loss this feature exists to
+  // prevent. The destination is never touched until the new bytes are all in.
+  let partial = '';
   // Flipped only once the write stream exists, i.e. once this function has
-  // actually created or truncated the destination. The cleanup below keys off
-  // it. Unlinking unconditionally would delete a pre-existing file the user
-  // picked in the save dialog even when the download never wrote a byte to it,
-  // which is exactly the kind of silent loss this feature exists to prevent.
-  let destinationOpened = false;
+  // actually created the partial file. The cleanup below keys off it, so it
+  // never removes anything this call did not create.
+  let partialOpened = false;
   try {
     resolved = path.resolve(opts.filePath);
+    partial = `${resolved}.part`;
     const res = await fetch(opts.url, { headers: opts.headers, signal: opts.signal });
     if (!res.ok) {
       let body = '';
@@ -99,8 +106,11 @@ export async function downloadToFile(opts: DownloadToFileOptions): Promise<Downl
       },
     });
     report(0);
-    destinationOpened = true;
-    await pipeline(source, counter, fs.createWriteStream(resolved), { signal: opts.signal });
+    partialOpened = true;
+    await pipeline(source, counter, fs.createWriteStream(partial), { signal: opts.signal });
+    // Complete: replace the destination in one step.
+    await fs.promises.rename(partial, resolved);
+    partialOpened = false;
     let bytes: number | undefined;
     try {
       bytes = (await fs.promises.stat(resolved)).size;
@@ -109,12 +119,12 @@ export async function downloadToFile(opts: DownloadToFileOptions): Promise<Downl
     }
     return bytes === undefined ? { ok: true } : { ok: true, bytes };
   } catch (err) {
-    // Best-effort cleanup so a half-written file is never left behind looking
-    // valid. Scoped to a file this call actually opened, and errors from the
-    // unlink itself are swallowed.
-    if (destinationOpened && resolved) {
+    // Best-effort cleanup so a half-written file is never left behind. Scoped
+    // to the partial file this call created, and errors from the unlink
+    // itself are swallowed.
+    if (partialOpened && partial) {
       try {
-        await fs.promises.unlink(resolved);
+        await fs.promises.unlink(partial);
       } catch {
         // Nothing to clean up, or the path is not ours to remove.
       }

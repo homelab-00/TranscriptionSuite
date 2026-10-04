@@ -576,6 +576,22 @@ describe('[GH #255] MLXServerManager bundled ffmpeg on spawn PATH', () => {
     expect(env.STARTUP_EVENTS_FILE).toBe(inherited);
   });
 
+  it('asks for the events file only when a start actually proceeds', async () => {
+    // Asking before start() decides anything let a redundant start replace
+    // (and delete) the events file of the server that was already running.
+    stubExists();
+    const manager = new MLXServerManager(() => mockWindow as never);
+    const provider = vi.fn(() => '/tmp/mlx-events/run.jsonl');
+    manager.setStartupEventsFileProvider(provider);
+
+    const env = await startAndCaptureSpawnEnv({}, manager);
+    expect(env.STARTUP_EVENTS_FILE).toBe('/tmp/mlx-events/run.jsonl');
+    expect(provider).toHaveBeenCalledTimes(1);
+
+    await manager.start({ port: 8000 }); // already running: a no-op
+    expect(provider).toHaveBeenCalledTimes(1);
+  });
+
   it('tells a status listener about every transition', async () => {
     stubExists();
     const manager = new MLXServerManager(() => mockWindow as never);
