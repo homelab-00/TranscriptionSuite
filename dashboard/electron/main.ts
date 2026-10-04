@@ -6,7 +6,8 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 import { fileURLToPath } from 'url';
-import { downloadToFile, type DownloadToFileResult } from './downloadToFile.js';
+import type { DownloadToFileResult } from './downloadToFile.js';
+import { downloadToFileTracked } from './exportDownload.js';
 import {
   ensureServerConfigSeed,
   getServerConfigDir,
@@ -32,7 +33,7 @@ import { NotificationLog } from './notificationLog.js';
 import { downloadHub } from './downloadHub.js';
 import { applyServerDownloadEvent } from './serverDownloadEvents.js';
 import { createInstallerDownloadAdapter } from './installerDownloads.js';
-import { StartupEventWatcher } from './startupEventWatcher.js';
+import { StartupEventWatcher, type StartupEvent } from './startupEventWatcher.js';
 import { MLXServerManager, type MLXStartOptions } from './mlxServerManager.js';
 import { createMlxLogSink, type MlxLogSink } from './mlxLogSink.js';
 import { TrayManager, type TrayState } from './trayManager.js';
@@ -587,6 +588,66 @@ const mlxLogSink: MlxLogSink = createMlxLogSink({
 });
 
 const mlxServerManager = new MLXServerManager(() => mainWindow ?? null, mlxLogSink);
+
+// ─── Server events (GH-318) ────────────────────────────────────────────────
+// Download events feed the download bar; every event still goes to the
+// renderer for the server-start card and warnings.
+
+function forwardServerEvent(event: StartupEvent): void {
+  applyServerDownloadEvent(downloadHub, event, 'server');
+  mainWindow?.webContents.send('activity:event', event);
+}
+
+function forwardMlxServerEvent(event: StartupEvent): void {
+  applyServerDownloadEvent(downloadHub, event, 'mlx-server');
+  mainWindow?.webContents.send('activity:event', event);
+}
+
+// The bare-metal (MLX) server has no container bind mount to write events
+// through, so it gets a private events file of its own for each run.
+const mlxEventWatcher = new StartupEventWatcher();
+let mlxEventsDir: string | null = null;
+
+function endMlxEvents(): void {
+  mlxEventWatcher.stop();
+  if (mlxEventsDir) {
+    try {
+      fs.rmSync(mlxEventsDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+    mlxEventsDir = null;
+  }
+}
+
+/** Create and watch the events file for an MLX run. Undefined if it cannot be set up. */
+function beginMlxEvents(): string | undefined {
+  try {
+    endMlxEvents();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'transcription-suite-mlx-events-'));
+    const file = path.join(dir, 'startup-events.jsonl');
+    fs.writeFileSync(file, '', { encoding: 'utf-8', mode: 0o600 });
+    mlxEventsDir = dir;
+    mlxEventWatcher.start(file, forwardMlxServerEvent);
+    return file;
+  } catch (err) {
+    console.warn('[MLX] could not set up the startup-events file:', err);
+    return undefined;
+  }
+}
+
+// The manager asks for the file from inside start(), once it has decided to
+// actually spawn: a redundant start must not replace the events file of the
+// server that is already running.
+mlxServerManager.setStartupEventsFileProvider(beginMlxEvents);
+
+mlxServerManager.onStatus((status) => {
+  if (status === 'stopped' || status === 'error') {
+    endMlxEvents();
+    // Whatever the server was still downloading is gone with it.
+    downloadHub.endAllFromSource('mlx-server', 'Server stopped');
+  }
+});
 
 // ─── Update Manager ─────────────────────────────────────────────────────────
 
@@ -1177,7 +1238,8 @@ ipcMain.handle(
   async (
     _event,
     opts: { url: string; headers?: Record<string, string>; filePath: string },
-  ): Promise<DownloadToFileResult> => downloadToFile(opts),
+    // Reported to the download bar, where it can also be cancelled (GH-318).
+  ): Promise<DownloadToFileResult> => downloadToFileTracked(downloadHub, opts),
 );
 
 ipcMain.handle('dialog:selectFolder', async () => {
@@ -1325,6 +1387,14 @@ ipcMain.handle('docker:getContainerStatus', async () => {
   if (status.exists && !status.running) {
     downloadHub.endAllFromSource('server', 'Server stopped');
   }
+  // The dashboard started while the server was already running: nothing is
+  // watching its events yet. Recover the file from the container, once.
+  if (!status.running) {
+    eventsReattachTried = false;
+  } else if (!eventsReattachTried && !startupEventWatcher.isWatching()) {
+    eventsReattachTried = true;
+    void reattachStartupEvents();
+  }
   return status;
 });
 
@@ -1333,6 +1403,15 @@ ipcMain.handle('docker:getContainerStatus', async () => {
 // events to the renderer via IPC for the notifications store.
 
 const startupEventWatcher = new StartupEventWatcher();
+let eventsReattachTried = false;
+
+async function reattachStartupEvents(): Promise<void> {
+  const eventsFile = await dockerManager.findRunningStartupEventsFile();
+  // A start that happened meanwhile owns the watcher; never replace it.
+  if (!eventsFile || startupEventWatcher.isWatching()) return;
+  // fromEnd: the startup already happened; only what comes next is news.
+  startupEventWatcher.start(eventsFile, forwardServerEvent, { fromEnd: true });
+}
 
 ipcMain.handle('docker:startContainer', async (_event, options: StartContainerOptions) => {
   // Anything the previous server run was still downloading is gone with it.
@@ -1344,12 +1423,7 @@ ipcMain.handle('docker:startContainer', async (_event, options: StartContainerOp
   // Start watching startup events file (set during startContainer)
   const eventsFile = dockerManager.getStartupEventsFilePath();
   if (eventsFile) {
-    startupEventWatcher.start(eventsFile, (event) => {
-      // Download events feed the download bar; every event still goes to the
-      // renderer for the server-start card and warnings.
-      applyServerDownloadEvent(downloadHub, event);
-      mainWindow?.webContents.send('activity:event', event);
-    });
+    startupEventWatcher.start(eventsFile, forwardServerEvent);
   }
 
   return result;
@@ -1493,6 +1567,11 @@ downloadHub.setBroadcaster((change) => broadcastToWindows('downloads:changed', c
 dockerManager.setServerLogEventListener((event) => {
   mainWindow?.webContents.send('activity:event', event);
 });
+
+// Image pulls report real bytes through the Engine API where a local docker
+// socket is reachable; everywhere else, and on any failure, the CLI pull is
+// used as before.
+dockerManager.configureEnginePull({ enabled: true });
 
 ipcMain.handle('downloads:getSnapshot', () => downloadHub.snapshot());
 

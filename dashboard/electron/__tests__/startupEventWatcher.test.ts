@@ -13,7 +13,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { StartupEventWatcher, type StartupEvent } from '../startupEventWatcher.js';
+import {
+  StartupEventWatcher,
+  eventsFileFromMounts,
+  type StartupEvent,
+} from '../startupEventWatcher.js';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -76,6 +80,34 @@ describe('[P1] StartupEventWatcher', () => {
     expect(received[1].progress).toBe(45);
 
     watcher.stop();
+  });
+
+  it('skips what is already in the file when attaching to a server that is already running', async () => {
+    // Re-attaching after a dashboard restart: the events of the startup that
+    // already happened must not replay as if they were happening now.
+    fs.writeFileSync(
+      eventsFile,
+      makeEvent({ id: 'server-ready', category: 'server', label: 'Server ready' }) + '\n',
+    );
+
+    const received: StartupEvent[] = [];
+    const watcher = new StartupEventWatcher();
+    watcher.start(eventsFile, (event) => received.push(event), { fromEnd: true });
+    await waitForEvents();
+    expect(received).toHaveLength(0);
+
+    fs.appendFileSync(
+      eventsFile,
+      makeEvent({ id: 'live-model-load-x', category: 'download', label: 'Downloading x...' }) +
+        '\n',
+    );
+    await waitForEvents();
+
+    expect(received.map((e) => e.id)).toEqual(['live-model-load-x']);
+    expect(watcher.isWatching()).toBe(true);
+
+    watcher.stop();
+    expect(watcher.isWatching()).toBe(false);
   });
 
   it('reads new lines appended after watcher starts', async () => {
@@ -311,5 +343,34 @@ describe('[P1] StartupEventWatcher', () => {
     expect(received.some((e) => e.id === 'delayed')).toBe(true);
 
     watcher.stop();
+  });
+});
+
+describe('eventsFileFromMounts', () => {
+  it('finds the events file behind the /startup-events bind mount', () => {
+    const mounts = JSON.stringify([
+      { Type: 'volume', Source: '/var/lib/docker/volumes/models/_data', Destination: '/models' },
+      {
+        Type: 'bind',
+        Source: '/tmp/transcription-suite-events-AbC123',
+        Destination: '/startup-events',
+      },
+    ]);
+
+    expect(eventsFileFromMounts(mounts)).toBe(
+      path.join('/tmp/transcription-suite-events-AbC123', 'startup-events.jsonl'),
+    );
+  });
+
+  it('is null when the container has no events mount', () => {
+    expect(
+      eventsFileFromMounts(JSON.stringify([{ Source: '/x', Destination: '/models' }])),
+    ).toBeNull();
+  });
+
+  it('is null for output that is not a mount list', () => {
+    expect(eventsFileFromMounts('')).toBeNull();
+    expect(eventsFileFromMounts('not json')).toBeNull();
+    expect(eventsFileFromMounts('null')).toBeNull();
   });
 });

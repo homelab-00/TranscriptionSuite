@@ -1674,6 +1674,9 @@ export const SessionView: React.FC<SessionViewProps> = ({
         // enable strictNullChecks, and without it TypeScript will not narrow a
         // union by a boolean literal on the falsy side of the test.
         if (outcome.ok === false) {
+          // Cancelled from the download bar: the user asked for it, and the
+          // bar already recorded it. Not a failure.
+          if (outcome.cancelled) return;
           // A 410 carries the server's own reason: never preserved, lost from
           // temporary storage on a restart, or already deleted. That distinction
           // is the whole answer for the user, so surface it verbatim rather than

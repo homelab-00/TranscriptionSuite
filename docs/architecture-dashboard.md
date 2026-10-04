@@ -56,6 +56,10 @@ audio notebook with calendar/full-text search/LLM chat, transcription/recording 
 | `serverDownloadEvents.ts` | **NEW** - maps server startup `download` events into hub items (only on evidence of a real download) |
 | `bootstrapLogDownloads.ts` | **NEW** - container log parser for dependency installs (start/complete/fail), fallback signal for the hub |
 | `installerDownloads.ts` | **NEW** - reports the app-update pipeline (electron-updater, macOS DMG) into the hub |
+| `pullProgress.ts` | **NEW** - turns image pull output into progress: docker CLI layer states, Engine API bytes, podman blob lines |
+| `enginePull.ts` | **NEW** - image pull through the Docker Engine API (byte progress); optional fast path, the CLI pull stays the fallback |
+| `exportDownload.ts` | **NEW** - reports a recording saved to disk (`file:downloadToPath`) into the hub, with cancel |
+| `readBodyWithProgress.ts` | **NEW** - read a fetch body into memory while reporting bytes (verify-before-write downloads) |
 | `watcherManager.ts` | Folder watcher for auto-import of audio files |
 | `wslDetect.ts` | **NEW** — detect WSL2 Docker backend + `/dev/dxg` GPU-PV (gates vulkan-wsl2) |
 | `platformGate.ts` | **NEW** — resolve per-OS install strategy (`electron-updater` vs `manual-download`) |

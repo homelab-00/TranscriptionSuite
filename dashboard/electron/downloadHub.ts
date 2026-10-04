@@ -33,8 +33,13 @@ export type DownloadKind =
 
 export type DownloadStatus = 'active' | 'complete' | 'error' | 'cancelled';
 
-/** Where the bytes are being fetched: by this app, or inside the server process. */
-export type DownloadSource = 'app' | 'server';
+/**
+ * Who is fetching the bytes: this app, the server container, or the
+ * bare-metal (MLX) server. The two servers are separate sources because each
+ * can stop without the other: a stopped container must not end the downloads
+ * of a running MLX server.
+ */
+export type DownloadSource = 'app' | 'server' | 'mlx-server';
 
 export interface DownloadItem {
   /** Stable source key, e.g. `server-image:latest`. One running item per id. */

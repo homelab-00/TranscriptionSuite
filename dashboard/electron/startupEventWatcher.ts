@@ -11,6 +11,7 @@
  */
 
 import fs from 'fs';
+import path from 'path';
 
 export interface StartupEvent {
   id: string;
@@ -58,14 +59,34 @@ export class StartupEventWatcher {
    *
    * @param filePath - Path to the startup-events.jsonl file
    * @param onEvent  - Callback invoked for each parsed event
+   * @param options  - `fromEnd`: skip what is already in the file. Used when
+   *                   attaching to a server that is already running, so the
+   *                   startup that already happened does not replay.
    */
-  start(filePath: string, onEvent: (event: StartupEvent) => void): void {
+  start(
+    filePath: string,
+    onEvent: (event: StartupEvent) => void,
+    options: { fromEnd?: boolean } = {},
+  ): void {
     this.stop();
     this.filePath = filePath;
     this.onEvent = onEvent;
     this.offset = 0;
+    if (options.fromEnd) {
+      try {
+        this.offset = fs.statSync(filePath).size;
+      } catch {
+        this.offset = 0; // not there yet: everything written later is new
+      }
+    }
 
     this.sawAnyEvent = false;
+    // A server that is already running has nothing left to announce, so the
+    // silent-channel diagnostic only makes sense for a fresh start.
+    if (options.fromEnd) {
+      this.tryWatch();
+      return;
+    }
     this.diagnosticTimer = setTimeout(() => {
       if (!this.sawAnyEvent) {
         console.warn(
@@ -76,6 +97,11 @@ export class StartupEventWatcher {
     }, SILENT_CHANNEL_DIAGNOSTIC_MS);
 
     this.tryWatch();
+  }
+
+  /** Whether a file is currently being watched. */
+  isWatching(): boolean {
+    return this.filePath !== null;
   }
 
   /** Stop watching and clean up. */
@@ -176,4 +202,33 @@ export class StartupEventWatcher {
       }
     }
   }
+}
+
+/** Where the server's events directory is mounted inside the container. */
+const EVENTS_MOUNT_DESTINATION = '/startup-events';
+const EVENTS_FILE_NAME = 'startup-events.jsonl';
+
+/**
+ * Host path of the events file of a running container, from the output of
+ * `inspect --format '{{json .Mounts}}'` (GH-318).
+ *
+ * The events directory is a fresh temp dir per container start and its path
+ * lives only in the memory of the dashboard that started the container. A
+ * dashboard that starts while the server is already running recovers it from
+ * the container's own mount list.
+ */
+export function eventsFileFromMounts(inspectOutput: string): string | null {
+  let mounts: unknown;
+  try {
+    mounts = JSON.parse(inspectOutput);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(mounts)) return null;
+  for (const mount of mounts as Array<{ Source?: unknown; Destination?: unknown }>) {
+    if (mount?.Destination === EVENTS_MOUNT_DESTINATION && typeof mount.Source === 'string') {
+      return path.join(mount.Source, EVENTS_FILE_NAME);
+    }
+  }
+  return null;
 }

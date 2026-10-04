@@ -542,11 +542,13 @@ describe('[GH #255] MLXServerManager bundled ffmpeg on spawn PATH', () => {
   }
 
   /** Drive start() to running and return the env passed to spawn(). */
-  async function startAndCaptureSpawnEnv(): Promise<Record<string, string>> {
+  async function startAndCaptureSpawnEnv(
+    extraOpts: { startupEventsFile?: string } = {},
+    manager = new MLXServerManager(() => mockWindow as never),
+  ): Promise<Record<string, string>> {
     const child = makeChildProcess();
     mockSpawn.mockReturnValue(child);
-    const manager = new MLXServerManager(() => mockWindow as never);
-    const startPromise = manager.start({ port: 8000 });
+    const startPromise = manager.start({ port: 8000, ...extraOpts });
     child.stderr.emit('data', Buffer.from('Application startup complete\n'));
     await startPromise;
     const [, , spawnOptions] = mockSpawn.mock.calls[0] as [
@@ -556,6 +558,50 @@ describe('[GH #255] MLXServerManager bundled ffmpeg on spawn PATH', () => {
     ];
     return spawnOptions.env;
   }
+
+  it('points the server at the startup-events file it is given (GH-318)', async () => {
+    stubExists();
+
+    const env = await startAndCaptureSpawnEnv({ startupEventsFile: '/tmp/mlx-events/ev.jsonl' });
+
+    expect(env.STARTUP_EVENTS_FILE).toBe('/tmp/mlx-events/ev.jsonl');
+  });
+
+  it('leaves STARTUP_EVENTS_FILE alone when no events file is given', async () => {
+    stubExists();
+    const inherited = process.env.STARTUP_EVENTS_FILE;
+
+    const env = await startAndCaptureSpawnEnv();
+
+    expect(env.STARTUP_EVENTS_FILE).toBe(inherited);
+  });
+
+  it('asks for the events file only when a start actually proceeds', async () => {
+    // Asking before start() decides anything let a redundant start replace
+    // (and delete) the events file of the server that was already running.
+    stubExists();
+    const manager = new MLXServerManager(() => mockWindow as never);
+    const provider = vi.fn(() => '/tmp/mlx-events/run.jsonl');
+    manager.setStartupEventsFileProvider(provider);
+
+    const env = await startAndCaptureSpawnEnv({}, manager);
+    expect(env.STARTUP_EVENTS_FILE).toBe('/tmp/mlx-events/run.jsonl');
+    expect(provider).toHaveBeenCalledTimes(1);
+
+    await manager.start({ port: 8000 }); // already running: a no-op
+    expect(provider).toHaveBeenCalledTimes(1);
+  });
+
+  it('tells a status listener about every transition', async () => {
+    stubExists();
+    const manager = new MLXServerManager(() => mockWindow as never);
+    const seen: string[] = [];
+    manager.onStatus((status) => seen.push(status));
+
+    await startAndCaptureSpawnEnv({}, manager);
+
+    expect(seen).toEqual(['starting', 'running']);
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();

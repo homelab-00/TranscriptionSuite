@@ -441,7 +441,8 @@ export interface ElectronAPI {
       headers?: Record<string, string>;
       filePath: string;
     }) => Promise<
-      { ok: true; bytes?: number } | { ok: false; error: string; status?: number; body?: string }
+      | { ok: true; bytes?: number }
+      | { ok: false; error: string; status?: number; body?: string; cancelled?: boolean }
     >;
   };
   watcher: {
@@ -804,7 +805,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveFile: (opts) => ipcRenderer.invoke('dialog:saveFile', opts) as Promise<string | null>,
     downloadToPath: (opts) =>
       ipcRenderer.invoke('file:downloadToPath', opts) as Promise<
-        { ok: true; bytes?: number } | { ok: false; error: string; status?: number; body?: string }
+        | { ok: true; bytes?: number }
+        | { ok: false; error: string; status?: number; body?: string; cancelled?: boolean }
       >,
   },
   watcher: {

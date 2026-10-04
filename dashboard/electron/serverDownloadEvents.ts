@@ -15,7 +15,7 @@
  *    `downloadedSize` / `totalSize` strings
  */
 
-import type { DownloadHub, DownloadKind } from './downloadHub.js';
+import type { DownloadHub, DownloadKind, DownloadSource } from './downloadHub.js';
 import type { StartupEvent } from './startupEventWatcher.js';
 
 /** Emitted with category `download` by older servers, but it is a load failure. */
@@ -58,7 +58,12 @@ function isNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-export function applyServerDownloadEvent(hub: DownloadHub, event: StartupEvent): void {
+export function applyServerDownloadEvent(
+  hub: DownloadHub,
+  event: StartupEvent,
+  /** Which server the event came from: the container, or the bare-metal one. */
+  source: DownloadSource = 'server',
+): void {
   if (event.category !== 'download') return;
   if (NOT_A_DOWNLOAD_IDS.has(event.id)) return;
 
@@ -89,7 +94,7 @@ export function applyServerDownloadEvent(hub: DownloadHub, event: StartupEvent):
     id: event.id,
     kind: resolveKind(event),
     label: event.name || nameFromLabel(event.label),
-    source: 'server',
+    source,
   });
 
   if (hasBytes) {

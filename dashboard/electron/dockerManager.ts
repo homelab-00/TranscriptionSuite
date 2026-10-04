@@ -41,7 +41,17 @@ import {
 } from './containerRuntime.js';
 import { type WslSupport, resetWslSupportCache } from './wslDetect.js';
 import { hfCacheDirName } from './hfRepoAliases.js';
-import { downloadHub } from './downloadHub.js';
+import { downloadHub, type DownloadProgress } from './downloadHub.js';
+import { PullProgressAggregator } from './pullProgress.js';
+import { readBodyWithProgress } from './readBodyWithProgress.js';
+import { eventsFileFromMounts } from './startupEventWatcher.js';
+import {
+  parseEngineHost,
+  pingEngine,
+  pullViaEngine,
+  splitImageReference,
+  type EngineEndpoint,
+} from './enginePull.js';
 import { BootstrapLogTracker } from './bootstrapLogDownloads.js';
 import type { StartupEvent } from './startupEventWatcher.js';
 import {
@@ -176,6 +186,28 @@ let _startupEventsFilePath: string | null = null;
 /** Get the current startup events file path (null if container not started). */
 function getStartupEventsFilePath(): string | null {
   return _startupEventsFilePath;
+}
+
+/**
+ * Events file of the container that is running right now, recovered from its
+ * mount list (GH-318). The path of the per-start temp dir only lives in the
+ * memory of the dashboard that started the container; a dashboard that starts
+ * later would otherwise never see a download the server performs afterwards
+ * (a Live Mode model, a first diarization run).
+ */
+async function findRunningStartupEventsFile(): Promise<string | null> {
+  try {
+    const output = await exec(await runtimeBin(), [
+      'inspect',
+      '--format',
+      '{{json .Mounts}}',
+      CONTAINER_NAME,
+    ]);
+    const file = eventsFileFromMounts(output.trim());
+    return file && fs.existsSync(file) ? file : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1721,6 +1753,7 @@ function retryDetection(): void {
   detectedRuntimeKind = null;
   _detectionGuidance = null;
   _composeAvailable = null;
+  cachedEngineEndpoint = undefined;
 }
 
 // ─── Image Operations ───────────────────────────────────────────────────────
@@ -1730,6 +1763,10 @@ let pullProcess: ChildProcess | null = null;
 
 /** Active sidecar pull process — independent from main image pull */
 let sidecarPullProcess: ChildProcess | null = null;
+
+/** Abort handles of in-flight Engine API pulls (the CLI pulls use the processes above). */
+let pullAbort: AbortController | null = null;
+let sidecarPullAbort: AbortController | null = null;
 
 /** True if the active sidecar pull was killed by a cancel rather than failing on its own. */
 let sidecarPullCancelled = false;
@@ -2053,6 +2090,115 @@ export function classifyPullError(
   };
 }
 
+// ─── Engine API pull (GH-318) ───────────────────────────────────────────────
+//
+// `docker pull` without a TTY reports no bytes; the Engine API does. It is an
+// optional fast path in front of the CLI pull: off unless main.ts turns it
+// on, used only for docker (podman's compat stream is unverified), and any
+// failure falls back to the CLI, which owns credentials, error
+// classification and retries.
+
+let enginePullEnabled = false;
+let engineEndpointOverride: (() => Promise<EngineEndpoint | null>) | null = null;
+/** undefined = not resolved yet; null = resolved, no usable local endpoint. */
+let cachedEngineEndpoint: EngineEndpoint | null | undefined;
+
+function configureEnginePull(config: {
+  enabled: boolean;
+  /** Test seam: replaces endpoint discovery. */
+  resolveEndpoint?: () => Promise<EngineEndpoint | null>;
+}): void {
+  enginePullEnabled = config.enabled;
+  engineEndpointOverride = config.resolveEndpoint ?? null;
+  cachedEngineEndpoint = undefined;
+}
+
+async function resolveEngineEndpoint(): Promise<EngineEndpoint | null> {
+  if (!enginePullEnabled) return null;
+  if (engineEndpointOverride) return engineEndpointOverride();
+  if (detectedRuntimeKind !== 'docker') return null;
+  if (cachedEngineEndpoint !== undefined) return cachedEngineEndpoint;
+
+  let host = buildProcessEnv(undefined, 'docker').DOCKER_HOST;
+  if (!host) {
+    try {
+      host = (
+        await exec(await runtimeBin(), [
+          'context',
+          'inspect',
+          '--format',
+          '{{.Endpoints.docker.Host}}',
+        ])
+      ).trim();
+    } catch {
+      host = undefined;
+    }
+  }
+  const endpoint = parseEngineHost(host);
+  cachedEngineEndpoint = endpoint && (await pingEngine(endpoint)) ? endpoint : null;
+  return cachedEngineEndpoint;
+}
+
+/**
+ * Try to pull *reference* through the Engine API, reporting byte progress.
+ * 'unavailable' means "use the CLI": no local endpoint, or the pull failed.
+ */
+async function pullThroughEngine(
+  reference: string,
+  onProgress: (progress: DownloadProgress) => void,
+  signal: AbortSignal,
+): Promise<'ok' | 'cancelled' | 'unavailable'> {
+  let endpoint: EngineEndpoint | null = null;
+  try {
+    endpoint = await resolveEngineEndpoint();
+  } catch {
+    endpoint = null;
+  }
+  if (!endpoint) return 'unavailable';
+
+  const aggregator = new PullProgressAggregator();
+  const result = await pullViaEngine(
+    endpoint,
+    splitImageReference(reference),
+    (message) => {
+      if (aggregator.applyApiMessage(message)) onProgress(aggregator.progress());
+    },
+    signal,
+  );
+  if (result.ok) return 'ok';
+  if (result.cancelled) return 'cancelled';
+  console.warn(
+    `[DockerManager] Engine API pull of ${reference} failed (${result.error}); falling back to the CLI`,
+  );
+  return 'unavailable';
+}
+
+/**
+ * Report the output of a pull process to the download bar as it arrives
+ * (GH-318). docker writes its layer lines to stdout, podman its blob lines to
+ * stderr, so both streams are parsed. Each stream keeps its own partial-line
+ * buffer: a chunk boundary can fall in the middle of a line.
+ */
+function trackPullOutput(
+  proc: ChildProcess,
+  onProgress: (progress: DownloadProgress) => void,
+): void {
+  const aggregator = new PullProgressAggregator();
+  const lineFeeder = () => {
+    let remainder = '';
+    return (data: Buffer) => {
+      const text = remainder + data.toString();
+      const lines = text.split(/\r?\n/);
+      remainder = lines.pop() ?? '';
+      let changed = false;
+      for (const line of lines) changed = aggregator.applyCliLine(line) || changed;
+      if (changed) onProgress(aggregator.progress());
+    };
+  };
+  proc.stdout?.on('data', lineFeeder());
+  proc.stderr?.on('data', lineFeeder());
+}
+
 /**
  * Pull an image tag from the registry.
  * Uses spawn instead of exec so the process can be cancelled.
@@ -2072,8 +2218,8 @@ async function pullImage(
     errorToast?: boolean;
   } = {},
 ): Promise<string> {
-  // Reported to the download bar (GH-318). The CLI gives no progress on a
-  // non-TTY, so the item stays indeterminate here.
+  // Reported to the download bar (GH-318). Without a TTY the CLI prints only
+  // per-layer states, so progress is the fraction of layers downloaded.
   const download = downloadHub.begin({
     id: `server-image:${tag}`,
     kind: 'server-image',
@@ -2084,7 +2230,7 @@ async function pullImage(
     errorToast: options.errorToast ?? true,
   });
   try {
-    const output = await runImagePull(tag);
+    const output = await runImagePull(tag, (progress) => download.update(progress));
     download.complete();
     return output;
   } catch (err) {
@@ -2094,7 +2240,10 @@ async function pullImage(
   }
 }
 
-async function runImagePull(tag: string): Promise<string> {
+async function runImagePull(
+  tag: string,
+  onProgress: (progress: DownloadProgress) => void,
+): Promise<string> {
   const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
   const bin = await runtimeBin();
   const env = buildProcessEnv(undefined, detectedRuntimeKind ?? undefined);
@@ -2114,13 +2263,14 @@ async function runImagePull(tag: string): Promise<string> {
   type AttemptResult =
     { ok: true; stdout: string } | { ok: false; code: number | null; stderr: string };
 
-  const runOne = (): Promise<AttemptResult> =>
+  const runCli = (): Promise<AttemptResult> =>
     new Promise((resolve) => {
       const proc = spawn(bin, ['pull', `${imageRepo}:${tag}`], {
         stdio: ['ignore', 'pipe', 'pipe'],
         env,
       });
       pullProcess = proc;
+      trackPullOutput(proc, onProgress);
 
       let stdout = '';
       let stderr = '';
@@ -2149,11 +2299,25 @@ async function runImagePull(tag: string): Promise<string> {
       });
     });
 
+  const runOne = async (): Promise<AttemptResult> => {
+    const abort = new AbortController();
+    pullAbort = abort;
+    const viaEngine = await pullThroughEngine(`${imageRepo}:${tag}`, onProgress, abort.signal);
+    if (pullAbort === abort) pullAbort = null;
+    if (viaEngine === 'ok') return { ok: true, stdout: '' };
+    // Cancelled during the API pull, or while its endpoint was still being
+    // resolved: never fall through to the CLI. The cancel check after
+    // runOne() turns this into 'Pull cancelled.'.
+    if (viaEngine === 'cancelled' || pullCancelled) return { ok: false, code: null, stderr: '' };
+    return runCli();
+  };
+
   for (let attempt = 1; attempt <= MAX_PULL_ATTEMPTS; attempt++) {
     // No top-of-loop cancel check here: pullCancelled is reset to false above
-    // and the loop has no yield points outside of the awaited backoff (which
-    // is followed by its own post-await check). cancelPull() can only flip
-    // the flag during an await, and every await already has a paired check.
+    // and the loop has no yield points outside of runOne() and the awaited
+    // backoff, each followed by its own post-await check. cancelPull() can
+    // only flip the flag during an await, and every await has a paired check
+    // (runOne() also checks before it falls back from the Engine API to the CLI).
     const result = await runOne();
 
     if (pullCancelled) {
@@ -2204,8 +2368,12 @@ async function runImagePull(tag: string): Promise<string> {
  * Returns true if anything was cancelled.
  */
 function cancelPull(): boolean {
-  const wasActive = pullProcess !== null || pullRetryTimer !== null;
+  const wasActive = pullProcess !== null || pullRetryTimer !== null || pullAbort !== null;
   pullCancelled = true;
+  if (pullAbort) {
+    pullAbort.abort();
+    pullAbort = null;
+  }
   if (pullRetryTimer) {
     clearTimeout(pullRetryTimer);
     pullRetryTimer = null;
@@ -2225,7 +2393,7 @@ function cancelPull(): boolean {
  * Check if a pull is currently in progress.
  */
 function isPulling(): boolean {
-  return pullProcess !== null;
+  return pullProcess !== null || pullAbort !== null;
 }
 
 // ─── Sidecar Image Operations ─────────────────────────────────────────────
@@ -2246,7 +2414,12 @@ async function hasSidecarImage(): Promise<boolean> {
  * Pull the Vulkan sidecar image from the registry.
  * Uses spawn so the process can be cancelled independently of the main pull.
  */
-async function pullSidecarImage(): Promise<string> {
+async function pullSidecarImage(
+  options: {
+    /** False when the caller raises its own failure toast (default true). */
+    errorToast?: boolean;
+  } = {},
+): Promise<string> {
   const bin = await runtimeBin();
   cancelSidecarPull(); // kill any existing sidecar pull first
   sidecarPullCancelled = false;
@@ -2257,9 +2430,10 @@ async function pullSidecarImage(): Promise<string> {
     cancel: () => {
       cancelSidecarPull();
     },
+    errorToast: options.errorToast ?? true,
   });
   try {
-    const output = await runSidecarPull(bin);
+    const output = await runSidecarPull(bin, (progress) => download.update(progress));
     download.complete();
     return output;
   } catch (err) {
@@ -2269,13 +2443,33 @@ async function pullSidecarImage(): Promise<string> {
   }
 }
 
-function runSidecarPull(bin: string): Promise<string> {
+async function runSidecarPull(
+  bin: string,
+  onProgress: (progress: DownloadProgress) => void,
+): Promise<string> {
+  const abort = new AbortController();
+  sidecarPullAbort = abort;
+  const viaEngine = await pullThroughEngine(VULKAN_SIDECAR_IMAGE, onProgress, abort.signal);
+  if (sidecarPullAbort === abort) sidecarPullAbort = null;
+  if (viaEngine === 'ok') return '';
+  // Also covers a cancel that landed while the endpoint was being resolved.
+  if (viaEngine === 'cancelled' || sidecarPullCancelled) {
+    throw new Error('Sidecar pull cancelled.');
+  }
+  return runSidecarCliPull(bin, onProgress);
+}
+
+function runSidecarCliPull(
+  bin: string,
+  onProgress: (progress: DownloadProgress) => void,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(bin, ['pull', VULKAN_SIDECAR_IMAGE], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
     });
     sidecarPullProcess = proc;
+    trackPullOutput(proc, onProgress);
 
     let stdout = '';
     let stderr = '';
@@ -2304,24 +2498,54 @@ function runSidecarPull(bin: string): Promise<string> {
 }
 
 /**
+ * Make sure the Vulkan sidecar image is local before `compose up` (GH-318).
+ *
+ * Left to itself, compose pulls a missing sidecar image inline: with no
+ * progress anywhere and inside its own exec timeout, which a multi-GB image
+ * on a slow link can exceed. Pulling here puts the download in the download
+ * bar, makes it cancellable, and turns a failed pull into the start error
+ * instead of a compose timeout. Covers every start surface, not just the
+ * Server tab (which used to pre-pull from the renderer).
+ */
+async function ensureVulkanSidecarImage(
+  runtimeProfile: RuntimeProfile,
+  deps: { hasImage: () => Promise<boolean>; pull: () => Promise<string> } = {
+    hasImage: hasSidecarImage,
+    // A failed pull fails the start, and the start flow reports that itself.
+    pull: () => pullSidecarImage({ errorToast: false }),
+  },
+): Promise<void> {
+  if (runtimeProfile !== 'vulkan') return;
+  if (await deps.hasImage()) return;
+  await deps.pull();
+}
+
+/**
  * Cancel an in-progress sidecar image pull.
  * Returns true if a pull was actually cancelled.
  */
 function cancelSidecarPull(): boolean {
+  let cancelled = false;
+  if (sidecarPullAbort) {
+    sidecarPullCancelled = true;
+    sidecarPullAbort.abort();
+    sidecarPullAbort = null;
+    cancelled = true;
+  }
   if (sidecarPullProcess) {
     sidecarPullCancelled = true;
     sidecarPullProcess.kill('SIGTERM');
     sidecarPullProcess = null;
-    return true;
+    cancelled = true;
   }
-  return false;
+  return cancelled;
 }
 
 /**
  * Check if a sidecar pull is currently in progress.
  */
 function isSidecarPulling(): boolean {
-  return sidecarPullProcess !== null;
+  return sidecarPullProcess !== null || sidecarPullAbort !== null;
 }
 
 /**
@@ -2888,6 +3112,8 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
     }
   }
 
+  await ensureVulkanSidecarImage(runtimeProfile);
+
   const upArgs = ['compose', ...fileArgs, 'up', '-d'];
   // --no-build: the build section is for manual dev builds only; the packaged
   //   app copies compose files to a writable dir where the relative build
@@ -2896,8 +3122,8 @@ async function startContainer(options: StartContainerOptions): Promise<string> {
   //   (see https://github.com/containers/podman-compose/issues/816).
   //   Safe to omit: the image exists locally so compose won't auto-build.
   // Pull policy: compose defaults to "missing" (pull only if not local).
-  //   The main image is pre-pulled by pullImage(); sidecar images (e.g.
-  //   whisper.cpp for Vulkan) are pulled automatically on first compose up.
+  //   The main image is pre-pulled by pullImage() and the Vulkan sidecar by
+  //   ensureVulkanSidecarImage() above, so compose has nothing left to pull.
   if (detectedRuntimeKind !== 'podman') {
     upArgs.push('--no-build');
   }
@@ -3957,7 +4183,13 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
   try {
     fs.renameSync(tmp, dest);
   } catch (err) {
-    // A locked or vanished file must not leave the item downloading forever.
+    // A locked or vanished file must not leave the item downloading forever,
+    // and the .tmp must not linger.
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best-effort */
+    }
     download.fail(err instanceof Error ? err.message : String(err));
     throw err;
   }
@@ -4062,7 +4294,7 @@ async function downloadWhisperServerExe(): Promise<void> {
     );
   }
   const manifest = (await manifestResp.json()) as {
-    layers?: Array<{ digest?: string; mediaType?: string }>;
+    layers?: Array<{ digest?: string; mediaType?: string; size?: number }>;
   };
   const layers = manifest.layers ?? [];
   // Prefer the PE-typed layer; fall back to the last layer (oras pushes the
@@ -4086,6 +4318,14 @@ async function downloadWhisperServerExe(): Promise<void> {
   if (digestAlgo !== 'sha256' || !expectedHash) {
     throw new Error(`Unsupported blob digest '${digest}' in whisper-server manifest`);
   }
+  // Shown in the download bar (GH-318). The body is still read fully into
+  // memory and verified before anything is written, so the integrity order
+  // above is unchanged; only the read now reports its progress.
+  const download = downloadHub.begin({
+    id: 'whisper-server',
+    kind: 'whisper-server',
+    label: 'whisper.cpp server',
+  });
   try {
     const blobResp = await fetch(`${registryBase}/blobs/${digest}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -4093,7 +4333,13 @@ async function downloadWhisperServerExe(): Promise<void> {
     if (!blobResp.ok) {
       throw new Error(`HTTP ${blobResp.status} downloading whisper-server.exe blob ${digest}`);
     }
-    const buffer = Buffer.from(await blobResp.arrayBuffer());
+    const bytesTotal =
+      typeof layer?.size === 'number' && layer.size > 0
+        ? layer.size
+        : Number(blobResp.headers.get('content-length') ?? 0);
+    const buffer = await readBodyWithProgress(blobResp.body, (bytesDone) =>
+      download.update({ bytesDone, bytesTotal }),
+    );
     const actualHash = crypto.createHash('sha256').update(buffer).digest('hex');
     if (actualHash !== expectedHash) {
       throw new Error(
@@ -4107,10 +4353,24 @@ async function downloadWhisperServerExe(): Promise<void> {
     } catch {
       /* best-effort */
     }
+    download.fail(err instanceof Error ? err.message : String(err));
     throw err;
   }
 
-  fs.renameSync(tmp, exePath);
+  try {
+    fs.renameSync(tmp, exePath);
+  } catch (err) {
+    // e.g. antivirus briefly locking the freshly written file. The item must
+    // not stay downloading forever, and the .tmp must not linger.
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best-effort */
+    }
+    download.fail(err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+  download.complete();
   console.log(
     `[DockerManager] whisper-server.exe downloaded from ${WHISPER_SERVER_BLOB_REPO}:${WHISPER_SERVER_BLOB_TAG} to ${exePath}`,
   );
@@ -4606,6 +4866,8 @@ export const dockerManager = {
   pullSidecarImage,
   cancelSidecarPull,
   isSidecarPulling,
+  configureEnginePull,
+  ensureVulkanSidecarImage,
   removeImage,
   getContainerStatus,
   startContainer,
@@ -4633,6 +4895,7 @@ export const dockerManager = {
   checkTailscaleCertsExist,
   getStartupEventsFilePath,
   setServerLogEventListener,
+  findRunningStartupEventsFile,
   VOLUME_NAMES,
   CONTAINER_NAME,
   IMAGE_REPO,

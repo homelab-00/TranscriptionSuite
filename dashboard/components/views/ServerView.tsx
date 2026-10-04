@@ -2719,12 +2719,13 @@ export const ServerView: React.FC<ServerViewProps> = ({
                             variant="secondary"
                             className="h-9 px-4 whitespace-nowrap"
                             onClick={async () => {
-                              // Vulkan's compose-up pulls a missing sidecar image
-                              // inline and can hit its 120s exec timeout on a
-                              // multi-GB image, so make sure the image is present
-                              // *before* starting the container rather than
-                              // racing it. This only runs for runtimeProfile ===
-                              // 'vulkan' — never on tile selection alone, and
+                              // Pull a missing Vulkan sidecar image before
+                              // starting, so a failed pull stops here with its
+                              // own error instead of surfacing as a failed
+                              // start. The main process makes the same check
+                              // inside startContainer for every other start
+                              // surface. This only runs for runtimeProfile ===
+                              // 'vulkan' - never on tile selection alone, and
                               // never for cpu/gpu/metal/vulkan-wsl2.
                               if (runtimeProfile === 'vulkan') {
                                 const exists = await docker.hasSidecarImage();
