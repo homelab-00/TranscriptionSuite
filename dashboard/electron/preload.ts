@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
+// Type-only: erased at compile time, so the sandboxed preload stays self-contained.
+import type { DownloadChange, DownloadItem } from './downloadHub.js';
 
 /**
  * Preload script — exposes a safe IPC bridge to the renderer process.
@@ -206,7 +208,7 @@ export interface ElectronAPI {
     listVariantTags: () => Promise<
       Record<'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux', string[]>
     >;
-    pullImage: (tag: string) => Promise<string>;
+    pullImage: (tag: string, options?: { errorToast?: boolean }) => Promise<string>;
     cancelPull: () => Promise<boolean>;
     isPulling: () => Promise<boolean>;
     hasSidecarImage: () => Promise<boolean>;
@@ -254,15 +256,6 @@ export interface ElectronAPI {
     startLogStream: (tail?: number) => Promise<void>;
     stopLogStream: () => Promise<void>;
     onLogLine: (callback: (line: string) => void) => () => void;
-    onDownloadEvent: (
-      callback: (event: {
-        action: 'start' | 'complete' | 'fail';
-        id: string;
-        type: string;
-        label: string;
-        error?: string;
-      }) => void,
-    ) => () => void;
     onActivityEvent: (
       callback: (event: {
         id: string;
@@ -494,6 +487,11 @@ export interface ElectronAPI {
     load: () => Promise<unknown[]>;
     persist: (items: unknown[]) => Promise<void>;
   };
+  downloads: {
+    getSnapshot: () => Promise<DownloadItem[]>;
+    cancel: (id: string) => Promise<boolean>;
+    onChanged: (callback: (change: DownloadChange) => void) => () => void;
+  };
   mlx: {
     start: (opts: {
       port: number;
@@ -604,7 +602,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('docker:listVariantTags') as Promise<
         Record<'cuda' | 'cuda-legacy' | 'vulkan-wsl2' | 'vulkan-linux', string[]>
       >,
-    pullImage: (tag: string) => ipcRenderer.invoke('docker:pullImage', tag),
+    pullImage: (tag: string, options?: { errorToast?: boolean }) =>
+      ipcRenderer.invoke('docker:pullImage', tag, options),
     cancelPull: () => ipcRenderer.invoke('docker:cancelPull'),
     isPulling: () => ipcRenderer.invoke('docker:isPulling'),
     hasSidecarImage: () => ipcRenderer.invoke('docker:hasSidecarImage'),
@@ -659,28 +658,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = (_event: Electron.IpcRendererEvent, line: string) => callback(line);
       ipcRenderer.on('docker:logLine', handler);
       return () => ipcRenderer.removeListener('docker:logLine', handler);
-    },
-    onDownloadEvent: (
-      callback: (event: {
-        action: 'start' | 'complete' | 'fail';
-        id: string;
-        type: string;
-        label: string;
-        error?: string;
-      }) => void,
-    ) => {
-      const handler = (
-        _event: Electron.IpcRendererEvent,
-        evt: {
-          action: 'start' | 'complete' | 'fail';
-          id: string;
-          type: string;
-          label: string;
-          error?: string;
-        },
-      ) => callback(evt);
-      ipcRenderer.on('docker:downloadEvent', handler);
-      return () => ipcRenderer.removeListener('docker:downloadEvent', handler);
     },
     onActivityEvent: (
       callback: (event: {
@@ -893,6 +870,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     load: () => ipcRenderer.invoke('notificationLog:load') as Promise<unknown[]>,
     persist: (items: unknown[]) =>
       ipcRenderer.invoke('notificationLog:persist', items) as Promise<void>,
+  },
+  downloads: {
+    getSnapshot: () => ipcRenderer.invoke('downloads:getSnapshot') as Promise<DownloadItem[]>,
+    cancel: (id: string) => ipcRenderer.invoke('downloads:cancel', id) as Promise<boolean>,
+    onChanged: (callback: (change: DownloadChange) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, change: DownloadChange) =>
+        callback(change);
+      ipcRenderer.on('downloads:changed', handler);
+      return () => ipcRenderer.removeListener('downloads:changed', handler);
+    },
   },
   mlx: {
     start: (opts: {

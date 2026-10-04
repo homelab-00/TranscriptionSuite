@@ -1,5 +1,5 @@
 meta:
-  spec_version: 1.18.0
+  spec_version: 1.20.0
   contract_mode: closed_set
   source_scope: mockup_repo
   validation_method: static_source_scan
@@ -31,7 +31,7 @@ meta:
       - components/__tests__/SessionView.recovery-refresh.test.tsx
       - components/__tests__/SessionView.retry-failed.test.tsx
       - components/__tests__/SessionView.test.tsx
-      - components/__tests__/StartupActivityInline.test.tsx
+      - components/__tests__/Sidebar.notebookSubTabs.test.tsx
       - components/AriaLiveRegion.tsx
       - components/AudioVisualizer.tsx
       - components/editor/FindReplaceTextEditor.test.tsx
@@ -71,13 +71,16 @@ meta:
       - components/recording/DownloadButtons.tsx
       - components/recording/SpeakerRenameInput.tsx
       - components/Sidebar.tsx
+      - components/ui/__tests__/DownloadBar.test.tsx
       - components/ui/__tests__/PersistentInfoBanner.test.tsx
+      - components/ui/__tests__/ProgressBar.test.tsx
       - components/ui/__tests__/ScrollFadeOverlay.test.tsx
       - components/ui/__tests__/UpdateBanner.test.tsx
       - components/ui/__tests__/UpdateModal.test.tsx
       - components/ui/AppleSwitch.tsx
       - components/ui/Button.tsx
       - components/ui/CustomSelect.tsx
+      - components/ui/DownloadBar.tsx
       - components/ui/ErrorFallback.tsx
       - components/ui/GlassCard.tsx
       - components/ui/HfTokenExplainer.tsx
@@ -91,6 +94,7 @@ meta:
       - components/ui/NotificationToasts.tsx
       - components/ui/notificationVisuals.tsx
       - components/ui/PersistentInfoBanner.tsx
+      - components/ui/ProgressBar.tsx
       - components/ui/QueuePausedBanner.tsx
       - components/ui/ScrollFadeOverlay.tsx
       - components/ui/SelectorGroup.tsx
@@ -123,7 +127,6 @@ meta:
       - components/views/server/MainModelPicker.tsx
       - components/views/server/RemoteClientSettingsCard.tsx
       - components/views/server/RemoteConnectionCard.tsx
-      - components/views/server/StartupActivityInline.tsx
       - components/views/ServerConfigEditor.tsx
       - components/views/ServerView.tsx
       - components/views/SessionImportTab.tsx
@@ -138,7 +141,7 @@ meta:
       - index.tsx
       - src/index.css
       - types.ts
-    generated_at: 2026-08-09T17:17:53.956Z
+    generated_at: 2026-10-03T20:01:02.498Z
     notes: Canonicalized from live source scan for React+TypeScript+Tailwind mockup.
 foundation:
   color_space:
@@ -376,6 +379,7 @@ foundation:
         - idle-wave-cyan
         - idle-wave-magenta
         - idle-wave-orange
+        - progress-indeterminate
         - reflowStackIn
         - slideInLeft
         - slideInRight
@@ -558,6 +562,10 @@ utility_allowlist:
     - aria-label
     - aria-labels
     - aria-pressed
+    - aria-valuemax
+    - aria-valuemin
+    - aria-valuenow
+    - aria-valuetext
     - backdrop-blur
     - backdrop-blur-2xl
     - backdrop-blur-3xl
@@ -599,7 +607,6 @@ utility_allowlist:
     - bg-blue-500/10
     - bg-cyan-400/10
     - bg-cyan-400/20
-    - bg-cyan-400/70
     - bg-cyan-500/80
     - bg-emerald-400/10
     - bg-emerald-500/10
@@ -623,6 +630,7 @@ utility_allowlist:
     - bg-orange-500/10
     - bg-purple-400/10
     - bg-purple-500
+    - bg-red-400
     - bg-red-400/10
     - bg-red-500
     - bg-red-500/10
@@ -698,6 +706,7 @@ utility_allowlist:
     - border-purple-400/60
     - border-r
     - border-red-400/20
+    - border-red-400/30
     - border-red-400/40
     - border-red-400/60
     - border-red-500/20
@@ -868,6 +877,7 @@ utility_allowlist:
     - inset-0
     - inset-4
     - italic
+    - items-baseline
     - items-center
     - items-end
     - items-start
@@ -1330,9 +1340,8 @@ inline_style_allowlist:
   allowed_literals:
     - "#0f172a"
     - ${100 / visibleSlots}%
+    - ${clamped}%
     - ${details.percent}%
-    - ${item.progress}%
-    - ${percent}%
     - "0"
     - "0.16"
     - "0.3"
@@ -1372,6 +1381,7 @@ inline_style_allowlist:
     - idle-wave-cyan
     - idle-wave-magenta
     - idle-wave-orange
+    - progress-indeterminate
     - reflowStackIn
     - slideInLeft
     - slideInRight
@@ -1920,6 +1930,23 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  DownloadBar:
+    file: components/ui/DownloadBar.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   DownloadButtons:
     file: components/recording/DownloadButtons.tsx
     required_tokens:
@@ -2257,6 +2284,40 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   IssueRow:
     file: components/views/GpuDiagnosticModal.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  ItemActions:
+    file: components/ui/DownloadBar.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  ItemBody:
+    file: components/ui/DownloadBar.tsx
     required_tokens:
       - colors
       - motion
@@ -2632,6 +2693,23 @@ component_contracts:
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
   ProfileSelector:
     file: components/profiles/ProfileSelector.tsx
+    required_tokens:
+      - colors
+      - motion
+      - radii
+      - shadows
+    allowed_variants: {}
+    structural_invariants:
+      - id: structure-stable
+        rule: Preserve current structural layout and region hierarchy for this component.
+    behavior_rules:
+      - id: motion-locked
+        rule: Use only approved motion tokens and classes from foundation token registry.
+    state_rules:
+      - id: closed-set-styles
+        rule: Do not introduce unregistered utility, arbitrary, or inline style values.
+  ProgressBar:
+    file: components/ui/ProgressBar.tsx
     required_tokens:
       - colors
       - motion
@@ -3027,8 +3105,8 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  StartupActivityInline:
-    file: components/views/server/StartupActivityInline.tsx
+  StateIcon:
+    file: components/views/GpuHealthCard.tsx
     required_tokens:
       - colors
       - motion
@@ -3044,8 +3122,8 @@ component_contracts:
     state_rules:
       - id: closed-set-styles
         rule: Do not introduce unregistered utility, arbitrary, or inline style values.
-  StateIcon:
-    file: components/views/GpuHealthCard.tsx
+  StatusGlyph:
+    file: components/ui/DownloadBar.tsx
     required_tokens:
       - colors
       - motion

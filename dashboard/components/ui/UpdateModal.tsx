@@ -304,7 +304,9 @@ export function UpdateModal({
     }
     setPullInProgress(true);
     try {
-      await dockerApi.pullImage(serverLatest);
+      // This flow reports a failed pull itself, so the download bar must not
+      // raise a second toast for it.
+      await dockerApi.pullImage(serverLatest, { errorToast: false });
       // Modal may have closed during the pull. Skip user-visible side
       // effects on unmounted component — prevents setState-on-unmounted
       // warnings and orphan toasts that confuse the user.
@@ -316,6 +318,8 @@ export function UpdateModal({
     } catch (err) {
       if (!mountedRef.current) return;
       const message = err instanceof Error ? err.message : String(err);
+      // Cancelled from the download bar: the user asked for it, not a failure.
+      if (message.includes('Pull cancelled')) return;
       toast.error(`Server image pull failed: ${message}`);
     } finally {
       if (mountedRef.current) setPullInProgress(false);

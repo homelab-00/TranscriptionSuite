@@ -161,7 +161,7 @@ durability:
 - **Server state**: @tanstack/react-query for server data (`useQuery`, `useMutation`, `useQueryClient`)
 - **Client state**: Zustand for ephemeral client-only state (import queue, activity tracking, folder watch, pause/resume)
 - **Custom hooks pattern**: Each feature has a dedicated hook (`useTranscription`, `useLiveMode`, `useDocker`, etc.)
-- **UI primitives**: @headlessui/react for accessible components, custom `ui/` directory for shared components (GlassCard, Button, AppleSwitch, StatusLight, CustomSelect, ErrorFallback, ShortcutCapture, LogTerminal, ActivityNotifications, QueuePausedBanner)
+- **UI primitives**: @headlessui/react for accessible components, custom `ui/` directory for shared components (GlassCard, Button, AppleSwitch, StatusLight, CustomSelect, ErrorFallback, ShortcutCapture, LogTerminal, NotificationToasts, QueuePausedBanner, ProgressBar, DownloadBar)
 - **Tailwind CSS v4**: Utility-first styling, custom oklab-strip PostCSS plugin to force sRGB fallbacks
 - **Vite base `'./'`**: Required for Electron `file://` protocol — never change to `/`
 
@@ -190,7 +190,8 @@ durability:
 - **useShallow for arrays**: `useShallow(selectSessionJobs)` prevents re-renders on array identity changes
 - **Module-level processing**: Async queue processing happens outside the store via `getState()` to avoid stale closures
 - **Stores directory**: `dashboard/src/stores/` — one store per feature domain
-- **activityStore**: Replaced former downloadStore (deleted) — unified 4-category model (download, server, warning, info) with status lifecycle (active → complete/error/dismissed). Do NOT reference `downloadStore` — it no longer exists
+- **notificationsStore**: The session notification log (history). Append-only rows addressed by a stable event `id`, toast-dismissable but never removed, persisted (debounced) for the app session. Fed by `useNotificationBridge` and by feature code
+- **downloadsStore + download hub (GH-318)**: Every download in the app reports to `dashboard/electron/downloadHub.ts` (main process): image pulls, bootstrap dependency installs, server startup download events, host-side model fetches, the app updater. The hub owns throttling, speed/ETA and a reload snapshot; `useDownloadsBridge` mirrors it into `downloadsStore`, which is the only state behind `components/ui/DownloadBar.tsx`. When a download ends the bridge writes ONE history row into `notificationsStore` (no progress fields; a toast only on failure). A percent is never invented: an item is determinate only with bytes or an honest layer/package fraction
 
 ### Testing Rules
 
@@ -235,7 +236,7 @@ durability:
 #### File Organization
 - **Backend**: Feature modules in `server/backend/core/`, API routes in `server/backend/api/routes/`, WebSocket in `api/routes/live.py`, durability layer in `server/backend/database/job_repository.py` + `audio_cleanup.py`
 - **Frontend**: Components in `dashboard/components/` (with `ui/` and `views/` subdirs), logic in `dashboard/src/` (`hooks/`, `services/`, `stores/`, `api/`, `utils/`, `types/`, `config/`)
-- **Shared UI**: `dashboard/components/ui/` — 10 reusable primitives (GlassCard, Button, AppleSwitch, StatusLight, ErrorFallback, CustomSelect, ShortcutCapture, LogTerminal, ActivityNotifications, QueuePausedBanner)
+- **Shared UI**: `dashboard/components/ui/` - reusable primitives (GlassCard, Button, AppleSwitch, StatusLight, ErrorFallback, CustomSelect, ShortcutCapture, LogTerminal, NotificationToasts, QueuePausedBanner, ProgressBar, DownloadBar). Use `ProgressBar` for any progress track instead of inlining the markup
 
 ### Development Workflow Rules
 
@@ -268,7 +269,7 @@ durability:
 - **NEVER use default exports** in frontend hooks/services — always named exports
 - **NEVER mock at the source module** for lazily-imported code — patch at the call site
 - **NEVER skip `_ensure_server_package_alias()`** in new test files — import conftest or it won't resolve `server.*`
-- **NEVER reference `downloadStore`** — it was replaced by `activityStore`. The old store is deleted
+- **NEVER show a running download in a toast or in the Notifications view** - a new download source calls `downloadHub.begin(...)` in the main process (or emits a `download` startup event from the server) and the download bar does the rest. Do not write download progress into `notificationsStore`, and do not add per-feature progress bars for downloads
 - **NEVER use silent `except: pass`** for `asyncio.CancelledError` — always log at debug level for clean shutdown tracing (CodeQL flags this)
 - **NEVER overwrite `created_at` on retry** — `reset_for_retry()` preserves the original timestamp; orphan sweep uses it to detect stuck jobs
 

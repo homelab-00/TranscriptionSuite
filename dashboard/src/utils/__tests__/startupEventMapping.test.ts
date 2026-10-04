@@ -2,24 +2,36 @@ import { describe, it, expect } from 'vitest';
 import { mapStartupEvent, serverStartPatch, SERVER_START_ID } from '../startupEventMapping';
 
 describe('mapStartupEvent (individual log entries)', () => {
-  it('maps a download event with progress', () => {
+  it('returns null for download events - the download bar owns them', () => {
+    expect(
+      mapStartupEvent({
+        id: 'model-load-openai--whisper-large-v3',
+        category: 'download',
+        label: 'Downloading Whisper large-v3...',
+        status: 'active',
+        progress: 42,
+        downloadedSize: '1.2 GB',
+        totalSize: '3.1 GB',
+      }),
+    ).toBeNull();
+  });
+
+  it('still surfaces a failed model preload from an older server', () => {
+    // Older servers emit this load failure with category "download". It is
+    // not a download, and it must not vanish with the download mapping.
     const entry = mapStartupEvent({
-      id: 'model-load-openai--whisper-large-v3',
+      id: 'model-preload-error',
       category: 'download',
-      label: 'Downloading Whisper large-v3...',
-      status: 'active',
-      progress: 42,
-      downloadedSize: '1.2 GB',
-      totalSize: '3.1 GB',
+      label: 'Model preload failed for large-v3. The server started without a loaded model.',
+      status: 'error',
+      severity: 'error',
+      persistent: true,
     });
     expect(entry).toMatchObject({
-      id: 'model-load-openai--whisper-large-v3',
-      category: 'download',
-      title: 'Downloading Whisper large-v3...',
-      status: 'active',
-      progress: 42,
-      downloadedSize: '1.2 GB',
-      totalSize: '3.1 GB',
+      id: 'model-preload-error',
+      category: 'server',
+      status: 'error',
+      severity: 'error',
     });
   });
 
@@ -48,7 +60,7 @@ describe('mapStartupEvent (individual log entries)', () => {
 });
 
 describe('serverStartPatch (aggregate "Starting server" card)', () => {
-  it('advances the aggregate through known stages', () => {
+  it('shows the current stage as the detail, without a made-up percent', () => {
     const patch = serverStartPatch({
       id: 'lifespan-start',
       category: 'server',
@@ -57,19 +69,38 @@ describe('serverStartPatch (aggregate "Starting server" card)', () => {
     expect(patch).toMatchObject({
       id: SERVER_START_ID,
       status: 'active',
-      progress: 55,
       detail: 'Starting server...',
     });
+    expect(patch).not.toHaveProperty('progress');
   });
 
-  it('scales model-load percent into the 65-95 band', () => {
+  it('shows the model being loaded into memory as the stage', () => {
     const patch = serverStartPatch({
       id: 'model-load-x',
       category: 'download',
-      label: 'Downloading X...',
-      progress: 50,
+      label: 'Loading X into memory...',
+      phase: 'load',
+      status: 'active',
     });
-    expect(patch).toMatchObject({ id: SERVER_START_ID, progress: 80 });
+    expect(patch).toMatchObject({
+      id: SERVER_START_ID,
+      status: 'active',
+      detail: 'Loading X into memory...',
+    });
+    expect(patch).not.toHaveProperty('progress');
+  });
+
+  it('leaves a model download to the download bar', () => {
+    expect(
+      serverStartPatch({
+        id: 'model-load-x',
+        category: 'download',
+        label: 'Downloading X...',
+        phase: 'download',
+        status: 'active',
+        progress: 50,
+      }),
+    ).toBeNull();
   });
 
   it('completes as Server ready', () => {
@@ -83,8 +114,8 @@ describe('serverStartPatch (aggregate "Starting server" card)', () => {
       id: SERVER_START_ID,
       title: 'Server ready',
       status: 'complete',
-      progress: 100,
     });
+    expect(patch).not.toHaveProperty('progress');
   });
 
   it('ignores unrelated download events', () => {

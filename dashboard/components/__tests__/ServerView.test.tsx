@@ -317,6 +317,20 @@ describe('[P2] ServerView', () => {
     expect(screen.getByText('Exited')).toBeDefined();
   });
 
+  it('keeps the Fetch Fresh Image label during a pull - the download bar shows the progress', () => {
+    mockDocker.pulling = true;
+    mockDocker.operating = true;
+    try {
+      render(React.createElement(ServerView, baseProps), { wrapper: createWrapper() });
+      expect(screen.getByText('Fetch Fresh Image')).toBeDefined();
+      expect(screen.queryByText(/Pulling/)).toBeNull();
+      // Cancelling stays available right where the pull was started.
+      expect(screen.getByText('Cancel Pull')).toBeDefined();
+    } finally {
+      mockDocker.pulling = false;
+    }
+  });
+
   it('displays operation error when docker.operationError is set', () => {
     mockDocker.operationError = 'Failed to start container: permission denied';
     mockDocker.container = { exists: true, running: false, status: 'exited', health: undefined };

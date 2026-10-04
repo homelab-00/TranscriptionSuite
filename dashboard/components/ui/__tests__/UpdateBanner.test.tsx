@@ -402,7 +402,6 @@ describe('UpdateBanner component', () => {
     await flush();
 
     expect(h.getInstallerStatus).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/Downloading 1\.3\.3/)).toBeTruthy();
   });
 
   it('renders available banner from poll-only state when installer is idle', async () => {
@@ -420,7 +419,7 @@ describe('UpdateBanner component', () => {
     expect(screen.getByRole('button', { name: 'Later' })).toBeTruthy();
   });
 
-  it('renders downloading banner with progress text', async () => {
+  it('renders nothing while downloading - the download bar shows the progress', async () => {
     const h = buildHarness({
       installer: {
         state: 'downloading',
@@ -436,7 +435,8 @@ describe('UpdateBanner component', () => {
     render(<UpdateBanner isBusy={false} />);
     await flush();
 
-    expect(screen.getByText('Downloading 1.3.3 — 43%')).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByText(/Downloading/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Download' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Later' })).toBeNull();
   });
@@ -574,29 +574,6 @@ describe('UpdateBanner component', () => {
     }
   });
 
-  it('clamps NaN percent to 0 in the rendered progress label and bar width', async () => {
-    const h = buildHarness({
-      installer: {
-        state: 'downloading',
-        version: '1.3.3',
-        percent: Number.NaN,
-        bytesPerSecond: 0,
-        transferred: 0,
-        total: 0,
-      },
-    });
-    installHarness(h);
-
-    const { container } = render(<UpdateBanner isBusy={false} />);
-    await flush();
-
-    expect(screen.getByText('Downloading 1.3.3 — 0%')).toBeTruthy();
-    // Progress bar inner div should have a finite width — grab it by class.
-    const bar = container.querySelector('[style*="width"]') as HTMLElement | null;
-    expect(bar).not.toBeNull();
-    expect(bar!.style.width).toBe('0%');
-  });
-
   it('does not clobber a live transition when getInstallerStatus resolves late', async () => {
     // Hold the getInstallerStatus promise so we can resolve it after a transition event.
     let resolveStatus: (s: InstallerStatus) => void = () => {};
@@ -612,16 +589,9 @@ describe('UpdateBanner component', () => {
     render(<UpdateBanner isBusy={false} />);
     // Deliver a live transition before the stale snapshot resolves.
     await act(async () => {
-      h.emit({
-        state: 'downloading',
-        version: '1.3.3',
-        percent: 50,
-        bytesPerSecond: 1,
-        transferred: 5,
-        total: 10,
-      });
+      h.emit({ state: 'downloaded', version: '1.3.3' });
     });
-    expect(screen.getByText('Downloading 1.3.3 — 50%')).toBeTruthy();
+    expect(screen.getByText('1.3.3 ready')).toBeTruthy();
 
     // Now resolve the stale snapshot with an older frame.
     await act(async () => {
@@ -636,8 +606,8 @@ describe('UpdateBanner component', () => {
       await Promise.resolve();
     });
 
-    // Banner must NOT regress to 10%.
-    expect(screen.getByText('Downloading 1.3.3 — 50%')).toBeTruthy();
+    // Banner must NOT regress to the stale downloading frame.
+    expect(screen.getByText('1.3.3 ready')).toBeTruthy();
   });
 
   it('reacts to live installer transitions after mount', async () => {
@@ -662,7 +632,8 @@ describe('UpdateBanner component', () => {
       });
     });
 
-    expect(screen.getByText('Downloading 1.3.3 — 10%')).toBeTruthy();
+    // Still nothing: the download bar owns the progress display.
+    expect(screen.queryByRole('status')).toBeNull();
 
     // Transition to downloaded.
     await act(async () => {
@@ -1226,7 +1197,7 @@ describe('Deferred bug fixes (M1-M7 review)', () => {
     await flush();
 
     expect(screen.queryByRole('button', { name: /^Download$/ })).toBeNull();
-    expect(screen.getByText(/Downloading 1\.3\.3/)).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('clampSnooze caps a bogus far-future stored value at now + SNOOZE_MS', () => {

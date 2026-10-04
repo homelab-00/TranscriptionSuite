@@ -1,9 +1,10 @@
 /**
  * Session notifications store - the app-wide notification log.
  *
- * Every tracked action (downloads, server lifecycle, recordings, imports,
- * notebook notes, transcription completions) is recorded here for the
- * lifetime of the app session. Producers address notifications by a stable
+ * Every tracked action (server lifecycle, recordings, imports, notebook
+ * notes, transcription completions, and how each download ended) is recorded
+ * here for the lifetime of the app session. A download in flight is not
+ * here: the download bar shows it (downloadsStore). Producers address notifications by a stable
  * event `id`; the store keeps a unique `entryId` per log row so a re-fired
  * event (e.g. a second server start) opens a NEW row instead of overwriting
  * history. Toasts are dismissable (`toastDismissed`), records are not:
@@ -34,10 +35,8 @@ export interface AppNotification {
   status: NotificationStatus;
   createdAt: number;
   completedAt?: number;
-  /** 0-100; undefined while active renders an indeterminate bar. */
+  /** 0-100, for non-download work that measures progress (e.g. recovery). */
   progress?: number;
-  downloadedSize?: string;
-  totalSize?: string;
   severity?: 'warning' | 'error';
   error?: string;
   /** Full transcript text for transcription records (collapsible in the view). */
@@ -150,7 +149,9 @@ export const useNotificationsStore = create<NotificationsStore>((set) => ({
         createdAt: Date.now(),
         toastDismissed: false,
         ...stripUndefined(item),
-        entryId: nextEntryId(item.id),
+        // A caller may pin the entryId (download history rows do) so the same
+        // row cannot be written twice across a renderer reload.
+        entryId: item.entryId ?? nextEntryId(item.id),
       } as AppNotification);
       return { notifications: capLog([...state.notifications, entry]) };
     }),

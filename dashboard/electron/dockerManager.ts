@@ -41,6 +41,9 @@ import {
 } from './containerRuntime.js';
 import { type WslSupport, resetWslSupportCache } from './wslDetect.js';
 import { hfCacheDirName } from './hfRepoAliases.js';
+import { downloadHub } from './downloadHub.js';
+import { BootstrapLogTracker } from './bootstrapLogDownloads.js';
+import type { StartupEvent } from './startupEventWatcher.js';
 import {
   type GpuDevice,
   enumerateGpus,
@@ -1728,6 +1731,9 @@ let pullProcess: ChildProcess | null = null;
 /** Active sidecar pull process — independent from main image pull */
 let sidecarPullProcess: ChildProcess | null = null;
 
+/** True if the active sidecar pull was killed by a cancel rather than failing on its own. */
+let sidecarPullCancelled = false;
+
 /** Pending retry timer for transient pull-error backoff (Issue #103). */
 let pullRetryTimer: NodeJS.Timeout | null = null;
 
@@ -2059,7 +2065,36 @@ export function classifyPullError(
  * final error translated into a one-sentence friendly message before reject.
  * Retries fire only when `classifyPullError` returns `retriable: true`.
  */
-async function pullImage(tag: string): Promise<string> {
+async function pullImage(
+  tag: string,
+  options: {
+    /** False when the caller raises its own failure toast (default true). */
+    errorToast?: boolean;
+  } = {},
+): Promise<string> {
+  // Reported to the download bar (GH-318). The CLI gives no progress on a
+  // non-TTY, so the item stays indeterminate here.
+  const download = downloadHub.begin({
+    id: `server-image:${tag}`,
+    kind: 'server-image',
+    label: `Server image (${tag})`,
+    cancel: () => {
+      cancelPull();
+    },
+    errorToast: options.errorToast ?? true,
+  });
+  try {
+    const output = await runImagePull(tag);
+    download.complete();
+    return output;
+  } catch (err) {
+    if (pullCancelled) download.cancel('Cancelled by user');
+    else download.fail(err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+}
+
+async function runImagePull(tag: string): Promise<string> {
   const imageRepo = resolveImageRepo(readUseLegacyGpuFromStore(), readRuntimeProfileFromStore());
   const bin = await runtimeBin();
   const env = buildProcessEnv(undefined, detectedRuntimeKind ?? undefined);
@@ -2213,9 +2248,29 @@ async function hasSidecarImage(): Promise<boolean> {
  */
 async function pullSidecarImage(): Promise<string> {
   const bin = await runtimeBin();
-  return new Promise((resolve, reject) => {
-    cancelSidecarPull(); // kill any existing sidecar pull first
+  cancelSidecarPull(); // kill any existing sidecar pull first
+  sidecarPullCancelled = false;
+  const download = downloadHub.begin({
+    id: 'sidecar-image',
+    kind: 'sidecar-image',
+    label: 'Vulkan sidecar (whisper.cpp)',
+    cancel: () => {
+      cancelSidecarPull();
+    },
+  });
+  try {
+    const output = await runSidecarPull(bin);
+    download.complete();
+    return output;
+  } catch (err) {
+    if (sidecarPullCancelled) download.cancel('Cancelled by user');
+    else download.fail(err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+}
 
+function runSidecarPull(bin: string): Promise<string> {
+  return new Promise((resolve, reject) => {
     const proc = spawn(bin, ['pull', VULKAN_SIDECAR_IMAGE], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: buildProcessEnv(undefined, detectedRuntimeKind ?? undefined),
@@ -2254,6 +2309,7 @@ async function pullSidecarImage(): Promise<string> {
  */
 function cancelSidecarPull(): boolean {
   if (sidecarPullProcess) {
+    sidecarPullCancelled = true;
     sidecarPullProcess.kill('SIGTERM');
     sidecarPullProcess = null;
     return true;
@@ -3253,6 +3309,17 @@ let logProcess: ChildProcess | null = null;
 const logSubscribers = new Set<(line: string) => void>();
 const logLineBuffer: string[] = [];
 
+/** Receives server events derived from log lines (set by main.ts). */
+let serverLogEventListener: ((event: StartupEvent) => void) | null = null;
+
+function setServerLogEventListener(listener: ((event: StartupEvent) => void) | null): void {
+  serverLogEventListener = listener;
+}
+
+const bootstrapLogTracker = new BootstrapLogTracker(downloadHub, (event) =>
+  serverLogEventListener?.(event),
+);
+
 function resolveDockerTailArg(tail?: number): string {
   if (typeof tail !== 'number' || !Number.isFinite(tail) || tail < 0) {
     // Docker accepts "all"; Podman requires an integer (0 = all logs by default).
@@ -3272,6 +3339,14 @@ function dispatchLogLine(line: string): void {
     logLineBuffer.shift();
   }
   logLineBuffer.push(line);
+  // Always-on: reports bootstrap dependency installs to the download bar.
+  // Called directly rather than as a log subscriber so it survives
+  // stopBackgroundLogStream() clearing the subscriber set.
+  try {
+    bootstrapLogTracker.apply(line);
+  } catch (err) {
+    console.warn('[DockerManager] bootstrap download parser failed:', err);
+  }
   for (const cb of logSubscribers) {
     cb(line);
   }
@@ -3371,7 +3446,6 @@ function stopBackgroundLogStream(): void {
   }
   logSubscribers.clear();
   logLineBuffer.length = 0;
-  bootstrapParserAttached = false;
 }
 
 /**
@@ -3389,219 +3463,6 @@ async function getLogs(tail?: number): Promise<string[]> {
     return output.split(/\r?\n/).filter(Boolean);
   } catch {
     return [];
-  }
-}
-
-// ─── Bootstrap Download Event Parser ────────────────────────────────────────
-//
-// Parses container log lines for install start/complete/fail patterns and
-// emits structured download events.  Covers both [bootstrap] dependency
-// installs and server-side model preloading.  Subscribers register via
-// subscribeToDownloadEvents() — typically the IPC bridge in main.ts.
-
-export type DownloadEventType = 'runtime-dep' | 'ml-model' | 'model-preload';
-
-export interface BootstrapDownloadEvent {
-  action: 'start' | 'complete' | 'fail';
-  id: string;
-  type: DownloadEventType;
-  label: string;
-  error?: string;
-  progress?: number; // 0-100 (GH-207)
-  downloadedSize?: string; // human-readable, e.g. "312 MB"
-  totalSize?: string;
-}
-
-/**
- * Human-readable byte size matching the server-side `_format_bytes` in
- * `download_progress.py`, so both download pipelines render consistently
- * in the dashboard (GH-207).
- */
-function formatBytes(num: number): string {
-  for (const unit of ['B', 'KB', 'MB', 'GB']) {
-    if (num < 1024) {
-      return unit === 'B' ? `${Math.trunc(num)} ${unit}` : `${num.toFixed(1)} ${unit}`;
-    }
-    num /= 1024;
-  }
-  return `${num.toFixed(1)} TB`;
-}
-
-interface BootstrapPattern {
-  /** Substring to match inside the log line. */
-  match: string;
-  action: BootstrapDownloadEvent['action'];
-  id: string;
-  type: DownloadEventType;
-  label: string;
-  /** When true, extract text after the match string as the error message. */
-  extractError?: boolean;
-}
-
-const BOOTSTRAP_PATTERNS: BootstrapPattern[] = [
-  // ── Runtime dependencies ──────────────────────────────────────────────────
-  {
-    match: '[bootstrap] Installing Python runtime dependencies',
-    action: 'start',
-    id: 'bootstrap-runtime-deps',
-    type: 'runtime-dep',
-    label: 'Runtime Dependencies',
-  },
-  {
-    match: '[bootstrap] Runtime dependencies installed',
-    action: 'complete',
-    id: 'bootstrap-runtime-deps',
-    type: 'runtime-dep',
-    label: 'Runtime Dependencies',
-  },
-  // ── faster-whisper ────────────────────────────────────────────────────────
-  {
-    match: '[bootstrap] Installing faster-whisper family dependencies',
-    action: 'start',
-    id: 'bootstrap-faster-whisper',
-    type: 'runtime-dep',
-    label: 'faster-whisper',
-  },
-  {
-    match: '[bootstrap] faster-whisper family dependencies installed',
-    action: 'complete',
-    id: 'bootstrap-faster-whisper',
-    type: 'runtime-dep',
-    label: 'faster-whisper',
-  },
-  {
-    match: '[bootstrap] faster-whisper dependency installation failed:',
-    action: 'fail',
-    id: 'bootstrap-faster-whisper',
-    type: 'runtime-dep',
-    label: 'faster-whisper',
-    extractError: true,
-  },
-  // ── NeMo toolkit ──────────────────────────────────────────────────────────
-  {
-    match: '[bootstrap] Installing NeMo toolkit',
-    action: 'start',
-    id: 'bootstrap-nemo',
-    type: 'runtime-dep',
-    label: 'NeMo Toolkit',
-  },
-  {
-    match: '[bootstrap] NeMo toolkit installed',
-    action: 'complete',
-    id: 'bootstrap-nemo',
-    type: 'runtime-dep',
-    label: 'NeMo Toolkit',
-  },
-  {
-    match: '[bootstrap] NeMo toolkit installation failed:',
-    action: 'fail',
-    id: 'bootstrap-nemo',
-    type: 'runtime-dep',
-    label: 'NeMo Toolkit',
-    extractError: true,
-  },
-  // ── VibeVoice-ASR ─────────────────────────────────────────────────────────
-  {
-    match: '[bootstrap] Installing VibeVoice-ASR',
-    action: 'start',
-    id: 'bootstrap-vibevoice',
-    type: 'runtime-dep',
-    label: 'VibeVoice-ASR',
-  },
-  {
-    match: '[bootstrap] VibeVoice-ASR support installed',
-    action: 'complete',
-    id: 'bootstrap-vibevoice',
-    type: 'runtime-dep',
-    label: 'VibeVoice-ASR',
-  },
-  {
-    match: '[bootstrap] VibeVoice-ASR installation failed:',
-    action: 'fail',
-    id: 'bootstrap-vibevoice',
-    type: 'runtime-dep',
-    label: 'VibeVoice-ASR',
-    extractError: true,
-  },
-  // ── Model preload (server runtime, post-bootstrap) ────────────────────────
-  {
-    match: 'Loading transcription model from cache',
-    action: 'start',
-    id: 'model-preload',
-    type: 'model-preload',
-    label: 'Loading Model',
-  },
-  {
-    match: 'STT model loaded and ready',
-    action: 'complete',
-    id: 'model-preload',
-    type: 'model-preload',
-    label: 'Loading Model',
-  },
-  {
-    match: 'Model preload failed',
-    action: 'fail',
-    id: 'model-preload',
-    type: 'model-preload',
-    label: 'Loading Model',
-  },
-];
-
-const downloadEventSubscribers = new Set<(event: BootstrapDownloadEvent) => void>();
-
-/**
- * Log subscriber that scans each line for bootstrap install patterns.
- * Attached automatically when any download-event subscriber is registered.
- */
-function bootstrapLogParser(line: string): void {
-  for (const pattern of BOOTSTRAP_PATTERNS) {
-    if (!line.includes(pattern.match)) continue;
-
-    const event: BootstrapDownloadEvent = {
-      action: pattern.action,
-      id: pattern.id,
-      type: pattern.type,
-      label: pattern.label,
-    };
-
-    if (pattern.extractError) {
-      const idx = line.indexOf(pattern.match) + pattern.match.length;
-      event.error = line.slice(idx).trim() || 'Unknown error';
-    }
-
-    emitBootstrapDownloadEvent(event);
-    return; // First match wins per line
-  }
-}
-
-/** Fan a download event out to all registered subscribers. */
-function emitBootstrapDownloadEvent(event: BootstrapDownloadEvent): void {
-  for (const cb of downloadEventSubscribers) {
-    cb(event);
-  }
-}
-
-/** Whether the parser is currently registered as a log subscriber. */
-let bootstrapParserAttached = false;
-
-function subscribeToDownloadEvents(callback: (event: BootstrapDownloadEvent) => void): void {
-  downloadEventSubscribers.add(callback);
-  if (!bootstrapParserAttached) {
-    // Replay the ring buffer so bootstrap events that arrived before this
-    // subscriber registered are not silently lost.
-    for (const line of logLineBuffer) {
-      bootstrapLogParser(line);
-    }
-    logSubscribers.add(bootstrapLogParser);
-    bootstrapParserAttached = true;
-  }
-}
-
-function unsubscribeFromDownloadEvents(callback: (event: BootstrapDownloadEvent) => void): void {
-  downloadEventSubscribers.delete(callback);
-  if (downloadEventSubscribers.size === 0 && bootstrapParserAttached) {
-    logSubscribers.delete(bootstrapLogParser);
-    bootstrapParserAttached = false;
   }
 }
 
@@ -4045,12 +3906,10 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
 
   const { net } = await import('electron');
 
-  const eventId = `ggml-download-${sanitized}`;
-  emitBootstrapDownloadEvent({
-    action: 'start',
-    id: eventId,
-    type: 'model-preload',
-    label: `Downloading ${sanitized}...`,
+  const download = downloadHub.begin({
+    id: `ggml-download-${sanitized}`,
+    kind: 'ggml-model',
+    label: sanitized,
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -4066,23 +3925,12 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
       const rawLength = response.headers['content-length'];
       const totalBytes = Number(Array.isArray(rawLength) ? rawLength[0] : (rawLength ?? 0));
       let downloadedBytes = 0;
-      let lastEmit = 0;
       response.on('data', (chunk) => {
         file.write(chunk);
         downloadedBytes += chunk.length;
-        const now = Date.now();
-        if (totalBytes > 0 && now - lastEmit >= 1000) {
-          lastEmit = now;
-          emitBootstrapDownloadEvent({
-            action: 'start',
-            id: eventId,
-            type: 'model-preload',
-            label: `Downloading ${sanitized}...`,
-            progress: Math.min(100, Math.round((downloadedBytes / totalBytes) * 100)),
-            downloadedSize: formatBytes(downloadedBytes),
-            totalSize: formatBytes(totalBytes),
-          });
-        }
+        // The hub throttles its own broadcasts; without a Content-Length the
+        // item just stays indeterminate with a running byte count.
+        download.update({ bytesDone: downloadedBytes, bytesTotal: totalBytes });
       });
       response.on('end', () => file.close(() => resolve()));
       response.on('error', (err) => {
@@ -4102,23 +3950,18 @@ async function downloadGgmlModelToHost(fileName: string): Promise<void> {
     } catch {
       /* best-effort */
     }
-    emitBootstrapDownloadEvent({
-      action: 'fail',
-      id: eventId,
-      type: 'model-preload',
-      label: `Downloading ${sanitized}...`,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    download.fail(err instanceof Error ? err.message : String(err));
     throw err;
   });
 
-  fs.renameSync(tmp, dest);
-  emitBootstrapDownloadEvent({
-    action: 'complete',
-    id: eventId,
-    type: 'model-preload',
-    label: `${sanitized} downloaded`,
-  });
+  try {
+    fs.renameSync(tmp, dest);
+  } catch (err) {
+    // A locked or vanished file must not leave the item downloading forever.
+    download.fail(err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+  download.complete();
 }
 
 /**
@@ -4788,9 +4631,8 @@ export const dockerManager = {
   ensureWhisperDirectories,
   downloadWhisperServerExe,
   checkTailscaleCertsExist,
-  subscribeToDownloadEvents,
-  unsubscribeFromDownloadEvents,
   getStartupEventsFilePath,
+  setServerLogEventListener,
   VOLUME_NAMES,
   CONTAINER_NAME,
   IMAGE_REPO,

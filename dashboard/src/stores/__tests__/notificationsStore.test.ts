@@ -30,6 +30,18 @@ describe('notificationsStore', () => {
     expect(n.entryId).toContain('dl-1');
   });
 
+  it('uses a caller-supplied entryId so a deterministic row can be deduplicated', () => {
+    useNotificationsStore.getState().notify({
+      entryId: 'download:model@1',
+      id: 'download:model@1',
+      category: 'download',
+      title: 'Model downloaded',
+      status: 'complete',
+    });
+
+    expect(all()[0].entryId).toBe('download:model@1');
+  });
+
   it('merges updates into the newest entry with the same event id', () => {
     const store = useNotificationsStore.getState();
     store.notify({ id: 'dl-1', category: 'download', title: 'Downloading X', progress: 10 });

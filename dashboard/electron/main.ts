@@ -29,6 +29,9 @@ const execFileAsync = promisify(execFile);
 import Store from 'electron-store';
 import { CONTAINER_NAME, dockerManager, type StartContainerOptions } from './dockerManager.js';
 import { NotificationLog } from './notificationLog.js';
+import { downloadHub } from './downloadHub.js';
+import { applyServerDownloadEvent } from './serverDownloadEvents.js';
+import { createInstallerDownloadAdapter } from './installerDownloads.js';
 import { StartupEventWatcher } from './startupEventWatcher.js';
 import { MLXServerManager, type MLXStartOptions } from './mlxServerManager.js';
 import { createMlxLogSink, type MlxLogSink } from './mlxLogSink.js';
@@ -718,7 +721,20 @@ function broadcastInstallerStatus(status: InstallerStatus): void {
   broadcastToWindows('updates:installerStatus', status);
 }
 
-updateInstaller.on('status', (status) => broadcastInstallerStatus(status));
+// The app-update pipeline also reports into the download bar (GH-318). Two
+// adapters because only the electron-updater path can be cancelled; the macOS
+// DMG variant download cannot.
+const reportUpdaterDownload = createInstallerDownloadAdapter(downloadHub, {
+  cancel: () => {
+    updateInstaller.cancelDownload();
+  },
+});
+const reportMacDmgDownload = createInstallerDownloadAdapter(downloadHub, {});
+
+updateInstaller.on('status', (status) => {
+  broadcastInstallerStatus(status);
+  reportUpdaterDownload(status);
+});
 
 // Push a one-shot update-available signal to every window; the renderer's
 // useUpdateToast hook turns it into the Update/Dismiss toast.
@@ -1253,9 +1269,12 @@ ipcMain.handle('docker:fetchRemoteTagDates', async (_event, tags: string[]) => {
   return dockerManager.fetchRemoteTagDates(tags);
 });
 
-ipcMain.handle('docker:pullImage', async (_event, tag: string) => {
-  return dockerManager.pullImage(tag);
-});
+ipcMain.handle(
+  'docker:pullImage',
+  async (_event, tag: string, options?: { errorToast?: boolean }) => {
+    return dockerManager.pullImage(tag, options);
+  },
+);
 
 ipcMain.handle('docker:cancelPull', () => {
   return dockerManager.cancelPull();
@@ -1298,7 +1317,15 @@ ipcMain.handle('docker:removeImage', async (_event, tag: string) => {
 });
 
 ipcMain.handle('docker:getContainerStatus', async () => {
-  return dockerManager.getContainerStatus();
+  const status = await dockerManager.getContainerStatus();
+  // A container that exists but is no longer running (crash, external stop)
+  // cannot finish its downloads - close them so the download bar does not
+  // hang on them. Only on a definite answer: a failed inspect reports
+  // exists=false and must not cancel anything.
+  if (status.exists && !status.running) {
+    downloadHub.endAllFromSource('server', 'Server stopped');
+  }
+  return status;
 });
 
 // ─── Startup Event Watcher ────────────────────────────────────────────────
@@ -1308,6 +1335,8 @@ ipcMain.handle('docker:getContainerStatus', async () => {
 const startupEventWatcher = new StartupEventWatcher();
 
 ipcMain.handle('docker:startContainer', async (_event, options: StartContainerOptions) => {
+  // Anything the previous server run was still downloading is gone with it.
+  downloadHub.endAllFromSource('server', 'Server restarted');
   const result = await dockerManager.startContainer(options);
   // Begin writing to server.log as soon as the container is running.
   dockerManager.startBackgroundLogStream();
@@ -1316,6 +1345,9 @@ ipcMain.handle('docker:startContainer', async (_event, options: StartContainerOp
   const eventsFile = dockerManager.getStartupEventsFilePath();
   if (eventsFile) {
     startupEventWatcher.start(eventsFile, (event) => {
+      // Download events feed the download bar; every event still goes to the
+      // renderer for the server-start card and warnings.
+      applyServerDownloadEvent(downloadHub, event);
       mainWindow?.webContents.send('activity:event', event);
     });
   }
@@ -1325,6 +1357,7 @@ ipcMain.handle('docker:startContainer', async (_event, options: StartContainerOp
 
 ipcMain.handle('docker:stopContainer', async () => {
   startupEventWatcher.stop();
+  downloadHub.endAllFromSource('server', 'Server stopped');
   return dockerManager.stopContainer();
 });
 
@@ -1448,14 +1481,22 @@ ipcMain.handle('docker:stopLogStream', async () => {
   }
 });
 
-// ─── Bootstrap Download Event Bridge ──────────────────────────────────────
-// Permanent subscriber — forwards structured download events from the
-// bootstrap log parser to the renderer so the download store can track
-// in-container installs regardless of which UI tab is active.
+// ─── Download Hub Bridge (GH-318) ─────────────────────────────────────────
+// Every download source reports into downloadHub; this is the only place its
+// state crosses to the renderer. The channel is broadcast-only, so the
+// renderer also fetches a snapshot on mount to recover after a reload.
 
-dockerManager.subscribeToDownloadEvents((event) => {
-  mainWindow?.webContents.send('docker:downloadEvent', event);
+downloadHub.setBroadcaster((change) => broadcastToWindows('downloads:changed', change));
+
+// Server events the container log parser derives (a failed model preload):
+// the only signal of it on a server whose startup events do not arrive.
+dockerManager.setServerLogEventListener((event) => {
+  mainWindow?.webContents.send('activity:event', event);
 });
+
+ipcMain.handle('downloads:getSnapshot', () => downloadHub.snapshot());
+
+ipcMain.handle('downloads:cancel', (_event, id: string) => downloadHub.cancel(id));
 
 // ─── Audio IPC ──────────────────────────────────────────────────────────────
 
@@ -1705,7 +1746,10 @@ ipcMain.handle('updates:download', async () => {
           isPackaged: app.isPackaged,
           resourcesPath: process.resourcesPath,
         }),
-        onStatus: (status) => broadcastInstallerStatus(status),
+        onStatus: (status) => {
+          broadcastInstallerStatus(status);
+          reportMacDmgDownload(status);
+        },
         revealFile: async (p) => {
           shell.showItemInFolder(p);
           const openErr = await shell.openPath(p);

@@ -40,7 +40,6 @@ import { GpuDiagnosticModal, type GpuDiagnosticResultProp } from './GpuDiagnosti
 import { InstanceSettingsSelectors } from './server/InstanceSettingsSelectors';
 import { RemoteClientSettingsCard } from './server/RemoteClientSettingsCard';
 import { RemoteConnectionCard } from './server/RemoteConnectionCard';
-import { StartupActivityInline } from './server/StartupActivityInline';
 
 import { useNotificationsStore } from '../../src/stores/notificationsStore';
 import { SERVER_START_ID } from '../../src/utils/startupEventMapping';
@@ -804,7 +803,6 @@ export const ServerView: React.FC<ServerViewProps> = ({
       // only ever kicked off from the Start Local click handler below.
       if (profile !== 'vulkan') {
         docker.cancelSidecarPull();
-        useNotificationsStore.getState().dismissToast('sidecar-vulkan');
       }
       // Warn if Metal selected on unsupported hardware (still allow the selection)
       if (
@@ -861,42 +859,17 @@ export const ServerView: React.FC<ServerViewProps> = ({
     await applyConnectionModeChange(true);
   }, [applyConnectionModeChange]);
 
-  // Pulls the Vulkan sidecar image, tracking progress in the notifications
-  // store. Triggered from the Start Local click handler below — only for
-  // runtimeProfile === 'vulkan', and never merely from selecting the tile.
+  // Pulls the Vulkan sidecar image. Triggered from the Start Local click
+  // handler below - only for runtimeProfile === 'vulkan', and never merely
+  // from selecting the tile. Progress, completion and failure are shown by
+  // the download bar (the main process reports the pull to the download hub).
   // Resolves with the pull error message (or null on success) so the caller
-  // can surface it without reading stale closure state.
-  const downloadVulkanSidecar = useCallback(async (): Promise<string | null> => {
-    const dlId = 'sidecar-vulkan';
-    useNotificationsStore.getState().notify({
-      id: dlId,
-      category: 'download',
-      title: 'Vulkan Sidecar (whisper.cpp)',
-      detail: 'Pulling sidecar image',
-      status: 'active',
-    });
-    // withOperation never throws - it resolves with the error message (or
-    // null on success), so branch on the return value instead of try/catch.
-    const pullError = await docker.pullSidecarImage();
-    const store = useNotificationsStore.getState();
-    const newest = [...store.notifications].reverse().find((n) => n.id === dlId);
-    // A user cancel already closed the record - leave it alone.
-    if (newest?.status === 'active') {
-      if (pullError === null) {
-        store.notify({
-          id: dlId,
-          category: 'download',
-          title: 'Vulkan Sidecar (whisper.cpp) downloaded',
-          // Clear the stale 'Pulling sidecar image' active-phase detail.
-          detail: '',
-          status: 'complete',
-        });
-      } else {
-        store.updateNotification(dlId, { status: 'error', error: pullError });
-      }
-    }
-    return pullError;
-  }, [docker.pullSidecarImage]);
+  // can surface it without reading stale closure state; withOperation never
+  // throws.
+  const downloadVulkanSidecar = useCallback(
+    (): Promise<string | null> => docker.pullSidecarImage(),
+    [docker.pullSidecarImage],
+  );
 
   const containerStatus = docker.container;
   const isRunning = containerStatus.running;
@@ -1129,7 +1102,6 @@ export const ServerView: React.FC<ServerViewProps> = ({
       title: 'Starting server...',
       detail: 'Launching the Metal (MLX) server process',
       status: 'active',
-      progress: 0,
     });
     try {
       const port = (await api.config?.get('server.port').catch(() => 9786)) ?? 9786;
@@ -1962,39 +1934,15 @@ export const ServerView: React.FC<ServerViewProps> = ({
 
   // Issue 103: shared by the "Fetch Fresh Image" button and the in-banner
   // Retry button so a user can re-attempt without re-navigating after a
-  // failure. The notification entry tracks the same dlId for both paths.
+  // failure. Progress, completion and failure are shown by the download bar
+  // (the main process reports the pull to the download hub).
   // (Avoid issue-number references with a leading hash in scanned files —
   //  the UI-contract color regex matches 3-digit hex shorthand and would
   //  pollute the literal palette.)
   const handleFetchFreshImage = useCallback(async (): Promise<void> => {
     if (!selectedTagForActions) return;
-    const dlId = `docker-image-${selectedTagForActions}`;
-    useNotificationsStore.getState().notify({
-      id: dlId,
-      category: 'download',
-      title: `Server Image (${selectedTagForActions})`,
-      detail: 'Pulling container image',
-      status: 'active',
-    });
-    // withOperation never throws - it resolves with the error message (or
-    // null on success), so branch on the return value instead of try/catch.
-    const pullError = await docker.pullImage(selectedTagForActions);
-    const store = useNotificationsStore.getState();
-    const newest = [...store.notifications].reverse().find((n) => n.id === dlId);
-    // A user cancel already closed the record - leave it alone.
-    if (newest?.status !== 'active') return;
-    if (pullError === null) {
-      store.notify({
-        id: dlId,
-        category: 'download',
-        title: `Server Image (${selectedTagForActions}) downloaded`,
-        // Clear the stale 'Pulling container image' active-phase detail.
-        detail: '',
-        status: 'complete',
-      });
-    } else {
-      store.updateNotification(dlId, { status: 'error', error: pullError });
-    }
+    // withOperation never throws - a failure lands in docker.operationError.
+    await docker.pullImage(selectedTagForActions);
   }, [docker, selectedTagForActions]);
 
   return (
@@ -2543,26 +2491,13 @@ export const ServerView: React.FC<ServerViewProps> = ({
                         onClick={handleFetchFreshImage}
                         disabled={docker.operating}
                       >
-                        {docker.pulling ? (
-                          <>
-                            <Loader2 size={14} className="mr-2 animate-spin" /> Pulling...
-                          </>
-                        ) : (
-                          'Fetch Fresh Image'
-                        )}
+                        Fetch Fresh Image
                       </Button>
                       {docker.pulling && (
                         <Button
                           variant="danger"
                           className="h-10 w-full"
-                          onClick={() => {
-                            docker.cancelPull();
-                            const dlId = `docker-image-${selectedTagForActions}`;
-                            useNotificationsStore.getState().updateNotification(dlId, {
-                              status: 'complete',
-                              detail: 'Cancelled by user',
-                            });
-                          }}
+                          onClick={() => docker.cancelPull()}
                         >
                           Cancel Pull
                         </Button>
@@ -2797,11 +2732,13 @@ export const ServerView: React.FC<ServerViewProps> = ({
                                   const pullError = await downloadVulkanSidecar();
                                   const nowExists = await docker.hasSidecarImage();
                                   if (!nowExists) {
-                                    toast.error(
-                                      pullError
-                                        ? `Failed to download the Vulkan sidecar image: ${pullError}`
-                                        : 'Failed to download the Vulkan sidecar image.',
-                                    );
+                                    // A failed pull is already reported by the
+                                    // download bar; only the silent case (pull
+                                    // reported success, image still missing)
+                                    // needs its own message.
+                                    if (pullError === null) {
+                                      toast.error('Failed to download the Vulkan sidecar image.');
+                                    }
                                     return;
                                   }
                                 }
@@ -2910,7 +2847,6 @@ export const ServerView: React.FC<ServerViewProps> = ({
                     </div>
                   )}
                   {/* Active model downloads while the server is starting (GH-207) */}
-                  {!isMetal && isRunning && !isRunningAndHealthy && <StartupActivityInline />}
                   {!isMetal && containerStatus.startedAt && isRunning && (
                     <div className="mt-2 font-mono text-xs text-slate-500">
                       Started: {new Date(containerStatus.startedAt).toLocaleString()}
