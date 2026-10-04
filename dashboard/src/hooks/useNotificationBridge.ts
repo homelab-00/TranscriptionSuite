@@ -59,6 +59,14 @@ function isNotificationArray(value: unknown): value is AppNotification[] {
   );
 }
 
+function isServerStarting(): boolean {
+  const entries = useNotificationsStore.getState().notifications;
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    if (entries[i].id === SERVER_START_ID) return entries[i].status === 'active';
+  }
+  return false;
+}
+
 export function useNotificationBridge(): void {
   // 1. Hydration + debounced persistence
   useEffect(() => {
@@ -105,7 +113,13 @@ export function useNotificationBridge(): void {
           const entry = mapStartupEvent(event);
           if (entry) store().notify(entry);
           const aggregate = serverStartPatch(event);
-          if (aggregate) store().notify(aggregate);
+          // Server stage events open and drive the card. A model load only
+          // updates a start that is still running: Live Mode, a model switch
+          // or a first diarization run load models long after startup, and
+          // must not reopen "Starting server".
+          if (aggregate && (event.category === 'server' || isServerStarting())) {
+            store().notify(aggregate);
+          }
         }),
       );
     }

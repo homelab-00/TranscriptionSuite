@@ -213,10 +213,20 @@ class DiarizationEngine:
         logger.info(f"Loading PyAnnote diarization pipeline: {self.model}")
 
         try:
-            self._pipeline = Pipeline.from_pretrained(
+            # The pipeline downloads on first use, often in the middle of a
+            # job; report it to the dashboard's download bar (GH-318).
+            from server.core.download_progress import track_model_download
+
+            short_name = self.model.split("/")[-1]
+            with track_model_download(
                 self.model,
-                token=self.hf_token,
-            )
+                kind="diarization-model",
+                name=f"Diarization model ({short_name})",
+            ):
+                self._pipeline = Pipeline.from_pretrained(
+                    self.model,
+                    token=self.hf_token,
+                )
 
             # Move to device
             if HAS_TORCH and torch is not None:

@@ -19,7 +19,9 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -73,25 +75,45 @@ _VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS: tuple[str, ...] = (
     "bitsandbytes>=0.43.1",
 )
 
-# Load startup event writer (stdlib-only module, safe to import before deps).
-# Falls back to no-ops when running outside the container (e.g. tests).
-try:
-    _se_path = APP_ROOT / "server" / "backend" / "core" / "startup_events.py"
-    _se_spec = importlib.util.spec_from_file_location("startup_events", _se_path)
-    if _se_spec and _se_spec.loader:
-        _se_mod = importlib.util.module_from_spec(_se_spec)
-        _se_spec.loader.exec_module(_se_mod)
-        emit_event = _se_mod.emit_event
-        truncate_events_file = _se_mod.truncate_events_file
-    else:
-        raise ImportError("spec_from_file_location returned None")
-except (FileNotFoundError, ImportError):
 
-    def emit_event(*_args: object, **_kwargs: object) -> None:  # type: ignore[misc]
-        pass
+def _startup_events_module_path(app_root: Path = APP_ROOT) -> Path:
+    """Where the startup event writer lives inside the image.
 
-    def truncate_events_file() -> None:
-        pass
+    The Dockerfile copies ``server/backend/`` to ``<app_root>/server/``, so the
+    module is at ``server/core/`` - there is no ``backend`` segment in the
+    container. Looking under ``server/backend/core/`` never found it, and every
+    bootstrap event silently became a no-op.
+    """
+    return app_root / "server" / "core" / "startup_events.py"
+
+
+def _noop_emit_event(*_args: object, **_kwargs: object) -> None:
+    pass
+
+
+def _noop_truncate_events_file() -> None:
+    pass
+
+
+def _load_startup_events(app_root: Path = APP_ROOT) -> tuple[Any, Any]:
+    """Load the startup event writer (stdlib-only, safe to import before deps).
+
+    Returns ``(emit_event, truncate_events_file)``, falling back to no-ops when
+    running outside the container (e.g. tests).
+    """
+    try:
+        se_path = _startup_events_module_path(app_root)
+        se_spec = importlib.util.spec_from_file_location("startup_events", se_path)
+        if se_spec is None or se_spec.loader is None:
+            raise ImportError("spec_from_file_location returned None")
+        se_mod = importlib.util.module_from_spec(se_spec)
+        se_spec.loader.exec_module(se_mod)
+        return se_mod.emit_event, se_mod.truncate_events_file
+    except (FileNotFoundError, ImportError):
+        return _noop_emit_event, _noop_truncate_events_file
+
+
+emit_event, truncate_events_file = _load_startup_events()
 
 
 def _utc_now_iso() -> str:
@@ -320,18 +342,300 @@ def run_command(
     cmd: list[str],
     timeout_seconds: int,
     env: dict[str, str],
+    on_line: Callable[[str], None] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        cmd,
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=timeout_seconds,
-        check=False,
-    )
+    """Run *cmd* to completion, raising on a non-zero exit.
+
+    With *on_line*, every output line is also handed to the callback as it is
+    produced (used to report download progress, GH-318). The returned output,
+    the failure text and the timeout behaviour are the same either way: the
+    retry and TLS classifiers read that text.
+    """
+    if on_line is None:
+        result = subprocess.run(
+            cmd,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    else:
+        result = _run_streaming(cmd, timeout_seconds, env, on_line)
     if result.returncode != 0:
         output = (result.stdout or "") + (result.stderr or "")
         raise RuntimeError(f"Command failed ({result.returncode}): {' '.join(cmd)}\n{output}")
+    return result
+
+
+# How long to wait for the output pumps after the command has exited.
+_PUMP_JOIN_TIMEOUT_SECONDS = 30
+
+
+def _run_streaming(
+    cmd: list[str],
+    timeout_seconds: int,
+    env: dict[str, str],
+    on_line: Callable[[str], None],
+) -> subprocess.CompletedProcess[str]:
+    """subprocess.run(capture_output=True) that also streams lines to *on_line*.
+
+    stdout and stderr are kept in separate buffers, exactly as the capturing
+    path returns them. A failing callback is ignored: progress reporting must
+    never fail the command it is watching.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=1,
+    )
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+
+    def pump(stream: Any, sink: list[str]) -> None:
+        try:
+            for line in stream:
+                sink.append(line)
+                try:
+                    on_line(line.rstrip("\n"))
+                except Exception:  # noqa: BLE001 - reporting is best-effort
+                    pass
+        finally:
+            stream.close()
+
+    pumps = [
+        threading.Thread(target=pump, args=(proc.stdout, stdout_lines), daemon=True),
+        threading.Thread(target=pump, args=(proc.stderr, stderr_lines), daemon=True),
+    ]
+    for thread in pumps:
+        thread.start()
+    try:
+        proc.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        for thread in pumps:
+            thread.join(timeout=_PUMP_JOIN_TIMEOUT_SECONDS)
+        raise subprocess.TimeoutExpired(
+            cmd,
+            timeout_seconds,
+            output="".join(stdout_lines),
+            stderr="".join(stderr_lines),
+        ) from None
+    except BaseException:
+        # Interrupted (Ctrl-C, shutdown): do not leave the child running, as
+        # subprocess.run would not either.
+        proc.kill()
+        proc.wait()
+        raise
+    # Bounded: a grandchild that inherited the pipes can hold them open after
+    # the command itself has exited, and must not hang the bootstrap.
+    for thread in pumps:
+        thread.join(timeout=_PUMP_JOIN_TIMEOUT_SECONDS)
+    return subprocess.CompletedProcess(
+        cmd, proc.returncode, "".join(stdout_lines), "".join(stderr_lines)
+    )
+
+
+# ── Download progress for uv installs (GH-318) ────────────────────────────
+#
+# Without a terminal uv prints no byte progress, only which wheels it started
+# and finished:
+#
+#     Downloading numpy (15.8MiB)
+#      Downloaded numpy
+#     Prepared 3 packages in 574ms
+#
+# So progress here is wheel-granular: the total is the sum of the announced
+# sizes and "done" is the sum of the wheels that finished. It never invents
+# progress inside a wheel - the bar steps when a wheel lands. Small packages
+# are not announced at all and simply do not count.
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_UV_DOWNLOADING_RE = re.compile(r"^Downloading (\S+) \(([\d.]+)\s*([KMGT]?i?B)\)$")
+_UV_DOWNLOADED_RE = re.compile(r"^Downloaded (\S+)$")
+_UV_PREPARED_RE = re.compile(r"^Prepared \d+ packages? in ")
+_UV_SIZE_UNITS: dict[str, int] = {
+    "B": 1,
+    "KB": 1000,
+    "MB": 1000**2,
+    "GB": 1000**3,
+    "TB": 1000**4,
+    "KIB": 1024,
+    "MIB": 1024**2,
+    "GIB": 1024**3,
+    "TIB": 1024**4,
+}
+
+
+class UvProgressParser:
+    """Tracks which wheels a uv run announced and which have finished."""
+
+    def __init__(self) -> None:
+        self._sizes: dict[str, int] = {}
+        self._finished: set[str] = set()
+        self.prepared = False
+
+    def feed(self, line: str) -> bool:
+        """Consume one output line. Returns True when the progress changed."""
+        text = _ANSI_ESCAPE_RE.sub("", line).strip()
+        match = _UV_DOWNLOADING_RE.match(text)
+        if match:
+            name, amount, unit = match.groups()
+            try:
+                self._sizes[name] = int(float(amount) * _UV_SIZE_UNITS[unit.upper()])
+            except (KeyError, ValueError):
+                return False
+            return True
+        match = _UV_DOWNLOADED_RE.match(text)
+        if match:
+            name = match.group(1)
+            if name not in self._sizes or name in self._finished:
+                return False
+            self._finished.add(name)
+            return True
+        if _UV_PREPARED_RE.match(text) and not self.prepared:
+            self.prepared = True
+            return True
+        return False
+
+    @property
+    def started(self) -> bool:
+        return bool(self._sizes)
+
+    @property
+    def total_bytes(self) -> int:
+        return sum(self._sizes.values())
+
+    @property
+    def done_bytes(self) -> int:
+        return sum(size for name, size in self._sizes.items() if name in self._finished)
+
+    @property
+    def in_flight(self) -> list[str]:
+        return [name for name in self._sizes if name not in self._finished]
+
+
+def _in_flight_detail(names: list[str]) -> str:
+    """ "torch, nvidia-cudnn-cu12 +3 more" - what is downloading right now."""
+    if len(names) <= 3:
+        return ", ".join(names)
+    return f"{', '.join(names[:3])} +{len(names) - 3} more"
+
+
+def _uv_failure_summary(error: BaseException | None) -> str:
+    """What went wrong, in one line: uv's own `error:` line when there is one.
+
+    The failure text starts with the command line that was run, which says
+    nothing about the cause.
+    """
+    lines = [line.strip() for line in str(error or "").splitlines() if line.strip()]
+    for line in reversed(lines):
+        if line.lower().startswith("error:"):
+            return line[len("error:") :].strip()[:300] or "Download failed"
+    return (lines[0][:300] if lines else "") or "Download failed"
+
+
+class UvDownloadReporter:
+    """Turns the output of a uv run into download events for the dashboard.
+
+    Emits nothing unless uv actually downloads something, so an install served
+    from the uv cache never shows up as a download. Never raises: reporting
+    must not be able to fail a dependency install.
+    """
+
+    def __init__(self, event_id: str, name: str, kind: str) -> None:
+        self.event_id = event_id
+        self.name = name
+        self.kind = kind
+        self._parser = UvProgressParser()
+        self._lock = threading.Lock()  # stdout and stderr are pumped by two threads
+        self._closed = False
+        # A retry starts a fresh parser; remember that an earlier attempt did
+        # download, so the item it opened still gets its terminal event.
+        self._downloaded_before_restart = False
+
+    def on_line(self, line: str) -> None:
+        try:
+            with self._lock:
+                if self._closed or not self._parser.feed(line):
+                    return
+                if self._parser.started:
+                    self._emit("active")
+        except Exception:  # noqa: BLE001 - reporting is best-effort
+            pass
+
+    def restart(self) -> None:
+        """A retry begins: uv re-announces what is still missing, so start counting again."""
+        with self._lock:
+            self._downloaded_before_restart = (
+                self._downloaded_before_restart or self._parser.started
+            )
+            self._parser = UvProgressParser()
+
+    def complete(self) -> None:
+        self._finish("complete", None)
+
+    def fail(self, error: BaseException) -> None:
+        self._finish("error", error)
+
+    def _finish(self, status: str, error: BaseException | None) -> None:
+        try:
+            with self._lock:
+                if self._closed:
+                    return
+                self._closed = True
+                if not (self._parser.started or self._downloaded_before_restart):
+                    return
+                self._emit(status, error)
+        except Exception:  # noqa: BLE001 - reporting is best-effort
+            pass
+
+    def _emit(self, status: str, error: BaseException | None = None) -> None:
+        parser = self._parser
+        extra: dict[str, Any] = {
+            "kind": self.kind,
+            "name": self.name,
+            "phase": "download",
+            "downloadedBytes": parser.done_bytes,
+            "totalBytes": parser.total_bytes,
+        }
+        if status == "active":
+            label = f"Downloading {self.name}..."
+            extra["detail"] = _in_flight_detail(parser.in_flight)
+        elif status == "complete":
+            label = f"{self.name} downloaded"
+        else:
+            label = f"{self.name} download failed"
+            extra["error"] = _uv_failure_summary(error)
+        emit_event(self.event_id, "download", label, status=status, **extra)
+
+
+def run_uv_install_with_progress(
+    cmd: list[str],
+    *,
+    timeout_seconds: int,
+    env: dict[str, str],
+    event_id: str,
+    name: str,
+    kind: str = "feature-deps",
+) -> subprocess.CompletedProcess[str]:
+    """run_command for a uv install, reporting its downloads to the dashboard."""
+    reporter = UvDownloadReporter(event_id, name, kind)
+    try:
+        result = run_command(
+            cmd,
+            timeout_seconds=timeout_seconds,
+            env=env,
+            on_line=reporter.on_line,
+        )
+    except BaseException as exc:
+        reporter.fail(exc)
+        raise
+    reporter.complete()
     return result
 
 
@@ -432,7 +736,12 @@ def _propagate_ca_bundle(env: dict[str, str]) -> None:
         ca = _SYSTEM_CA_BUNDLE
     else:
         return
-    for var in ("SSL_CERT_FILE", "GIT_SSL_CAINFO", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+    for var in (
+        "SSL_CERT_FILE",
+        "GIT_SSL_CAINFO",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+    ):
         env.setdefault(var, ca)
 
 
@@ -472,8 +781,12 @@ def run_dependency_sync(
     timeout_seconds: int,
     extras: tuple[str, ...] = (),
     pytorch_variant: str = "cu129",
+    on_line: Callable[[str], None] | None = None,
 ) -> None:
     """Run dependency sync into the runtime virtual environment.
+
+    *on_line* receives every line uv prints, as it prints it (download
+    progress for the dashboard, GH-318).
 
     Variant handling (Issue #83; cpu variant added in GH #125, same URL-swap):
         cu129 (default) — frozen sync against the lock-pinned PyTorch index.
@@ -511,7 +824,10 @@ def run_dependency_sync(
         str(PROJECT_DIR),
     ]
     use_system_torch = parse_bool_env("BOOTSTRAP_USE_SYSTEM_TORCH", False)
-    is_linux_arm64 = sys.platform == "linux" and platform.machine().lower() in {"arm64", "aarch64"}
+    is_linux_arm64 = sys.platform == "linux" and platform.machine().lower() in {
+        "arm64",
+        "aarch64",
+    }
     # Non-default variants swap the URL of the *named* index `pytorch-cu129`
     # (which [tool.uv.sources] pins torch/torchaudio to): cu126 for legacy GPUs
     # (Pascal/Maxwell, sm_50..sm_90) and cpu for CPU-only hosts (GH #125 — no
@@ -581,6 +897,7 @@ def run_dependency_sync(
         cmd,
         timeout_seconds=max(timeout_seconds, 10800),
         env=build_uv_sync_env(venv_dir=venv_dir, cache_dir=cache_dir),
+        on_line=on_line,
     )
 
 
@@ -733,6 +1050,10 @@ def run_dependency_sync_with_retries(
         else parse_int_env("BOOTSTRAP_SYNC_ATTEMPTS", DEFAULT_SYNC_ATTEMPTS),
     )
 
+    # One reporter for all attempts: a retried sync stays a single running
+    # download in the dashboard instead of flashing a failure and starting over.
+    reporter = UvDownloadReporter("bootstrap-deps", "Runtime dependencies", "server-deps")
+
     for attempt in range(1, total_attempts + 1):
         try:
             run_dependency_sync(
@@ -741,15 +1062,22 @@ def run_dependency_sync_with_retries(
                 timeout_seconds=timeout_seconds,
                 extras=extras,
                 pytorch_variant=pytorch_variant,
+                on_line=reporter.on_line,
             )
+            reporter.complete()
             return
         except subprocess.TimeoutExpired:
             # The whole sync exceeded its (already 3h) budget — a retry would
             # just spend another one.
             raise
         except Exception as exc:
+            # No failure is reported from here: a failed delta-sync is retried
+            # as a rebuild, and the download must stay one running item across
+            # that too. The unrecoverable case is reported by
+            # _raise_dependency_sync_failure, where every one of them ends up.
             if attempt >= total_attempts or not is_transient_network_failure(str(exc)):
                 raise
+            reporter.restart()
             delay = min(
                 _SYNC_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1)),
                 _SYNC_RETRY_MAX_DELAY_SECONDS,
@@ -820,6 +1148,20 @@ def _raise_dependency_sync_failure(exc: Exception, final_sync_mode: str) -> None
             status="error",
             phase="bootstrap",
         )
+    # Close the dependency download in the dashboard (GH-318). Emitted here,
+    # the single point every unrecoverable sync failure passes through, so an
+    # attempt that is retried or escalated never shows as a failure. A no-op
+    # for the dashboard when nothing was being downloaded.
+    emit_event(
+        "bootstrap-deps",
+        "download",
+        "Runtime dependencies download failed",
+        status="error",
+        phase="download",
+        kind="server-deps",
+        name="Runtime dependencies",
+        error=_uv_failure_summary(exc),
+    )
     failure_snippet = error_text if len(error_text) <= 240 else f"{error_text[:237]}..."
     raise RuntimeError(
         f"Dependency sync failed for mode={final_sync_mode}: {failure_snippet}"
@@ -1362,6 +1704,46 @@ def should_reuse_cached_diarization_status(
     return available and reason == "ready" and cached_key == preload_cache_key
 
 
+# Prepended to the bootstrap child scripts that download models (GH-318), so a
+# model preload shows in the dashboard's download bar like any other download.
+# The tracker lives in the server package, which the child may not be able to
+# import; in that case tracking degrades to a no-op - a preload decides whether
+# a feature is available and must never depend on progress reporting.
+_CHILD_DOWNLOAD_TRACKER = r"""
+import contextlib
+import sys
+
+
+def _track_download(app_root, model_name, **kwargs):
+    try:
+        # Appended, not prepended: installed packages keep precedence.
+        if app_root and app_root not in sys.path:
+            sys.path.append(app_root)
+        from server.core.download_progress import track_model_download
+
+        return track_model_download(model_name, **kwargs)
+    except Exception:
+        return contextlib.nullcontext()
+"""
+
+
+def _emit_child_download_aborted(event_id: str, name: str, kind: str) -> None:
+    """Close a child script's download that it could not close itself.
+
+    A no-op for the dashboard when the child never started downloading.
+    """
+    emit_event(
+        event_id,
+        "download",
+        f"{name} download did not finish",
+        status="error",
+        phase="download",
+        kind=kind,
+        name=name,
+        error="The download was stopped before it finished",
+    )
+
+
 def check_diarization_access(
     venv_python: Path,
     diarization_model: str,
@@ -1372,14 +1754,16 @@ def check_diarization_access(
     if not hf_token:
         return {"available": False, "reason": "token_missing"}
 
-    checker = r"""
+    checker = (
+        _CHILD_DOWNLOAD_TRACKER
+        + r"""
 import json
-import sys
 
 from huggingface_hub import HfApi
 
 model = sys.argv[1]
 token = sys.argv[2]
+app_root = sys.argv[3] if len(sys.argv) > 3 else ""
 
 try:
     # Validate token/model access first to surface auth errors clearly.
@@ -1388,7 +1772,13 @@ try:
     # does not trigger a large cold download.
     from pyannote.audio import Pipeline
 
-    pipeline = Pipeline.from_pretrained(model, token=token)
+    with _track_download(
+        app_root,
+        model,
+        kind="diarization-model",
+        name="Diarization model (" + model.split("/")[-1] + ")",
+    ):
+        pipeline = Pipeline.from_pretrained(model, token=token)
     del pipeline
     print(json.dumps({"available": True, "reason": "ready"}))
 except Exception as exc:
@@ -1413,17 +1803,29 @@ except Exception as exc:
 
     print(json.dumps({"available": False, "reason": reason, "error": str(exc)}))
 """
+    )
 
     env = os.environ.copy()
     env["HF_HOME"] = hf_home
-    result = subprocess.run(
-        [str(venv_python), "-c", checker, diarization_model, hf_token],
-        text=True,
-        capture_output=True,
-        timeout=max(120, min(timeout_seconds, 1800)),
-        env=env,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [str(venv_python), "-c", checker, diarization_model, hf_token, str(APP_ROOT)],
+            text=True,
+            capture_output=True,
+            timeout=max(120, min(timeout_seconds, 1800)),
+            env=env,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        # The child was killed mid-download and could not write its own
+        # terminal event; without one the download would stay running in the
+        # dashboard. Same id the child (and the server, later) reports under.
+        _emit_child_download_aborted(
+            f"diarization-model-load-{diarization_model.replace('/', '--')}",
+            "Diarization model (" + diarization_model.split("/")[-1] + ")",
+            "diarization-model",
+        )
+        raise
 
     output = (result.stdout or "").strip().splitlines()
     if not output:
@@ -1657,19 +2059,30 @@ def warm_download_sensevoice_models(
     load-degrade still covers a missing model — so this never raises.
     Returns True if the prefetch subprocess reported success.
     """
-    prefetch = """
+    prefetch = (
+        _CHILD_DOWNLOAD_TRACKER
+        + """
 import json
 try:
     from huggingface_hub import snapshot_download
-    snapshot_download("funasr/campplus")
-    snapshot_download("funasr/fsmn-vad")
+    app_root = sys.argv[1] if len(sys.argv) > 1 else ""
+    with _track_download(
+        app_root,
+        "funasr/campplus",
+        kind="diarization-model",
+        name="SenseVoice speaker models",
+        event_id="sensevoice-aux",
+    ):
+        snapshot_download("funasr/campplus")
+        snapshot_download("funasr/fsmn-vad")
     print(json.dumps({"ok": True}))
 except Exception as exc:
     print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}))
 """
+    )
     try:
         result = subprocess.run(
-            [str(venv_python), "-c", prefetch],
+            [str(venv_python), "-c", prefetch, str(APP_ROOT)],
             text=True,
             capture_output=True,
             # Floor at 60 s — adequate for ~30 MB on a slow link; cap at 600 s.
@@ -1678,6 +2091,10 @@ except Exception as exc:
         )
     except Exception as exc:
         log(f"SenseVoice CAM++ warm-download skipped (non-fatal): {type(exc).__name__}: {exc}")
+        # Killed by its timeout: the child could not close its own download.
+        _emit_child_download_aborted(
+            "sensevoice-aux", "SenseVoice speaker models", "diarization-model"
+        )
         return False
 
     output = (result.stdout or "").strip().splitlines()
@@ -2191,7 +2608,7 @@ def main() -> int:
         elif install_whisper:
             log("Installing faster-whisper family dependencies...")
             try:
-                run_command(
+                run_uv_install_with_progress(
                     [
                         "uv",
                         "pip",
@@ -2207,6 +2624,8 @@ def main() -> int:
                         venv_dir=venv_dir,
                         cache_dir=cache_dir,
                     ),
+                    event_id="bootstrap-faster-whisper",
+                    name="faster-whisper",
                 )
                 whisper_status, _cudnn_fallback_dir = probe_whisper_with_cudnn_fallback(
                     venv_python=venv_python,
@@ -2276,7 +2695,7 @@ def main() -> int:
         elif install_nemo:
             log("Installing NeMo toolkit for NVIDIA Parakeet support...")
             try:
-                run_command(
+                run_uv_install_with_progress(
                     [
                         "uv",
                         "pip",
@@ -2290,6 +2709,8 @@ def main() -> int:
                         venv_dir=venv_dir,
                         cache_dir=cache_dir,
                     ),
+                    event_id="bootstrap-nemo",
+                    name="NeMo toolkit",
                 )
                 nemo_status = check_nemo_asr_import(
                     venv_python=venv_python,
@@ -2384,7 +2805,7 @@ def main() -> int:
                     + "..."
                 )
                 try:
-                    run_command(
+                    run_uv_install_with_progress(
                         [
                             "uv",
                             "pip",
@@ -2398,6 +2819,8 @@ def main() -> int:
                             venv_dir=venv_dir,
                             cache_dir=cache_dir,
                         ),
+                        event_id="bootstrap-vibevoice-quant",
+                        name="VibeVoice-ASR quantization runtime",
                     )
                     vibevoice_quant_runtime_status = check_vibevoice_asr_quant_runtime(
                         venv_python=venv_python,
@@ -2461,7 +2884,7 @@ def main() -> int:
                         f"dependencies: {', '.join(_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS)}"
                     )
                     vibevoice_install_specs.extend(_VIBEVOICE_ASR_QUANT_RUNTIME_PACKAGE_SPECS)
-                run_command(
+                run_uv_install_with_progress(
                     [
                         "uv",
                         "pip",
@@ -2475,6 +2898,8 @@ def main() -> int:
                         venv_dir=venv_dir,
                         cache_dir=cache_dir,
                     ),
+                    event_id="bootstrap-vibevoice",
+                    name="VibeVoice-ASR",
                 )
                 vibevoice_asr_status = check_vibevoice_asr_import(
                     venv_python=venv_python,
@@ -2552,10 +2977,19 @@ def main() -> int:
         elif install_funasr:
             log("Installing FunASR for SenseVoice support...")
             try:
-                run_command(
-                    ["uv", "pip", "install", "--python", str(venv_python), "funasr>=1.3.12"],
+                run_uv_install_with_progress(
+                    [
+                        "uv",
+                        "pip",
+                        "install",
+                        "--python",
+                        str(venv_python),
+                        "funasr>=1.3.12",
+                    ],
                     timeout_seconds=timeout_seconds,
                     env=build_uv_sync_env(venv_dir=venv_dir, cache_dir=cache_dir),
+                    event_id="bootstrap-funasr",
+                    name="FunASR",
                 )
                 sensevoice_status = check_funasr_import(
                     venv_python=venv_python,
@@ -2583,7 +3017,10 @@ def main() -> int:
                 }
                 log(f"FunASR installation failed: {exc}")
         else:
-            sensevoice_status = {"available": False, "reason": "selected_but_not_requested"}
+            sensevoice_status = {
+                "available": False,
+                "reason": "selected_but_not_requested",
+            }
             log(
                 "SenseVoice model selected but INSTALL_FUNASR is not enabled, "
                 "skipping optional install"

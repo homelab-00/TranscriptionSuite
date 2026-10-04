@@ -654,7 +654,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 # a failed preload looks like an infinite server start.
                 emit_event(
                     "model-preload-error",
-                    "download",
+                    # A failed preload is a load failure, not a download: it
+                    # belongs with the server warnings, not in the download bar.
+                    "warning",
                     warning_message,
                     status="error",
                     severity="warning",
@@ -679,7 +681,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 _log_time("model preload failed (continuing without model)")
                 emit_event(
                     "model-preload-error",
-                    "download",
+                    # A failed preload is a load failure, not a download: it
+                    # belongs with the server warnings, not in the download bar.
+                    "warning",
                     f"Model preload failed for {selected_main_model}. The server started without a loaded model - fix the model selection in the dashboard and restart.",
                     status="error",
                     severity="error",

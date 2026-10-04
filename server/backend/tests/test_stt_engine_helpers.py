@@ -869,3 +869,129 @@ class TestShutdownUnloadsBackend:
         rec.shutdown()  # must not raise
 
         assert rec._backend is None
+
+
+# ── GH-318: _load_model reports first-time downloads to the download bar ──
+
+
+class _DownloadingBackend:
+    """A backend whose load() downloads, the way huggingface_hub would."""
+
+    backend_name = "whisper"
+
+    def __init__(self, on_load=None) -> None:
+        self._on_load = on_load
+
+    def load(self, **_kwargs: Any) -> None:
+        if self._on_load is not None:
+            self._on_load()
+            return
+        from server.core.download_progress import _ProgressTqdm
+
+        bar = _ProgressTqdm(total=4_000_000, unit="B")
+        bar.update(4_000_000)
+
+    def configure_decode_options(self, _options: Any) -> None:
+        pass
+
+    def warmup(self, **_kwargs: Any) -> None:
+        pass
+
+
+class TestLoadModelDownloadTracking:
+    """Only the main model load was tracked (by model_manager). A recorder that
+    loads on its own - Live Mode - downloaded its model with no progress."""
+
+    @staticmethod
+    def _bare_recorder(instance_name: str, model_name: str = "org/live-model"):
+        rec = object.__new__(AudioToTextRecorder)
+        rec.instance_name = instance_name
+        rec.model_name = model_name
+        rec.device = "cpu"
+        rec.compute_type = "default"
+        rec.gpu_device_index = 0
+        rec.download_root = None
+        rec.batch_size = 1
+        rec.whisper_decode = None
+        rec.language = "en"
+        rec._backend = None
+        rec._model_loaded = False
+        return rec
+
+    @staticmethod
+    def _load(rec, backend=None) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+
+        def fake_emit(id: str, category: str, label: str, status: str = "active", **extra):
+            events.append({"id": id, "label": label, "status": status, **extra})
+
+        with (
+            patch(
+                "server.core.stt.engine.create_backend",
+                return_value=backend or _DownloadingBackend(),
+            ),
+            patch("server.core.stt.engine.detect_backend_type", return_value="whisper"),
+            patch("server.core.download_progress.emit_event", fake_emit),
+        ):
+            rec._load_model()
+        return events
+
+    @pytest.mark.parametrize("instance_name", ["live_mode", "realtime_main"])
+    def test_live_recorder_reports_a_live_model_download(self, instance_name):
+        events = self._load(self._bare_recorder(instance_name))
+
+        done = events[-1]
+        assert done["status"] == "complete"
+        assert done["id"] == "live-model-load-org--live-model"
+        assert done["kind"] == "live-model"
+        assert done["name"] == "Live model (live-model)"
+        assert done["downloaded"] is True
+        assert done["totalBytes"] == 4_000_000
+
+    def test_file_transcriber_reports_a_plain_model_download(self):
+        events = self._load(self._bare_recorder("file_transcriber", "org/main-model"))
+
+        assert events[-1]["id"] == "model-load-org--main-model"
+        assert events[-1]["kind"] == "model"
+
+    def test_load_inside_the_model_manager_context_reports_into_it(self):
+        """load_transcription_model already tracks; no second download may open."""
+        from server.core.download_progress import track_model_download
+
+        events: list[dict[str, Any]] = []
+
+        def fake_emit(id: str, category: str, label: str, status: str = "active", **extra):
+            events.append({"id": id, "label": label, "status": status, **extra})
+
+        with (
+            patch("server.core.stt.engine.create_backend", return_value=_DownloadingBackend()),
+            patch("server.core.stt.engine.detect_backend_type", return_value="whisper"),
+            patch("server.core.download_progress.emit_event", fake_emit),
+            track_model_download("org/main-model"),
+        ):
+            self._bare_recorder("file_transcriber", "org/main-model")._load_model()
+
+        assert {e["id"] for e in events} == {"model-load-org--main-model"}
+        assert events[-1]["totalBytes"] == 4_000_000
+
+    def test_a_failing_backend_load_still_raises_its_own_error(self):
+        def explode() -> None:
+            raise RuntimeError("CUDA out of memory")
+
+        with pytest.raises(RuntimeError, match="CUDA out of memory"):
+            self._load(self._bare_recorder("live_mode"), _DownloadingBackend(on_load=explode))
+
+    def test_model_loads_when_the_progress_channel_is_broken(self):
+        rec = self._bare_recorder("live_mode")
+
+        def broken_emit(*_args: Any, **_kwargs: Any) -> None:
+            raise OSError("events file gone")
+
+        with (
+            patch("server.core.stt.engine.create_backend", return_value=_DownloadingBackend()),
+            patch("server.core.stt.engine.detect_backend_type", return_value="whisper"),
+            patch("server.core.download_progress.emit_event", broken_emit),
+        ):
+            rec._load_model()
+
+        assert rec._model_loaded is True

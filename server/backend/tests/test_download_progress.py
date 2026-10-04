@@ -593,3 +593,754 @@ class TestMonkeyPatching:
                 )
 
             assert mod.tqdm == "original_tqdm"
+
+
+# ── GH-318: attribution across threads ─────────────────────────────────
+#
+# huggingface_hub does not keep a download on the thread that started it:
+# snapshot_download creates each file's bar inside a thread_map worker, and
+# the xet backend reports bytes from its own callback thread. A tracker that
+# is only reachable through thread-local state silently drops all of that and
+# reports a real download as "loaded from cache".
+
+
+class TestWorkerThreadAttribution:
+    def test_bar_updated_from_another_thread_still_counts(self, mock_emit):
+        """xet: the bar is created by the caller but updated from a callback thread."""
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/model"):
+            tracker = dp._get_tracker()
+            bar = dp._ProgressTqdm(total=2_000_000, unit="B")
+            t = threading.Thread(target=lambda: bar.update(750_000))
+            t.start()
+            t.join()
+
+            assert tracker.downloaded_bytes == 750_000
+
+    def test_thread_map_workers_inherit_the_callers_tracker(self, mock_emit):
+        """snapshot_download: per-file bars are created inside thread_map workers."""
+        import server.core.download_progress as dp
+
+        def fake_thread_map(fn, iterable, **_kwargs):
+            results = []
+
+            def run(item):
+                results.append(fn(item))
+
+            threads = [threading.Thread(target=run, args=(item,)) for item in iterable]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            return results
+
+        def download_one(size):
+            bar = dp._ProgressTqdm(total=size, unit="B")
+            bar.update(size)
+            return size
+
+        with dp.track_model_download("org/model"):
+            tracker = dp._get_tracker()
+            wrapped = dp._make_tracking_thread_map(fake_thread_map)
+            wrapped(download_one, [1_000_000, 3_000_000])
+
+            assert tracker.total_bytes == 4_000_000
+            assert tracker.downloaded_bytes == 4_000_000
+
+    def test_thread_map_wrapper_keeps_the_file_count_bar_out_of_the_byte_total(self, mock_emit):
+        import server.core.download_progress as dp
+
+        seen = {}
+
+        def fake_thread_map(fn, iterable, **kwargs):
+            seen["tqdm_class"] = kwargs.get("tqdm_class")
+            # thread_map builds its outer "Fetching N files" bar from tqdm_class.
+            kwargs["tqdm_class"](total=5000)
+            return [fn(item) for item in iterable]
+
+        with dp.track_model_download("org/model"):
+            tracker = dp._get_tracker()
+            dp._make_tracking_thread_map(fake_thread_map)(
+                lambda x: x, [1], tqdm_class=dp._ProgressTqdm
+            )
+
+            assert seen["tqdm_class"] is not dp._ProgressTqdm
+            assert tracker.total_bytes == 0
+
+    def test_bar_on_an_unrelated_thread_is_not_attributed_to_the_running_download(self, mock_emit):
+        """Only threads that belong to the load report into it. Guessing an
+        owner for a bar from some other thread put unrelated bytes under the
+        wrong name, and let a bar that outlived its download reopen it."""
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/model"):
+            tracker = dp._get_tracker()
+
+            def unrelated():
+                bar = dp._ProgressTqdm(total=2_000_000, unit="B")
+                bar.update(2_000_000)
+
+            t = threading.Thread(target=unrelated)
+            t.start()
+            t.join()
+
+            assert tracker.downloaded_bytes == 0
+            assert not tracker.download_started
+
+    def test_foreign_thread_bar_is_not_guessed_when_two_downloads_are_active(self, mock_emit):
+        import server.core.download_progress as dp
+
+        other_ready = threading.Event()
+        release_other = threading.Event()
+        trackers = {}
+
+        def other_load():
+            with dp.track_model_download("org/other"):
+                trackers["other"] = dp._get_tracker()
+                other_ready.set()
+                release_other.wait(timeout=5)
+
+        t_other = threading.Thread(target=other_load)
+        t_other.start()
+        assert other_ready.wait(timeout=5)
+        try:
+            with dp.track_model_download("org/model"):
+                trackers["main"] = dp._get_tracker()
+
+                def foreign():
+                    bar = dp._ProgressTqdm(total=2_000_000, unit="B")
+                    bar.update(2_000_000)
+
+                t = threading.Thread(target=foreign)
+                t.start()
+                t.join()
+
+                assert trackers["main"].downloaded_bytes == 0
+                assert trackers["other"].downloaded_bytes == 0
+        finally:
+            release_other.set()
+            t_other.join()
+
+
+class TestTotalMutation:
+    def test_total_grown_after_construction_is_registered(self, mock_emit):
+        """hf_hub 1.x: one shared bytes bar starts at 0 and grows per file."""
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/model"):
+            tracker = dp._get_tracker()
+            bar = dp._ProgressTqdm(total=0, unit="B")
+            bar.total += 1_500_000  # type: ignore[operator]
+            bar.total += 500_000  # type: ignore[operator]
+
+            assert tracker.download_started
+            assert tracker.total_bytes == 2_000_000
+
+    def test_reset_with_a_new_total_does_not_double_count(self, mock_emit):
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/model"):
+            tracker = dp._get_tracker()
+            bar = dp._ProgressTqdm(total=1_000_000, unit="B")
+            bar.reset(total=3_000_000)
+
+            assert tracker.total_bytes == 3_000_000
+
+    def test_non_byte_bar_is_not_counted(self, mock_emit):
+        """A files/items counter must never be mistaken for a byte total."""
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/model"):
+            tracker = dp._get_tracker()
+            bar = dp._ProgressTqdm(total=5000, unit="it")
+            bar.update(5000)
+
+            assert not tracker.download_started
+            assert tracker.downloaded_bytes == 0
+
+
+class TestRefcountedPatching:
+    def test_overlapping_contexts_restore_the_original_exactly_once(self, mock_emit):
+        """Two loads on two threads: whichever exits last must restore, not re-patch."""
+        import server.core.download_progress as dp
+
+        mod = types.ModuleType("fake_hf_tqdm_rc")
+        mod.tqdm = "original_tqdm"
+
+        a_inside = threading.Event()
+        a_release = threading.Event()
+
+        def load_a():
+            with dp.track_model_download("org/a"):
+                a_inside.set()
+                a_release.wait(timeout=5)
+
+        with (
+            patch("server.core.download_progress._PATCH_TARGETS", [("fake_hf_tqdm_rc", "tqdm")]),
+            patch.dict("sys.modules", {"fake_hf_tqdm_rc": mod}),
+        ):
+            t = threading.Thread(target=load_a)
+            t.start()
+            assert a_inside.wait(timeout=5)
+
+            with dp.track_model_download("org/b"):
+                assert mod.tqdm != "original_tqdm"
+            # A is still loading: the patch must survive B's exit.
+            assert mod.tqdm != "original_tqdm"
+
+            a_release.set()
+            t.join()
+            assert mod.tqdm == "original_tqdm"
+
+    def test_first_entered_context_exiting_first_does_not_leak_the_patch(self, mock_emit):
+        """A enters, B enters, A exits, B exits. Saving 'the previous value' per
+        context made B restore A's patch as if it were the original."""
+        import server.core.download_progress as dp
+
+        mod = types.ModuleType("fake_hf_tqdm_leak")
+        mod.tqdm = "original_tqdm"
+
+        b_inside = threading.Event()
+        b_release = threading.Event()
+
+        def load_b():
+            with dp.track_model_download("org/b"):
+                b_inside.set()
+                b_release.wait(timeout=5)
+
+        with (
+            patch("server.core.download_progress._PATCH_TARGETS", [("fake_hf_tqdm_leak", "tqdm")]),
+            patch.dict("sys.modules", {"fake_hf_tqdm_leak": mod}),
+        ):
+            with dp.track_model_download("org/a"):
+                t = threading.Thread(target=load_b)
+                t.start()
+                assert b_inside.wait(timeout=5)
+            # A is out, B still loading.
+            assert mod.tqdm != "original_tqdm"
+
+            b_release.set()
+            t.join()
+            assert mod.tqdm == "original_tqdm"
+
+    def test_torch_hub_is_patched_only_when_already_imported(self, mock_emit):
+        import sys
+
+        import server.core.download_progress as dp
+
+        assert ("torch.hub", "tqdm") in dp._PATCH_TARGETS
+
+        fake_hub = types.ModuleType("torch.hub")
+        fake_hub.tqdm = "original_tqdm"
+
+        with patch("server.core.download_progress._PATCH_TARGETS", [("torch.hub", "tqdm")]):
+            # Not imported yet: tracking must not drag torch in.
+            with patch.dict("sys.modules"):
+                sys.modules.pop("torch.hub", None)
+                assert dp._patch_hf_tqdm(dp._ProgressTqdm) == []
+
+            with patch.dict("sys.modules", {"torch.hub": fake_hub}):
+                originals = dp._patch_hf_tqdm(dp._ProgressTqdm)
+                assert fake_hub.tqdm is dp._ProgressTqdm
+                dp._restore_hf_tqdm(originals)
+                assert fake_hub.tqdm == "original_tqdm"
+
+
+class TestReentrancy:
+    def test_nested_context_on_the_same_thread_reports_into_the_outer_one(self, mock_emit):
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/model"):
+            outer = dp._get_tracker()
+            events_before = len(mock_emit)
+            with dp.track_model_download("org/model", kind="live-model"):
+                assert dp._get_tracker() is outer
+                bar = dp._ProgressTqdm(total=2_000_000, unit="B")
+                bar.update(2_000_000)
+            # The inner context announced nothing of its own and left the outer intact.
+            assert dp._get_tracker() is outer
+            assert all(e["id"] == "model-load-org--model" for e in mock_emit[events_before:])
+            assert outer.downloaded_bytes == 2_000_000
+
+        assert mock_emit[-1]["label"] == "model ready"
+
+
+class TestNeverFailsTheCaller:
+    """Download tracking is cosmetic. A model load or a transcription that is
+    in progress must never fail because the progress plumbing did."""
+
+    def test_emit_failure_does_not_break_the_tracked_body(self, monkeypatch):
+        import server.core.download_progress as dp
+
+        def boom(*_args, **_kwargs):
+            raise OSError("events file gone")
+
+        monkeypatch.setattr("server.core.download_progress.emit_event", boom)
+
+        result = []
+        with dp.track_model_download("org/model"):
+            bar = dp._ProgressTqdm(total=2_000_000, unit="B")
+            bar.update(2_000_000)
+            result.append("loaded")
+
+        assert result == ["loaded"]
+
+    def test_tracker_failure_inside_update_is_swallowed(self, mock_emit, monkeypatch):
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/model"):
+            bar = dp._ProgressTqdm(total=2_000_000, unit="B")
+            monkeypatch.setattr(
+                dp._DownloadTracker,
+                "on_tqdm_update",
+                lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("tracker bug")),
+            )
+            bar.update(1_000)  # must not raise
+            assert bar.n == 1_000
+
+    def test_patching_failure_still_runs_the_body(self, mock_emit, monkeypatch):
+        import server.core.download_progress as dp
+
+        monkeypatch.setattr(
+            dp, "_patch_hf_tqdm", lambda *_a: (_ for _ in ()).throw(RuntimeError("patch bug"))
+        )
+
+        ran = []
+        with dp.track_model_download("org/model"):
+            ran.append(True)
+
+        assert ran == [True]
+
+    def test_the_bodys_own_exception_propagates_unchanged(self, mock_emit):
+        import server.core.download_progress as dp
+
+        class LoadFailed(Exception):
+            pass
+
+        with pytest.raises(LoadFailed):
+            _enter_ctx_and_raise(dp.track_model_download("org/model"), LoadFailed("cuda oom"))
+
+
+class TestEventProtocol:
+    def test_progress_events_carry_raw_bytes_kind_name_and_phase(self, mock_emit):
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("nvidia/parakeet", kind="live-model", name="Live model"):
+            bar = dp._ProgressTqdm(total=4_000_000, unit="B")
+            dp._get_tracker()._last_emit_time = 0.0
+            bar.update(1_000_000)
+
+        progress = [e for e in mock_emit if e.get("phase") == "download"][-1]
+        assert progress["kind"] == "live-model"
+        assert progress["name"] == "Live model"
+        assert progress["downloadedBytes"] == 1_000_000
+        assert progress["totalBytes"] == 4_000_000
+        # Legacy fields stay for older dashboards.
+        assert progress["progress"] == 25
+        assert progress["totalSize"] == "3.8 MB"
+
+    def test_event_id_is_derived_from_the_kind(self, mock_emit):
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/main"):
+            pass
+        with dp.track_model_download("org/live", kind="live-model"):
+            pass
+        with dp.track_model_download("pyannote/x", kind="diarization-model"):
+            pass
+        with dp.track_model_download("el", kind="alignment-model", event_id="alignment-load-el"):
+            pass
+
+        ids = {e["id"] for e in mock_emit}
+        assert ids == {
+            "model-load-org--main",
+            "live-model-load-org--live",
+            "diarization-model-load-pyannote--x",
+            "alignment-load-el",
+        }
+
+    def test_initial_loading_event_carries_no_phase(self, mock_emit):
+        """Only real download/load-after-download events are phased - a plain
+        (cached) load must not look like download activity to the dashboard."""
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/model"):
+            pass
+
+        assert "phase" not in mock_emit[0]
+        assert mock_emit[-1]["downloaded"] is False
+
+    def test_failure_before_any_download_is_marked_as_a_load_failure(self, mock_emit):
+        import server.core.download_progress as dp
+
+        with pytest.raises(RuntimeError):
+            _enter_ctx_and_raise(dp.track_model_download("org/model"), RuntimeError("cuda oom"))
+
+        assert mock_emit[-1]["status"] == "error"
+        assert mock_emit[-1]["phase"] == "load"
+
+    def test_failure_mid_download_is_marked_as_a_download_failure(self, mock_emit):
+        import server.core.download_progress as dp
+
+        def body():
+            with dp.track_model_download("org/model"):
+                bar = dp._ProgressTqdm(total=4_000_000, unit="B")
+                bar.update(1_000_000)
+                raise ConnectionError("connection reset")
+
+        with pytest.raises(ConnectionError):
+            body()
+
+        assert mock_emit[-1]["status"] == "error"
+        assert mock_emit[-1]["phase"] == "download"
+        assert "connection reset" in mock_emit[-1]["error"]
+
+
+class TestLoadPhaseSettle:
+    """The 'loading into memory' transition must wait for the byte total to
+    settle: in a multi-file download the bars registered so far can all be
+    finished while more files are still about to start."""
+
+    def _fake_timer(self, monkeypatch):
+        import server.core.download_progress as dp
+
+        timers = []
+
+        class FakeTimer:
+            def __init__(self, interval, function):
+                self.interval = interval
+                self.function = function
+                self.cancelled = False
+                self.daemon = False
+                timers.append(self)
+
+            def start(self):
+                pass
+
+            def cancel(self):
+                self.cancelled = True
+
+        monkeypatch.setattr(dp.threading, "Timer", FakeTimer)
+        return timers
+
+    def test_load_phase_waits_for_the_settle_timer(self, mock_emit, monkeypatch):
+        import server.core.download_progress as dp
+
+        timers = self._fake_timer(monkeypatch)
+        tracker = dp._DownloadTracker("model-load-test", "test-model", settle_s=2.0)
+        tracker.on_tqdm_created(2_000_000)
+        tracker.on_tqdm_update(2_000_000)
+
+        assert not any("into memory" in e["label"] for e in mock_emit)
+        assert len(timers) == 1
+
+        timers[0].function()
+        assert any("into memory" in e["label"] and e["phase"] == "load" for e in mock_emit)
+
+    def test_load_phase_is_dropped_when_another_file_starts_first(self, mock_emit, monkeypatch):
+        import server.core.download_progress as dp
+
+        timers = self._fake_timer(monkeypatch)
+        tracker = dp._DownloadTracker("model-load-test", "test-model", settle_s=2.0)
+        tracker.on_tqdm_created(2_000)
+        tracker.on_tqdm_update(2_000)  # the small first file is done...
+        tracker.on_tqdm_created(4_000_000)  # ...and then the big one registers
+
+        timers[0].function()
+        assert not any("into memory" in e["label"] for e in mock_emit)
+
+    def test_close_cancels_a_pending_settle_timer(self, mock_emit, monkeypatch):
+        import server.core.download_progress as dp
+
+        timers = self._fake_timer(monkeypatch)
+        tracker = dp._DownloadTracker("model-load-test", "test-model", settle_s=2.0)
+        tracker.on_tqdm_created(2_000_000)
+        tracker.on_tqdm_update(2_000_000)
+        tracker.close()
+
+        assert timers[0].cancelled
+        timers[0].function()
+        assert not any("into memory" in e["label"] for e in mock_emit)
+
+
+class TestExternalDownload:
+    """Byte progress for downloads that do not go through huggingface_hub
+    (the whisper.cpp GGML fetch streams with httpx)."""
+
+    def test_feeds_the_enclosing_tracker(self, mock_emit):
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("ggml-large-v3.bin"):
+            outer = dp._get_tracker()
+            with dp.track_external_download(
+                "ggml-large-v3.bin", 3_000_000, kind="ggml-model"
+            ) as advance:
+                advance(1_000_000)
+                advance(2_000_000)
+
+            assert outer.total_bytes == 3_000_000
+            assert outer.downloaded_bytes == 3_000_000
+
+        assert mock_emit[-1]["label"] == "ggml-large-v3.bin ready"
+        assert mock_emit[-1]["downloaded"] is True
+
+    def test_stands_alone_when_nothing_encloses_it(self, mock_emit):
+        import server.core.download_progress as dp
+
+        with dp.track_external_download("ggml-tiny.bin", 2_000_000, kind="ggml-model") as advance:
+            advance(2_000_000)
+
+        assert mock_emit[0]["id"] == "ggml-model-load-ggml-tiny.bin"
+        assert mock_emit[-1]["status"] == "complete"
+        assert mock_emit[-1]["downloaded"] is True
+
+    def test_unknown_total_still_counts_bytes(self, mock_emit):
+        import server.core.download_progress as dp
+
+        with dp.track_external_download("ggml-tiny.bin", 0, kind="ggml-model") as advance:
+            tracker = dp._get_tracker()
+            advance(500_000)
+            assert tracker.downloaded_bytes == 500_000
+            assert tracker.download_started
+
+    def test_advance_never_raises(self, monkeypatch):
+        import server.core.download_progress as dp
+
+        monkeypatch.setattr(
+            "server.core.download_progress.emit_event",
+            lambda *_a, **_k: (_ for _ in ()).throw(OSError("gone")),
+        )
+        with dp.track_external_download("ggml-tiny.bin", 2_000_000, kind="ggml-model") as advance:
+            advance(1_000_000)
+
+
+class TestTqdmSurface:
+    def test_methods_newer_huggingface_hub_calls_exist(self, mock_emit):
+        from server.core.download_progress import _ProgressTqdm
+
+        bar = _ProgressTqdm(total=10, unit="B")
+        bar.set_postfix_str("x")
+        bar.set_description_str("y")
+        bar.unpause()
+        bar.display()
+        bar.moveto(1)
+        assert isinstance(bar.format_dict, dict)
+        assert bar.disable is False
+
+
+# ── GH-318 review fixes ────────────────────────────────────────────────
+
+
+class TestLateUpdatesAfterTheDownloadEnded:
+    def test_a_bar_that_outlives_its_context_emits_nothing(self, mock_emit):
+        """The xet backend can deliver one more report after the download
+        call returned. An event after the terminal one would reopen the
+        download in the dashboard with nothing left to ever close it."""
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/model"):
+            bar = dp._ProgressTqdm(total=4_000_000, unit="B")
+            bar.update(4_000_000)
+
+        events_at_exit = len(mock_emit)
+        bar.update(1_000)
+        bar.total = 9_000_000
+
+        assert len(mock_emit) == events_at_exit
+        assert mock_emit[-1]["status"] == "complete"
+
+
+class TestHuggingFaceHub1x:
+    """huggingface_hub 1.x (the MLX builds) shapes its bars differently."""
+
+    def test_the_network_transfer_bar_is_not_counted_on_top_of_the_bytes_written(self, mock_emit):
+        """1.x keeps two byte bars per download - bytes written to disk, and
+        `<name>.transfer` for bytes off the network - and grows both by the
+        file size. Counting both doubled the total and the speed."""
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/model"):
+            tracker = dp._get_tracker()
+            written = dp._ProgressTqdm(total=0, unit="B", name="huggingface_hub.snapshot_download")
+            transfer = dp._ProgressTqdm(
+                total=0, unit="B", name="huggingface_hub.snapshot_download.transfer"
+            )
+            for bar in (written, transfer):
+                bar.total += 3_000_000  # type: ignore[operator]
+                bar.update(3_000_000)
+
+            assert tracker.total_bytes == 3_000_000
+            assert tracker.downloaded_bytes == 3_000_000
+
+    def test_static_formatters_the_xet_reporter_calls_exist(self, mock_emit):
+        from server.core.download_progress import _ProgressTqdm
+
+        assert isinstance(_ProgressTqdm.format_sizeof(1536), str)
+        assert isinstance(_ProgressTqdm.format_interval(75), str)
+        assert isinstance(_ProgressTqdm.format_num(1234), str)
+
+    def test_xet_reporter_module_is_a_patch_target(self, mock_emit):
+        import server.core.download_progress as dp
+
+        assert ("huggingface_hub.utils._xet_progress_reporting", "tqdm") in dp._PATCH_TARGETS
+
+
+class TestPatchOrdering:
+    def test_original_is_captured_before_anything_is_replaced(self, mock_emit):
+        """Importing one target can copy a name out of another at import time
+        (`from .utils.tqdm import tqdm as hf_tqdm`). If the first target was
+        already patched by then, the copy is our class - and "restoring" it
+        would leave huggingface_hub patched for the rest of the process."""
+        import sys
+
+        import server.core.download_progress as dp
+
+        first = types.ModuleType("fake_first")
+        first.tqdm = "real_tqdm"
+
+        def make_second() -> types.ModuleType:
+            second = types.ModuleType("fake_second")
+            second.hf_tqdm = first.tqdm  # what `from fake_first import tqdm` binds
+            return second
+
+        real_import = dp.importlib.import_module
+
+        def lazy_import(name: str):
+            if name == "fake_second" and name not in sys.modules:
+                sys.modules[name] = make_second()
+            return real_import(name)
+
+        with (
+            patch(
+                "server.core.download_progress._PATCH_TARGETS",
+                [("fake_first", "tqdm"), ("fake_second", "hf_tqdm")],
+            ),
+            patch.dict("sys.modules", {"fake_first": first}),
+            patch.object(dp.importlib, "import_module", lazy_import),
+        ):
+            originals = dp._patch_hf_tqdm(dp._ProgressTqdm)
+            second = sys.modules["fake_second"]
+            assert first.tqdm is dp._ProgressTqdm and second.hf_tqdm is dp._ProgressTqdm
+
+            dp._restore_hf_tqdm(originals)
+            assert first.tqdm == "real_tqdm"
+            assert second.hf_tqdm == "real_tqdm"
+
+    def test_a_failed_setup_does_not_leak_the_patch_count(self, mock_emit, monkeypatch):
+        """A leaked count meant the patches were never installed again."""
+        import server.core.download_progress as dp
+
+        assert dp._patch_refcount == 0
+        monkeypatch.setattr(
+            dp, "_patch_hf_tqdm", lambda *_a: (_ for _ in ()).throw(RuntimeError("patch bug"))
+        )
+
+        with dp.track_model_download("org/model"):
+            pass
+
+        assert dp._patch_refcount == 0
+
+    def test_one_broken_target_does_not_stop_the_others(self, mock_emit):
+        import server.core.download_progress as dp
+
+        good = types.ModuleType("fake_good")
+        good.tqdm = "original"
+
+        class Exploding(types.ModuleType):
+            def __getattr__(self, name):
+                raise RuntimeError("import-time side effect")
+
+        with (
+            patch(
+                "server.core.download_progress._PATCH_TARGETS",
+                [("fake_exploding", "tqdm"), ("fake_good", "tqdm")],
+            ),
+            patch.dict(
+                "sys.modules", {"fake_exploding": Exploding("fake_exploding"), "fake_good": good}
+            ),
+        ):
+            originals = dp._patch_hf_tqdm(dp._ProgressTqdm)
+            assert good.tqdm is dp._ProgressTqdm
+            dp._restore_hf_tqdm(originals)
+            assert good.tqdm == "original"
+
+
+class TestMultiStageDownloads:
+    def test_load_phase_is_re_armed_when_more_bytes_register_afterwards(self, mock_emit):
+        """A pipeline can download one model, load it, then download the next.
+        The load phase was announced once and never again."""
+        from server.core.download_progress import _DownloadTracker
+
+        tracker = _DownloadTracker("diarization-model-load-x", "x")
+        tracker.on_tqdm_created(2_000_000)
+        tracker.on_tqdm_update(2_000_000)
+        assert sum("into memory" in e["label"] for e in mock_emit) == 1
+
+        tracker.on_tqdm_created(3_000_000)  # the next sub-model starts
+        tracker.on_tqdm_update(3_000_000)
+
+        assert sum("into memory" in e["label"] for e in mock_emit) == 2
+
+    def test_a_shrinking_total_can_complete_the_download(self, mock_emit):
+        """xet deduplication: the total is corrected downwards at the end."""
+        from server.core.download_progress import _DownloadTracker
+
+        tracker = _DownloadTracker("model-load-x", "x")
+        tracker.on_tqdm_created(5_000_000)
+        tracker.on_tqdm_update(4_000_000)
+        assert not any("into memory" in e["label"] for e in mock_emit)
+
+        tracker.on_total_delta(-1_000_000)
+
+        assert any("into memory" in e["label"] for e in mock_emit)
+
+    def test_a_failure_between_two_files_is_a_download_failure(self, mock_emit):
+        """Every byte registered so far is in, but the download as a whole is
+        not confirmed finished: the next file may have failed at its first
+        request. That must not be reported as a completed download."""
+        import server.core.download_progress as dp
+
+        def body():
+            with dp.track_model_download("org/model"):
+                bar = dp._ProgressTqdm(total=2_000_000, unit="B")
+                bar.update(2_000_000)  # file 1 done; settle window still open
+                raise ConnectionError("HEAD request for file 2 failed")
+
+        with pytest.raises(ConnectionError):
+            body()
+
+        assert mock_emit[-1]["status"] == "error"
+        assert mock_emit[-1]["phase"] == "download"
+
+    def test_a_failure_after_the_download_settled_is_a_load_failure(self, mock_emit, monkeypatch):
+        import server.core.download_progress as dp
+
+        monkeypatch.setattr(dp, "_LOAD_PHASE_SETTLE_S", 0.0)
+
+        def body():
+            with dp.track_model_download("org/model"):
+                bar = dp._ProgressTqdm(total=2_000_000, unit="B")
+                bar.update(2_000_000)
+                raise RuntimeError("CUDA out of memory")
+
+        with pytest.raises(RuntimeError):
+            body()
+
+        assert mock_emit[-1]["status"] == "error"
+        assert mock_emit[-1]["phase"] == "load"
+
+
+class TestResumedDownload:
+    def test_bytes_already_on_disk_count_as_downloaded(self, mock_emit):
+        """A resumed file is announced with its full size and `initial` set to
+        what is already there. Ignoring `initial` meant it never reached 100%."""
+        import server.core.download_progress as dp
+
+        with dp.track_model_download("org/model"):
+            tracker = dp._get_tracker()
+            bar = dp._ProgressTqdm(total=4_000_000, initial=3_000_000, unit="B")
+            assert tracker.downloaded_bytes == 3_000_000
+
+            bar.update(1_000_000)
+            assert tracker.downloaded_bytes == tracker.total_bytes == 4_000_000

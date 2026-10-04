@@ -18,6 +18,7 @@ import httpx
 import numpy as np
 from httpx import DecodingError as HttpxDecodingError
 from httpx import HTTPStatusError as HttpxHTTPStatusError
+from server.core.download_progress import track_external_download
 from server.core.stt.backends.base import (
     BackendSegment,
     BackendTranscriptionInfo,
@@ -501,6 +502,14 @@ def _parse_words(raw_words: Any, word_cap: int, audio_duration_s: float) -> list
     return words
 
 
+def _content_length(resp: Any) -> int:
+    """Declared body size of *resp*, or 0 when the server did not send one."""
+    try:
+        return int(getattr(resp, "headers", {}).get("content-length") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _ensure_ggml_model_present(model_name: str) -> bool:
     """Download the GGML model into the shared volume if it isn't there yet.
 
@@ -547,9 +556,18 @@ def _ensure_ggml_model_present(model_name: str) -> bool:
             "GET", url, timeout=_GGML_DOWNLOAD_TIMEOUT, follow_redirects=True
         ) as resp:
             resp.raise_for_status()
-            with open(tmp, "wb") as fh:
+            # httpx never touches a tqdm bar, so the bytes are reported
+            # explicitly (GH-318). Inside a tracked model load they count
+            # toward that load; otherwise they stand alone.
+            with (
+                track_external_download(
+                    filename, _content_length(resp), kind="ggml-model"
+                ) as advance,
+                open(tmp, "wb") as fh,
+            ):
                 for chunk in resp.iter_bytes(chunk_size=1024 * 1024):
                     fh.write(chunk)
+                    advance(len(chunk))
         # Same-dir rename → atomic publish; a crashed download leaves only .tmp.
         os.replace(tmp, target)
     except Exception as exc:  # noqa: BLE001 — collapse to one actionable error

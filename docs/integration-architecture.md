@@ -146,6 +146,21 @@ Client                          Server
 
 **Event types:** `lifespan-start`, `lifespan-gpu`, `info-gpu`, `warn-gpu`, `warn-gpu-fatal`, `server-ready`
 
+**File ownership:** the dashboard creates the events directory as the desktop user (0700) and the file as 0600. The server runs as `appuser`, a different uid, so `docker-entrypoint.sh` runs `prepare_events_file.py` as root before bootstrap: it hands the file to `appuser` (0644) and opens the directory for traversal only (0711). Without that step every `emit_event()` fails with `EACCES` and is swallowed, and nothing reaches the dashboard on a Linux host.
+
+**Download events (GH-318):** events with `category: "download"` feed the dashboard's download bar (`dashboard/electron/serverDownloadEvents.ts` → `downloadHub`). They carry:
+
+| Field | Meaning |
+|-------|---------|
+| `id` | Stable per download: `model-load-<repo--name>`, `live-model-load-…`, `diarization-model-load-…`, `alignment-load-<lang>`, `ggml-model-load-<file>`, `bootstrap-deps`, `bootstrap-<feature>`, `sensevoice-aux` |
+| `kind` | `model`, `live-model`, `diarization-model`, `alignment-model`, `ggml-model`, `server-deps`, `feature-deps` |
+| `name` | Clean display name for the bar. `label` stays a status line ("Downloading X...") for older dashboards |
+| `phase` | `download` while bytes flow, `load` once they are in and the weights are being loaded (the dashboard keeps the item, marked "Loading into memory", until the terminal event - a pipeline may go on to download its next model). Absent on the initial "Loading X..." event: a load is not a download until bytes actually flow |
+| `downloadedBytes` / `totalBytes` | Raw byte counts. The legacy `progress` (0-100) and pre-formatted `downloadedSize` / `totalSize` strings are still emitted |
+| `status` | `active`, `complete` (with `downloaded: true/false`), `error` (with `phase` telling a failed download from a failed load) |
+
+The dashboard opens a download item only on evidence of an actual download, so loading a cached model never raises the bar. Only bars created on a thread that belongs to the tracked load are counted (the calling thread and the `thread_map` workers it spawns); on huggingface_hub 1.x the separate network-transfer bar is skipped so bytes are not counted twice. A file whose size the server does not announce (gzip-encoded text files) is not counted at all. Model downloads are emitted by `server/backend/core/download_progress.py` (`track_model_download`, `track_external_download`); dependency installs by `UvDownloadReporter` in `server/docker/bootstrap_runtime.py`, which is wheel-granular because uv prints no byte progress without a terminal.
+
 ### 6. Server → HuggingFace Hub
 
 **Protocol:** HTTPS

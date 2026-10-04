@@ -145,7 +145,11 @@ describe('applyServerDownloadEvent', () => {
     });
   });
 
-  it('completes the download when the server moves on to loading into memory', () => {
+  it('keeps the item running while the weights load, and says so', () => {
+    // A pipeline can download one model, load it, then download the next.
+    // Ending the item at the first "load" opened a second download (and a
+    // second history row) for the same thing; it now ends on the terminal
+    // event only.
     applyServerDownloadEvent(hub, {
       id: 'm',
       category: 'download',
@@ -163,10 +167,10 @@ describe('applyServerDownloadEvent', () => {
       status: 'active',
     });
 
-    expect(only().status).toBe('complete');
+    expect(only()).toMatchObject({ status: 'active', detail: 'Loading into memory' });
   });
 
-  it('completes on the legacy 100 percent load marker', () => {
+  it('treats the legacy 100 percent marker as loading too', () => {
     applyServerDownloadEvent(hub, {
       id: 'm',
       category: 'download',
@@ -182,7 +186,44 @@ describe('applyServerDownloadEvent', () => {
       progress: 100,
     });
 
-    expect(only().status).toBe('complete');
+    expect(only()).toMatchObject({ status: 'active', detail: 'Loading into memory' });
+  });
+
+  it('goes back to downloading in the same run when a second stage starts', () => {
+    const base = { id: 'm', category: 'download', label: 'Downloading m...', status: 'active' };
+    applyServerDownloadEvent(hub, {
+      ...base,
+      phase: 'download',
+      downloadedBytes: 10,
+      totalBytes: 10,
+    });
+    const firstRun = only().runId;
+    applyServerDownloadEvent(hub, { ...base, label: 'Loading m into memory...', phase: 'load' });
+    applyServerDownloadEvent(hub, {
+      ...base,
+      phase: 'download',
+      downloadedBytes: 12,
+      totalBytes: 40,
+    });
+
+    const item = only();
+    expect(item.runId).toBe(firstRun);
+    expect(item).toMatchObject({ status: 'active', bytesDone: 12, bytesTotal: 40 });
+    // The stale "Loading into memory" line is gone again.
+    expect(item.detail ?? '').toBe('');
+  });
+
+  it('never opens an item from a load event alone', () => {
+    applyServerDownloadEvent(hub, {
+      id: 'm',
+      category: 'download',
+      label: 'Loading m into memory...',
+      phase: 'load',
+      status: 'active',
+      progress: 100,
+    });
+
+    expect(hub.snapshot()).toHaveLength(0);
   });
 
   it('completes and fails a running item on terminal events', () => {
@@ -216,6 +257,56 @@ describe('applyServerDownloadEvent', () => {
     const byId = Object.fromEntries(hub.snapshot().map((i) => [i.id, i]));
     expect(byId.ok.status).toBe('complete');
     expect(byId.bad).toMatchObject({ status: 'error', error: 'Failed to load bad' });
+  });
+
+  it('counts a load failure after the bytes arrived as a finished download', () => {
+    // The download itself succeeded; what failed is loading the weights
+    // (CUDA OOM, bad file). That is reported as a server warning, not as a
+    // failed download.
+    applyServerDownloadEvent(hub, {
+      id: 'm',
+      category: 'download',
+      label: 'Downloading m...',
+      phase: 'download',
+      status: 'active',
+      downloadedBytes: 10,
+      totalBytes: 10,
+    });
+    applyServerDownloadEvent(hub, {
+      id: 'm',
+      category: 'download',
+      label: 'Failed to load m',
+      phase: 'load',
+      status: 'error',
+      error: 'RuntimeError: CUDA out of memory',
+    });
+
+    expect(only().status).toBe('complete');
+  });
+
+  it('fails the item with the server error text when the download itself broke', () => {
+    applyServerDownloadEvent(hub, {
+      id: 'm',
+      category: 'download',
+      label: 'Downloading m...',
+      phase: 'download',
+      status: 'active',
+      downloadedBytes: 4,
+      totalBytes: 10,
+    });
+    applyServerDownloadEvent(hub, {
+      id: 'm',
+      category: 'download',
+      label: 'Failed to load m',
+      phase: 'download',
+      status: 'error',
+      error: 'ConnectionError: connection reset',
+    });
+
+    expect(only()).toMatchObject({
+      status: 'error',
+      error: 'ConnectionError: connection reset',
+    });
   });
 
   it('ignores terminal events for ids that never downloaded', () => {
