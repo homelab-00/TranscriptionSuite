@@ -35,37 +35,67 @@ from pathlib import Path
 
 SERVER_USER = "appuser"
 EVENTS_FILE_ENV = "STARTUP_EVENTS_FILE"
+# Where docker-compose mounts the dashboard's events directory. This step only
+# ever acts on a file directly inside it: the env var is operator-settable, and
+# pointed anywhere else (the mounted config directory, say) it would have root
+# re-own and re-mode something that is none of its business.
+EVENTS_MOUNT_DIR = Path("/startup-events")
 
 
 def log(message: str) -> None:
     print(f"[prepare-events-file] {message}", flush=True)
 
 
-def prepare_events_file(path: Path, uid: int, gid: int) -> bool:
+def prepare_events_file(
+    path: Path,
+    uid: int,
+    gid: int,
+    allowed_dir: Path = EVENTS_MOUNT_DIR,
+) -> bool:
     """Give *path* to (*uid*, *gid*) and make its directory traversable.
 
     Returns False when there is nothing to prepare.
+
+    This runs as root on a host-controlled mount, so every change is made
+    through an open descriptor that was first checked: the file is opened
+    without following a symlink and must be a regular file, and nothing can be
+    swapped in between that check and the ownership or mode change.
     """
-    try:
-        info = os.lstat(path)
-    except OSError:
-        return False
-    # A regular file only: this runs as root on a host-controlled mount, and
-    # must not be steered into re-owning whatever a symlink points at.
-    if not stat.S_ISREG(info.st_mode):
-        log(f"skipping {path}: not a regular file")
+    if path.parent != allowed_dir:
+        log(f"skipping {path}: not inside {allowed_dir}")
         return False
 
     try:
-        os.chown(path, uid, gid, follow_symlinks=False)
-    except OSError as exc:
-        # Docker Desktop file sharing rejects chown; the mount is writable anyway.
-        log(f"could not change ownership of {path}: {exc}")
-    for target, mode in ((path, 0o644), (path.parent, 0o711)):
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return False  # missing, or a symlink
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            log(f"skipping {path}: not a regular file")
+            return False
         try:
-            os.chmod(target, mode)
+            os.fchown(fd, uid, gid)
         except OSError as exc:
-            log(f"could not set mode {mode:o} on {target}: {exc}")
+            # Docker Desktop file sharing rejects chown; the mount is writable anyway.
+            log(f"could not change ownership of {path}: {exc}")
+        try:
+            os.fchmod(fd, 0o644)
+        except OSError as exc:
+            log(f"could not set mode 644 on {path}: {exc}")
+    finally:
+        os.close(fd)
+
+    try:
+        dir_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
+        log(f"could not open {path.parent}: {exc}")
+        return True
+    try:
+        os.fchmod(dir_fd, 0o711)
+    except OSError as exc:
+        log(f"could not set mode 711 on {path.parent}: {exc}")
+    finally:
+        os.close(dir_fd)
     return True
 
 

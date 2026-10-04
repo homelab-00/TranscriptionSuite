@@ -52,10 +52,9 @@ logger = logging.getLogger(__name__)
 # admin reload), so each thread tracks its own download independently.
 _thread_local = threading.local()
 
-# Process-wide state: which trackers are live, and how many contexts hold the
-# module-level patches. Guarded by _state_lock.
+# Process-wide state: how many contexts hold the module-level patches.
+# Guarded by _state_lock.
 _state_lock = threading.RLock()
-_active_trackers: list[_DownloadTracker] = []
 _patch_refcount = 0
 _patch_originals: list[tuple[ModuleType, str, Any]] = []
 
@@ -97,23 +96,6 @@ def _set_tracker(tracker: _DownloadTracker | None) -> None:
     _thread_local.tracker = tracker
 
 
-def _resolve_tracker() -> _DownloadTracker | None:
-    """Tracker a newly created bar belongs to.
-
-    The current thread's tracker when there is one. Otherwise, if exactly one
-    download is being tracked process-wide, that one: a bar created on a
-    library worker thread we did not instrument still belongs to it. With
-    several downloads active the owner cannot be known, so nothing is guessed.
-    """
-    tracker = _get_tracker()
-    if tracker is not None:
-        return tracker
-    with _state_lock:
-        if len(_active_trackers) == 1:
-            return _active_trackers[0]
-    return None
-
-
 class _DownloadTracker:
     """Aggregates download progress across multiple tqdm instances for one model."""
 
@@ -153,21 +135,37 @@ class _DownloadTracker:
         if delta == 0:
             return
         with self._lock:
+            # A bar can outlive its download (the xet backend may report once
+            # more after the call returned). Anything emitted after the
+            # terminal event would reopen the download in the dashboard.
+            if self._closed:
+                return
             self.total_bytes = max(0, self.total_bytes + delta)
             if delta > 0:
                 self.download_started = True
+                # More bytes to fetch: whatever was announced as "loading" is
+                # downloading again (a pipeline fetching its next sub-model).
+                self._load_phase_emitted = False
             self._emit_progress()
+            # A total corrected downwards (xet deduplication) can be what
+            # completes the download.
+            self._maybe_enter_load_phase()
 
     def on_external_start(self, total: int) -> None:
         """A non-tqdm download begins; *total* may be 0 when the size is unknown."""
         with self._lock:
+            if self._closed:
+                return
             self.download_started = True
             self.total_bytes += max(0, total)
+            self._load_phase_emitted = False
             self._emit_progress()
 
     def on_tqdm_update(self, n: int | float) -> None:
         """Accumulate downloaded bytes; emit throttled progress event."""
         with self._lock:
+            if self._closed:
+                return
             self.downloaded_bytes += int(n)
             now = time.monotonic()
             if now - self._last_emit_time >= _EMIT_INTERVAL_S:
@@ -186,6 +184,11 @@ class _DownloadTracker:
     @property
     def download_finished(self) -> bool:
         return self.total_bytes > 0 and self.downloaded_bytes >= self.total_bytes
+
+    @property
+    def download_settled(self) -> bool:
+        """The download is confirmed over: every byte in, and no new file since."""
+        return self._load_phase_emitted
 
     def _maybe_enter_load_phase(self) -> None:
         # Every registered byte is in. That is the point where the (possibly
@@ -296,14 +299,25 @@ class _ProgressTqdm:
 
         # Byte bars are created with unit="B" (or no unit at all); a bar with
         # any other unit counts files or items and must never reach the total.
+        # huggingface_hub 1.x keeps two byte bars per download: the bytes
+        # written to disk, and `<name>.transfer` for the bytes off the network.
+        # Both grow by the file size, so only the first one is counted.
+        is_transfer_bar = isinstance(name, str) and name.endswith(".transfer")
         unit = kwargs.get("unit")
-        if not self.disable and self._counts_bytes and unit in (None, "B"):
-            try:
-                self._tracker = _resolve_tracker()
-            except Exception:
-                logger.debug("Could not resolve a download tracker", exc_info=True)
+        if not self.disable and self._counts_bytes and not is_transfer_bar and unit in (None, "B"):
+            # Only a bar created on a thread that belongs to the load is bound.
+            # An owner is never guessed for a bar from some other thread: that
+            # put unrelated bytes under the wrong name.
+            self._tracker = _get_tracker()
 
         self.total = total  # registers with the tracker through the setter
+        # A resumed file is announced with its full size and `initial` set to
+        # what is already on disk; those bytes are done.
+        if self._tracker is not None and self._registered_total > 0 and initial:
+            try:
+                self._tracker.on_tqdm_update(initial)
+            except Exception:
+                logger.debug("Download tracker rejected a resume offset", exc_info=True)
 
     @property
     def total(self) -> int | float | None:
@@ -412,6 +426,31 @@ class _ProgressTqdm:
     def format_dict(self) -> dict[str, Any]:
         return {"n": self.n, "total": self.total}
 
+    # Static formatters the xet progress reporter of huggingface_hub 1.x calls
+    # on the tqdm class itself (`tqdm.format_sizeof(speed)`).
+
+    @staticmethod
+    def format_sizeof(num: float, suffix: str = "", divisor: float = 1000) -> str:
+        for unit in ("", "k", "M", "G", "T", "P", "E", "Z"):
+            if abs(num) < 999.5:
+                if abs(num) < 99.95:
+                    if abs(num) < 9.995:
+                        return f"{num:1.2f}{unit}{suffix}"
+                    return f"{num:2.1f}{unit}{suffix}"
+                return f"{num:3.0f}{unit}{suffix}"
+            num /= divisor
+        return f"{num:3.1f}Y{suffix}"
+
+    @staticmethod
+    def format_interval(t: float) -> str:
+        minutes, seconds = divmod(int(t), 60)
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours:d}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes:02d}:{seconds:02d}"
+
+    @staticmethod
+    def format_num(n: float) -> str:
+        return f"{n:.3g}".replace("e+0", "e+").replace("e-0", "e-")
+
     def reset(self, total: int | float | None = None) -> None:
         self.n = 0
         if total is not None:
@@ -474,6 +513,8 @@ _PATCH_TARGETS: list[tuple[str, str]] = [
     ("huggingface_hub.utils.tqdm", "tqdm"),
     ("huggingface_hub.file_download", "tqdm"),
     ("huggingface_hub._snapshot_download", "hf_tqdm"),
+    # huggingface_hub 1.x: the xet reporter builds its bars from its own copy.
+    ("huggingface_hub.utils._xet_progress_reporting", "tqdm"),
     ("torch.hub", "tqdm"),
 ]
 
@@ -491,6 +532,11 @@ def _patch_hf_tqdm(
 
     Returns a list of (module, attr_name, original_value) for restoration.
     """
+    # Two passes: resolve every original first, replace afterwards. Importing
+    # one target can copy a name out of another at import time
+    # (`from .utils.tqdm import tqdm as hf_tqdm`); if that other target were
+    # already patched, the copy would be our class and "restoring" it would
+    # leave huggingface_hub patched for the rest of the process.
     originals: list[tuple[ModuleType, str, Any]] = []
     for module_path, attr in _PATCH_TARGETS:
         if module_path in _PATCH_ONLY_IF_LOADED and module_path not in sys.modules:
@@ -499,9 +545,12 @@ def _patch_hf_tqdm(
             mod = importlib.import_module(module_path)
             if hasattr(mod, attr):
                 originals.append((mod, attr, getattr(mod, attr)))
-                setattr(mod, attr, tqdm_cls)
-        except (ImportError, AttributeError):
-            logger.debug("Could not patch %s.%s — skipping", module_path, attr)
+        except Exception:
+            # Any failure of one target (not just ImportError) only costs that
+            # target: the others are still patched, and nothing is left half done.
+            logger.debug("Could not patch %s.%s - skipping", module_path, attr, exc_info=True)
+    for mod, attr, _original in originals:
+        setattr(mod, attr, tqdm_cls)
     return originals
 
 
@@ -515,8 +564,8 @@ def _patch_thread_map() -> list[tuple[ModuleType, str, Any]]:
             return []
         setattr(mod, attr, _make_tracking_thread_map(original))
         return [(mod, attr, original)]
-    except (ImportError, AttributeError):
-        logger.debug("Could not patch %s.%s — skipping", module_path, attr)
+    except Exception:
+        logger.debug("Could not patch %s.%s - skipping", module_path, attr, exc_info=True)
         return []
 
 
@@ -536,9 +585,11 @@ def _acquire_patches() -> None:
     """
     global _patch_refcount, _patch_originals
     with _state_lock:
-        _patch_refcount += 1
-        if _patch_refcount == 1:
+        if _patch_refcount == 0:
+            # Counted only once the patches are in: a failed setup must not
+            # leave a count behind, or they would never be installed again.
             _patch_originals = _patch_hf_tqdm(_ProgressTqdm) + _patch_thread_map()
+        _patch_refcount += 1
 
 
 def _release_patches() -> None:
@@ -605,8 +656,6 @@ def track_model_download(
             settle_s=_LOAD_PHASE_SETTLE_S,
         )
         _set_tracker(tracker)
-        with _state_lock:
-            _active_trackers.append(tracker)
         # No phase on this one: until bytes actually flow, the load is not
         # known to be a download and must not look like one.
         _safe_emit(
@@ -638,9 +687,6 @@ def track_model_download(
                 _release_patches()
         except Exception:
             logger.debug("Download tracking patches could not be released", exc_info=True)
-        with _state_lock:
-            if tracker is not None and tracker in _active_trackers:
-                _active_trackers.remove(tracker)
         _set_tracker(None)
 
 
@@ -658,7 +704,10 @@ def _finish_tracking(
     if failure is not None:
         # A failure only counts as a failed *download* while bytes were still
         # outstanding; anything else (CUDA OOM, bad weights) is a load failure.
-        mid_download = tracker.download_started and not tracker.download_finished
+        # "Every registered byte is in" is not enough: in a multi-file download
+        # the next file may have failed at its first request. Only a download
+        # that had settled is treated as finished.
+        mid_download = tracker.download_started and not tracker.download_settled
         _safe_emit(
             tracker.event_id,
             "download",

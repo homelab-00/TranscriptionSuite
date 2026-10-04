@@ -2504,7 +2504,9 @@ def test_raise_dependency_sync_failure_no_network_hint_for_subprocess_timeout(
 
     hint = "\n".join(logs)
     assert "start the server again" not in hint
-    assert events == []
+    # No remedy hint of either kind. The dependency download itself is still
+    # closed as failed for the dashboard's download bar (GH-318).
+    assert [args[0] for args, _ in events] == ["bootstrap-deps"]
 
 
 def test_pyproject_declares_vibevoice_dependency_metadata() -> None:
@@ -2827,19 +2829,21 @@ def test_dependency_sync_reports_progress_and_survives_a_retry(
     assert deps[-1]["status"] == "complete"
 
 
-def test_dependency_sync_reports_the_final_failure(
+def test_a_failed_sync_does_not_report_a_failure_by_itself(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """A failed delta-sync is retried as a rebuild. Reporting the failure here
+    raised an error toast for an install that then succeeded."""
     module = _load_bootstrap_module()
     events = _capture_events(module, monkeypatch)
 
     def fake_sync(**kwargs: object) -> None:
         kwargs["on_line"]("Downloading torch (1.2GiB)")  # type: ignore[operator]
-        raise RuntimeError("Command failed (2): uv sync\nno space left on device")
+        raise RuntimeError("Command failed (2): uv sync\nerror: lock file is out of date")
 
     monkeypatch.setattr(module, "run_dependency_sync", fake_sync)
 
-    with pytest.raises(RuntimeError, match="no space left"):
+    with pytest.raises(RuntimeError, match="out of date"):
         module.run_dependency_sync_with_retries(
             venv_dir=tmp_path / "venv",
             cache_dir=tmp_path / "cache",
@@ -2848,7 +2852,113 @@ def test_dependency_sync_reports_the_final_failure(
         )
 
     deps = [e for e in events if e["id"] == "bootstrap-deps"]
+    assert deps and all(e["status"] == "active" for e in deps)
+
+
+def test_the_final_sync_failure_is_reported_with_uvs_own_error_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one place every unrecoverable sync failure passes through."""
+    module = _load_bootstrap_module()
+    events = _capture_events(module, monkeypatch)
+    failure = RuntimeError(
+        "Command failed (2): uv sync --frozen --no-dev\n"
+        "Resolved 210 packages in 2ms\n"
+        "error: Failed to download `torch==2.8.0`\n"
+        "  Caused by: No space left on device (os error 28)"
+    )
+
+    with pytest.raises(RuntimeError):
+        module._raise_dependency_sync_failure(failure, "rebuild-sync")
+
+    deps = [e for e in events if e["id"] == "bootstrap-deps"]
     assert deps[-1]["status"] == "error"
+    assert deps[-1]["category"] == "download"
+    assert deps[-1]["phase"] == "download"
+    # What went wrong, not the command line that was run.
+    assert deps[-1]["error"] == "Failed to download `torch==2.8.0`"
+
+
+def test_run_command_streaming_kills_the_child_when_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import io
+
+    module = _load_bootstrap_module()
+    killed: list[bool] = []
+
+    class FakePopen:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self.stdout = io.StringIO("")
+            self.stderr = io.StringIO("")
+            self.returncode = None
+
+        def wait(self, timeout: float | None = None) -> int:
+            if not killed:
+                raise KeyboardInterrupt
+            return -9
+
+        def kill(self) -> None:
+            killed.append(True)
+
+    monkeypatch.setattr(module.subprocess, "Popen", FakePopen)
+
+    with pytest.raises(KeyboardInterrupt):
+        module.run_command(["uv", "sync"], timeout_seconds=30, env={}, on_line=lambda _l: None)
+
+    assert killed == [True]
+
+
+def test_pyannote_preload_killed_by_its_timeout_closes_the_download(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A child killed mid-download cannot write its own terminal event, which
+    left the download running in the dashboard until the container stopped."""
+    import sys
+
+    module = _load_bootstrap_module()
+    events = _capture_events(module, monkeypatch)
+
+    def killed(*_args: object, **kwargs: object):
+        raise subprocess.TimeoutExpired(cmd="python", timeout=kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(module.subprocess, "run", killed)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        module.check_diarization_access(
+            venv_python=Path(sys.executable),
+            diarization_model="pyannote/speaker-diarization-community-1",
+            hf_token="hf_test",
+            hf_home=str(tmp_path / "hf"),
+            timeout_seconds=120,
+        )
+
+    assert events[-1]["id"] == "diarization-model-load-pyannote--speaker-diarization-community-1"
+    assert events[-1]["status"] == "error"
+    assert events[-1]["phase"] == "download"
+
+
+def test_sensevoice_warm_download_killed_by_its_timeout_closes_the_download(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    module = _load_bootstrap_module()
+    events = _capture_events(module, monkeypatch)
+
+    def killed(*_args: object, **kwargs: object):
+        raise subprocess.TimeoutExpired(cmd="python", timeout=kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(module.subprocess, "run", killed)
+
+    assert (
+        module.warm_download_sensevoice_models(
+            venv_python=Path(sys.executable), timeout_seconds=120
+        )
+        is False
+    )
+    assert events[-1]["id"] == "sensevoice-aux"
+    assert events[-1]["status"] == "error"
 
 
 def test_feature_install_runs_through_the_progress_reporter(

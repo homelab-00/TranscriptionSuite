@@ -356,11 +356,22 @@ class WhisperXBackend(STTBackend):
         # whisperx >= 3.8 renamed the HuggingFace-token kwarg from ``use_auth_token``
         # to ``token`` (GH #152). Passing the old name raises TypeError, which the
         # route silently swallows and degrades to the fragile sequential pyannote path.
-        diarize_model = DiarizationPipeline(
-            model_name=diarization_model,
-            token=token,
-            device=self._device,
-        )
+        # The pipeline downloads its pyannote models on first use, in the
+        # middle of this transcription; report it to the dashboard's download
+        # bar (GH-318). Tracking never raises into the job.
+        from server.core.download_progress import track_model_download
+
+        tracked_name = diarization_model or "pyannote/speaker-diarization"
+        with track_model_download(
+            tracked_name,
+            kind="diarization-model",
+            name=f"Diarization model ({tracked_name.split('/')[-1]})",
+        ):
+            diarize_model = DiarizationPipeline(
+                model_name=diarization_model,
+                token=token,
+                device=self._device,
+            )
 
         diarize_kwargs: dict[str, Any] = {}
         if num_speakers is not None:

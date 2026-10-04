@@ -450,9 +450,11 @@ class AudioToTextRecorder:
 
             backend = create_backend(self.model_name)
             # Report a first-time download to the dashboard's download bar
-            # (GH-318). A no-op when the caller already tracks this load
-            # (model_manager.load_transcription_model), so only the recorders
-            # that load on their own - Live Mode - open a download here.
+            # (GH-318). This is where a model is actually fetched: a recorder
+            # loads in its constructor, so for the main model as well as for
+            # Live Mode the download opens here. A reload through
+            # model_manager.load_transcription_model is already tracked by
+            # that caller, and this nests into it as a no-op.
             from server.core.download_progress import track_model_download
 
             is_live = self.instance_name.startswith(("live", "realtime"))

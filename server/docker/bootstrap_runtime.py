@@ -368,6 +368,10 @@ def run_command(
     return result
 
 
+# How long to wait for the output pumps after the command has exited.
+_PUMP_JOIN_TIMEOUT_SECONDS = 30
+
+
 def _run_streaming(
     cmd: list[str],
     timeout_seconds: int,
@@ -414,15 +418,23 @@ def _run_streaming(
         proc.kill()
         proc.wait()
         for thread in pumps:
-            thread.join(timeout=5)
+            thread.join(timeout=_PUMP_JOIN_TIMEOUT_SECONDS)
         raise subprocess.TimeoutExpired(
             cmd,
             timeout_seconds,
             output="".join(stdout_lines),
             stderr="".join(stderr_lines),
         ) from None
+    except BaseException:
+        # Interrupted (Ctrl-C, shutdown): do not leave the child running, as
+        # subprocess.run would not either.
+        proc.kill()
+        proc.wait()
+        raise
+    # Bounded: a grandchild that inherited the pipes can hold them open after
+    # the command itself has exited, and must not hang the bootstrap.
     for thread in pumps:
-        thread.join()
+        thread.join(timeout=_PUMP_JOIN_TIMEOUT_SECONDS)
     return subprocess.CompletedProcess(
         cmd, proc.returncode, "".join(stdout_lines), "".join(stderr_lines)
     )
@@ -514,6 +526,19 @@ def _in_flight_detail(names: list[str]) -> str:
     return f"{', '.join(names[:3])} +{len(names) - 3} more"
 
 
+def _uv_failure_summary(error: BaseException | None) -> str:
+    """What went wrong, in one line: uv's own `error:` line when there is one.
+
+    The failure text starts with the command line that was run, which says
+    nothing about the cause.
+    """
+    lines = [line.strip() for line in str(error or "").splitlines() if line.strip()]
+    for line in reversed(lines):
+        if line.lower().startswith("error:"):
+            return line[len("error:") :].strip()[:300] or "Download failed"
+    return (lines[0][:300] if lines else "") or "Download failed"
+
+
 class UvDownloadReporter:
     """Turns the output of a uv run into download events for the dashboard.
 
@@ -585,8 +610,7 @@ class UvDownloadReporter:
             label = f"{self.name} downloaded"
         else:
             label = f"{self.name} download failed"
-            text = str(error).strip().splitlines()[0] if error and str(error).strip() else ""
-            extra["error"] = text[:300] or "Download failed"
+            extra["error"] = _uv_failure_summary(error)
         emit_event(self.event_id, "download", label, status=status, **extra)
 
 
@@ -1042,14 +1066,16 @@ def run_dependency_sync_with_retries(
             )
             reporter.complete()
             return
-        except subprocess.TimeoutExpired as exc:
+        except subprocess.TimeoutExpired:
             # The whole sync exceeded its (already 3h) budget — a retry would
             # just spend another one.
-            reporter.fail(exc)
             raise
         except Exception as exc:
+            # No failure is reported from here: a failed delta-sync is retried
+            # as a rebuild, and the download must stay one running item across
+            # that too. The unrecoverable case is reported by
+            # _raise_dependency_sync_failure, where every one of them ends up.
             if attempt >= total_attempts or not is_transient_network_failure(str(exc)):
-                reporter.fail(exc)
                 raise
             reporter.restart()
             delay = min(
@@ -1122,6 +1148,20 @@ def _raise_dependency_sync_failure(exc: Exception, final_sync_mode: str) -> None
             status="error",
             phase="bootstrap",
         )
+    # Close the dependency download in the dashboard (GH-318). Emitted here,
+    # the single point every unrecoverable sync failure passes through, so an
+    # attempt that is retried or escalated never shows as a failure. A no-op
+    # for the dashboard when nothing was being downloaded.
+    emit_event(
+        "bootstrap-deps",
+        "download",
+        "Runtime dependencies download failed",
+        status="error",
+        phase="download",
+        kind="server-deps",
+        name="Runtime dependencies",
+        error=_uv_failure_summary(exc),
+    )
     failure_snippet = error_text if len(error_text) <= 240 else f"{error_text[:237]}..."
     raise RuntimeError(
         f"Dependency sync failed for mode={final_sync_mode}: {failure_snippet}"
@@ -1687,6 +1727,23 @@ def _track_download(app_root, model_name, **kwargs):
 """
 
 
+def _emit_child_download_aborted(event_id: str, name: str, kind: str) -> None:
+    """Close a child script's download that it could not close itself.
+
+    A no-op for the dashboard when the child never started downloading.
+    """
+    emit_event(
+        event_id,
+        "download",
+        f"{name} download did not finish",
+        status="error",
+        phase="download",
+        kind=kind,
+        name=name,
+        error="The download was stopped before it finished",
+    )
+
+
 def check_diarization_access(
     venv_python: Path,
     diarization_model: str,
@@ -1750,14 +1807,25 @@ except Exception as exc:
 
     env = os.environ.copy()
     env["HF_HOME"] = hf_home
-    result = subprocess.run(
-        [str(venv_python), "-c", checker, diarization_model, hf_token, str(APP_ROOT)],
-        text=True,
-        capture_output=True,
-        timeout=max(120, min(timeout_seconds, 1800)),
-        env=env,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [str(venv_python), "-c", checker, diarization_model, hf_token, str(APP_ROOT)],
+            text=True,
+            capture_output=True,
+            timeout=max(120, min(timeout_seconds, 1800)),
+            env=env,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        # The child was killed mid-download and could not write its own
+        # terminal event; without one the download would stay running in the
+        # dashboard. Same id the child (and the server, later) reports under.
+        _emit_child_download_aborted(
+            f"diarization-model-load-{diarization_model.replace('/', '--')}",
+            "Diarization model (" + diarization_model.split("/")[-1] + ")",
+            "diarization-model",
+        )
+        raise
 
     output = (result.stdout or "").strip().splitlines()
     if not output:
@@ -2023,6 +2091,10 @@ except Exception as exc:
         )
     except Exception as exc:
         log(f"SenseVoice CAM++ warm-download skipped (non-fatal): {type(exc).__name__}: {exc}")
+        # Killed by its timeout: the child could not close its own download.
+        _emit_child_download_aborted(
+            "sensevoice-aux", "SenseVoice speaker models", "diarization-model"
+        )
         return False
 
     output = (result.stdout or "").strip().splitlines()

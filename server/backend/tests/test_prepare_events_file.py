@@ -47,7 +47,12 @@ def test_opens_the_file_for_the_server_user_and_the_dir_for_traversal(tmp_path: 
     module = _load_module()
     events_file = _host_style_events_file(tmp_path)
 
-    assert module.prepare_events_file(events_file, os.getuid(), os.getgid()) is True
+    assert (
+        module.prepare_events_file(
+            events_file, os.getuid(), os.getgid(), allowed_dir=events_file.parent
+        )
+        is True
+    )
 
     # Owner (the server user) writes; the host user reads it back as "other".
     assert _mode(events_file) == 0o644
@@ -60,18 +65,20 @@ def test_hands_ownership_of_the_file_to_the_server_user(
 ) -> None:
     module = _load_module()
     events_file = _host_style_events_file(tmp_path)
-    chowned: list[tuple[str, int, int, bool]] = []
+    chowned: list[tuple[int, int, int]] = []
+    file_inode = events_file.stat().st_ino
 
-    def fake_chown(path, uid, gid, *, follow_symlinks=True):
-        chowned.append((str(path), uid, gid, follow_symlinks))
+    def fake_fchown(fd, uid, gid):
+        chowned.append((os.fstat(fd).st_ino, uid, gid))
 
-    monkeypatch.setattr(module.os, "chown", fake_chown)
+    monkeypatch.setattr(module.os, "fchown", fake_fchown)
 
-    module.prepare_events_file(events_file, 10000, 10000)
+    module.prepare_events_file(events_file, 10000, 10000, allowed_dir=events_file.parent)
 
     # Only the file changes owner - the directory must stay the host user's so
-    # the dashboard can still clean it up.
-    assert chowned == [(str(events_file), 10000, 10000, False)]
+    # the dashboard can still clean it up. And it is done through the open
+    # descriptor, so nothing can be swapped in between the check and the change.
+    assert chowned == [(file_inode, 10000, 10000)]
 
 
 def test_still_fixes_modes_when_the_mount_ignores_ownership_changes(
@@ -84,16 +91,22 @@ def test_still_fixes_modes_when_the_mount_ignores_ownership_changes(
     def refuse(*_args, **_kwargs):
         raise PermissionError("Operation not permitted")
 
-    monkeypatch.setattr(module.os, "chown", refuse)
+    monkeypatch.setattr(module.os, "fchown", refuse)
 
-    assert module.prepare_events_file(events_file, 10000, 10000) is True
+    assert (
+        module.prepare_events_file(events_file, 10000, 10000, allowed_dir=events_file.parent)
+        is True
+    )
     assert _mode(events_file) == 0o644
 
 
 def test_does_nothing_when_there_is_no_events_file(tmp_path: Path) -> None:
     module = _load_module()
 
-    assert module.prepare_events_file(tmp_path / "missing.jsonl", 10000, 10000) is False
+    assert (
+        module.prepare_events_file(tmp_path / "missing.jsonl", 10000, 10000, allowed_dir=tmp_path)
+        is False
+    )
 
 
 def test_refuses_a_symlink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -105,11 +118,43 @@ def test_refuses_a_symlink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     link = tmp_path / "startup-events.jsonl"
     link.symlink_to(target)
     chowned: list[object] = []
-    monkeypatch.setattr(module.os, "chown", lambda *a, **k: chowned.append(a))
+    monkeypatch.setattr(module.os, "fchown", lambda *a, **k: chowned.append(a))
 
-    assert module.prepare_events_file(link, 10000, 10000) is False
+    assert module.prepare_events_file(link, 10000, 10000, allowed_dir=tmp_path) is False
     assert chowned == []
     assert _mode(target) == 0o600
+
+
+def test_refuses_a_file_outside_the_events_mount(tmp_path: Path) -> None:
+    """STARTUP_EVENTS_FILE is operator-settable. Pointed at, say, the mounted
+    config directory, this step would have re-moded that directory as root."""
+    module = _load_module()
+    elsewhere = tmp_path / "user-config"
+    elsewhere.mkdir(mode=0o700)
+    victim = elsewhere / "config.yaml"
+    victim.write_text("x", encoding="utf-8")
+    victim.chmod(0o600)
+
+    assert (
+        module.prepare_events_file(
+            victim, os.getuid(), os.getgid(), allowed_dir=tmp_path / "startup-events"
+        )
+        is False
+    )
+    assert _mode(victim) == 0o600
+    assert _mode(elsewhere) == 0o700
+
+
+def test_main_only_acts_inside_the_events_mount(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_module()
+    events_file = _host_style_events_file(tmp_path)
+    monkeypatch.setenv("STARTUP_EVENTS_FILE", str(events_file))
+
+    assert str(module.EVENTS_MOUNT_DIR) == "/startup-events"
+    assert module.main() == 0
+    assert _mode(events_file) == 0o600  # a tmp path is not the mount: untouched
 
 
 def test_main_is_a_no_op_without_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -6,7 +6,8 @@
  *
  * An item is created only on evidence of an actual download - a `download`
  * phase, numeric byte counts, or a sub-100 percent - so loading a model that
- * is already in the cache never raises the download bar.
+ * is already in the cache never raises the download bar. Once open, it ends
+ * only on the server's terminal event for that id.
  *
  * Understands two event shapes:
  *  - current: `kind`, `name`, `phase` ('download' | 'load'), numeric
@@ -17,6 +18,9 @@
 
 import type { DownloadHub, DownloadKind } from './downloadHub.js';
 import type { StartupEvent } from './startupEventWatcher.js';
+
+/** Shown on an item whose bytes are in while the server loads the weights. */
+const LOADING_DETAIL = 'Loading into memory';
 
 /** Emitted with category `download` by older servers, but it is a load failure. */
 const NOT_A_DOWNLOAD_IDS = new Set(['model-preload-error']);
@@ -83,8 +87,12 @@ export function applyServerDownloadEvent(hub: DownloadHub, event: StartupEvent):
     (event.phase !== 'load' && (hasBytes || (legacyPercent !== undefined && legacyPercent < 100)));
 
   if (!isDownloading) {
-    // The bytes are in; the server is now loading the weights into memory.
-    if (running && (event.phase === 'load' || (legacyPercent ?? 0) >= 100)) running.complete();
+    // The bytes are in and the server is loading the weights into memory.
+    // The item stays, saying so, and ends on the terminal event: a pipeline
+    // can go on to download its next model, which continues this same run.
+    if (running && (event.phase === 'load' || (legacyPercent ?? 0) >= 100)) {
+      running.update({ detail: LOADING_DETAIL });
+    }
     return;
   }
 
@@ -99,7 +107,8 @@ export function applyServerDownloadEvent(hub: DownloadHub, event: StartupEvent):
     handle.update({
       bytesDone: isNumber(event.downloadedBytes) ? event.downloadedBytes : undefined,
       bytesTotal: isNumber(event.totalBytes) ? event.totalBytes : undefined,
-      ...(event.detail ? { detail: event.detail } : {}),
+      // Always set: clears a "Loading into memory" line left by an earlier stage.
+      detail: event.detail ?? '',
     });
     return;
   }

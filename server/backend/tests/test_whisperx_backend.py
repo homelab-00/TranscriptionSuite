@@ -251,6 +251,52 @@ def test_whisperx_diarization_path_uses_compat_transcribe(monkeypatch) -> None:
     assert fake_model.options is original_options
 
 
+def test_whisperx_diarization_pipeline_download_is_reported(monkeypatch) -> None:
+    """WhisperX builds its own pyannote pipeline, which downloads on first use
+    in the middle of a transcription. It was the one model download the
+    download bar never saw (GH-318)."""
+    module = _import_whisperx_backend()
+    backend = module.WhisperXBackend()
+    backend._model = _ModernFakeModel()
+    backend._device = "cpu"
+    backend._align = lambda wx_result, audio, language: wx_result
+
+    events: list[dict] = []
+
+    def fake_emit(id: str, category: str, label: str, status: str = "active", **extra):
+        events.append({"id": id, "label": label, "status": status, **extra})
+
+    monkeypatch.setattr("server.core.download_progress.emit_event", fake_emit)
+
+    whisperx_mod = types.ModuleType("whisperx")
+    whisperx_mod.assign_word_speakers = lambda diarize_segments, wx_result: wx_result
+    diarize_mod = types.ModuleType("whisperx.diarize")
+
+    class DownloadingDiarizationPipeline:
+        def __init__(self, model_name=None, token=None, device="cpu", cache_dir=None) -> None:
+            from server.core.download_progress import _ProgressTqdm
+
+            bar = _ProgressTqdm(total=30_000_000, unit="B")
+            bar.update(30_000_000)
+
+        def __call__(self, audio, **kwargs):
+            return [{"speaker": "SPEAKER_00"}]
+
+    diarize_mod.DiarizationPipeline = DownloadingDiarizationPipeline
+    monkeypatch.setitem(sys.modules, "whisperx", whisperx_mod)
+    monkeypatch.setitem(sys.modules, "whisperx.diarize", diarize_mod)
+
+    result = backend.transcribe_with_diarization(
+        np.zeros(16000, dtype=np.float32), beam_size=3, hf_token="hf_test"
+    )
+
+    assert result is not None
+    done = [e for e in events if e["status"] == "complete"][-1]
+    assert done["kind"] == "diarization-model"
+    assert done["downloaded"] is True
+    assert done["totalBytes"] == 30_000_000
+
+
 def test_whisperx_backend_forwards_batch_size_modern_signature() -> None:
     """batch_size stored during load() must be forwarded to model.transcribe()."""
     module = _import_whisperx_backend()
