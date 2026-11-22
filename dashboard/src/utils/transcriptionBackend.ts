@@ -5,6 +5,7 @@ export type TranscriptionBackendType =
   | 'vibevoice_asr'
   | 'mlx_parakeet'
   | 'mlx_canary'
+  | 'mlx_gigaam'
   | 'mlx_whisper'
   | 'mlx_vibevoice';
 
@@ -16,6 +17,8 @@ function normalizeModelName(modelName: string | null | undefined): string {
 const MLX_PARAKEET_PATTERN = /^mlx-community\/parakeet/i;
 // Matches community Canary MLX ports: eelcor/canary-1b-v2-mlx, Mediform/canary-1b-v2-mlx-q8, etc.
 const MLX_CANARY_PATTERN = /^[^/]+\/canary[^/]*-mlx/i;
+// Matches the GigaAM v3 MLX conversions: al-bo/gigaam-v3-e2e-rnnt-mlx, etc.
+const MLX_GIGAAM_PATTERN = /^[^/]+\/gigaam[^/]*-mlx/i;
 // MLX VibeVoice must be checked before the generic VibeVoice pattern.
 const MLX_VIBEVOICE_PATTERN = /^mlx-community\/vibevoice-asr/i;
 const MLX_PATTERN = /^mlx-community\//i;
@@ -32,6 +35,7 @@ export function detectTranscriptionBackendType(
   if (/^[^/]+\/vibevoice-asr(?:-[^/]+)?$/.test(model)) return 'vibevoice_asr';
   if (MLX_PARAKEET_PATTERN.test(model)) return 'mlx_parakeet';
   if (MLX_CANARY_PATTERN.test(model)) return 'mlx_canary';
+  if (MLX_GIGAAM_PATTERN.test(model)) return 'mlx_gigaam';
   if (MLX_PATTERN.test(model)) return 'mlx_whisper';
   return 'whisper';
 }

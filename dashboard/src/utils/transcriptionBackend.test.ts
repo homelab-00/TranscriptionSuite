@@ -97,3 +97,11 @@ describe('supportsExplicitWordTimestampToggle', () => {
     expect(supportsExplicitWordTimestampToggle('microsoft/VibeVoice-ASR')).toBe(false);
   });
 });
+
+describe('detectTranscriptionBackendType: MLX GigaAM', () => {
+  it('returns mlx_gigaam for GigaAM MLX conversions', () => {
+    expect(detectTranscriptionBackendType('al-bo/gigaam-v3-e2e-rnnt-mlx')).toBe('mlx_gigaam');
+    expect(detectTranscriptionBackendType('AL-BO/GigaAM-v3-CTC-MLX')).toBe('mlx_gigaam');
+    expect(detectTranscriptionBackendType('ai-sage/GigaAM-v3')).toBe('whisper');
+  });
+});

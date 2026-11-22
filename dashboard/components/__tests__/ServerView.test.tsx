@@ -137,6 +137,7 @@ vi.mock('../../src/services/modelCapabilities', () => ({
   isCanaryModel: () => false,
   isMLXParakeetModel: () => false,
   isMLXCanaryModel: () => false,
+  isMLXGigaAMModel: () => false,
   isVibeVoiceASRModel: () => false,
   isSenseVoiceModel: (m: string) => typeof m === 'string' && m.toLowerCase().includes('sensevoice'),
 }));

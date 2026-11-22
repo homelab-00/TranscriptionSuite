@@ -17,6 +17,8 @@ import {
   NEMO_LANGUAGES,
   CANARY_TRANSLATION_TARGETS,
   SENSEVOICE_LANGUAGES,
+  isMLXGigaAMModel,
+  isMLXModel,
 } from './modelCapabilities';
 
 // ---------------------------------------------------------------------------
@@ -603,5 +605,28 @@ describe('truncatesGreekFinalSigma', () => {
     expect(truncatesGreekFinalSigma('large-v3')).toBe(false);
     expect(truncatesGreekFinalSigma(null)).toBe(false);
     expect(truncatesGreekFinalSigma(undefined)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MLX GigaAM (Russian-only)
+// ---------------------------------------------------------------------------
+describe('MLX GigaAM models', () => {
+  const GIGAAM = 'al-bo/gigaam-v3-e2e-rnnt-mlx';
+
+  it('detects the al-bo GigaAM MLX conversions', () => {
+    expect(isMLXGigaAMModel(GIGAAM)).toBe(true);
+    expect(isMLXGigaAMModel('al-bo/gigaam-v3-ctc-mlx')).toBe(true);
+    expect(isMLXGigaAMModel('ai-sage/GigaAM-v3')).toBe(false);
+    expect(isMLXModel(GIGAAM)).toBe(true);
+    expect(isWhisperModel(GIGAAM)).toBe(false);
+  });
+
+  it('offers only Russian (plus Auto Detect) and no translation', () => {
+    expect(
+      filterLanguagesForModel(['Auto Detect', 'English', 'Russian', 'German'], GIGAAM),
+    ).toEqual(['Auto Detect', 'Russian']);
+    expect(supportsTranslation(GIGAAM)).toBe(false);
+    expect(supportsDiarization(GIGAAM)).toBe(true);
   });
 });

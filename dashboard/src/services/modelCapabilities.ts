@@ -13,6 +13,8 @@ const WHISPERCPP_PATTERN = /(?:(?:^|\/)ggml-.*\.bin$|\.gguf$)/i;
 const MLX_PARAKEET_PATTERN = /^mlx-community\/parakeet/i;
 // Matches community Canary MLX ports: eelcor/canary-1b-v2-mlx, Mediform/canary-1b-v2-mlx-q8, qfuxa/canary-mlx, etc.
 const MLX_CANARY_PATTERN = /^[^/]+\/canary[^/]*-mlx/i;
+// Matches the GigaAM v3 MLX conversions: al-bo/gigaam-v3-e2e-rnnt-mlx, al-bo/gigaam-v3-ctc-mlx, etc.
+const MLX_GIGAAM_PATTERN = /^[^/]+\/gigaam[^/]*-mlx/i;
 const MLX_PATTERN = /^mlx-community\//i;
 const SENSEVOICE_PATTERN = /^[^/]+\/sensevoice/i;
 
@@ -120,7 +122,7 @@ export function isNemoModel(modelName: string | null | undefined): boolean {
  */
 export function isMLXModel(modelName: string | null | undefined): boolean {
   const name = (modelName ?? '').trim();
-  return MLX_PATTERN.test(name) || MLX_CANARY_PATTERN.test(name);
+  return MLX_PATTERN.test(name) || MLX_CANARY_PATTERN.test(name) || MLX_GIGAAM_PATTERN.test(name);
 }
 
 /**
@@ -139,6 +141,15 @@ export function isMLXParakeetModel(modelName: string | null | undefined): boolea
 export function isMLXCanaryModel(modelName: string | null | undefined): boolean {
   const name = (modelName ?? '').trim();
   return MLX_CANARY_PATTERN.test(name);
+}
+
+/**
+ * Returns true if the model is an MLX GigaAM v3 model (al-bo conversions).
+ * Russian only; no translation; no live mode.
+ */
+export function isMLXGigaAMModel(modelName: string | null | undefined): boolean {
+  const name = (modelName ?? '').trim();
+  return MLX_GIGAAM_PATTERN.test(name);
 }
 
 /**
@@ -262,6 +273,10 @@ export function filterLanguagesForModel(
   if (isVibeVoiceASRModel(modelName)) {
     return languages.filter((l) => l === 'Auto Detect');
   }
+  if (isMLXGigaAMModel(modelName)) {
+    // GigaAM v3 is Russian-only; the language setting is otherwise ignored.
+    return languages.filter((l) => l === 'Auto Detect' || l === 'Russian');
+  }
   if (isMLXParakeetModel(modelName)) {
     // parakeet-mlx exposes no language-hint API; the model auto-detects language from audio
     return languages.filter((l) => l === 'Auto Detect');
@@ -297,6 +312,8 @@ export function supportsTranslation(modelName: string | null | undefined): boole
   if (isCanaryModel(modelName)) return true;
   // MLX Canary: ASR-only in the MLX port, no translation task
   if (isMLXCanaryModel(modelName)) return false;
+  // MLX GigaAM: Russian ASR only
+  if (isMLXGigaAMModel(modelName)) return false;
   // VibeVoice-ASR (v1 integration) is ASR+diarization only.
   if (isVibeVoiceASRModel(modelName)) return false;
   // SenseVoice is ASR-only (5 languages, no translation task).

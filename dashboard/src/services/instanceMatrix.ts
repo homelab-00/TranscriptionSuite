@@ -15,6 +15,7 @@
 import type { RuntimeProfile } from '../types/runtime';
 import {
   isMLXCanaryModel,
+  isMLXGigaAMModel,
   isMLXModel,
   isMLXParakeetModel,
   isNemoModel,
@@ -164,8 +165,8 @@ const FAMILY_META: Record<FamilyChoiceId, FamilyMeta> = {
       requiresToken: false,
     },
   },
-  // Both models behind this tile are ASR-only: the MLX Canary port does not
-  // ship the translation task. See the family-maximum note on nemo above.
+  // Every model behind this tile is ASR-only: the MLX Canary port does not
+  // ship the translation task, and GigaAM (Russian) has none. See the family-maximum note on nemo above.
   'mlx-nemo': {
     label: 'MLX NeMo',
     sublabel: 'Apple Silicon',
@@ -267,7 +268,10 @@ export function familyChoiceForModel(modelId: string | null | undefined): Family
   ) {
     return null;
   }
-  if (isMLXParakeetModel(name) || isMLXCanaryModel(name)) return 'mlx-nemo';
+  // GigaAM is a NeMo-style Conformer (Russian) and shares the MLX NeMo tile.
+  if (isMLXParakeetModel(name) || isMLXCanaryModel(name) || isMLXGigaAMModel(name)) {
+    return 'mlx-nemo';
+  }
   if (isMLXModel(name)) {
     return /vibevoice/i.test(name) ? 'mlx-vibevoice' : 'mlx-whisper';
   }

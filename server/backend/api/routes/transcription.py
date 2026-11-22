@@ -1609,6 +1609,9 @@ _WHISPER_LANGUAGES: dict[str, str] = _sorted_languages(
 
 _VIBEVOICE_ASR_LANGUAGES: dict[str, str] = {}
 
+# GigaAM v3 is a Russian-only model.
+_GIGAAM_LANGUAGES: dict[str, str] = {"ru": "Russian"}
+
 
 @router.get("/recent")
 async def get_recent_undelivered_results(request: Request) -> JSONResponse:
@@ -1701,6 +1704,8 @@ async def get_supported_languages(request: Request) -> dict[str, Any]:
     elif backend_type in ("vibevoice_asr", "mlx_vibevoice", "mlx_parakeet"):
         # mlx_parakeet: parakeet-mlx has no language-hint API; model auto-detects from audio
         languages = _VIBEVOICE_ASR_LANGUAGES
+    elif backend_type == "mlx_gigaam":
+        languages = _GIGAAM_LANGUAGES
     else:
         languages = _WHISPER_LANGUAGES
 
