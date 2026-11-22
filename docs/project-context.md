@@ -142,6 +142,7 @@ durability:
 - **NeMo backends require temp WAV files** — no direct array transcription in older NeMo versions
 - **MLX backends**: Apple Silicon only; beam_size > 1 silently falls back to greedy
 - **MLX Whisper model naming**: Only `-asr-` HuggingFace repo IDs supported (e.g. `mlx-community/whisper-large-v3-asr-fp16`); older `whisper-*-mlx` IDs lack the required HuggingFace processor
+- **Sortformer (Apple Silicon diarization)**: Default model is Streaming Sortformer v2.1 (`sortformer.model`); AOSC models are fed chunk by chunk via `feed()` with times re-anchored on real sample offsets (file mode pre-encodes the whole recording in one Metal buffer and fails on multi-hour audio). Chunks are capped at `spkcache_update_period` frames (15.04 s) — longer chunks grow mlx-audio's FIFO without bound (quadratic slowdown)
 - **MLX VibeVoice**: Native speaker diarization via `transcribe_with_diarization()` (returns real results, not `None`); expects 24 kHz audio (resampled internally from 16 kHz); no translation support
 - **FasterWhisperBackend**: Lightweight `faster_whisper.WhisperModel` wrapper without WhisperX — exists for Live Mode on Apple Silicon bare-metal where the `whisper` extra is not installed
 

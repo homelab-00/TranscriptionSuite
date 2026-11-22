@@ -3,6 +3,12 @@
 Wraps the ``mlx-audio`` Sortformer model for token-free, Metal-native speaker
 diarization.  Supports up to 4 speakers without requiring a HuggingFace token.
 
+The default model is NVIDIA's Streaming Sortformer v2.1: its Arrival-Order
+Speaker Cache (AOSC) carries speaker identities across streaming chunks, which
+keeps labels consistent over multi-hour recordings. The older offline v1 model
+only has basic chunk-to-chunk context and tends to swap or split speakers on
+long audio. Override with ``sortformer.model`` in config.yaml.
+
 Requires: ``mlx-audio>=0.4.1`` (included in the ``mlx`` optional-dependencies
 group).
 """
@@ -31,7 +37,11 @@ except Exception:  # ImportError or transitive failures
     HAS_MLX_AUDIO = False
 
 # Default model hosted on mlx-community (open weights, no auth needed).
-_DEFAULT_MODEL = "mlx-community/diar_sortformer_4spk-v1-fp32"
+DEFAULT_SORTFORMER_MODEL = "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp32"
+_DEFAULT_MODEL = DEFAULT_SORTFORMER_MODEL
+
+# Duration of one Sortformer output frame (hop 160 samples x subsampling 8 at 16 kHz).
+_DIAR_FRAME_S = 0.08
 
 # Minimum speech probability to accept a diarization frame.
 _DEFAULT_THRESHOLD = 0.5
@@ -162,10 +172,40 @@ class SortformerEngine(MLXThreadAffinityMixin):
         except ImportError as exc:
             raise RuntimeError("soundfile is required for Sortformer") from exc
 
-        # Read configurable streaming chunk duration (default 5.0 s).
+        # Read configurable streaming chunk duration (default 15.0 s).
         cfg = get_config()
         sortformer_cfg = cfg.get("sortformer", default={}) or {}
-        chunk_duration_s = float(sortformer_cfg.get("chunk_duration_s", 5.0))
+        chunk_duration_s = float(sortformer_cfg.get("chunk_duration_s", 15.0))
+        modules_cfg = getattr(getattr(self._model, "config", None), "modules_config", None)
+        use_aosc = bool(getattr(modules_cfg, "use_aosc", False))
+        if chunk_duration_s > 0 and use_aosc:
+            # mlx-audio moves at most spkcache_update_period frames from the FIFO
+            # into the speaker cache per chunk. A longer chunk grows the FIFO
+            # without bound, so every step attends over more frames and a
+            # multi-hour file slows down quadratically.
+            max_chunk_s = modules_cfg.spkcache_update_period * _DIAR_FRAME_S
+            if chunk_duration_s > max_chunk_s:
+                logger.info(
+                    "Sortformer: chunk_duration_s %.1f exceeds the AOSC update period; using %.2fs",
+                    chunk_duration_s,
+                    max_chunk_s,
+                )
+                chunk_duration_s = max_chunk_s
+        # Post-processing: drop blips and bridge short pauses within one turn.
+        # Passed only when set, so mlx-audio releases without these kwargs work.
+        post_kwargs: dict[str, float] = {}
+        min_duration = float(sortformer_cfg.get("min_segment_duration_s", 0.0))
+        merge_gap = float(sortformer_cfg.get("merge_gap_s", 0.0))
+        if min_duration > 0:
+            post_kwargs["min_duration"] = min_duration
+        if merge_gap > 0:
+            post_kwargs["merge_gap"] = merge_gap
+
+        if chunk_duration_s > 0 and use_aosc:
+            all_segments_raw = self._diarize_fed_chunks(
+                audio_data, sample_rate, chunk_duration_s, post_kwargs
+            )
+            return self._to_result(all_segments_raw)
 
         # Sortformer expects a file path — write a temporary WAV.
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -184,12 +224,13 @@ class SortformerEngine(MLXThreadAffinityMixin):
                     tmp_path,
                     chunk_duration=chunk_duration_s,
                     threshold=self.threshold,
+                    **post_kwargs,
                 ):
                     all_segments_raw.extend(result.segments)
             else:
                 # Offline inference: process entire file at once (high memory).
                 logger.info("Sortformer: offline diarization (streaming disabled)")
-                result = self._model.generate(tmp_path, threshold=self.threshold)
+                result = self._model.generate(tmp_path, threshold=self.threshold, **post_kwargs)
                 all_segments_raw = list(result.segments)
         finally:
             Path(tmp_path).unlink(missing_ok=True)
@@ -201,6 +242,71 @@ class SortformerEngine(MLXThreadAffinityMixin):
             except Exception:
                 logger.debug("mlx cache clear failed (non-critical)", exc_info=True)
 
+        return self._to_result(all_segments_raw)
+
+    def _diarize_fed_chunks(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        chunk_duration_s: float,
+        post_kwargs: dict[str, float],
+    ) -> list[DiarizationSegment]:
+        """Stream the audio through ``feed()`` one chunk at a time (AOSC models).
+
+        mlx-audio's file mode pre-encodes the whole recording in one Metal
+        buffer (~12 GB per hour of audio), which fails on multi-hour files;
+        feeding chunks keeps memory flat. Chunk times are re-anchored on the
+        real sample offset: ``feed()`` advances its clock by whole output
+        frames, which drifts ~40 ms per 15 s chunk (~30 s over three hours).
+        """
+        import mlx.core as mx
+
+        audio = np.asarray(audio_data, dtype=np.float32).squeeze()
+        total_s = len(audio) / sample_rate
+        chunk_samples = max(1, int(round(chunk_duration_s * sample_rate)))
+        logger.info(
+            "Sortformer: streaming diarization (%.2fs chunks, %.0fs audio)",
+            chunk_duration_s,
+            total_s,
+        )
+
+        state = self._model.init_streaming_state()
+        segments: list[DiarizationSegment] = []
+        try:
+            for i, start in enumerate(range(0, len(audio), chunk_samples)):
+                chunk = audio[start : start + chunk_samples]
+                chunk_start_s = start / sample_rate
+                chunk_end_s = min(chunk_start_s + len(chunk) / sample_rate, total_s)
+                if len(chunk) < sample_rate:
+                    # Too short for the feature front-end: pad the tail with silence.
+                    chunk = np.pad(chunk, (0, sample_rate - len(chunk)))
+                model_offset_s = state.frames_processed * _DIAR_FRAME_S
+                result, state = self._model.feed(
+                    chunk,
+                    state,
+                    sample_rate=sample_rate,
+                    threshold=self.threshold,
+                    **post_kwargs,
+                )
+                shift = chunk_start_s - model_offset_s
+                for seg in result.segments:
+                    start_s = float(seg.start) + shift
+                    end_s = min(float(seg.end) + shift, chunk_end_s)
+                    if end_s > start_s:
+                        segments.append(
+                            DiarizationSegment(start=start_s, end=end_s, speaker=str(seg.speaker))
+                        )
+                if i % 64 == 63:
+                    mx.clear_cache()
+        finally:
+            try:
+                mx.clear_cache()
+            except Exception:
+                logger.debug("mlx cache clear failed (non-critical)", exc_info=True)
+        return segments
+
+    @staticmethod
+    def _to_result(all_segments_raw: list[Any]) -> DiarizationResult:
         segments: list[DiarizationSegment] = []
         speakers: set[str] = set()
 

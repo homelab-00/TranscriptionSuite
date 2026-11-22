@@ -124,7 +124,7 @@ Orchestrates real-time transcription:
 PyAnnote 4.x speaker diarization pipeline:
 - Parallel mode (keep main model loaded) vs sequential (unload to save VRAM)
 - Configurable speaker count hints (min/max or auto-detect)
-- Sortformer engine as alternative for Apple Silicon (no HF token needed)
+- Sortformer engine as alternative for Apple Silicon (no HF token needed; Streaming Sortformer v2.1 by default)
 
 ### Audio Processing (`core/ffmpeg_utils.py`, `core/audio_utils.py`)
 
