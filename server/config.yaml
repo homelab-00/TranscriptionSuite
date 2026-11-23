@@ -191,13 +191,32 @@ whisper_cpp:
 # Settings for the MLX Sortformer speaker diarization engine.
 # Used automatically on Apple Silicon when diarization is requested.
 sortformer:
+    # Sortformer model (mlx-audio format). Default: Streaming Sortformer v2.1,
+    # whose speaker cache keeps labels consistent over multi-hour recordings.
+    # The older offline model (mlx-community/diar_sortformer_4spk-v1-fp32) only
+    # carries basic context between chunks and swaps speakers on long audio.
+    # A Sortformer repo entered as the custom diarization model in the
+    # Dashboard takes precedence over this value.
+    # Default: "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp32"
+    model: "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp32"
+
     # Streaming chunk duration (seconds) for Sortformer diarization.
-    # Smaller chunks use dramatically less memory (quadratic attention scaling).
-    # The streaming state carries speaker context across chunks.
-    # Recommended: 5-10s. Maximum trained: 90s.
-    # Set to 0 to disable streaming and use offline mode (higher memory).
-    # Default: 5.0
-    chunk_duration_s: 5.0
+    # The streaming state (speaker cache + FIFO, bounded size) carries speaker
+    # context across chunks, so time and memory per chunk stay flat regardless
+    # of file length. v2.1 was trained with 15s chunks (188 frames); for v2.1
+    # longer values are capped at 15s, because mlx-audio can only move 15s of
+    # frames into the speaker cache per chunk. Smaller values are slower.
+    # Set to 0 to disable streaming and use offline mode (memory grows with
+    # file length — not recommended for long recordings).
+    # Default: 15.0
+    chunk_duration_s: 15.0
+
+    # Drop speaker segments shorter than this (seconds). Default: 0.0
+    min_segment_duration_s: 0.0
+
+    # Merge consecutive segments of the same speaker separated by a pause
+    # shorter than this (seconds). Default: 0.0
+    merge_gap_s: 0.0
 
 # ----------------------------------------------------------------------------
 # MLX Memory Settings (Apple Silicon only)

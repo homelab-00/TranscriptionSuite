@@ -438,10 +438,19 @@ def create_diarization_engine(config: dict[str, Any]) -> DiarizationEngine | Any
     )
 
     if use_sortformer:
-        from server.core.sortformer_engine import SortformerEngine
+        from server.core.sortformer_engine import DEFAULT_SORTFORMER_MODEL, SortformerEngine
 
-        logger.info("Using Sortformer (Metal-native) diarization engine")
+        # A Sortformer repo entered as the (custom) diarization model wins over
+        # the sortformer.model config key; both fall back to the engine default.
+        sortformer_cfg = config.get("sortformer", {}) or {}
+        if explicit_model and "sortformer" in explicit_model.lower():
+            sortformer_model = explicit_model
+        else:
+            sortformer_model = sortformer_cfg.get("model") or DEFAULT_SORTFORMER_MODEL
+
+        logger.info("Using Sortformer (Metal-native) diarization engine: %s", sortformer_model)
         return SortformerEngine(
+            model=sortformer_model,
             num_speakers=diar_config.get("num_speakers"),
             min_speakers=diar_config.get("min_speakers"),
             max_speakers=max_speakers,
