@@ -253,6 +253,25 @@ class TestProgressTqdm:
         bar = _ProgressTqdm(total=100)
         bar.set_postfix({"speed": "10MB/s"}, refresh=True)  # should not raise
 
+    def test_hf_hub_1x_snapshot_bar_calls(self, mock_emit):
+        """huggingface_hub 1.x snapshot_download finishes its aggregate bars with
+        set_description_str() / set_postfix_str() and reads format_dict["rate"].
+
+        Without these, every snapshot_download inside track_model_download
+        (MLX Canary, MLX GigaAM) raised AttributeError after the files were
+        already fetched, so the model could never be (re)loaded.
+        """
+        from server.core.download_progress import _ProgressTqdm
+
+        bar = _ProgressTqdm(desc="Downloading bytes", total=0, initial=0, unit="B")
+        bar.update(10)
+        bar.total = bar.n
+        bar.refresh()
+        bar.set_postfix_str(f"{bar.format_dict.get('rate')}", refresh=False)
+        bar.set_description_str("Download complete")
+        bar.set_description("Reconstruction complete")
+        assert bar.format_dict["n"] == 10
+
 
 # ── Loading phase + byte formatting (GH-207) ──────────────────────────
 
