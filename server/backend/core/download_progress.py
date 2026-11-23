@@ -198,6 +198,19 @@ class _ProgressTqdm:
     def set_postfix(self, *args: Any, **kwargs: Any) -> None:
         pass
 
+    # huggingface_hub 1.x snapshot_download labels its aggregate transfer bar
+    # with set_description_str() and set_postfix_str() and reads
+    # format_dict["rate"] once the files are fetched.
+    def set_description_str(self, desc: str | None = None, refresh: bool = True) -> None:
+        pass
+
+    def set_postfix_str(self, s: str = "", refresh: bool = True) -> None:
+        pass
+
+    @property
+    def format_dict(self) -> dict[str, Any]:
+        return {"n": self.n, "total": self.total, "rate": None}
+
     def refresh(self) -> None:
         pass
 
