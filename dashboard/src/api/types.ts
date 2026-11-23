@@ -146,6 +146,7 @@ export interface LanguagesResponse {
     | 'vibevoice_asr'
     | 'mlx_parakeet'
     | 'mlx_canary'
+    | 'mlx_gigaam'
     | 'mlx_whisper'
     | 'mlx_vibevoice';
   supports_translation?: boolean;

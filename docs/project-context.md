@@ -136,12 +136,14 @@ durability:
   - GGML pattern (`ggml-*.bin`, `.gguf`) → WhisperCppBackend
   - `mlx-community/parakeet*` → MLXParakeetBackend (Apple Silicon)
   - `[user]/canary*-mlx` → MLXCanaryBackend (Apple Silicon)
+  - `[user]/gigaam*-mlx` → MLXGigaAMBackend (Apple Silicon; GigaAM v3, Russian only; e.g. `al-bo/gigaam-v3-e2e-rnnt-mlx`)
   - `mlx-community/*` → MLXWhisperBackend (Apple Silicon)
   - else → WhisperXBackend (faster-whisper + alignment + diarization); falls back to FasterWhisperBackend if WhisperX not installed
 - **Abstract base**: `base.py::STTBackend` — all backends implement `load()`, `unload()`, `transcribe()`
 - **NeMo backends require temp WAV files** — no direct array transcription in older NeMo versions
 - **MLX backends**: Apple Silicon only; beam_size > 1 silently falls back to greedy
 - **MLX Whisper model naming**: Only `-asr-` HuggingFace repo IDs supported (e.g. `mlx-community/whisper-large-v3-asr-fp16`); older `whisper-*-mlx` IDs lack the required HuggingFace processor
+- **MLX GigaAM**: Self-contained MLX runtime in `gigaam_mlx.py` (no extra dependency; loads `al-bo/gigaam-v3-*-mlx` checkpoints). Decodes the whole file in contiguous ≤20s windows cut at Silero VAD pauses — VAD never drops audio (it misses quiet speech; GigaAM emits nothing for silence). Word timestamps come from decoder emission frames (40 ms); trailing punctuation never extends a word's end. Settings: `gigaam:` in config.yaml
 - **MLX VibeVoice**: Native speaker diarization via `transcribe_with_diarization()` (returns real results, not `None`); expects 24 kHz audio (resampled internally from 16 kHz); no translation support
 - **FasterWhisperBackend**: Lightweight `faster_whisper.WhisperModel` wrapper without WhisperX — exists for Live Mode on Apple Silicon bare-metal where the `whisper` extra is not installed
 

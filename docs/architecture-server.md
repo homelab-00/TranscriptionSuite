@@ -102,6 +102,7 @@ Central hub for all ML model lifecycle management:
 | MLX Whisper | `MLXWhisperBackend` | `mlx-community/whisper*` | Yes | Apple Silicon |
 | MLX Parakeet | `MLXParakeetBackend` | `mlx-community/parakeet*` | No | Apple Silicon |
 | MLX Canary | `MLXCanaryBackend` | `*/canary*-mlx` | Yes | Apple Silicon |
+| MLX GigaAM | `MLXGigaAMBackend` | `*/gigaam*-mlx` | No | Apple Silicon |
 | MLX VibeVoice | `MLXVibeVoiceBackend` | `mlx-community/vibevoice*` | No | Apple Silicon |
 
 **Factory routing** (`factory.py`): `detect_backend_type(model_name)` matches patterns in priority order

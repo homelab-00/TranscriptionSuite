@@ -21,6 +21,8 @@ _WHISPERCPP_BASENAME_RE = re.compile(r"^ggml-[^/]+\.bin$|^[^/]+\.gguf$", re.IGNO
 _MLX_PARAKEET_PATTERN = re.compile(r"^mlx-community/parakeet", re.IGNORECASE)
 # Matches community Canary MLX ports: eelcor/canary-1b-v2-mlx, Mediform/canary-1b-v2-mlx-q8, qfuxa/canary-mlx, etc.
 _MLX_CANARY_PATTERN = re.compile(r"^[^/]+/canary[^/]*-mlx", re.IGNORECASE)
+# Matches the GigaAM v3 MLX conversions: al-bo/gigaam-v3-e2e-rnnt-mlx, al-bo/gigaam-v3-ctc-mlx, etc.
+_MLX_GIGAAM_PATTERN = re.compile(r"^[^/]+/gigaam[^/]*-mlx", re.IGNORECASE)
 # MLX VibeVoice must be checked before the generic VibeVoice pattern.
 _MLX_VIBEVOICE_PATTERN = re.compile(r"^mlx-community/vibevoice-asr", re.IGNORECASE)
 _MLX_PATTERN = re.compile(r"^mlx-community/", re.IGNORECASE)
@@ -70,6 +72,8 @@ def detect_backend_type(model_name: str) -> str:
         return "mlx_parakeet"
     if _MLX_CANARY_PATTERN.match(name):
         return "mlx_canary"
+    if _MLX_GIGAAM_PATTERN.match(name):
+        return "mlx_gigaam"
     if _MLX_PATTERN.match(name):
         return "mlx_whisper"
     return "whisper"
@@ -111,6 +115,7 @@ def is_mlx_model(model_name: str) -> bool:
         "mlx_whisper",
         "mlx_parakeet",
         "mlx_canary",
+        "mlx_gigaam",
         "mlx_vibevoice",
     )
 
@@ -166,6 +171,11 @@ def create_backend(model_name: str) -> STTBackend:
         from server.core.stt.backends.mlx_canary_backend import MLXCanaryBackend
 
         return MLXCanaryBackend()
+
+    if backend_type == "mlx_gigaam":
+        from server.core.stt.backends.mlx_gigaam_backend import MLXGigaAMBackend
+
+        return MLXGigaAMBackend()
 
     if backend_type == "mlx_vibevoice":
         from server.core.stt.backends.mlx_vibevoice_backend import MLXVibeVoiceBackend

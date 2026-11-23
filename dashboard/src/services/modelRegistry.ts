@@ -499,6 +499,23 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     roles: ['main'],
   },
 
+  // ── MLX GigaAM (Apple Silicon / Metal) ─────────────────────────────────
+  // SaluteDevices GigaAM v3 (Russian only), MLX conversion by al-bo. The E2E
+  // RNN-T variant outputs punctuation and casing; plain al-bo/gigaam-v3-rnnt-mlx
+  // and -ctc-mlx (lowercase, no punctuation) also work as custom models.
+  {
+    id: 'al-bo/gigaam-v3-e2e-rnnt-mlx',
+    displayName: 'GigaAM v3 E2E (Russian)',
+    family: 'mlx',
+    description:
+      'SaluteDevices GigaAM v3 on MLX. Best-in-class Russian accuracy, native punctuation & casing, ~100× real-time on Apple Silicon. Russian only (~445 MB).',
+    parameterCount: '240M',
+    approxSize: '~445 MB',
+    huggingfaceUrl: 'https://huggingface.co/al-bo/gigaam-v3-e2e-rnnt-mlx',
+    capabilities: { translation: 'none', liveMode: false, diarization: true, languageCount: 1 },
+    roles: ['main'],
+  },
+
   // ── MLX Whisper (Apple Silicon / Metal via mlx-audio) ───────────────────
   {
     id: 'mlx-community/whisper-large-v3-turbo-asr-fp16',

@@ -15,6 +15,8 @@ _CANARY_PATTERN = re.compile(r"^nvidia/canary", re.IGNORECASE)
 _VIBEVOICE_ASR_PATTERN = re.compile(r"^[^/]+/vibevoice-asr(?:-[^/]+)?$", re.IGNORECASE)
 _MLX_PARAKEET_PATTERN = re.compile(r"^mlx-community/parakeet", re.IGNORECASE)
 _MLX_CANARY_PATTERN = re.compile(r"^[^/]+/canary[^/]*-mlx", re.IGNORECASE)
+# GigaAM v3 MLX conversions (al-bo/gigaam-v3-e2e-rnnt-mlx, ...) — Russian-only ASR.
+_MLX_GIGAAM_PATTERN = re.compile(r"^[^/]+/gigaam[^/]*-mlx", re.IGNORECASE)
 # SenseVoice (FunAudioLLM) — any "<org>/sensevoice…" repo id.
 _SENSEVOICE_PATTERN = re.compile(r"^[^/]+/sensevoice", re.IGNORECASE)
 
@@ -61,6 +63,10 @@ def supports_english_translation(model_name: str | None) -> bool:
         return False
     # MLX Canary port supports ASR only — no translation task.
     if _MLX_CANARY_PATTERN.match(name):
+        return False
+
+    # GigaAM is Russian ASR only — no translation task.
+    if _MLX_GIGAAM_PATTERN.match(name):
         return False
 
     # NVIDIA Canary models support X↔English translation.

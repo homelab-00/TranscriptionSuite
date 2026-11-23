@@ -200,6 +200,30 @@ sortformer:
     chunk_duration_s: 5.0
 
 # ----------------------------------------------------------------------------
+# GigaAM Settings (Apple Silicon only)
+# ----------------------------------------------------------------------------
+# Settings for the MLX GigaAM v3 backend (Russian-only ASR), selected with an
+# al-bo/gigaam-v3-*-mlx model. GigaAM decodes short windows: long audio is cut
+# into contiguous windows at pauses found by Silero VAD. The whole file is
+# decoded — VAD only picks the cut points, so quiet speech is never dropped.
+gigaam:
+    # Maximum length of one decoding window (seconds). GigaAM was trained on
+    # utterances up to ~25s. Default: 20.0
+    max_segment_s: 20.0
+
+    # Silero VAD speech probability threshold used to find pauses. Default: 0.5
+    vad_threshold: 0.5
+
+    # Minimum pause (ms) that counts as a place to cut. Default: 300
+    vad_min_silence_ms: 300
+
+    # Output segments are sentences: split on . ? ! and also on pauses longer
+    # than sentence_gap_s or when a segment would exceed max_sentence_s.
+    # Defaults: 1.0 / 15.0
+    sentence_gap_s: 1.0
+    max_sentence_s: 15.0
+
+# ----------------------------------------------------------------------------
 # MLX Memory Settings (Apple Silicon only)
 # ----------------------------------------------------------------------------
 # Controls Metal GPU buffer pool management for all MLX backends.

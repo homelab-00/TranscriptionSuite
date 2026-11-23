@@ -338,3 +338,14 @@ describe('instanceMatrix: NeMo family merge', () => {
     expect(byId('metal').get('mlx-nemo')!.capabilities.translation).toBe('none');
   });
 });
+
+describe('instanceMatrix: GigaAM', () => {
+  it('puts GigaAM MLX models on the MLX NeMo tile', () => {
+    expect(familyChoiceForModel('al-bo/gigaam-v3-e2e-rnnt-mlx')).toBe('mlx-nemo');
+    expect(
+      MODEL_REGISTRY.some(
+        (m) => m.id === 'al-bo/gigaam-v3-e2e-rnnt-mlx' && familyChoiceForModel(m.id) === 'mlx-nemo',
+      ),
+    ).toBe(true);
+  });
+});
